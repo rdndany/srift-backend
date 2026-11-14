@@ -119,7 +119,8 @@ export class Realm {
   readonly rand: () => number;
 
   readonly blockEntities = new BlockEntities();
-  readonly mobs = new MobManager();
+  /** The mobs (made in the constructor, from the realm's own dice: a seeded realm must roll the same for them as for everything else). */
+  readonly mobs: MobManager;
   readonly spawner = new MobSpawner();
   /** Flowing water and lava. Anything that changes a block next to a fluid calls `fluids.notify`. */
   readonly fluids: FluidSim;
@@ -192,6 +193,7 @@ export class Realm {
     this.stations = this.generator.npcStations();
     this.dummySpots = this.generator.dummyStations();
     this.rand = opts.rand ?? Math.random;
+    this.mobs = new MobManager(this.rand);
     this.naturalSpawning = opts.naturalSpawning ?? true;
     this.villagers = opts.villagers ?? this.naturalSpawning;
     this.allowSleep = opts.sleeping ?? true;
