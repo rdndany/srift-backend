@@ -1421,15 +1421,30 @@ function shieldGrid(): Cell[] {
 /** A bow; without the string it is the frame the first-person hand draws its own, moving string on. */
 function bowGrid(withString = true): Cell[] {
   const g = blank();
-  const wood: RGB = [138, 100, 52];
-  // Limb: a quarter-ish arc from the bottom-left to the top-right, bulging to the upper-left.
-  for (let i = 0; i <= 28; i++) {
-    const t = i / 28;
-    const x = 2 + t * 11 - Math.sin(t * Math.PI) * 4.4;
-    const y = 14 - t * 12 - Math.sin(t * Math.PI) * 4.4;
-    dot(g, Math.round(x), Math.round(y), shade(wood, (i % 4) * 6 - 10));
-    dot(g, Math.round(x) + 1, Math.round(y), shade(wood, -22));
+  const wood: RGB = [150, 106, 54];
+  const leather: RGB = [88, 56, 34];
+  // A plain wooden bow: one arc from the bottom-left to the top-right, bulging to the upper-left, thick at the belly and thin
+  // at the tips, with a leather-wrapped grip in the middle.
+  for (let i = 0; i <= 40; i++) {
+    const t = i / 40;
+    const belly = Math.sin(t * Math.PI);
+    const x = Math.round(2 + t * 11 - belly * 4.4);
+    const y = Math.round(14 - t * 12 - belly * 4.4);
+    const wide = belly > 0.82 ? 3 : belly > 0.5 ? 2 : 1;
+    const grip = t > 0.4 && t < 0.6;
+    const base = grip ? leather : wood;
+    dot(g, x, y, shade(base, 0));
+    if (wide >= 2) {
+      dot(g, x + 1, y, shade(base, -26)); // the shaded inside of the limb
+      dot(g, x, y + 1, shade(base, -26));
+    }
+    if (wide >= 3 || grip) {
+      dot(g, x - 1, y, shade(base, 20)); // the lit outside
+      dot(g, x, y - 1, shade(base, 20));
+    }
   }
+  dot(g, 2, 14, [230, 214, 170]); // the nocks at the tips
+  dot(g, 13, 2, [230, 214, 170]);
   // String from tip to tip.
   if (withString) line(g, 2, 14, 13, 2, [226, 226, 226], 1);
   return outline(g);
@@ -1459,11 +1474,28 @@ function daggerGrid(): Cell[] {
   const steel: RGB = [224, 228, 236];
   const wood: RGB = [96, 66, 40];
   const gold: RGB = [220, 176, 56];
-  line(g, 7, 9, 13, 3, shade(steel, -22), 2);
-  line(g, 8, 8, 13, 3, steel, 1);
-  line(g, 5, 8, 9, 12, gold, 1);
-  line(g, 4, 12, 7, 9, wood, 2);
-  dot(g, 3, 13, gold);
+  // A slim blade from the guard to the tip (upper right): wide at the base, a bright edge on one side, a dark one on the other, and a fuller down the middle.
+  const widths = [4, 4, 3, 3, 3, 2, 2, 1, 1];
+  widths.forEach((w, i) => {
+    const x = 6 + i;
+    const y = 10 - i;
+    const x0 = x - Math.floor(w / 2);
+    for (let k = 0; k < w; k++) {
+      const edge = k === 0 ? shade(steel, 24) : k === w - 1 ? shade(steel, -46) : w >= 3 && k === 1 ? shade(steel, -14) : steel;
+      dot(g, x0 + k, y, edge);
+    }
+  });
+  // The cross-guard (gold, with a darker underside), the leather-bound grip and the pommel.
+  for (let k = -2; k <= 2; k++) {
+    dot(g, 5 + k, 11 + k, k < 0 ? shade(gold, 18) : gold);
+    dot(g, 6 + k, 11 + k, shade(gold, -34));
+  }
+  line(g, 4, 12, 2, 14, wood, 1);
+  dot(g, 3, 12, shade(wood, -22));
+  dot(g, 2, 13, shade(wood, -22));
+  dot(g, 4, 13, shade(wood, 14));
+  dot(g, 1, 15, gold);
+  dot(g, 2, 15, shade(gold, -30));
   return outline(g);
 }
 
@@ -1592,13 +1624,35 @@ function orbGrid(): Cell[] {
 /** A crossbow; without the string and the bolt it is the frame the first-person hand adds its own to. */
 function crossbowGrid(withString = true): Cell[] {
   const g = blank();
-  const wood: RGB = [128, 90, 48];
-  const iron: RGB = [168, 172, 182];
-  // The stock runs from the lower left up to the prod, which crosses it at the top right.
-  line(g, 2, 14, 10, 6, wood, 2);
-  line(g, 3, 14, 10, 7, shade(wood, -26), 1);
-  line(g, 6, 3, 14, 11, iron, 1);
-  line(g, 5, 3, 13, 11, shade(iron, -40), 1);
+  const wood: RGB = [132, 92, 50];
+  const dark: RGB = [88, 58, 32];
+  const iron: RGB = [176, 180, 190];
+  // The prod: a bow laid across the stock, its limbs bent forward (toward the upper right), with iron on the tips.
+  for (let i = 0; i <= 24; i++) {
+    const t = i / 24;
+    const bend = Math.sin(t * Math.PI) * 2.2;
+    const x = Math.round(6.5 + t * 8 + bend * 0.707);
+    const y = Math.round(3.5 + t * 8 - bend * 0.707);
+    const tip = t < 0.12 || t > 0.88;
+    dot(g, x, y, tip ? iron : shade(wood, 8));
+    dot(g, x - 1, y, tip ? shade(iron, -30) : dark);
+    if (!tip && t > 0.3 && t < 0.7) dot(g, x, y - 1, shade(wood, 22));
+  }
+  // The stock runs from the butt (lower left) up to the middle of the prod, with a stirrup of iron on the front and a lock behind the prod.
+  for (let k = 0; k <= 8; k++) {
+    const x = 3 + k;
+    const y = 15 - k;
+    dot(g, x, y, shade(wood, k % 2 ? 4 : -2));
+    dot(g, x + 1, y, shade(wood, -18));
+    dot(g, x - 1, y, shade(wood, 14));
+  }
+  dot(g, 2, 15, dark);
+  dot(g, 3, 15, dark);
+  dot(g, 2, 14, shade(wood, -26));
+  line(g, 11, 6, 12, 5, iron, 1); // the stirrup
+  dot(g, 12, 4, iron);
+  dot(g, 8, 9, shade(iron, -30)); // the lock
+  dot(g, 7, 10, [214, 168, 70]);
   // The string and the bolt in the groove.
   if (withString) {
     line(g, 6, 3, 14, 11, [226, 226, 226], 1);

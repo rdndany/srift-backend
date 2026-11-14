@@ -74,6 +74,14 @@ const STILL_SPEED = 0.3;
 export const REACH = 5;
 /** How far a blow reaches, and how far beside a mob's body or head it still lands: what the screen showed a moment ago is not exactly where the mob is now (it walks, and the picture is a tick or two behind). */
 const MELEE_REACH = 4;
+/** A dagger's combo: this many stabs, each within this many seconds of the last, and the last hits half as hard again. */
+const COMBO_STABS = 3;
+const COMBO_WINDOW = 1;
+/** The dagger of a ranger with a bow in the hand only reaches this far from the eye along the line of sight (the mob has to be right up against the body: about a stride at most). */
+const STAB_REACH = 1;
+/** While stabbing with a dagger (this many seconds after a stab) a blow taken is parried or dodged with this chance. */
+const STAB_GUARD_TIME = 0.6;
+const STAB_GUARD_CHANCE = 0.02;
 const MELEE_MARGIN = 0.15;
 const MELEE_LAG = 0.12;
 /** Fixed simulation step. */
@@ -286,6 +294,9 @@ export class Player implements EffectOwner {
   private placeCooldown = 0;
   private breakCooldown = 0;
   private attackCooldown = 0;
+  /** A dagger's quick stabs: how many in a row, and the seconds since the last. */
+  private stabs = 0;
+  private stabAge = 9;
   private eatTimer = 0;
   /** The Emberstone: seconds cast so far (0: not casting), where the cast began, and the seconds it still has to rest. */
   private emberTimer = 0;
@@ -1241,6 +1252,11 @@ export class Player implements EffectOwner {
     // The class's toughness, a guard ability or a roll in progress come first; a hit that is fully avoided does not even push.
     if (this.cls) amount = this.cls.mitigate(amount);
     if (amount <= 0) return;
+    // A dagger that is stabbing turns a blow aside now and then, with a parry or a dodge: nothing is taken and nothing pushes.
+    if (this.stabAge < STAB_GUARD_TIME && this.rand() < STAB_GUARD_CHANCE) {
+      this.emit({ t: 'guard', what: this.rand() < 0.5 ? 'parry' : 'dodge' });
+      return;
+    }
     if (this.tryBlock(amount, kx, kz)) return;
     const before = this.vitals.health;
     this.vitals.damage(this.protect(this.afterArmor(amount), source === 'arrow' ? 'projectile' : 'all'), 'mob');
@@ -1315,7 +1331,8 @@ export class Player implements EffectOwner {
     return !!this.rush && this.rush.def.id === 'charge';
   }
 
-  attackMob(mob: Mob): void {
+  /** `dist`: how far along the line of sight the mob was hit (a stab of the off hand needs it close: see `STAB_REACH`). */
+  attackMob(mob: Mob, dist = 0): void {
     if (mob.def.invulnerable) return;
     this.leaveMount(); // a quest giver is spoken to, not struck
     const held = this.held;
@@ -1325,17 +1342,36 @@ export class Player implements EffectOwner {
     const d = this.look();
     const hs = this.enchHeld();
     // A class weapon hits as it says (a wand or a bow in melee is a poke); anything else as before. The class multiplies it.
-    const base = weapon ? (weapon.kind === 'melee' ? weapon.damage : 1) : tool ? tool.damage : 1;
-    const roll = rollDamage(this.cls?.stats ?? null, 'melee', base + sharpnessBonus(levelOf(hs, ENCH.SHARPNESS)), this.rand);
+    // A bow (or crossbow) in the hand only pokes: a dagger in the off hand does the stabbing instead.
+    const offItem = this.offhand.get(0) ? getItem(this.offhand.get(0)!.id) : null;
+    const stab = !!offItem && offItem.id === I.DAGGER && !!item && (item.use === 'bow' || item.use === 'crossbow');
+    // A bow does not attack in melee at all: with no dagger in the off hand a left click does nothing to a mob.
+    if (!stab && !!item && (item.use === 'bow' || item.use === 'crossbow')) return;
+    // ... and the dagger of the off hand is short: the mob must be right up against the player.
+    if (stab && dist > STAB_REACH) return;
+    const blade = stab ? offItem.weapon : weapon;
+    // A dagger (in either hand) is quick: three stabs in a row, each within a second of the last, and the third goes in half as deep again.
+    const dagger = stab || item?.id === I.DAGGER;
+    let combo = false;
+    if (dagger) {
+      this.stabs = this.stabAge < COMBO_WINDOW ? this.stabs + 1 : 1;
+      this.stabAge = 0;
+      if (this.stabs >= COMBO_STABS) {
+        combo = true;
+        this.stabs = 0;
+      }
+    } else this.stabs = 0;
+    const base = blade ? (blade.kind === 'melee' ? blade.damage : 1) : tool ? tool.damage : 1;
+    const roll = rollDamage(this.cls?.stats ?? null, 'melee', (base + sharpnessBonus(levelOf(hs, ENCH.SHARPNESS))) * (combo ? 1.5 : 1), this.rand);
     const dealt = roll.amount;
     this.mobs.damage(mob, dealt, d.x, d.z, this.realm.mobEvents, true, true, true, {
       knock: 1 + levelOf(hs, ENCH.KNOCKBACK),
       fire: 4 * levelOf(hs, ENCH.FIRE_ASPECT),
       looting: levelOf(hs, ENCH.LOOTING),
     });
-    this.showHit(mob, dealt, roll.crit);
-    this.attackCooldown = (weapon?.kind === 'melee' ? weapon.cooldown : 0.5) / (this.cls ? this.cls.stats.attackSpeed : 1);
-    this.emit({ t: 'swing' });
+    this.showHit(mob, dealt, roll.crit, { blade: dagger, combo });
+    this.attackCooldown = (blade?.kind === 'melee' ? blade.cooldown : 0.5) / (this.cls ? this.cls.stats.attackSpeed : 1);
+    this.emit(stab ? { t: 'swing', off: true } : { t: 'swing' });
     if (tool || weapon?.kind === 'melee') this.damageHeld(1);
     this.vitals.addExhaustion(EXHAUSTION.attack);
     this.emit({ t: 'inv' });
@@ -1360,6 +1396,7 @@ export class Player implements EffectOwner {
     this.breakCooldown -= dt;
     this.placeCooldown -= dt;
     this.attackCooldown -= dt;
+    this.stabAge = Math.min(9, this.stabAge + dt);
     this.castCooldown -= dt;
     this.lockedNotice -= dt;
     if (this.emberCooldown > 0) this.emberCooldown = Math.max(0, this.emberCooldown - dt);
@@ -1391,7 +1428,7 @@ export class Player implements EffectOwner {
     const d = this.look();
     const eye = this.eye();
     const mobHit = this.aimedMob();
-    if (mobHit && f.left && this.attackCooldown <= 0) this.attackMob(mobHit.mob);
+    if (mobHit && f.left && this.attackCooldown <= 0) this.attackMob(mobHit.mob, mobHit.dist);
     if (rightPressed && this.useOnMob()) return;
     const rigHit = mobHit ? null : this.aimedVehicle();
     if (rigHit && f.left && this.attackCooldown <= 0) this.hitVehicle(rigHit.vehicle);
@@ -1690,8 +1727,19 @@ export class Player implements EffectOwner {
         // A crossbow bolt hits as hard as the weapon says (9 is a full bow); the class's ranged multiplier and crits come on top.
         const weapon = bow ? getItem(bow.id).weapon : null;
         const shot = weapon ? (arrow.damage * weapon.damage) / 9 : arrow.damage;
-        arrow.damage = rollDamage(this.cls?.stats ?? null, 'ranged', shot, this.rand).amount;
-        this.realm.emitNear(e.x, e.y, e.z, { t: 'mob', kind: 'skeleton', sound: 'shoot', vol: 0.6 });
+        const roll = rollDamage(this.cls?.stats ?? null, 'ranged', shot, this.rand);
+        arrow.damage = roll.amount;
+        // Where it ends, the archer is told: a number and a mark over what it hit (a headshot counts as a critical hit), or the arrow stands in the wall.
+        arrow.onHit = (a, mob, dealt, head) => {
+          if (mob) {
+            this.showHit(mob, dealt, roll.crit || head, { arrow: true, head });
+            return;
+          }
+          const v = Math.hypot(a.vx, a.vy, a.vz) || 1;
+          this.realm.effects.mark('arrow_stick', this.name, a.x, a.y, a.z, 0, 5, { x: a.x + a.vx / v, y: a.y + a.vy / v, z: a.z + a.vz / v });
+        };
+        // A full draw rings louder than a tap.
+        this.realm.emitNear(e.x, e.y, e.z, { t: 'mob', kind: 'skeleton', sound: 'shoot', vol: 0.35 + 0.45 * power });
         if (this.mode === 'survival') {
           if (levelOf(this.enchHeld(), ENCH.INFINITY) <= 0) this.inventory.remove(I.ARROW, 1);
           this.damageHeld(1);
@@ -2170,10 +2218,22 @@ export class Player implements EffectOwner {
   }
 
   /** Tell the player how much a hit of theirs did (the number floats up over the mob). */
-  private showHit(mob: Mob, amount: number, crit: boolean): void {
+  private showHit(mob: Mob, amount: number, crit: boolean, how: { arrow?: boolean; head?: boolean; blade?: boolean; combo?: boolean } = {}): void {
     // A training dummy also reports what it has taken so far (it starts over when it has taken all it has).
     const total = mob.kind === 'dummy' ? { total: Math.round(mob.maxHealth - mob.health) } : {};
-    this.emit({ t: 'dmg', x: mob.body.x, y: mob.body.y + (mob.body.height ?? 1.8) + 0.25, z: mob.body.z, amount: Math.round(amount * 10) / 10, ...(crit ? { crit: true } : {}), ...total });
+    this.emit({
+      t: 'dmg',
+      x: mob.body.x,
+      y: mob.body.y + (mob.body.height ?? 1.8) + 0.25,
+      z: mob.body.z,
+      amount: Math.round(amount * 10) / 10,
+      ...(crit ? { crit: true } : {}),
+      ...(how.arrow ? { arrow: true } : {}),
+      ...(how.head ? { head: true } : {}),
+      ...(how.blade ? { blade: true } : {}),
+      ...(how.combo ? { combo: true } : {}),
+      ...total,
+    });
   }
 
   /** The way the player faces on the ground (unit length). */
@@ -2271,7 +2331,7 @@ export class Player implements EffectOwner {
       if (e.stun || e.slow) this.mobs.applyStatus(m, { ...(e.stun ? { stun: e.stun } : {}), ...(e.slow ? { slow: e.slow } : {}) });
     }
     // The frost stays on the ground a little while after the wave has passed; a slam leaves its cracks.
-    if (def.id === 'frost_nova') this.realm.effects.mark('frost_nova', this.name, x, y, z, e.radius, 1.6);
+    if (def.id === 'frost_nova') this.realm.effects.mark('frost_nova', this.name, x, y, z, e.radius, 2.5);
     else this.realm.effects.mark('slam', this.name, x, y, z, e.radius, 1.4);
   }
 
@@ -2474,7 +2534,7 @@ export class Player implements EffectOwner {
         const eye = this.eye();
         const spell = def.id === 'fireball' ? 1 : 2;
         this.mobs.castBolt(eye.x + d.x * 0.6, eye.y + d.y * 0.6 - 0.1, eye.z + d.z * 0.6, d.x, d.y, d.z, e.speed, spell, (hx, hy, hz, target) => {
-          this.boltBurst(hx, hy, hz, target, e.damage, def.kind, e.radius ?? 0, e.burn ?? 0, spell === 1 ? 'fireball_burst' : 'bolt');
+          this.boltBurst(hx, hy, hz, target, e.damage, def.kind, e.radius ?? 0, e.burn ?? 0, spell === 1 ? 'fireball_burst' : 'bolt', spell === 1 ? 1 : 0.6);
         });
         this.realm.emitNear(eye.x, eye.y, eye.z, { t: 'mob', kind: 'skeleton', sound: 'shoot', vol: 0.5 });
         return;
@@ -2541,7 +2601,7 @@ export class Player implements EffectOwner {
   }
 
   /** A spell ended at a point: the thing it struck takes the hit, and with `radius` so does everything hostile near the burst. */
-  private boltBurst(x: number, y: number, z: number, target: Mob | null, damage: number, kind: DamageKind, radius: number, burn: number, mark: 'fireball_burst' | 'bolt'): void {
+  private boltBurst(x: number, y: number, z: number, target: Mob | null, damage: number, kind: DamageKind, radius: number, burn: number, mark: 'fireball_burst' | 'bolt' | 'wand_hit' | 'staff_hit', ttl = 0.6): void {
     const hurt = new Set<Mob>();
     if (target) hurt.add(target);
     if (radius > 0) for (const m of this.foesNear(x, y, z, radius, radius + 1)) hurt.add(m);
@@ -2549,7 +2609,7 @@ export class Player implements EffectOwner {
       this.strike(m, damage, kind, { x, z }, 0.7);
       if (burn > 0 && !m.dead && !m.body.inWater) m.onFire = Math.max(m.onFire, burn);
     }
-    this.realm.effects.mark(mark, this.name, x, y, z, radius || 0.8, 0.6);
+    this.realm.effects.mark(mark, this.name, x, y, z, radius || 0.8, ttl);
   }
 
   /** Right-click with a staff, wand or spellbook: a bolt that costs the class's resource (a classless player pays in hunger). */
@@ -2569,8 +2629,11 @@ export class Player implements EffectOwner {
     }
     this.castCooldown = weapon.cooldown / (cls ? cls.stats.attackSpeed : 1);
     const radius = weapon.radius ?? 0;
-    this.mobs.castBolt(eye.x + d.x * 0.6, eye.y + d.y * 0.6 - 0.1, eye.z + d.z * 0.6, d.x, d.y, d.z, weapon.speed ?? 18, 2, (hx, hy, hz, target) => {
-      this.boltBurst(hx, hy, hz, target, weapon.damage, weapon.kind, radius, 0, 'bolt');
+    // Each weapon has its own look: a wand's bolt is spell 3 and bursts as 'wand_hit', a staff's is spell 4 and 'staff_hit'; the spellbook's is spell 2 and 'bolt'.
+    const wand = itemId === I.WAND;
+    const staff = itemId === I.STAFF;
+    this.mobs.castBolt(eye.x + d.x * 0.6, eye.y + d.y * 0.6 - 0.1, eye.z + d.z * 0.6, d.x, d.y, d.z, weapon.speed ?? 18, wand ? 3 : staff ? 4 : 2, (hx, hy, hz, target) => {
+      this.boltBurst(hx, hy, hz, target, weapon.damage, weapon.kind, radius, 0, wand ? 'wand_hit' : staff ? 'staff_hit' : 'bolt');
     });
     // Its own sound for each (a wand zaps, a staff booms, a spellbook hums), heard by the players near.
     this.realm.emitNear(eye.x, eye.y, eye.z, { t: 'spell', weapon: itemId === I.STAFF ? 'staff' : itemId === I.SPELLBOOK ? 'spellbook' : 'wand', vol: 0.8 });
@@ -3956,7 +4019,7 @@ export class Player implements EffectOwner {
   /** Swing at whatever is under the crosshair, exactly like a left click. Returns the mob id hit. */
   swing(): number | null {
     const hit = this.aimedMob();
-    if (hit) this.attackMob(hit.mob);
+    if (hit) this.attackMob(hit.mob, hit.dist);
     return hit ? hit.mob.id : null;
   }
 

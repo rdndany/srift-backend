@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { BLOCKS, I, getItem, lanternInfo } from '@solrift/shared';
 import { mageProp } from '../mageGear';
+import { FIGURE_AIM } from './aim';
 import type { HeldViews } from './kinds';
 import type { ItemModels } from './models';
 
@@ -45,6 +46,21 @@ export class ItemFigures {
     inner.rotation.set(0, 0, 0);
     inner.scale.setScalar(1);
     const item = getItem(id);
+    if ((item.use === 'bow' || item.use === 'crossbow') && view.rigFigure) {
+      // A bow and a crossbow are held the way they are shot (see `FIGURE_AIM`), the grip of the picture in the hand, with a string that can be drawn.
+      const spec = item.use === 'bow' ? FIGURE_AIM.bow : FIGURE_AIM.crossbow;
+      inner.rotation.z = spec.roll;
+      const aim = new THREE.Group();
+      aim.add(inner);
+      aim.quaternion.copy(spec.q);
+      aim.scale.setScalar(spec.scale);
+      aim.updateMatrixWorld(true);
+      aim.position.sub(inner.localToWorld(new THREE.Vector3(spec.grip[0], spec.grip[1], 0)));
+      const holder = new THREE.Group();
+      holder.add(aim);
+      holder.userData.rig = view.rigFigure(inner);
+      return holder;
+    }
     // Class weapons are centred for the figure's hand (only the first-person copy is held by the grip).
     if (view.swing && !item.tool) inner.children[0]?.position.set(0, 0, 0);
     const cube = item.block !== null && BLOCKS[item.block].shape === 'cube';

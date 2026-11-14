@@ -27,6 +27,29 @@ interface AimDef {
 const BOW: AimDef = { a: tl(2.5, 14.5), b: tl(13.5, 2.5), dir: [0.74, -0.67], max: 0.3, len: 0.7, crossbow: false };
 const CROSSBOW: AimDef = { a: tl(6.5, 3.5), b: tl(14.5, 11.5), dir: [-0.707, -0.707], max: 0.22, len: 0.34, crossbow: true };
 
+const S2 = Math.SQRT1_2;
+const basis = (x: THREE.Vector3, y: THREE.Vector3, z: THREE.Vector3): THREE.Quaternion => new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
+
+/**
+ * The crossbow's picture laid flat for the first-person hand: its stock (the picture's lower left to upper right, where it shoots) points away
+ * into the view, the prod runs across, and the picture's face is up; `tilt` raises the muzzle.
+ */
+function crossbowAim(tilt: number, yaw: number): THREE.Quaternion {
+  const q = basis(new THREE.Vector3(S2, 0, -S2), new THREE.Vector3(-S2, 0, -S2), new THREE.Vector3(0, 1, 0));
+  // (the hand itself is turned a little to the left by `baseYaw`: the yaw here turns it back, so the muzzle points at the middle of the view)
+  return new THREE.Quaternion().setFromAxisAngle(AXIS_Y, yaw).multiply(new THREE.Quaternion().setFromAxisAngle(AXIS_X, tilt)).multiply(q);
+}
+
+/**
+ * How a figure holds them, in the space of its hand with the arm out in front (the arm's own hanging direction, -y, points ahead; -z is up):
+ * the bow upright with its belly forward and the string toward the archer, the crossbow flat with its muzzle ahead. Each also gives the point
+ * of its picture (a tile pixel) that sits in the hand, and the turn the picture takes first (the bow's chord is rolled upright).
+ */
+export const FIGURE_AIM = {
+  bow: { q: basis(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, -1), new THREE.Vector3(-1, 0, 0)), roll: 0.74, grip: tl(3.1, 3.6), scale: 0.95 },
+  crossbow: { q: basis(new THREE.Vector3(S2, -S2, 0), new THREE.Vector3(-S2, -S2, 0), new THREE.Vector3(0, 0, -1)), roll: 0, grip: tl(6, 11), scale: 0.8 },
+};
+
 /** The shot just let go, which the bow and the crossbow of one hand share: seconds into the follow-through as 0..1 (1 = none), how far it was drawn, and a crossbow just wound all the way (0..1, 1 = long ago). */
 interface Shot {
   t: number;
@@ -54,49 +77,82 @@ class AimView implements HeldView {
 
   constructor(
     private readonly def: AimDef,
-    kit: HeldKit,
+    private readonly kit: HeldKit,
     private readonly shot: Shot,
   ) {
     const group = this.object;
     const sprite = kit.models.sprite(tileIndex(def.crossbow ? 'crossbow_frame' : 'bow_frame'));
     group.add(sprite);
     if (def.crossbow) {
-      // Held out in front, the prod across the view, the stock pointing at the middle of the screen.
-      group.scale.setScalar(0.5);
-      group.rotation.order = 'YXZ';
-      group.rotation.set(0.6, 1.7, -0.785);
-      this.rest = new THREE.Vector3(0.5, -0.4, -0.85);
+      // Held out in front, flat: the stock points away into the view, the prod across it, seen from a little above and behind.
+      group.scale.setScalar(0.55);
+      group.quaternion.copy(crossbowAim(0.3, 0.45));
+      this.rest = new THREE.Vector3(0.1, -0.2, -0.85);
     } else {
       // Held upright in the left of the grip like the original: big, limb vertical, facing forward.
       // The sprite's chord is turned upright and its belly faces away, so the player sees the bow from the side.
-      group.scale.setScalar(0.4);
+      group.scale.setScalar(0.55);
       group.rotation.set(0, -0.8, 0.74);
-      this.rest = new THREE.Vector3(0.5, -0.42, -0.85);
+      this.rest = new THREE.Vector3(0.46, -0.1, -0.9);
     }
     // The string and the arrow sit on the sprite's origin, so tile pixels map straight onto them.
-    const mat = kit.models.flat();
     this.root.position.copy(sprite.position);
-    const thick = SLAB * 0.55;
-    // The string is a unit-long bar along x that `seg` stretches between two points.
-    const bar = (): THREE.Mesh => new THREE.Mesh(kit.models.colorBox(1, thick * 0.5, thick, 0xe6e6e6, 0.5), mat);
-    this.s1 = bar();
-    this.s2 = bar();
-    const L = def.len;
-    const shaft = def.crossbow ? 0x6b4a2a : 0xc8a06a;
-    const part = (len: number, h: number, hex: number, at: number): void => {
-      const m = new THREE.Mesh(kit.models.colorBox(len, h, h * 1.1, hex, len / 2), mat);
-      m.position.x = at;
-      this.arrow.add(m);
-    };
-    part(L, thick * 0.55, shaft, 0);
-    part(L * 0.14, thick * 1.5, 0x9aa0ac, L * 0.9); // the head
-    part(L * 0.2, thick * 1.5, def.crossbow ? 0xc8463c : 0xe8e8e8, 0); // the fletching
+    this.s1 = this.bar();
+    this.s2 = this.bar();
+    this.fillArrow(this.arrow);
     this.arrow.visible = false;
     this.root.add(this.s1, this.s2);
     // The arrow lives in the scene, not on the bow, so it can leave along the line of sight (see `late`).
     kit.scene.add(this.arrow);
     this.string(0);
     group.add(this.root);
+  }
+
+  /** The string is a unit-long bar along x that `seg` stretches between two points. */
+  private bar(): THREE.Mesh {
+    return new THREE.Mesh(this.kit.models.colorBox(1, SLAB * 0.55 * 0.5, SLAB * 0.55, 0xe6e6e6, 0.5), this.kit.models.flat());
+  }
+
+  /** The arrow (a bolt for the crossbow): a shaft, a head and fletching, lying along x with its tail at the origin. */
+  private fillArrow(into: THREE.Object3D): void {
+    const mat = this.kit.models.flat();
+    const thick = SLAB * 0.55;
+    const L = this.def.len;
+    const shaft = this.def.crossbow ? 0x6b4a2a : 0xc8a06a;
+    const part = (len: number, h: number, hex: number, at: number): void => {
+      const m = new THREE.Mesh(this.kit.models.colorBox(len, h, h * 1.1, hex, len / 2), mat);
+      m.position.x = at;
+      into.add(m);
+    };
+    part(L, thick * 0.55, shaft, 0);
+    part(L * 0.14, thick * 1.5, 0x9aa0ac, L * 0.9); // the head
+    part(L * 0.2, thick * 1.5, this.def.crossbow ? 0xc8463c : 0xe8e8e8, 0); // the fletching
+  }
+
+  /**
+   * The string and the arrow of a figure's copy of the model (`inner`, a clone of `object`: the picture, then the group of the two bars of the string):
+   * returns what draws the string back by `pull` (0..1, may overshoot) and shows or hides the arrow nocked in it.
+   */
+  rigFigure(inner: THREE.Object3D): (pull: number, arrow: boolean) => void {
+    const root = inner.children[1];
+    const bars = root ? (root.children as THREE.Mesh[]) : [];
+    const arrow = new THREE.Group();
+    this.fillArrow(arrow);
+    arrow.visible = false;
+    root?.add(arrow);
+    const { a, b, dir, max } = this.def;
+    return (pull, on) => {
+      const n: [number, number] = [(a[0] + b[0]) / 2 + dir[0] * max * pull, (a[1] + b[1]) / 2 + dir[1] * max * pull];
+      if (bars.length >= 2) {
+        this.seg(bars[0], a, n);
+        this.seg(bars[1], n, b);
+      }
+      arrow.visible = on;
+      if (on) {
+        arrow.position.set(n[0], n[1], 0);
+        arrow.rotation.z = Math.atan2(-dir[1], -dir[0]);
+      }
+    };
   }
 
   private seg(m: THREE.Mesh, p: [number, number], q: [number, number]): void {

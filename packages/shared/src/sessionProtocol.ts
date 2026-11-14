@@ -176,17 +176,19 @@ export type SessionEvent =
   | { t: 'cast'; slot: number }
   | { t: 'hurt' }
   /** A number to float up where damage was done: by this player to a mob (`x,y,z` is the mob), or to this player (`taken`; `guarded`: a guard ability was cutting it down). */
-  | { t: 'dmg'; x: number; y: number; z: number; amount: number; crit?: boolean; total?: number; taken?: boolean; guarded?: boolean }
+  /** `arrow`: it was an arrow that did it; `head`: a headshot; `blade`: a dagger stab; `combo`: the last of a dagger's three quick stabs. */
+  | { t: 'dmg'; x: number; y: number; z: number; amount: number; crit?: boolean; total?: number; taken?: boolean; guarded?: boolean; head?: boolean; arrow?: boolean; blade?: boolean; combo?: boolean }
   | { t: 'thunder'; distance: number }
   | { t: 'explode'; vol: number }
   | { t: 'mob'; kind: MobKind; sound: MobSound; vol: number; x?: number; y?: number; z?: number }
   /** A staff, wand or spellbook was cast (the sound of the weapon; the bolt and its burst are drawn from the world). */
   | { t: 'spell'; weapon: 'wand' | 'staff' | 'spellbook'; vol: number }
-  | { t: 'swing' }
+  /** The hand swung (`off`: the off hand did, a dagger stabbing while a bow is in the main hand). */
+  | { t: 'swing'; off?: boolean }
   /** A shield took a hit (`broke`: it was the last one). */
   | { t: 'shield'; vol: number; broke?: boolean; parry?: boolean }
   /** Your shield stopped a hit: a plain block, or a parry (the hit came just as the guard went up, so the shield took no wear). */
-  | { t: 'guard'; what: 'block' | 'parry' }
+  | { t: 'guard'; what: 'block' | 'parry' | 'dodge' }
   /** The Emberstone: someone began to cast it where x,y,z is (start), lost the cast (stop), vanished from there (depart) or appeared there (arrive). Everyone near sees and hears it. */
   | { t: 'ember'; what: 'start' | 'stop' | 'depart' | 'arrive'; x: number; y: number; z: number }
   | { t: 'died' }

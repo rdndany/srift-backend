@@ -46,7 +46,7 @@ export class Cubes {
   private readonly colors: Float32Array;
 
   constructor(
-    private readonly kit: SpellKit,
+    private readonly kit: Pick<SpellKit, 'voxel' | 'viewer'>,
     material: THREE.Material,
     private readonly cap: number,
     /** Where the effect stands in the world (the cubes are placed relative to it). */
@@ -178,7 +178,7 @@ export function makePuffs(rng: Rng, s: PuffSpec): Puff[] {
   return out;
 }
 
-export function drawPuffs(cubes: Cubes, list: readonly Puff[], age: number): void {
+export function drawPuffs(cubes: Cubes, list: readonly Puff[], age: number, colors: readonly THREE.Color[] = DUST): void {
   for (const p of list) {
     const t = age - p.delay;
     if (t <= 0 || t >= p.life) continue;
@@ -187,7 +187,7 @@ export function drawPuffs(cubes: Cubes, list: readonly Puff[], age: number): voi
     const rise = (1 - Math.exp(-3 * t)) / 3;
     const s = p.size * steps(1 - k * k);
     // darker as it ages: dust that has settled is the colour of the ground
-    cubes.put(p.x0 + p.dx * p.speed * out, p.y0 + s / 2 + p.up * rise, p.z0 + p.dz * p.speed * out, s, s, s, DUST[Math.min(3, p.tone + (k > 0.5 ? 1 : 0) + (k > 0.8 ? 1 : 0))]);
+    cubes.put(p.x0 + p.dx * p.speed * out, p.y0 + s / 2 + p.up * rise, p.z0 + p.dz * p.speed * out, s, s, s, colors[Math.min(colors.length - 1, p.tone + (k > 0.5 ? 1 : 0) + (k > 0.8 ? 1 : 0))]);
   }
 }
 

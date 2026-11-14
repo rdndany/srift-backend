@@ -10,6 +10,8 @@ export class Hud {
   private underwater = document.getElementById('underwater')!;
   private damageEl = document.getElementById('damage')!;
   private netEl = document.getElementById('net')!;
+  private hitEl = document.getElementById('hitmarker');
+  private crossEl = document.getElementById('crosshair');
   private nameTimer = 0;
   private lastFlash = -1;
   debugVisible = false;
@@ -37,6 +39,36 @@ export class Hud {
     if (q === this.lastFlash) return;
     this.lastFlash = q;
     this.damageEl.style.opacity = String(q * 0.55);
+  }
+
+  /** A hit of yours landed: four ticks flash round the crosshair (white; orange for a critical hit, red for a headshot). */
+  hitMarker(kind: 'hit' | 'crit' | 'head'): void {
+    const el = this.hitEl;
+    if (!el || typeof el.animate !== 'function') return;
+    el.style.setProperty('--hm', kind === 'head' ? '#ff5a3c' : kind === 'crit' ? '#ffb347' : '#ffffff');
+    const big = kind === 'hit' ? 1 : 1.3;
+    el.getAnimations().forEach((a) => a.cancel());
+    el.animate(
+      [
+        { opacity: 1, transform: `translate(-50%, -50%) scale(${0.75 * big})` },
+        { opacity: 1, transform: `translate(-50%, -50%) scale(${1.1 * big})`, offset: 0.35 },
+        { opacity: 0, transform: `translate(-50%, -50%) scale(${1.25 * big})` },
+      ],
+      { duration: kind === 'hit' ? 220 : 340, easing: 'ease-out' },
+    );
+  }
+
+  /** The crosshair pulses once (a bow at full draw). */
+  crosshairPulse(): void {
+    const el = this.crossEl;
+    if (!el || typeof el.animate !== 'function') return;
+    el.animate(
+      [
+        { transform: 'translate(-50%, -50%) scale(1.7)', opacity: 1 },
+        { transform: 'translate(-50%, -50%) scale(1)', opacity: 1 },
+      ],
+      { duration: 180, easing: 'ease-out' },
+    );
   }
 
   setNet(text: string, ok: boolean): void {

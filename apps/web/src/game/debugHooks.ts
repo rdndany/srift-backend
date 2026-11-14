@@ -459,9 +459,11 @@ export function installDebugHooks(parts: DebugParts): void {
     addClassXp: (n: number) => act(() => L().addClassXp(n)),
     /** A raw command by the way the interface sends it (single player or online): for tests of what the server accepts. */
     netCommand: (c: Command) => sendCommand(c),
-    fxList: () => session.fx.map((f) => ({ id: f.id, k: f.k, by: f.by, x: f.x, y: f.y, z: f.z, r: f.r })),
+    fxList: () => session.fx.map((f) => ({ id: f.id, k: f.k, by: f.by, x: f.x, y: f.y, z: f.z, r: f.r, age: f.age, ttl: f.ttl })),
+    /** Learn a class ability without its skill book (single player), to look at it. */
+    unlockAbility: (id: string) => act(() => void L().cls?.unlocked.add(id as never)),
     abilityMeshes: () => abilityFx.group.children.length,
-    /** Send a spell (1 fireball, 2 arcane bolt) from the eye at a given speed, to look at it in flight (single player). */
+    /** Send a spell (1 fireball, 2 the spellbook's arcane bolt, 3 a wand's and 4 a staff's bolt of cubes) from the eye at a given speed, to look at it in flight (single player). */
     testSpell: (spell: number, speed: number) => {
       const p = L();
       const e = p.eye();

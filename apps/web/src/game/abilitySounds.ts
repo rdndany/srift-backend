@@ -19,6 +19,7 @@ export type AbilitySound =
   | 'staff_cast'
   | 'spellbook_cast'
   | 'arcane_hit'
+  | 'staff_hit'
   | 'slam_leap'
   | 'ground_slam'
   | 'shield_bash'
@@ -41,7 +42,15 @@ export type AbilitySound =
   | 'mount_gather'
   | 'mount_strike'
   | 'mount_step'
-  | 'mount_learn';
+  | 'mount_learn'
+  | 'bow_draw'
+  | 'bow_full'
+  | 'arrow_hit'
+  | 'arrow_head'
+  | 'arrow_thunk'
+  | 'dagger_swish'
+  | 'dagger_hit'
+  | 'dagger_finish';
 
 /** Everything a recipe needs: the audio context, where to send the sound, and a second of white noise. */
 export interface SynthTarget {
@@ -241,6 +250,15 @@ const RECIPES: Record<AbilitySound, Recipe> = {
     s.tone(0, 0.14, { type: 'sine', f0: 1700, f1: 520, gain: 0.16, attack: 0.003 });
     [3136, 4186].forEach((f, i) => s.tone(0.03 + i * 0.05, 0.25, { type: 'sine', f0: f, gain: 0.07, attack: 0.003 }));
     s.crackle(0.04, 0.22, 3, 4500, 9000, 0.1, 'highpass');
+  },
+
+  // A staff's bolt bursting: a low thump, a rush of air and two bright rings on top, longer than a wand's pop and as heavy as the staff.
+  staff_hit: (s) => {
+    s.tone(0, 0.3, { type: 'sine', f0: 230, f1: 70, gain: 0.4, attack: 0.004 });
+    s.noise(0, 0.22, { filter: 'lowpass', f0: 2400, f1: 300, gain: 0.25, attack: 0.003 });
+    s.noise(0, 0.14, { filter: 'highpass', f0: 3200, f1: 1800, q: 0.7, gain: 0.14, attack: 0.003 });
+    [1568, 2349].forEach((f, i) => s.tone(0.04 + i * 0.07, 0.45, { type: 'sine', f0: f, gain: 0.08, attack: 0.003 }));
+    s.crackle(0.05, 0.3, 4, 3000, 8000, 0.1, 'highpass');
   },
 
   // ---- Warrior: weight and steel ----
@@ -465,6 +483,61 @@ const RECIPES: Record<AbilitySound, Recipe> = {
     s.tone(0.5, 0.9, { type: 'sine', f0: 588, gain: 0.05, attack: 0.04 });
     [1046.5, 1568, 2093].forEach((f, i) => s.tone(0.6 + i * 0.1, 1.0 - i * 0.15, { type: 'sine', f0: f, f1: f * 0.998, gain: 0.08, attack: 0.004 }));
     s.crackle(0.6, 1.3, 6, 5000, 10000, 0.1, 'highpass');
+  },
+
+  // Drawing a bow: the wood and the string creaking under the strain, a low groan rising as it comes back. `seconds` is how long the draw takes.
+  bow_draw: (s, seconds) => {
+    const d = Math.max(0.3, Math.min(1.4, seconds));
+    s.tone(0, d, { type: 'sawtooth', f0: 70, f1: 150, gain: 0.07, attack: d * 0.6, lowpass: 380 });
+    s.noise(0, d, { filter: 'bandpass', f0: 380, f1: 1500, q: 3, gain: 0.07, attack: d * 0.55 });
+    s.crackle(0.02, d, 4, 220, 900, 0.08);
+  },
+
+  // Full draw: a small tight tick of the string settling.
+  bow_full: (s) => {
+    s.tone(0, 0.07, { type: 'triangle', f0: 1900, f1: 1500, gain: 0.12, attack: 0.002 });
+    s.noise(0, 0.04, { filter: 'highpass', f0: 4200, q: 0.7, gain: 0.1, attack: 0.002 });
+  },
+
+  // An arrow into flesh: a dull thwack with a low thump under it.
+  arrow_hit: (s) => {
+    s.tone(0, 0.16, { type: 'sine', f0: 230, f1: 70, gain: 0.5, attack: 0.003 });
+    s.noise(0, 0.09, { filter: 'bandpass', f0: 1300, q: 0.8, gain: 0.3, attack: 0.002 });
+    s.noise(0.01, 0.05, { filter: 'highpass', f0: 3800, q: 0.7, gain: 0.07, attack: 0.002 });
+  },
+
+  // A headshot: the same, with a bright ring over it.
+  arrow_head: (s) => {
+    s.tone(0, 0.2, { type: 'sine', f0: 260, f1: 60, gain: 0.55, attack: 0.003 });
+    s.noise(0, 0.1, { filter: 'bandpass', f0: 1500, q: 0.8, gain: 0.34, attack: 0.002 });
+    [1568, 2349].forEach((f, i) => s.tone(0.015 + i * 0.03, 0.3, { type: 'sine', f0: f, f1: f * 0.997, gain: 0.11, attack: 0.003 }));
+  },
+
+  // An arrow into wood, earth or stone: a short knock and the shaft humming for a moment.
+  arrow_thunk: (s) => {
+    s.tone(0, 0.12, { type: 'sine', f0: 180, f1: 75, gain: 0.4, attack: 0.002 });
+    s.noise(0, 0.06, { filter: 'lowpass', f0: 1100, f1: 400, gain: 0.26, attack: 0.002 });
+    s.tone(0.01, 0.22, { type: 'triangle', f0: 760, f1: 700, gain: 0.05, attack: 0.002 });
+  },
+
+  // A dagger through the air: a thin quick hiss.
+  dagger_swish: (s) => {
+    s.noise(0, 0.12, { filter: 'bandpass', f0: 2600, f1: 6800, q: 1.2, gain: 0.15, attack: 0.03 });
+  },
+
+  // A dagger landing: a short metallic shink and a small thump.
+  dagger_hit: (s) => {
+    s.noise(0, 0.12, { filter: 'highpass', f0: 3600, f1: 5200, q: 0.8, gain: 0.22, attack: 0.002 });
+    s.tone(0, 0.1, { type: 'sine', f0: 2500, f1: 1900, gain: 0.08, attack: 0.002 });
+    s.tone(0, 0.1, { type: 'sine', f0: 150, f1: 70, gain: 0.32, attack: 0.002 });
+  },
+
+  // The last stab of three: a heavier thud, the shink with a ring, and a few sparks.
+  dagger_finish: (s) => {
+    s.tone(0, 0.26, { type: 'sine', f0: 110, f1: 40, gain: 0.55, attack: 0.003 });
+    s.noise(0, 0.2, { filter: 'highpass', f0: 3200, f1: 5600, q: 0.8, gain: 0.26, attack: 0.002 });
+    [1318, 1976].forEach((f, i) => s.tone(0.01 + i * 0.025, 0.4, { type: 'sine', f0: f, f1: f * 0.996, gain: 0.1, attack: 0.003 }));
+    s.crackle(0.03, 0.2, 4, 4500, 9000, 0.14, 'highpass');
   },
 };
 

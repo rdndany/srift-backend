@@ -4,13 +4,23 @@ import type { AbilitySound } from './abilitySounds';
 import { buildFang, buildThunderHit, buildThunderWarn } from './fenrirFx';
 import { softBall, type FireParticles } from './fireFx';
 import { buildSummonArrive, buildSummonCast, buildSummonFizzle } from './mountSummonFx';
-import { buildBearTrapSet, buildBearTrapSnap, buildEvasiveRoll, buildPiercingShot, buildRainHit, buildRainMark } from './rangerFx';
+import { buildPiercingShot } from './piercingFx';
+import { buildEvasiveRoll } from './rollFx';
+import { buildBearTrapSet, buildBearTrapSnap } from './trapFx';
+import { buildRainHit, buildRainMark } from './rainFx';
 import type { ShaderKeeper } from './shaderKeep';
 import { buildShieldBash } from './bashFx';
 import { buildCharge } from './chargeFx';
+import { buildFireballHit } from './fireballFx';
+import { buildStaffHit } from './staffFx';
+import { buildWandHit } from './wandFx';
 import { buildIronDefense } from './guardFx';
 import { buildGroundSlam, buildLeap } from './slamFx';
-import { SpellKit, buildArcaneShield, buildFrostNova, buildMeteorHit, buildMeteorWarn, type FxEntry } from './spellFx';
+import { buildMeteorHit, buildMeteorWarn } from './meteorFx';
+import { buildFrostNova } from './frostFx';
+import { SpellKit, type FxEntry } from './spellFx';
+import { buildArcaneShield, buildShieldShatter } from './arcaneShieldFx';
+import { buildArrowStick } from './arrowFx';
 
 /**
  * Draws what class abilities leave in the world (rings, bursts, a meteor on its way down, a line of light for a
@@ -33,9 +43,12 @@ const COLORS: Record<FxKind, number> = {
   roll: 0xcfe8a0,
   trap_set: 0xb8b8b8,
   trap_snap: 0xff6060,
+  arrow_stick: 0xb08a55,
   guard_iron: 0xc8d0e0,
   guard_arcane: 0x9a7bff,
   bolt: 0x9ab8ff,
+  wand_hit: 0x9aaeff,
+  staff_hit: 0xc9a0ff,
   fang: 0xb8a8ff,
   thunder_warn: 0xb8a8ff,
   thunder_hit: 0xb8a8ff,
@@ -74,6 +87,11 @@ export class AbilityFx {
     if (this.kit) this.kit.impact = (x, y, z, s) => this.onImpact?.(x, y, z, s);
   }
 
+  /** The cubes' shapes and the camera, for what is drawn outside these marks (the wand's bolt in flight, see MobRenderer). Null without the fire. */
+  get voxelKit(): SpellKit | null {
+    return this.kit;
+  }
+
   /** Tell the effects where the camera is, so the ones round the player can keep out of their view. */
   setViewer(position: THREE.Vector3): void {
     if (this.kit) this.kit.viewer = position;
@@ -104,6 +122,7 @@ export class AbilityFx {
     const entry: Entry = { group: g, age: f.age, ttl: Math.max(0.1, f.ttl), materials: mats, extra: [], animate: () => undefined };
     const r = Math.max(0.6, f.r);
 
+    if (f.k === 'fireball_burst' && this.kit) return buildFireballHit(f, entry, this.kit);
     if ((f.k === 'fireball_burst' || f.k === 'bolt') && this.fire) return this.spellBurst(f, entry, g, r, this.fire, f.k === 'bolt');
     if (this.kit) {
       if (f.k === 'frost_nova') return buildFrostNova(f, entry, this.kit);
@@ -114,11 +133,21 @@ export class AbilityFx {
       if (f.k === 'guard_iron') return buildIronDefense(f, entry, this.kit);
       if (f.k === 'meteor_warn') return buildMeteorWarn(f, entry, this.kit);
       if (f.k === 'meteor_hit') return buildMeteorHit(f, entry, this.kit);
-      if (f.k === 'guard_arcane') return buildArcaneShield(f, entry, this.kit);
+      if (f.k === 'guard_arcane') {
+        const shield = buildArcaneShield(f, entry, this.kit);
+        // soaked up before its time: it breaks, where it stood, in cubes of its own (the mark is gone by then)
+        shield.onEnd = (early) => {
+          if (early) this.shatterShield(shield.group.position.x, shield.group.position.y, shield.group.position.z);
+        };
+        return shield;
+      }
+      if (f.k === 'wand_hit') return buildWandHit(f, entry, this.kit);
+      if (f.k === 'staff_hit') return buildStaffHit(f, entry, this.kit);
       if (f.k === 'pierce') return buildPiercingShot(f, entry, this.kit);
       if (f.k === 'roll') return buildEvasiveRoll(f, entry, this.kit);
       if (f.k === 'trap_set') return buildBearTrapSet(f, entry, this.kit);
       if (f.k === 'trap_snap') return buildBearTrapSnap(f, entry, this.kit);
+      if (f.k === 'arrow_stick') return buildArrowStick(f, entry, this.kit);
       if (f.k === 'rain_mark') return buildRainMark(f, entry, this.kit);
       if (f.k === 'rain_hit') return buildRainHit(f, entry, this.kit);
       if (f.k === 'fang') return buildFang(f, entry, this.kit);
@@ -353,8 +382,13 @@ export class AbilityFx {
         return play('meteor_fall', f.ttl - 0.4 - f.age); // it lands 0.4 s before the mark goes
       case 'meteor_hit':
         return play('meteor_hit');
-      case 'bolt': // where a wand, staff or spellbook bolt bursts
+      case 'bolt': // where a spellbook bolt bursts
+      case 'wand_hit': // and a wand's
         return play('arcane_hit');
+      case 'staff_hit': // a staff's is deeper
+        return play('staff_hit');
+      case 'arrow_stick':
+        return play('arrow_thunk');
       case 'fang':
         return play('mount_bite');
       case 'thunder_warn':
@@ -586,6 +620,11 @@ export class AbilityFx {
     this.startLocal(false, 1.7, x, y, z, (e, kit) => {
       buildSummonArrive(id, e, kit, this.say, x, y, z);
     });
+  }
+
+  /** The Arcane Shield broke: its cubes fly apart. */
+  private shatterShield(x: number, y: number, z: number): void {
+    this.startLocal(false, 0.9, x, y, z, (e, kit) => buildShieldShatter(e, kit));
   }
 
   private stepLocals(dt: number): void {

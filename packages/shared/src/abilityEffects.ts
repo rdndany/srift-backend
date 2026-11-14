@@ -32,9 +32,15 @@ export type FxKind =
   | 'roll'
   | 'trap_set'
   | 'trap_snap'
+  /** An arrow of a bow that stuck in a wall or the ground: where it hit (`x2..z2` is the point it was flying to, so the way it points). */
+  | 'arrow_stick'
   | 'guard_iron'
   | 'guard_arcane'
   | 'bolt'
+  /** Where a wand's bolt burst (the wand has its own look, built of cubes; the staff and the spellbook still use 'bolt'). */
+  | 'wand_hit'
+  /** Where a staff's bolt burst (also with its own look of cubes). */
+  | 'staff_hit'
   /** A mount's: the bite (a line from the mount to the far end of its reach), and the ground a Thunder Howl will strike and has struck. */
   | 'fang'
   | 'thunder_warn'
@@ -193,8 +199,8 @@ export class EffectField {
   }
 
   private hitZone(z: Zone, mobs: MobManager): void {
-    // A meteor leaves its fire and smoke about for a while; an arrow volley is over quickly.
-    const mark = this.mark(z.hit, z.by, z.x, z.y, z.z, z.radius, z.hit === 'meteor_hit' ? 1.3 : z.hit === 'thunder_hit' ? 1.1 : 0.7);
+    // A meteor leaves its crater and smoke about for a while; an arrow volley is over quickly.
+    const mark = this.mark(z.hit, z.by, z.x, z.y, z.z, z.radius, z.hit === 'meteor_hit' ? 1.8 : z.hit === 'thunder_hit' ? 1.1 : 0.7);
     if (z.mount) mark.mount = z.mount;
     for (const m of mobs.mobs) {
       if (m.dead || (!m.def.hostile && m.def.ambient) || m.def.invulnerable) continue;

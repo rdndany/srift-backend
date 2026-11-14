@@ -85,6 +85,8 @@ export interface HeldView {
   leave?(): void;
   /** Called before a copy of the model is made for a figure: put it in the pose a figure carries it in. */
   forFigure?(): void;
+  /** A figure's copy of the model (`inner`): what draws its string back by `pull` (0..1) and shows or hides the arrow nocked in it. */
+  rigFigure?(inner: THREE.Object3D): (pull: number, arrow: boolean) => void;
   /** Free what it made outside `object` (the geometry of `object` is freed for it). */
   dispose?(): void;
 }

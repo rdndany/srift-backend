@@ -18,6 +18,9 @@ const LOOKS = {
   coins: { fill: '#ffd84a', edge: '#5a3a00', size: 0.8, font: 54 },
   block: { fill: '#d6e6ff', edge: '#1a3a66', size: 1.25, font: 56 },
   parry: { fill: '#ffe45c', edge: '#7a3a00', size: 1.6, font: 56 },
+  dodge: { fill: '#8cf0c8', edge: '#07402e', size: 1.5, font: 56 },
+  head: { fill: '#ff6a4a', edge: '#3a0a00', size: 1.15, font: 50 },
+  combo: { fill: '#ffe45c', edge: '#5a2a00', size: 1.15, font: 50 },
 } satisfies Record<string, Look>;
 
 type Kind = keyof typeof LOOKS;
@@ -85,9 +88,10 @@ export class DamageNumbers {
     this.materials.clear();
   }
 
-  /** A number where a mob was hurt. */
-  dealt(x: number, y: number, z: number, amount: number, crit: boolean, total?: number): void {
+  /** A number where a mob was hurt (`tag`: a word over it: a headshot, the last stab of a dagger's combo). */
+  dealt(x: number, y: number, z: number, amount: number, crit: boolean, total?: number, tag?: 'head' | 'combo'): void {
     this.add(x, y, z, fmt(amount) + (crit ? '!' : ''), crit ? 'crit' : 'dealt', false);
+    if (tag) this.add(x, y + 0.6, z, tag === 'head' ? 'HEADSHOT' : 'FINISHER', tag, false);
     if (total === undefined) return;
     // A training dummy keeps a running count above the numbers: one at a time, in place.
     if (this.totalNum) {
@@ -125,11 +129,11 @@ export class DamageNumbers {
   }
 
   /** "BLOCK" or "PARRY!" a little above the middle of the view when the player's shield stopped a hit. */
-  guard(what: 'block' | 'parry', camera: THREE.Camera): void {
+  guard(what: 'block' | 'parry' | 'dodge', camera: THREE.Camera): void {
     this.fwd.set(0, 0, -1).applyQuaternion(camera.quaternion);
     this.right.set(1, 0, 0).applyQuaternion(camera.quaternion);
     const p = camera.position;
-    this.add(p.x + this.fwd.x * 1.7, p.y + this.fwd.y * 1.7 + 0.12, p.z + this.fwd.z * 1.7, what === 'parry' ? 'PARRY!' : 'BLOCK', what, true);
+    this.add(p.x + this.fwd.x * 1.7, p.y + this.fwd.y * 1.7 + 0.12, p.z + this.fwd.z * 1.7, what === 'parry' ? 'PARRY!' : what === 'dodge' ? 'DODGE!' : 'BLOCK', what, true);
   }
 
   private add(x: number, y: number, z: number, text: string, kind: Kind, hud: boolean): void {
@@ -142,10 +146,10 @@ export class DamageNumbers {
     this.live.push({
       sprite,
       age: 0,
-      ttl: kind === 'total' ? 2.6 : kind === 'crit' ? 1.1 : kind === 'xp' || kind === 'coins' ? 1.3 : kind === 'block' || kind === 'parry' ? 1.0 : 0.9,
-      vx: kind === 'total' || kind === 'block' || kind === 'parry' ? 0 : (Math.random() - 0.5) * 0.8,
-      vy: kind === 'total' ? 0 : kind === 'crit' ? 2.4 : kind === 'block' || kind === 'parry' ? 1.1 : 1.8,
-      vz: kind === 'total' || kind === 'block' || kind === 'parry' ? 0 : (Math.random() - 0.5) * 0.8,
+      ttl: kind === 'total' ? 2.6 : kind === 'crit' ? 1.1 : kind === 'xp' || kind === 'coins' ? 1.3 : kind === 'block' || kind === 'parry' || kind === 'dodge' ? 1.0 : 0.9,
+      vx: kind === 'total' || kind === 'block' || kind === 'parry' || kind === 'dodge' ? 0 : (Math.random() - 0.5) * 0.8,
+      vy: kind === 'total' ? 0 : kind === 'crit' ? 2.4 : kind === 'block' || kind === 'parry' || kind === 'dodge' ? 1.1 : 1.8,
+      vz: kind === 'total' || kind === 'block' || kind === 'parry' || kind === 'dodge' ? 0 : (Math.random() - 0.5) * 0.8,
       size: LOOKS[kind].size,
       hud,
     });

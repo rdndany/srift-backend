@@ -10,6 +10,7 @@ import { StoneHeat } from './held/heat';
 import { ItemFigures } from './held/figures';
 import { ShieldMoves, type GuardHands } from './held/guard';
 import { HeldViews } from './held/kinds';
+import { OffJab } from './held/offJab';
 import { MapHold } from './held/mapHold';
 import { ItemModels } from './held/models';
 import type { SwingStyle } from './held/swings';
@@ -35,6 +36,7 @@ export class HeldItem {
   private readonly views: HeldViews;
   private readonly figures: ItemFigures;
   private readonly guard = new ShieldMoves();
+  private readonly jab = new OffJab();
   private readonly eating = new Eating();
   private readonly casting = new Casting();
   private readonly stoneHeat = new StoneHeat();
@@ -66,6 +68,11 @@ export class HeldItem {
   private rest = new THREE.Vector3(0.55, -0.42, -0.75);
   private baseYaw = -0.5;
   private equipT = 1;
+  private equipDur = 0.28;
+  /** Set while the item is being changed for a reason that has to be quick (the bow put away for a stab, and back): the change takes about half the time. */
+  quickSwap = false;
+  /** The off-hand item is lowered out of sight (a ranger holds a bow with both hands: the dagger waits below the view and comes up to stab). */
+  offAway = false;
   private switching = false;
   private bobPhase = 0;
   private bobAmp = 0;
@@ -153,6 +160,17 @@ export class HeldItem {
     this.guard.blockHit(parry);
   }
 
+  /** Hold the off hand's stab at one moment of it (0..1; null lets it play), for looking at a pose. */
+  holdJab(t: number | null): void {
+    this.jab.frozen = t;
+  }
+
+  /** The dagger of the off hand stabs (it has to be up in the hand: see `offAway`). Returns whether a stab started. */
+  stab(): boolean {
+    if (!this.offObj || this.offView?.shield || this.offView?.float) return false;
+    return this.jab.start(true);
+  }
+
   /** Start a swing (attack or place). Ignored while one is already in its first half. */
   swing(): void {
     if (this.holdsMap()) return;
@@ -163,6 +181,11 @@ export class HeldItem {
         this.swingVariant++;
       }
     } else if (this.swingT > 0.5) this.swingT = 0;
+  }
+
+  /** Is this item the one in the hand right now (not still being swapped in or out)? */
+  holds(id: number): boolean {
+    return this.currentId === id && !this.switching;
   }
 
   /** A Shield Bash: the shield is drawn back and driven forward (the warrior's own shield if they have one in hand, otherwise one is brought out for it). */
@@ -180,10 +203,11 @@ export class HeldItem {
     this.guard.setSlam(phase, vy);
   }
 
-  /** Keep swinging while mining: only starts a new swing once the last one has finished. */
-  swingIfIdle(): void {
-    if (this.holdsMap()) return;
-    if (this.swingT >= 1) this.swingT = 0;
+  /** Keep swinging while mining: only starts a new swing once the last one has finished. Returns whether one started. */
+  swingIfIdle(): boolean {
+    if (this.holdsMap() || this.switching || this.swingT < 1) return false;
+    this.swingT = 0;
+    return true;
   }
 
   /** The use button held on the item in hand, 0..1 (a bow's draw; a crossbow is wound to 1 and then waits). */
@@ -203,8 +227,9 @@ export class HeldItem {
     } else if (id !== this.currentId && !this.switching) {
       this.switching = true;
       this.equipT = 0;
+      this.equipDur = this.quickSwap ? 0.17 : 0.28;
     }
-    this.equipT = Math.min(1, this.equipT + dt / 0.28);
+    this.equipT = Math.min(1, this.equipT + dt / this.equipDur);
     if (this.switching && this.equipT >= 0.5) {
       this.setItem(id);
       this.switching = false;
@@ -291,6 +316,7 @@ export class HeldItem {
       scale: f.scale,
     };
     this.guard.pose(hands);
+    this.jab.apply(dt, this.offPivot, !this.offAway, !!this.offObj && !this.offView?.shield && !this.offView?.float);
     this.map.apply(dt, this.holdsMap() && !this.switching, this.pivot, this.offPivot, this.shakeT);
     this.view?.late?.(f);
   }
@@ -349,7 +375,8 @@ export class HeldItem {
     this.view = null;
     this.currentId = id;
     this.arm.visible = id === 0;
-    if (id === 0) return;
+    // (0 is the empty hand, and anything below it is nothing at all: the hand is put away, as for a stab of the other one)
+    if (id <= 0) return;
     const view = getItem(id).use === 'map' && this.map.main ? this.map.main : this.views.get(id);
     this.view = view;
     this.holder.add(view.object);

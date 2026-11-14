@@ -1,7 +1,7 @@
 import type { EntityLight } from './entityLight';
 import * as THREE from 'three';
 import { BASH_ANIM, type MountId } from '@solrift/shared';
-import { Character, DEFAULT_PALETTE, SWING_TIME, figureLoadout, layDown, standUp, type Palette, type SkinVoxel } from './character';
+import { Character, DEFAULT_PALETTE, STAB_TIME, SWING_TIME, figureLoadout, layDown, standUp, type Palette, type SkinVoxel } from './character';
 import type { StepHandler } from './fenrir';
 import { MountRig } from './mountRig';
 import { BEHIND_DISTANCE, ChaseCamera, MOUNTED_EXTRA, SHOULDER_SIDE, SHOULDER_UP, clearRun } from './chaseCamera';
@@ -107,6 +107,8 @@ export interface SelfState {
   vz?: number;
   /** The player is aiming (a bow drawn): the figure faces the crosshair, as it does while it swings, casts or blocks. */
   aiming?: boolean;
+  /** How far the bow in the hand is drawn (a crossbow: wound), 0..1. */
+  bowDraw?: number;
   /** Vertical speed (up is positive), and whether the feet are off the ground (jumping or falling, not swimming or climbing). */
   vy: number;
   airborne: boolean;
@@ -209,6 +211,13 @@ export class SelfView {
     return this.group.rotation.y;
   }
 
+  /** The left hand stabs (the dagger of a ranger who has put the bow away). */
+  stab(): boolean {
+    if (this.character.stabAge < STAB_TIME * 0.8) return false;
+    this.character.stabAge = 0;
+    return true;
+  }
+
   /** Keep swinging while mining: a new swing starts only when the last one has finished. */
   swingIfIdle(): void {
     if (this.attack >= 1) this.attack = 0;
@@ -245,7 +254,7 @@ export class SelfView {
     // The body: a mount turns with the view (the head you ride behind must stay in front of you). On foot the camera orbits freely and the body
     // faces where it walks (sideways and backward too, so it always walks forward); while it swings, casts, blocks or aims it faces the
     // crosshair, and standing still it stays as it is until the crosshair goes past what the neck can turn to: then it turns right round to face it.
-    const acting = this.attack < 1 || s.blocking || !!s.aiming || !!s.eating || !!s.slam || this.bashAge < BASH_ANIM;
+    const acting = this.attack < 1 || this.character.stabAge < 0.5 || s.blocking || !!s.aiming || !!s.eating || !!s.slam || this.bashAge < BASH_ANIM;
     if (moving || acting || mounted) this.turnToAim = false;
     if (mounted) this.bodyYaw = s.yaw;
     else if (acting) this.bodyYaw = turnToward(this.bodyYaw, s.yaw, dt, 24, 22);
@@ -293,6 +302,8 @@ export class SelfView {
     c.charging = !mounted && !!s.charging;
     c.casting = mounted ? 0 : (s.casting ?? 0);
     c.bashAge = mounted ? 9 : this.bashAge;
+    c.aimDraw = mounted ? 0 : (s.bowDraw ?? 0);
+    c.aimPitch = s.pitch;
     c.animate(dt, s.speed, this.turn, this.attack, load.hand !== 0, s.blocking && !mounted, s.vy, s.airborne, !!s.eating && !mounted);
     c.setArmor(s.armor);
     c.setHeld(load.hand, this.models);

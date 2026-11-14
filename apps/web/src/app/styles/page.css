@@ -56,6 +56,37 @@ body {
   width: 18px;
 }
 
+/* A hit of yours landed: four short ticks round the crosshair, drawn by Hud.hitMarker. */
+#hitmarker {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  width: 34px;
+  height: 34px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  opacity: 0;
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.85));
+}
+#hitmarker::before,
+#hitmarker::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 15px;
+  width: 34px;
+  height: 3px;
+  background: var(--hm, #fff);
+  -webkit-mask: linear-gradient(90deg, #000 0 28%, transparent 28% 72%, #000 72%);
+  mask: linear-gradient(90deg, #000 0 28%, transparent 28% 72%, #000 72%);
+}
+#hitmarker::before {
+  transform: rotate(45deg);
+}
+#hitmarker::after {
+  transform: rotate(-45deg);
+}
+
 #hud-bottom {
   position: fixed;
   left: 50%;

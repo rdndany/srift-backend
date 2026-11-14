@@ -566,8 +566,11 @@ export class GameAudio {
       return;
     }
     if (action === 'shoot') {
-      this.voice('triangle', 520 * r, 180, 0.12, 0.3 * v);
-      this.blip(2400, 0.7, 0.1, 0.25 * v, 'bandpass');
+      // The string snapping: a hard pluck falling in pitch with a thump under it, the whip of the limbs, and the air of the arrow leaving.
+      this.voice('triangle', 300 * r, 120, 0.1, 0.34 * v);
+      this.voice('sine', 95 * r, 60, 0.16, 0.3 * v);
+      this.blip(1800, 0.8, 0.07, 0.28 * v, 'bandpass', 1.5);
+      this.blip(4200, 0.6, 0.18, 0.12 * v, 'highpass', 0.5);
       return;
     }
     if (action === 'yes') {

@@ -153,6 +153,7 @@ export default function GameView() {
       <div id="underwater" />
       <div id="damage" />
       <div id="crosshair" />
+      <div id="hitmarker" />
       <div id="break-progress">
         <div />
       </div>

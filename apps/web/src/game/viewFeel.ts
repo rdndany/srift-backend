@@ -65,6 +65,17 @@ export class ViewFeel {
     this.shake = Math.max(this.shake, crit ? 0.24 : 0.12);
   }
 
+  /** An arrow of yours found its mark: the view jolts a little (more for a headshot or a critical hit), but the hand does not stop. */
+  thump(big: boolean): void {
+    this.hitK = Math.max(this.hitK, big ? 0.5 : 0.25);
+    this.shake = Math.max(this.shake, big ? 0.14 : 0.06);
+  }
+
+  /** The kick of loosing an arrow: the view jumps back a little, more for a full draw (0..1). */
+  recoil(power: number): void {
+    this.shake = Math.max(this.shake, 0.03 + 0.07 * power * power);
+  }
+
   /** The weight of a blow wears off (in real time, even while the game stands still). */
   fade(dt: number): void {
     this.hitStop = Math.max(0, this.hitStop - dt);

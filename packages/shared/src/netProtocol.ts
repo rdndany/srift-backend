@@ -273,7 +273,7 @@ export interface ArrowView {
   b?: 1;
   /** A thrown ender pearl. */
   p?: 1;
-  /** A spell (1 fireball, 2 arcane bolt): drawn as a glowing ball. */
+  /** A spell (1 fireball, 2 the spellbook's arcane bolt, 3 the wand's and 4 the staff's bolt of cubes). */
   s?: number;
 }
 

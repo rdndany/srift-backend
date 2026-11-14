@@ -604,6 +604,17 @@ describe('Mage abilities', () => {
     expect(events(s).length).toBeGreaterThan(0);
   });
 
+  it("Fireball's blast mark is as wide as its burst and lasts long enough to leave smoke (a second), longer than a plain bolt's", () => {
+    const s = make('mage');
+    dummy(s, 'zombie', 6);
+    s.useAbility(0);
+    run(s, 0.6);
+    const blast = s.fx.find((f) => f.k === 'fireball_burst');
+    expect(blast).toBeDefined();
+    expect(blast!.r).toBe(2);
+    expect(blast!.ttl).toBeGreaterThanOrEqual(1);
+  });
+
   it('Fireball bursts against a wall without hurting anything beyond it', () => {
     const s = make('mage');
     for (let y = FLOOR + 1; y <= FLOOR + 5; y++) for (let x = CX - 2; x <= CX + 2; x++) s.world.setBlock(x, y, CZ - 3, B.STONE);
@@ -625,6 +636,11 @@ describe('Mage abilities', () => {
     expect(cow.health).toBeCloseTo(cow.maxHealth - 5 * 1.5, 2);
     expect(cow.slowTime).toBeGreaterThan(3);
     expect(villager.health).toBe(villager.maxHealth);
+    // the frost stays on the ground for a couple of seconds, over as wide a circle as the blast
+    const frost = s.fx.find((f) => f.k === 'frost_nova');
+    expect(frost).toBeDefined();
+    expect(frost!.r).toBe(5);
+    expect(frost!.ttl).toBeGreaterThanOrEqual(2.5);
   });
 
   it('Meteor lands where you look, after a delay, and not before', () => {
@@ -638,6 +654,10 @@ describe('Mage abilities', () => {
     expect(m.health).toBe(m.maxHealth);
     run(s, 1.2);
     expect(m.dead).toBe(true); // 15 * 1.5 is more than a zombie has
+    // the crater and the smoke it leaves stay for nearly two seconds
+    const blast = s.fx.find((f) => f.k === 'meteor_hit');
+    expect(blast).toBeDefined();
+    expect(blast!.ttl).toBeGreaterThanOrEqual(1.8);
   });
 
   it('Meteor is dropped if its caster dies before it lands', () => {
@@ -707,6 +727,34 @@ describe('Mage abilities', () => {
     const before = s.cls!.resource;
     run(s, 1, { right: true });
     expect(s.cls!.resource).toBeLessThan(before + s.cls!.stats.resourceRegen * 1.2 + 0.01);
+  });
+
+  it("each weapon's bolt is its own spell and bursts as its own mark: a wand 3 'wand_hit', a staff 4 'staff_hit', a spellbook the plain arcane bolt 2 'bolt'", () => {
+    const s = make('mage');
+    dummy(s, 'zombie', 6);
+    run(s, 0.1, { right: true });
+    expect(s.mobs.arrows.some((a) => a.spell === 3)).toBe(true);
+    run(s, 0.4);
+    expect(s.fx.some((f) => f.k === 'wand_hit')).toBe(true);
+    expect(s.fx.some((f) => f.k === 'bolt')).toBe(false);
+
+    const staff = make('mage');
+    staff.inventory.set(staff.selected, { id: I.STAFF, count: 1, damage: 0 });
+    dummy(staff, 'zombie', 6);
+    run(staff, 0.1, { right: true });
+    expect(staff.mobs.arrows.some((a) => a.spell === 4)).toBe(true);
+    run(staff, 0.5);
+    expect(staff.fx.some((f) => f.k === 'staff_hit')).toBe(true);
+    expect(staff.fx.some((f) => f.k === 'wand_hit' || f.k === 'bolt')).toBe(false);
+
+    const book = make('mage');
+    book.inventory.set(book.selected, { id: I.SPELLBOOK, count: 1, damage: 0 });
+    dummy(book, 'zombie', 6);
+    run(book, 0.1, { right: true });
+    expect(book.mobs.arrows.some((a) => a.spell === 2)).toBe(true);
+    run(book, 0.6);
+    expect(book.fx.some((f) => f.k === 'bolt')).toBe(true);
+    expect(book.fx.some((f) => f.k === 'wand_hit' || f.k === 'staff_hit')).toBe(false);
   });
 });
 

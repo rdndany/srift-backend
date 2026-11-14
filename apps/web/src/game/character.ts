@@ -291,6 +291,8 @@ const EAT_TILT = 0.2;
 export const CHEWS_PER_SECOND = 4;
 /** How long one swing of the arm takes (seconds): a blow, a placed block, one stroke of mining. */
 export const SWING_TIME = 0.3;
+/** Seconds a stab of the left hand takes. */
+export const STAB_TIME = 0.3;
 
 /** The styles of a jump: feet together, a stride with one leg ahead and one behind, knees pulled up, arms and legs flung out, a long leap at a run, and the flailing of a fall. */
 const JUMP_PLAIN = 0;
@@ -828,6 +830,8 @@ export class Character {
     if (id === this.heldId) return;
     this.heldId = id;
     this.carry = getItem(id).carry;
+    const use = id ? getItem(id).use : undefined;
+    this.aimKind = use === 'bow' || use === 'crossbow' ? use : null;
     if (this.heldObj) this.heldMount.remove(this.heldObj);
     this.heldObj = id ? make(id) : null;
     if (this.heldObj) this.heldMount.add(this.heldObj);
@@ -960,6 +964,20 @@ export class Character {
   private slamVy = 0;
   /** A Shield Bash, set by the caller before `animate`: seconds since it was thrown (`BASH_ANIM` and more, the default: none). */
   bashAge = 9;
+  /**
+   * A bow or a crossbow in the hand (null: neither). The caller sets how far it is drawn (0..1: a bow's draw, a crossbow wound to 1 and held) and
+   * the way the player looks (positive: up) before `animate`: the figure raises it, draws it, lets go of it (it is seen to let go by the draw
+   * dropping back) and lowers it again.
+   */
+  aimKind: 'bow' | 'crossbow' | null = null;
+  aimDraw = 0;
+  aimPitch = 0;
+  private aimW = 0;
+  private aimPrev = 0;
+  private shotAge = 9;
+  private shotPull = 0;
+  /** Seconds since the left hand last stabbed (a dagger in it, the bow put away); `STAB_TIME` and more: not stabbing. */
+  stabAge = 9;
   /** Running at a Charge: the body goes in low over the shield with the weapon arm swept back (set by whoever draws the figure). */
   charging = false;
   private chargeW = 0;
@@ -1417,7 +1435,11 @@ export class Character {
     // (the stone in the hand heats up from the middle as the cast goes on)
     this.heat.apply(this.heldObj, this.heldId === I.EMBERSTONE ? this.casting : 0);
     if (this.castW > 0.002) this.castPose();
+    this.stabAge += dt;
+    if (this.stabAge < STAB_TIME) this.stabPose();
+    this.aimPose(dt);
     this.looseArms(dt);
+    this.aimHeld();
   }
 
   /** Seconds each of the idle things takes (sitting goes on until something else happens). */
@@ -1631,6 +1653,88 @@ export class Character {
       this.root.rotation.y += yaw * 0.12 * k;
       this.headPivot.rotation.y -= yaw * 0.12 * k;
     }
+  }
+
+  /** The arm that holds a bow or a crossbow is level when it is aimed (the arm's own angle: 0 hangs down, 1.57 points ahead). */
+  private static readonly AIM_ARM = 1.5;
+
+  /** Seconds since the shot, how far it was drawn, and what the bow is doing this frame (shared by the arms and the string). */
+  private aimNow = { pull: 0, arrow: false };
+
+  /**
+   * Aiming a bow or a crossbow: the weapon arm comes up level and the other hand reaches for the string; a bow is drawn by bringing that hand
+   * back to the chest, a crossbow is held at the shoulder in both hands. Letting go snaps the string, kicks the weapon arm and the hand falls away.
+   */
+  private aimPose(dt: number): void {
+    const kind = this.aimKind;
+    if (!kind) {
+      this.aimW = 0;
+      this.aimPrev = 0;
+      return;
+    }
+    const cross = kind === 'crossbow';
+    const d = this.aimDraw;
+    // Let go of a draw that would shoot (a crossbow only when it was wound all the way).
+    if (this.aimPrev >= (cross ? 0.999 : 0.15) && d <= 0.001) {
+      this.shotAge = 0;
+      this.shotPull = this.aimPrev;
+    }
+    this.aimPrev = d;
+    this.shotAge += dt;
+    const t = this.shotAge;
+    const firing = t < 0.55;
+    const want = d > 0.02 || t < 0.5 ? 1 : 0;
+    this.aimW += (want - this.aimW) * (1 - Math.exp(-dt * (want ? 16 : 7)));
+    if (this.aimW < 0.003) this.aimW = 0;
+    const w = this.aimW;
+    const e = d * d * (3 - 2 * d);
+    const kick = firing ? this.shotPull * Math.exp(-t * 9) : 0;
+    // The string (see `aimHeld`): a bow's rings out after the shot, a crossbow's goes slack.
+    this.aimNow.pull = firing ? (cross ? 0 : this.shotPull * Math.exp(-t * 14) * Math.cos(t * 48)) : d;
+    this.aimNow.arrow = firing ? false : cross ? d >= 0.35 : d > 0.03;
+    if (w <= 0) return;
+    const pitch = Math.max(-1, Math.min(1, this.aimPitch)) * 0.9;
+    const up = Character.AIM_ARM + pitch;
+    // The weapon arm.
+    this.armR.rotation.x += (up + 0.1 * kick - this.armR.rotation.x) * w;
+    this.armR.rotation.z += (-0.05 - this.armR.rotation.z) * w;
+    // The other hand: on the weapon (a crossbow), or on the string, brought back to the chest as the bow is drawn and falling away at the shot.
+    const back = firing ? this.shotPull * Math.exp(-t * 12) : e;
+    const lx = cross ? up - 0.08 : up - 0.35 * back;
+    const lz = cross ? 0.42 : 0.45 + 0.45 * back;
+    this.armL.rotation.x += (lx - this.armL.rotation.x) * w;
+    this.armL.rotation.z += (lz - this.armL.rotation.z) * w;
+    // The shoulders give a little with the draw and the kick.
+    this.torso.rotation.y += (0.12 * (cross ? 0.5 : e) - 0.05 * kick) * w;
+  }
+
+  /** The weapon keeps its aim whatever the arm is doing (upright for a bow, flat for a crossbow: see `FIGURE_AIM`), and its string follows the draw. */
+  private aimHeld(): void {
+    if (!this.aimKind) return;
+    this.heldMount.rotation.x = Character.AIM_ARM + Math.max(-1, Math.min(1, this.aimPitch)) * 0.9 * this.aimW - this.armR.rotation.x;
+    const rig = this.heldObj?.userData.rig as ((pull: number, arrow: boolean) => void) | undefined;
+    rig?.(this.aimNow.pull, this.aimNow.arrow);
+  }
+
+  /**
+   * A stab of the left hand (the dagger of a ranger with the bow put away): the hand comes back a little, then the arm is driven straight out
+   * ahead with the shoulders turning into it, and it comes home. (The arm's angle: 0 hangs down, 1.57 points ahead.)
+   */
+  private stabPose(): void {
+    const u = this.stabAge / STAB_TIME;
+    // wind-up (0..0.3), thrust (0.3..0.5), hold and recover (0.5..1)
+    const wind = Math.sin(Math.min(1, u / 0.3) * Math.PI * 0.5);
+    const thrust = u < 0.3 ? 0 : Math.min(1, (u - 0.3) / 0.2);
+    const home = u < 0.5 ? 0 : (u - 0.5) / 0.5;
+    const out = thrust * (1 - home * home);
+    const back = wind * (1 - thrust);
+    // (it eases in from whatever the arm was doing and back out to it)
+    const env = Math.min(1, u / 0.12) * Math.min(1, (1 - u) / 0.15);
+    this.armL.rotation.x += (0.6 - 0.5 * back + out * 0.95 - this.armL.rotation.x) * env;
+    this.armL.rotation.z += (0.12 * out - this.armL.rotation.z) * env;
+    this.torso.rotation.y += (-0.18 * back + 0.3 * out) * env;
+    this.root.rotation.y += 0.1 * out * env;
+    this.root.position.z -= 0.05 * out * env;
   }
 
   /** The arms hang loose from the shoulders: they follow where the pose puts them as springs do, so a start, a stop, a jump or a blow whips through them. */

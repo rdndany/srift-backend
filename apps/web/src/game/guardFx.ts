@@ -77,7 +77,14 @@ export function buildIronDefense(f: Fx, e: FxEntry, kit: SpellKit): FxEntry {
 
 // ---- The mask over the first-person view ----------------------------------------------------------------------------------
 
-const VEIL = [srgb(0x5f9bff), srgb(0x86aee0), srgb(0xa8d0ff)];
+/** How a mask looks: 'rise' comes up from the bottom edge and stays (the Warrior's guard); 'frame' is a ragged frame of small cubes round the whole view that pops in all at once and twinkles (the Mage's shield). */
+export interface VeilStyle {
+  colors: readonly THREE.Color[];
+  opacity: number;
+  mode: 'rise' | 'frame';
+}
+export const IRON_VEIL: VeilStyle = { colors: [srgb(0x5f9bff), srgb(0x86aee0), srgb(0xa8d0ff)], opacity: 0.36, mode: 'rise' };
+export const ARCANE_VEIL: VeilStyle = { colors: [srgb(0x8a7bff), srgb(0xb4a8ff), srgb(0xd8dcff)], opacity: 0.42, mode: 'frame' };
 /** How far in front of the camera the cubes sit, and how many rows of them fill the height of the view. */
 const DEPTH = 0.5;
 const ROWS = 16;
@@ -98,7 +105,7 @@ interface Cell {
 export class GuardVeil {
   readonly group = new THREE.Group();
   private readonly mesh: THREE.InstancedMesh;
-  private readonly material = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.36, depthTest: false, depthWrite: false });
+  private readonly material: THREE.MeshBasicMaterial;
   private readonly geometry: THREE.BufferGeometry;
   private readonly cap = 420;
   private cells: Cell[] = [];
@@ -108,7 +115,8 @@ export class GuardVeil {
   private clock = 0;
   private readonly matrix = new THREE.Matrix4();
 
-  constructor() {
+  constructor(private readonly style: VeilStyle = IRON_VEIL) {
+    this.material = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: style.opacity, depthTest: false, depthWrite: false });
     const v = new THREE.BoxGeometry(1, 1, 1);
     const shades = [0.8, 0.7, 1, 0.5, 0.9, 0.75];
     const vc = new Float32Array(v.attributes.position.count * 3);
@@ -116,7 +124,7 @@ export class GuardVeil {
     v.setAttribute('color', new THREE.BufferAttribute(vc, 3));
     this.geometry = v;
     this.mesh = new THREE.InstancedMesh(v, this.material, this.cap);
-    this.mesh.setColorAt(0, VEIL[0]);
+    this.mesh.setColorAt(0, style.colors[0]);
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = 998;
     this.mesh.count = 0;
@@ -138,7 +146,14 @@ export class GuardVeil {
         const bottom = 0.1 + 0.07 * luck;
         const side = 0.07 + 0.05 * luck;
         const top = 0.06 * luck;
-        const inMask = y < bottom + 0.22 * Math.max(0, x - 0.55) || 1 - x < side + (1 - y) * 0.05 || 1 - y < top;
+        let inMask = y < bottom + 0.22 * Math.max(0, x - 0.55) || 1 - x < side + (1 - y) * 0.05 || 1 - y < top;
+        if (this.style.mode === 'frame') {
+          // a ragged frame all round, thicker in the corners
+          const dx = 1 - x;
+          const dy = Math.min(y, 1 - y) * 2;
+          const thick = 0.05 + 0.06 * luck + (dx < 0.3 && dy < 0.3 ? 0.1 : 0);
+          inMask = dx < thick || dy < thick * 1.2;
+        }
         if (inMask && this.cells.length < this.cap) this.cells.push({ col, row, luck, luck2: rng() });
       }
     }
@@ -165,16 +180,19 @@ export class GuardVeil {
     for (const c of this.cells) {
       const y = (c.row + 0.5) / ROWS;
       // it rises: a cell is there once the front of the rise has passed it (and goes in the order of rising when it falls)
-      const reach = clamp01((p * 1.35 - y - c.luck2 * 0.12) / 0.18);
-      const grow = steps(reach, 3);
+      const frame = this.style.mode === 'frame';
+      const reach = frame ? clamp01((p * 1.4 - c.luck2 * 0.4) / 0.2) : clamp01((p * 1.35 - y - c.luck2 * 0.12) / 0.18);
+      // (a frame twinkles: now and then a cube blinks small)
+      const grow = steps(reach, 3) * (frame && Math.floor(this.clock * 2.5 + c.luck2 * 9) % 7 === 0 ? 0.55 : 1);
       if (grow <= 0) continue;
       const x = -hw + (c.col + 0.5) * cw;
       const yy = -hh + (c.row + 0.5) * cell;
-      this.matrix.makeScale(cw * 0.94 * grow, cell * 0.94 * grow, cell * 0.4 * grow);
+      const fill = frame ? 0.72 : 0.94;
+      this.matrix.makeScale(cw * fill * grow, cell * fill * grow, cell * 0.4 * grow);
       this.matrix.setPosition(x, yy, -DEPTH);
       this.mesh.setMatrixAt(n, this.matrix);
       // a slow wave of lighter blue climbing the mask
-      this.mesh.setColorAt(n, VEIL[(Math.floor(this.clock * 1.6 - y * 5 + c.luck * 3) % 3 + 3) % 3]);
+      this.mesh.setColorAt(n, this.style.colors[(Math.floor(frame ? this.clock * 3 + c.luck * 7 : this.clock * 1.6 - y * 5 + c.luck * 3) % 3 + 3) % 3]);
       n++;
     }
     this.mesh.count = n;

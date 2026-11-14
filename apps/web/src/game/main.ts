@@ -23,6 +23,7 @@ import {
   type InputFrame,
   type PlayerSave,
   getItem,
+  I,
   MOUNTS,
   IS_LIQUID,
   type SaveMode,
@@ -78,7 +79,7 @@ import { HitchLog, describeHitch, hitchShaders, type Hitch } from './hitch';
 import { FigureWarm } from './figureWarm';
 import { warmPreview } from './characterPreview';
 import { RushLines } from './spellFx';
-import { GuardVeil } from './guardFx';
+import { ARCANE_VEIL, GuardVeil } from './guardFx';
 import { FireParticles } from './fireFx';
 import { World } from './world';
 import { installDebugHooks } from './debugHooks';
@@ -399,6 +400,20 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   scene.add(xpOrbs.group);
   const eatFx = new EatFx();
   scene.add(eatFx.group);
+  let bowWas = 0;
+  let drawShown = 0;
+  let zoomShown = 0;
+  // A ranger with a bow in the hand puts it away for a stab of the dagger (see the left button below): seconds since the last click, and a click waiting for the dagger to be out.
+  const STAB_HOLD = 0.7;
+  let stabClock = 99;
+  let stabQueued = false;
+  const bowHeld = (): boolean => {
+    const use = session.held ? getItem(session.held.id).use : undefined;
+    return use === 'bow' || use === 'crossbow';
+  };
+  const hasStabDagger = (): boolean => session.offhand.get(0)?.id === I.DAGGER;
+  /** The dagger is out instead of the bow. */
+  const stabbing = (): boolean => stabClock < STAB_HOLD && bowHeld() && hasStabDagger() && session.bowDraw < 0.02;
   let eatClock = 0;
   let eatBites = 0;
   const eatDir = new THREE.Vector3();
@@ -478,6 +493,9 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   // Iron Defense seen from inside: a bluish mask of cubes over the edges of the view (see GuardVeil).
   const guardVeil = new GuardVeil();
   scene.add(guardVeil.group);
+  // The Arcane Shield seen from inside: a twinkling frame of violet cubes round the edge of the view.
+  const arcaneVeil = new GuardVeil(ARCANE_VEIL);
+  scene.add(arcaneVeil.group);
   // Numbers for the damage the player deals and takes.
   const damageNumbers = new DamageNumbers();
   // The wind of a fast dash: blurred sides and streaks of air.
@@ -535,7 +553,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     deathFx.spawn(selfView.voxels(), body.x, body.y, body.z, selfView.mode !== 0 ? selfView.facing : input.yaw, variant, sky.brightness);
   };
 
-  const mobRenderer = new MobRenderer(fire);
+  const mobRenderer = new MobRenderer(fire, abilityFx.voxelKit);
   // Mobs, other players and your own body are lit like the world: sky colour, caves, torches, sun on each face.
   const handLight = new THREE.Color();
   const heldLightFull = new THREE.Color();
@@ -959,20 +977,47 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     if (session.ready && playing) keys.handle();
     // From behind, the camera is placed before the frame is sent: the game aims at what its crosshair is on (see `aimThroughCrosshair`).
     // The camera and the body are both placed from one smoothed position (see `viewPos`), taken here, so the body never jitters against the camera.
+    // The draw of a bow arrives in steps (a tick of the game at a time, and a whole snapshot late online) and drops to nothing at the shot. What is
+    // shown comes from two smoothed copies: `drawShown` for the hand and the figure rises smoothly but falls at once (they watch for the shot
+    // itself), `zoomShown` for the view's zoom and the camera coming in rises and falls smoothly (the shot gives it a quick, soft release).
+    {
+      const raw = session.bowDraw;
+      drawShown = raw <= drawShown ? raw : drawShown + (raw - drawShown) * (1 - Math.exp(-Math.min(dt, 0.1) * 26));
+      if (drawShown > raw - 0.002) drawShown = raw;
+      zoomShown += (raw - zoomShown) * (1 - Math.exp(-Math.min(dt, 0.1) * (raw > zoomShown ? 22 : 9)));
+      if (Math.abs(raw - zoomShown) < 0.002) zoomShown = raw;
+    }
     const view = session.viewPos();
     const viewEye = session.eyeAt(view);
     const chasing =
       selfView.mode === 1 && session.ready
-        ? chase.update(dt, viewEye, input.yaw, input.pitch, cameraSolid, session.mountView().mount > 0, session.bowDraw, Math.hypot(body.vx, body.vz))
+        ? chase.update(dt, viewEye, input.yaw, input.pitch, cameraSolid, session.mountView().mount > 0, zoomShown, Math.hypot(body.vx, body.vz))
         : null;
     if (link) link.send(buildFrame(dt, chasing));
     else remote!.frame(buildFrame(dt, chasing));
     syncUi();
     hitches.lap('input');
+    stabClock += dt;
     if (session.ready && playing && input.leftDown) {
-      hand.swingIfIdle();
-      selfView.swingIfIdle();
+      if (bowHeld()) {
+        // A bow takes both hands and does not attack. A left click puts it away and brings out the dagger, which stabs (whether or not
+        // anything is in reach); a moment after the last stab the bow comes back. The click is remembered until the dagger is out.
+        if (hasStabDagger() && session.bowDraw < 0.02) {
+          stabClock = 0;
+          stabQueued = true;
+        }
+      } else {
+        hand.swingIfIdle();
+        selfView.swingIfIdle();
+      }
     }
+    if (stabQueued && stabbing()) {
+      // (in first person the dagger has to be up in the hand first; in third person the figure stabs at once)
+      if (selfView.mode !== 0 ? selfView.stab() : hand.stab()) {
+        stabQueued = false;
+        audio.ability('dagger_swish', 0.7);
+      }
+    } else if (!stabbing()) stabQueued = false;
 
     // The red damage flash fades in real time, even while the simulation is paused.
     flash = Math.max(0, flash - dt / 0.6);
@@ -1000,11 +1045,12 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     camera.rotation.set(pose.pitch, pose.yaw, 0);
     // What the view does on top of that (see ViewFeel): first the shake, the dip of a landing and the kick of a blow...
     const classNow = session.classView();
-    const feelNow: FeelFrame = { dt, ready: session.ready, firstPerson: selfView.mode === 0, body, yaw: input.yaw, bowDraw: session.bowDraw, rush: classNow?.rush, slam: classNow?.slam ?? 0 };
+    const feelNow: FeelFrame = { dt, ready: session.ready, firstPerson: selfView.mode === 0, body, yaw: input.yaw, bowDraw: zoomShown, rush: classNow?.rush, slam: classNow?.slam ?? 0 };
     feel.jolt(camera, feelNow);
     // (the warrior's Charge streaks light past; the ranger's roll has its own look, the wind at the sides)
     rushLines.update(dt, !!classNow?.rush && !classNow.rush.roll, camera);
     guardVeil.update(dt, selfView.mode === 0 && session.ready && classNow?.id === 'warrior' && classNow.guard > 0, camera);
+    arcaneVeil.update(dt, selfView.mode === 0 && session.ready && classNow?.id === 'mage' && classNow.shield > 0, camera);
     damageNumbers.update(dt, camera);
     // ...then what a dash or a Ground Slam does to it, and the angle of the lens.
     const dash = feel.carry(camera, feelNow);
@@ -1113,12 +1159,14 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
       vx: body.vx,
       vz: body.vz,
       aiming: session.bowDraw > 0.02,
+      bowDraw: drawShown,
       vy: body.vy,
       airborne: !body.onGround && !body.inWater && !body.onLadder,
       sneaking: session.sneaking,
       armor: [0, 1, 2, 3].map((i) => session.armor.get(i)?.id ?? 0),
-      held: heldId,
-      offhand: session.offhand.get(0)?.id ?? 0,
+      // A bow is held with both hands: the figure shows the dagger only while it stabs, with the bow put away.
+      held: stabbing() ? 0 : heldId,
+      offhand: bowHeld() && hasStabDagger() && !stabbing() ? 0 : session.offhand.get(0)?.id ?? 0,
       blocking: session.blocking,
       eating: session.eatProgress > 0,
       slam: session.classView()?.slam ?? 0,
@@ -1227,11 +1275,30 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     hand.setArmor([0, 1, 2, 3].map((i) => session.armor.get(i)?.id ?? 0));
     hand.visible = !debugHideHand && mountNow === 0 && session.screen !== 'dead' && !session.spectating && !body.eyeInWater && !session.sleeping && selfView.mode === 0;
     hand.setMapUp(useUi.getState().mapUp);
-    hand.setDraw(session.bowDraw);
+    hand.setDraw(drawShown);
+    // A bow drawn: it creaks as it comes back, ticks at full draw (the crosshair pulses), and the view kicks when the arrow is loosed.
+    {
+      const draw = session.bowDraw;
+      const use = heldNow ? getItem(heldNow.id).use : undefined;
+      if (session.ready && (use === 'bow' || use === 'crossbow')) {
+        if (bowWas < 0.02 && draw >= 0.02) audio.ability('bow_draw', 0.8, use === 'bow' ? 1 : 0.8);
+        if (bowWas < 1 && draw >= 1) {
+          audio.ability('bow_full', 0.9);
+          hud.crosshairPulse();
+        }
+        if (bowWas >= 0.15 && draw < 0.02) feel.recoil(bowWas);
+      }
+      bowWas = draw;
+    }
     const guardNow = session.classView();
     hand.setStance(guardNow?.rush && !guardNow.rush.roll ? 1 : guardNow && guardNow.id === 'warrior' && guardNow.guard > 0 ? 0.3 : 0);
     hand.setSlam(guardNow?.slam ?? 0, body.vy);
-    hand.update(feel.hitStop > 0 ? dt * 0.1 : dt, heldNow ? heldNow.id : 0, body.onGround && session.ready ? Math.hypot(body.vx, body.vz) : 0, camera.aspect, session.offhand.get(0)?.id ?? 0, session.blocking, session.eatProgress, session.emberProgress);
+    // A bow is held with both hands: the dagger in the off hand is not shown (it is the one that comes out in the main hand for a stab).
+    hand.quickSwap = bowHeld() && hasStabDagger() && stabClock < STAB_HOLD + 0.6;
+    hand.offAway = bowHeld() && hasStabDagger() && !stabbing();
+    // (the bow is put away, as nothing at all, while the dagger of the left hand stabs)
+    const shownId = stabbing() ? -2 : heldNow ? heldNow.id : 0;
+    hand.update(feel.hitStop > 0 ? dt * 0.1 : dt, shownId, body.onGround && session.ready ? Math.hypot(body.vx, body.vz) : 0, camera.aspect, session.offhand.get(0)?.id ?? 0, session.blocking, session.eatProgress, session.emberProgress);
     // Eating: a bite every quarter of a second, each with its crunch and a few crumbs of the food falling from the mouth.
     if (session.eatProgress > 0 && heldNow) {
       eatClock += dt;
@@ -1476,6 +1543,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     mountFx.destroy();
     rushLines.dispose();
     guardVeil.dispose();
+    arcaneVeil.dispose();
     damageNumbers.dispose();
     windBlur.dispose();
     hitches.dispose();

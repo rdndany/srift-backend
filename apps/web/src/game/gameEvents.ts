@@ -1,5 +1,5 @@
 import type * as THREE from 'three';
-import { BLOCKS, abilitiesOf, type SessionEvent } from '@solrift/shared';
+import { BLOCKS, I, abilitiesOf, getItem, type SessionEvent } from '@solrift/shared';
 import { bumpUi, pushPickup, pushQuestNote, setParty, setQuests, showZone, useUi } from '../ui/store';
 import type { AbilityFx } from './abilityFx';
 import type { GameAudio } from './audio';
@@ -109,7 +109,10 @@ export function makeEventHandler(parts: EventParts): (events: SessionEvent[]) =>
         case 'guard':
           // "BLOCK" or "PARRY!" floats up in the middle of the view; a parry also kicks the screen a little.
           damageNumbers.guard(e.what, camera);
-          hand.blockHit(e.what === 'parry');
+          // (a parry or a dodge with the dagger: a bright clash or a quick swish, no shield to jolt)
+          if (e.what === 'dodge') audio.ability('dagger_swish', 0.8);
+          else if ([session.held, session.offhand.get(0)].some((s) => s && getItem(s.id).shield)) hand.blockHit(e.what === 'parry');
+          else if (e.what === 'parry') audio.ability('dagger_hit', 0.8);
           if (e.what === 'parry') feel.kick(0.12);
           break;
         case 'ember':
@@ -180,10 +183,19 @@ export function makeEventHandler(parts: EventParts): (events: SessionEvent[]) =>
         case 'dmg':
           if (e.taken) damageNumbers.taken(e.amount, e.guarded === true, camera);
           else {
-            damageNumbers.dealt(e.x, e.y, e.z, e.amount, e.crit === true, e.total);
             const crit = e.crit === true;
-            feel.blow(crit);
-            if (crit) particles.sparks(e.x, e.y, e.z, 1, 0.82, 0.25, 14);
+            const head = e.head === true;
+            damageNumbers.dealt(e.x, e.y, e.z, e.amount, crit || head, e.total, head ? 'head' : e.combo ? 'combo' : undefined);
+            hud.hitMarker(head ? 'head' : crit || e.combo ? 'crit' : 'hit');
+            if (e.arrow) {
+              // An arrow lands from a distance: the view feels it, but the hand does not stop (it is not swinging anything).
+              feel.thump(crit || head);
+              audio.ability(head ? 'arrow_head' : 'arrow_hit', 0.9);
+            } else {
+              feel.blow(crit || e.combo === true);
+              if (e.blade) audio.ability(e.combo ? 'dagger_finish' : 'dagger_hit', 0.9);
+            }
+            if (crit || head) particles.sparks(e.x, e.y, e.z, 1, 0.82, 0.25, 14);
             else particles.sparks(e.x, e.y, e.z, 0.95, 0.3, 0.25, 8);
           }
           break;
@@ -209,8 +221,11 @@ export function makeEventHandler(parts: EventParts): (events: SessionEvent[]) =>
           break;
         }
         case 'swing':
+          // (A stab of the off hand is started and heard by the client the moment the button goes down, hit or not: see main.ts.)
+          if (e.off) break;
           hand.swing();
           selfView.swing();
+          if (session.held?.id === I.DAGGER) audio.ability('dagger_swish', 0.7);
           break;
         case 'pins':
           parts.setPartyPins(e.party);

@@ -3,6 +3,10 @@ import { ATTACK_ANIM, DYE_RGB, MOBS, NPCS, variantLevel, variantProfession, type
 import type { ArrowLike, MobLike } from './clientSession';
 import type { EntityLight } from './entityLight';
 import { ArcaneBoltView, FireballView, type FireParticles, type SpellView } from './fireFx';
+import type { SpellKit } from './spellFx';
+import { FireballBoltView } from './fireballFx';
+import { StaffBoltView } from './staffFx';
+import { WandBoltView } from './wandFx';
 
 type RGB = [number, number, number];
 type Painter = (x: number, y: number) => RGB;
@@ -622,7 +626,7 @@ export class MobRenderer {
   readonly group = new THREE.Group();
   private views = new Map<number, View>();
   private arrowMeshes = new Map<ArrowLike, THREE.Object3D>();
-  /** Spells in flight (3 a fireball, 4 an arcane bolt) draw themselves (see fireFx.ts); they are listed here to be updated and freed. */
+  /** Spells in flight (3 a fireball, 4 an arcane bolt, 5 a wand's and 6 a staff's bolt) draw themselves (see fireFx.ts, fireballFx.ts, wandFx.ts, staffFx.ts); they are listed here to be updated and freed. */
   private spells = new Map<ArrowLike, { kind: number; view: SpellView }>();
   // An arrow: a wooden shaft, a steel head and red fletching (see makeArrow), pointing along +z, its middle at the origin.
   private arrowShaftGeo = new THREE.BoxGeometry(0.035, 0.035, 0.8);
@@ -640,6 +644,8 @@ export class MobRenderer {
   private fireballMat = new THREE.MeshBasicMaterial({ color: 0xff8a1f });
   private boltMat = new THREE.MeshBasicMaterial({ color: 0x9ab8ff });
   private spellGeo = new THREE.SphereGeometry(0.22, 10, 8);
+  /** The cubes of every fireball, wand and staff bolt in flight (made on the first one; each cube has its own colour). */
+  private cubeMat: THREE.MeshBasicMaterial | null = null;
   private time = 0;
   private env: EntityLight | null = null;
   private readonly tint = new THREE.Color();
@@ -649,8 +655,15 @@ export class MobRenderer {
   /** What to show over a quest giver (an id of `NPCS`): set by the game from the player's quest log. */
   markerFor: ((npc: string) => QuestMark | null) | null = null;
 
-  /** `fire` draws the Mage's fireballs and arcane bolts; without it they are plain glowing balls. */
-  constructor(private readonly fire: FireParticles | null = null) {}
+  /** `fire` draws the Mage's fireballs and arcane bolts; without it they are plain glowing balls. `kit` has the cubes' shape for the wand's bolts. */
+  constructor(
+    private readonly fire: FireParticles | null = null,
+    private readonly kit: SpellKit | null = null,
+  ) {}
+
+  private cubeMaterial(): THREE.MeshBasicMaterial {
+    return (this.cubeMat ??= new THREE.MeshBasicMaterial({ vertexColors: true }));
+  }
 
   /** One arrow in flight: shaft, steel head, two crossed fletching vanes and a faint streak behind it. */
   private makeArrow(): THREE.Group {
@@ -791,19 +804,20 @@ export class MobRenderer {
     // arrows
     const liveArrows = new Set(arrows);
     for (const a of arrows) {
-      // 0 = arrow, 1 = bottle o' enchanting, 2 = ender pearl, 3 = fireball, 4 = arcane bolt.
+      // 0 = arrow, 1 = bottle o' enchanting, 2 = ender pearl, 3 = fireball, 4 = arcane bolt, 5 = a wand's bolt (of cubes), 6 = a staff's.
       const spell = a.spell ?? a.s ?? 0;
-      const kind = a.bottle || a.b ? 1 : a.pearl || a.p ? 2 : spell === 1 ? 3 : spell > 1 ? 4 : 0;
+      const kind = a.bottle || a.b ? 1 : a.pearl || a.p ? 2 : spell === 1 ? 3 : spell === 3 && this.kit ? 5 : spell === 4 && this.kit ? 6 : spell > 1 ? 4 : 0;
       // Fireballs and arcane bolts draw themselves (see fireFx.ts).
       if (kind >= 3 && this.fire) {
         const old = this.spells.get(a);
         let sv = old;
         if (old && old.kind !== kind) {
           this.group.remove(old.view.group);
+          old.view.dispose?.();
           sv = undefined;
         }
         if (!sv) {
-          sv = { kind, view: kind === 3 ? new FireballView(this.fire, a) : new ArcaneBoltView(this.fire, a) };
+          sv = { kind, view: kind === 3 ? (this.kit ? new FireballBoltView(this.kit, this.cubeMaterial(), a) : new FireballView(this.fire, a)) : kind === 5 ? new WandBoltView(this.kit!, this.cubeMaterial(), a) : kind === 6 ? new StaffBoltView(this.kit!, this.cubeMaterial(), a) : new ArcaneBoltView(this.fire, a) };
           this.spells.set(a, sv);
           this.group.add(sv.view.group);
         }
@@ -819,6 +833,7 @@ export class MobRenderer {
       const stale = this.spells.get(a);
       if (stale) {
         this.group.remove(stale.view.group);
+        stale.view.dispose?.();
         this.spells.delete(a);
       }
       let mesh = this.arrowMeshes.get(a);
@@ -856,6 +871,7 @@ export class MobRenderer {
     for (const [a, sv] of this.spells) {
       if (liveArrows.has(a)) continue;
       this.group.remove(sv.view.group);
+      sv.view.dispose?.();
       this.spells.delete(a);
     }
   }
@@ -904,6 +920,7 @@ export class MobRenderer {
     this.fireballMat.dispose();
     this.boltMat.dispose();
     this.spellGeo.dispose();
+    this.cubeMat?.dispose();
   }
 }
 

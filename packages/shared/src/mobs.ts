@@ -686,6 +686,12 @@ export class Arrow {
   spell = 0;
   /** A spell's ending: called where it stopped, with the mob it struck (null: it hit the ground or a wall). The projectile is gone after. */
   impact: ((x: number, y: number, z: number, mob: Mob | null) => void) | null = null;
+  /**
+   * An arrow's ending, for the archer who shot it: it hit a mob (`dealt`: what it did, `head`: a headshot, which hits half as hard again) or
+   * stuck in the ground or a wall (`mob` null; `x, y, z` is then where it entered, and `vx, vy, vz` still the way it was flying). The
+   * arrow is gone after. Only a player's arrow has one.
+   */
+  onHit: ((a: Arrow, mob: Mob | null, dealt: number, head: boolean) => void) | null = null;
   constructor(
     public x: number,
     public y: number,
@@ -2115,27 +2121,46 @@ export class MobManager {
     const ny = a.y + a.vy * dt;
     const nz = a.z + a.vz * dt;
 
-    if (solidAt(env.world, nx, ny, nz)) {
-      if (a.impact) a.impact(a.x, a.y, a.z, null);
-      if (a.bottle) events.shatter?.(a.x, a.y, a.z);
-      if (a.pearl) events.pearl?.(a.x, a.y, a.z, a.pearl);
-      return true;
+    // The step is walked in short pieces: an arrow at full draw covers several blocks a tick and would fly through a thin wall otherwise.
+    // `entry` is how far along the step it is when it goes into a block (1: it does not), found to a fine fraction of a block.
+    const dist = Math.hypot(nx - a.x, ny - a.y, nz - a.z);
+    const pieces = Math.max(1, Math.ceil(dist / 0.4));
+    const at = (f: number): boolean => solidAt(env.world, a.x + (nx - a.x) * f, a.y + (ny - a.y) * f, a.z + (nz - a.z) * f);
+    let entry = 1;
+    for (let k = 1; k <= pieces; k++) {
+      if (!at(k / pieces)) continue;
+      let lo = (k - 1) / pieces;
+      let hi = k / pieces;
+      for (let i = 0; i < 6; i++) {
+        const mid = (lo + hi) / 2;
+        if (at(mid)) hi = mid;
+        else lo = mid;
+      }
+      entry = lo;
+      break;
     }
+    const wall = entry < 1;
+    // where it flies to (the end of the step, or the face of the block it hits)
+    const ex = a.x + (nx - a.x) * entry;
+    const ey = a.y + (ny - a.y) * entry;
+    const ez = a.z + (nz - a.z) * entry;
 
     if (a.friendly) {
-      // Sweep the step against every living mob.
-      const sx = nx - a.x;
-      const sy = ny - a.y;
-      const sz = nz - a.z;
+      // Sweep the step against every living mob (up to the wall, when the arrow meets one).
+      const sx = ex - a.x;
+      const sy = ey - a.y;
+      const sz = ez - a.z;
       const len = Math.hypot(sx, sy, sz) || 1;
       let best: { mob: Mob; t: number } | null = null;
-      for (const m of this.mobs) {
-        if (m.dead) continue;
-        const t = m.hitDistance(a.x, a.y, a.z, sx / len, sy / len, sz / len, len, ARROW_MARGIN);
-        if (t !== null && (!best || t < best.t)) best = { mob: m, t };
+      if (len > 1e-6) {
+        for (const m of this.mobs) {
+          if (m.dead) continue;
+          const t = m.hitDistance(a.x, a.y, a.z, sx / len, sy / len, sz / len, len, ARROW_MARGIN);
+          if (t !== null && (!best || t < best.t)) best = { mob: m, t };
+        }
       }
       if (best && a.impact) {
-        a.impact(nx, ny, nz, best.mob);
+        a.impact(ex, ey, ez, best.mob);
         return true;
       }
       if (best && a.bottle) {
@@ -2154,15 +2179,33 @@ export class MobManager {
           return true;
         }
         const hlen = Math.hypot(a.vx, a.vz) || 1;
-        this.damage(best.mob, a.damage, a.vx / hlen, a.vz / hlen, events, true, true, true, { knock: 1 + a.punch, fire: a.fire ? 5 : 0 });
+        // A player's arrow that strikes the upper fifth of something tall (a head) hits half as hard again.
+        const m = best.mob;
+        const head = !!a.onHit && m.height >= 1.2 && a.y + (sy / len) * best.t >= m.body.y + m.height * 0.8;
+        const dealt = head ? a.damage * 1.5 : a.damage;
+        this.damage(m, dealt, a.vx / hlen, a.vz / hlen, events, true, true, true, { knock: 1 + a.punch, fire: a.fire ? 5 : 0 });
+        a.onHit?.(a, m, dealt, head);
         return true;
       }
+    }
+
+    if (wall) {
+      // It stopped in the wall or the ground: `a` is left where it went in (and still points the way it flew).
+      a.x = ex;
+      a.y = ey;
+      a.z = ez;
+      if (a.impact) a.impact(a.x, a.y, a.z, null);
+      a.onHit?.(a, null, 0, false);
+      if (a.bottle) events.shatter?.(a.x, a.y, a.z);
+      if (a.pearl) events.pearl?.(a.x, a.y, a.z, a.pearl);
+      return true;
+    }
+    if (a.friendly) {
       a.x = nx;
       a.y = ny;
       a.z = nz;
       return false;
     }
-
     for (const p of players) {
       if (!p.alive || p.invulnerable) continue;
       const hw = 0.3;

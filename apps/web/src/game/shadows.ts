@@ -338,7 +338,9 @@ export class SunShadows {
     this.lastScan = now;
     const mark = (o: THREE.Object3D): void => {
       const m = o as THREE.Mesh;
-      if (!m.isMesh || m.userData.shadowChecked) return;
+      // (A mesh that says `noShadow` stays out of the map: a flying bolt is a light, and an instanced mesh drawn into the map would have its
+      // own shader built the first time one flies, with the game standing still while it is.)
+      if (!m.isMesh || m.userData.shadowChecked || m.userData.noShadow) return;
       m.userData.shadowChecked = true;
       const mats = Array.isArray(m.material) ? m.material : [m.material];
       if (mats.every((x) => !x.transparent)) m.layers.enable(ENTITY_SHADOW_LAYER);
