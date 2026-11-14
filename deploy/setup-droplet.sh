@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # First-time setup of a fresh Ubuntu (22.04 or 24.04) droplet for the SolRift game server. Run once, as root:
-#   bash setup-droplet.sh https://github.com/YOU/solrift.git api.example.com
+#   bash setup-droplet.sh https://github.com/rdndany/srift-backend.git api.toklytest.site
 # It installs Node 24, Caddy and a firewall, makes the `solrift` user, fetches the code into /opt/solrift and installs the
 # service. It stops before starting it: fill in /etc/solrift.env first (see deploy/solrift.env.example), then
 #   systemctl enable --now solrift-server
@@ -49,7 +49,7 @@ if [ ! -f /etc/solrift.env ]; then
   install -m 600 -o root -g root deploy/solrift.env.example /etc/solrift.env
   echo ">> Edit /etc/solrift.env (AUTH_ORIGINS, COOKIE_DOMAIN) before starting the server."
 fi
-sed "s/api\.example\.com/${DOMAIN}/" deploy/Caddyfile > /etc/caddy/Caddyfile
+sed -E "s/^[A-Za-z0-9.-]+ \{/${DOMAIN} {/" deploy/Caddyfile > /etc/caddy/Caddyfile
 systemctl reload caddy || systemctl restart caddy
 cp deploy/solrift-server.service /etc/systemd/system/solrift-server.service
 systemctl daemon-reload
