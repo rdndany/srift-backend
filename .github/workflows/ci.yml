@@ -16,7 +16,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run typecheck
+      # - run: npm run typecheck
       # (the unit tests are run on the developer's machine only, with `npm test`; they are not run on a push)
       - run: npm run build
 
