@@ -5,6 +5,7 @@ Two names of one domain you own (here `toklytest.site`):
 
 | Name | What | Where |
 |---|---|---|
+| `toklytest.site` (and `www`) | the presentation page (the `/welcome` page, chosen by the host in `next.config.ts`) | Vercel, same project |
 | `play.toklytest.site` | the game page | Vercel |
 | `api.toklytest.site` | the game server (`https://` and `wss://`) | the droplet, behind Caddy |
 
@@ -65,7 +66,7 @@ server needs and sets up the service (`deploy/solrift-server.service`) and Caddy
 3. **Environment variables** (Production, and Preview if you use it):
    - `NEXT_PUBLIC_SERVER_URL` = `wss://api.toklytest.site`
    - `SERVER_ORIGIN` = `https://api.toklytest.site`
-4. Deploy, then **Settings, Domains**: add `play.toklytest.site` and make the DNS record Vercel shows (a CNAME `play` to `cname.vercel-dns.com`).
+4. Deploy, then **Settings, Domains**: add `play.toklytest.site` **and** `toklytest.site` (+ `www.toklytest.site`, redirect to the bare one) and make the DNS record Vercel shows (a CNAME `play` to `cname.vercel-dns.com`).
 
 Both variables are fixed at build time: change one and redeploy.
 

@@ -37,3 +37,4 @@
 @import './styles/frame-quest-log.css';   /* the quest log made over: chapters, plates, the detail page */
 @import './styles/frame-quest-wells.css'; /* quest log and party with the studded frame and sunken wells */
 @import './styles/bags.css';              /* the bag bar and the bag windows */
+@import './styles/landing.css';           /* the presentation page (/welcome, the bare domain) */
