@@ -1,0 +1,89 @@
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  font-family: 'Monocraft', 'Courier New', monospace;
+  color: #fff;
+  user-select: none;
+}
+
+#game {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  /* A light colour grade: richer colour and a touch more punch, like a filmic tone curve. */
+  filter: saturate(1.14) contrast(1.07) brightness(1.02);
+}
+
+/* Soft darkening towards the corners keeps the eye on the middle of the screen. */
+#vignette {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0) 58%, rgba(6, 8, 20, 0.2) 100%);
+}
+
+#crosshair {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  mix-blend-mode: difference;
+}
+#crosshair::before,
+#crosshair::after {
+  content: '';
+  position: absolute;
+  background: #fff;
+}
+#crosshair::before {
+  left: 8px;
+  top: 0;
+  width: 2px;
+  height: 18px;
+}
+#crosshair::after {
+  top: 8px;
+  left: 0;
+  height: 2px;
+  width: 18px;
+}
+
+#hud-bottom {
+  position: fixed;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  flex-direction: column;
+  gap: 4px;
+  pointer-events: none;
+}
+#hotbar {
+  position: relative;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: linear-gradient(rgba(40, 40, 54, 0.7), rgba(14, 14, 22, 0.78));
+  border: 2px solid #0c0c12;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.09), 0 6px 18px rgba(0, 0, 0, 0.5);
+  image-rendering: pixelated;
+}
+.vrow {
+  display: flex;
+  gap: 1px;
+  justify-content: flex-end;
+  padding: 0 2px;
+}
+.vrow .pix {
+  width: 20px;
+  height: 20px;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.45));
+}
+

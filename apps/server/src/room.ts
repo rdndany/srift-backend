@@ -1,0 +1,1405 @@
+import {
+  ATTACK_ANIM,
+  BASH_ANIM,
+  HeadlessWorld,
+  Player,
+  Realm,
+  STEP,
+  AnvilMenu,
+  GrindstoneMenu,
+  CraftingMenu,
+  EnchantMenu,
+  TradeMenu,
+  ADVENTURE_LAYOUT,
+  GENERATOR_VERSION,
+  ADVENTURE_SEED,
+  CHUNK_VOLUME,
+  lookCode,
+  lookFromName,
+  parseLookCode,
+  makeGenerator,
+  parsePlayerSave,
+  parseWorldState,
+  type ArrowView,
+  type ClassId,
+  type VehicleView,
+  type Command,
+  type DropView,
+  type XpOrbView,
+  totalForLevel,
+  MAX_LEVEL,
+  MAX_AWARD,
+  type InputFrame,
+  type InventoryView,
+  type ItemStack,
+  type ItemView,
+  type MenuView,
+  type MobView,
+  type NetClientMessage,
+  type NetInput,
+  type NetServerMessage,
+  type PlayerView,
+  type SaveMode,
+  type SelfView,
+  type SessionEvent,
+  type Snapshot,
+  type WorldKind,
+  SocialBook,
+  parseSocialBook,
+  GUILD_COST,
+  GUILD_INVITE_SECONDS,
+  MAX_GUILD_MEMBERS,
+  cleanGuildName,
+  cleanGuildTag,
+  cleanMotd,
+  disbandError,
+  doLeader,
+  doRank,
+  findGuildMember,
+  guildNameError,
+  inviteError,
+  kickError,
+  leaderError,
+  leaveError,
+  memberOf,
+  motdError,
+  rankError,
+  type GuildData,
+  type ChatChannel,
+  type SocialAction,
+  Trade,
+  TRADE_ASK_SECONDS,
+  tradeBlocker,
+  type TradeAct,
+  type TradeSide,
+  type TradeSideView,
+  type TradeView,
+} from '@solrift/shared';
+
+import type { RoomStore } from './roomStore';
+import { entryOf, findMember, inspectView, socialView, splitTarget } from './social';
+import { GuildRegistry } from './guilds';
+
+/** The room's view of one connection. */
+export interface RoomConnection {
+  send(msg: NetServerMessage): void;
+  /**
+   * Optional fast path for snapshots on a crowded server. `snap.players` is empty; `playersJson` is the JSON
+   * array of the players in view, already serialised once for everybody (each player is written to JSON once
+   * per tick instead of once per recipient). The connection must send what `JSON.stringify` would for the full snapshot.
+   */
+  sendSnapshot?(snap: Snapshot, playersJson: string): void;
+  close(reason: string): void;
+}
+
+/** One player as the others see them this tick, written to JSON at most once. */
+interface PlayerFrame {
+  x: number;
+  z: number;
+  id: number;
+  view: PlayerView;
+  json: string | null;
+}
+
+export interface RoomOptions {
+  seed: number;
+  /** The kind of world: the generated overworld (default) or the Adventure world, which has a seed of its own. */
+  kind?: WorldKind;
+  /** Server ticks per second. */
+  tickHz?: number;
+  maxPlayers?: number;
+  /** Game mode new players start in. */
+  mode?: SaveMode;
+  naturalSpawning?: boolean;
+  /** Allow cheat commands in chat (/time, /weather, /gamemode, /tp). Off on shared servers. */
+  cheats?: boolean;
+  rand?: () => number;
+  /** Where the world and signed-in players' progress are kept. Without it nothing survives a restart. */
+  store?: RoomStore;
+  /** Seconds between automatic saves. */
+  autosaveSeconds?: number;
+  /** Suspicion score at which a player is kicked (see `strike`). Default 50. */
+  kickScore?: number;
+  /** Called for every strike and kick (logging, metrics). */
+  onViolation?: (info: { id: number; name: string; reason: string; points: number; score: number; kicked: boolean }) => void;
+}
+
+/** What a misbehaving client costs, in suspicion points. The score decays by 1 per second. */
+export const STRIKES = {
+  invalidMessage: 5,
+  droppedInput: 0.1,
+  staleInput: 1,
+  commandFlood: 0.5,
+  chatSpam: 2,
+  socialSpam: 0.5,
+  forbidden: 3,
+} as const;
+
+export interface RoomStats {
+  players: number;
+  ticks: number;
+  /** Smoothed milliseconds a tick takes. */
+  tickMsAvg: number;
+  /** Slowest tick since the last `stats(true)`. */
+  tickMsMax: number;
+  /** Ticks that took longer than their budget (1000 / tickHz ms). */
+  overruns: number;
+  strikes: number;
+  kicks: number;
+}
+
+type QueueItem = { k: 'input'; f: NetInput } | { k: 'cmd'; c: Command };
+
+interface Member {
+  id: number;
+  name: string;
+  /** What they look like (a `lookCode`). */
+  look: number;
+  /** Account the progress belongs to (guests have none, so nothing of theirs is stored). */
+  key: string | null;
+  player: Player;
+  conn: RoomConnection;
+  queue: QueueItem[];
+  /** Seconds of input the player may still spend: stops clients from running faster than real time. */
+  budget: number;
+  /** Highest input seq applied; echoed to the client. */
+  ack: number;
+  /** Highest input seq received (older and duplicate inputs are dropped). */
+  lastSeq: number;
+  invDirty: boolean;
+  chatTokens: number;
+  /** Looks at the social window and at other players that may still be made (token bucket). */
+  socialTokens: number;
+  /** Friends and the people they ignore (kept with the account). */
+  book: SocialBook;
+  /** Who whispered them last, for /r. */
+  replyTo: number | null;
+  /** A guild that has asked them to join, and the tick it stops asking. */
+  guildInvite: { guildId: string; from: string; until: number } | null;
+  /** The trade they are in, and who with. */
+  trade: { trade: Trade; peer: Member } | null;
+  /** Somebody who asked to trade with them, and the tick the request lapses. */
+  tradeAsk: { from: number; until: number } | null;
+  /** Clicks at the trade table they may still make (token bucket). */
+  tradeTokens: number;
+  /** Commands the player may still send (token bucket), so inventory clicks cannot be flooded. */
+  cmdTokens: number;
+  /** Suspicion score: rises with misbehaviour, decays over time, kicks at `kickScore`. */
+  score: number;
+  warned: boolean;
+  messages: number;
+  /** The ability effects this player has been sent in full, and where (a client keeps what it was told: later snapshots only name them, see `snapshot`). */
+  fxSent: Map<number, string>;
+}
+
+/** Most input a player may bank while the network stalls, in seconds. */
+const MAX_BUDGET = 0.25;
+const MAX_QUEUE = 240;
+/** Commands per second a player may send (a burst of CMD_BURST is allowed). */
+const CMD_RATE = 40;
+const CMD_BURST = 60;
+/** The social window polls every couple of seconds; a burst covers opening it and a few clicks. */
+const SOCIAL_RATE = 1.5;
+const SOCIAL_BURST = 8;
+/** Clicks at a trade table: filling it takes a few quick ones. */
+const TRADE_RATE = 6;
+const TRADE_BURST = 20;
+const MAX_STEPS_PER_TICK = 15;
+const EDITS_PER_MESSAGE = 6000;
+
+/**
+ * Players one room takes unless `MAX_PLAYERS` says otherwise. The load test (`npm run loadtest`) holds 100
+ * players standing in one spot at about half the tick budget; 120 keeps some headroom for that worst case.
+ */
+export const DEFAULT_MAX_PLAYERS = 120;
+
+const VIEW_PLAYERS = 160;
+const VIEW_MOBS = 96;
+const VIEW_DROPS = 64;
+/**
+ * In a crowd a client is sent the players nearest to it every snapshot (the ones the game draws as figures: `LOD.maxFull` in the client is
+ * 20) and each of the others one snapshot in `FAR_PLAYER_EVERY`, the ids of the rest in `Snapshot.keep` so that the client does not drop them.
+ * A far player is a block on the horizon, and the client smooths its way between snapshots.
+ */
+const NEAR_PLAYERS = 24;
+const FAR_PLAYER_EVERY = 4;
+/** Ability effects further away than this are not sent, and a client is sent at most `MAX_FX` of them (the nearest): more are not readable anyway. */
+const VIEW_FX = 64;
+const MAX_FX = 48;
+
+const round = (v: number, p = 100): number => Math.round(v * p) / p;
+
+/** The mount fields of a player's own view: left out until there is a mount to show. */
+function mountFields(p: Player): { mount?: number; mountCd?: [number, number] } {
+  const v = p.mountView();
+  return v.mount === 0 ? {} : { mount: v.mount, mountCd: [v.cd[0], v.cd[1]] as [number, number] };
+}
+const itemView = (s: ItemStack | null): ItemView | null => {
+  if (!s) return null;
+  const v: ItemView = { id: s.id, count: s.count, damage: s.damage };
+  if (s.ench) v.e = s.ench;
+  if (s.name) v.n = s.name;
+  if (s.rc) v.r = s.rc;
+  if (s.gear) v.g = s.gear;
+  return v;
+};
+
+/**
+ * One shared world with many players. Each tick it runs the players' queued inputs (one physics step
+ * per input, within a time budget), advances the shared simulation, and sends every player a
+ * snapshot of what they can see. Clients never touch state directly.
+ */
+export class GameRoom {
+  readonly seed: number;
+  readonly kind: WorldKind;
+  readonly tickHz: number;
+  readonly world: HeadlessWorld;
+  readonly realm: Realm;
+  readonly members = new Map<number, Member>();
+  tickCount = 0;
+
+  private nextId = 1;
+  /** Every guild of the realm. */
+  readonly guilds: GuildRegistry;
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private pendingBlocks: number[] = [];
+  private readonly dirtyChunks = new Set<string>();
+  private readonly stat = { tickMsAvg: 0, tickMsMax: 0, overruns: 0, strikes: 0, kicks: 0 };
+
+  constructor(readonly opts: RoomOptions) {
+    this.kind = opts.kind ?? 'overworld';
+    this.seed = this.kind === 'adventure' ? ADVENTURE_SEED : opts.seed;
+    this.tickHz = opts.tickHz ?? 20;
+    const generator = makeGenerator(this.seed, this.kind);
+    this.world = new HeadlessWorld(generator);
+    this.realm = new Realm({ seed: this.seed, world: this.world, generator, naturalSpawning: opts.naturalSpawning ?? true, rand: opts.rand, sleeping: false });
+    if (opts.store) this.loadWorld(opts.store);
+    this.guilds = new GuildRegistry(opts.store ?? null);
+    this.world.onChange = (x, y, z, id) => {
+      this.pendingBlocks.push(x, y, z, id);
+      this.dirtyChunks.add(`${x >> 4},${z >> 4}`);
+    };
+  }
+
+  get playerCount(): number {
+    return this.members.size;
+  }
+
+  /** Is this account's character in the room right now? */
+  hasAccount(accountId: string): boolean {
+    for (const m of this.members.values()) if (m.key === accountId) return true;
+    return false;
+  }
+
+  /** How many players the room takes (`MAX_PLAYERS`). */
+  get capacity(): number {
+    return this.opts.maxPlayers ?? DEFAULT_MAX_PLAYERS;
+  }
+
+  start(): void {
+    if (this.timer) return;
+    // Timers are coarse (about 15 ms on Windows), so a plain setInterval would run slow and the game with it.
+    // Wake up often, and run as many ticks as real time has earned (never more than a short catch-up).
+    const period = 1000 / this.tickHz;
+    let next = performance.now() + period;
+    this.timer = setInterval(() => {
+      const now = performance.now();
+      let ran = 0;
+      while (now >= next && ran < 4) {
+        this.tick();
+        next += period;
+        ran++;
+      }
+      if (now >= next) next = now + period; // too far behind: drop the backlog instead of spiralling
+    }, Math.max(1, Math.floor(period / 4)));
+    this.timer.unref();
+  }
+
+  stop(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+    this.save();
+  }
+
+  // ---- persistence ---------------------------------------------------------------
+
+  /** What the world is stored under: the Adventure world is kept apart from an overworld that happens to share its seed. */
+  private get storeSeed(): number {
+    return this.kind === 'adventure' ? -this.seed : this.seed;
+  }
+
+  private loadWorld(store: RoomStore): void {
+    // The land is made by the generator: when it changes, the saved chunks (edits made on the old land) no longer fit it,
+    // and would show as seams and floating builds. They are dropped, once, before anything else is read.
+    const terrainKey = `terrain:${this.storeSeed}`;
+    if (store.getJson(terrainKey) !== GENERATOR_VERSION) {
+      store.clearChunks(this.storeSeed);
+      store.setJson(terrainKey, GENERATOR_VERSION);
+    }
+    const chunks = store.loadChunks(this.storeSeed);
+    // The made places were rebuilt since this world was saved: mend them in the saved chunks (and save the mended chunks).
+    const layoutKey = `layout:${this.storeSeed}`;
+    if (this.kind === 'adventure' && store.getJson(layoutKey) !== ADVENTURE_LAYOUT) {
+      const mended = chunks.filter((c) => c.data.length === CHUNK_VOLUME && this.world.generator.mendProtected(c.cx, c.cz, c.data));
+      // Save them now, before the version is written: a server that is stopped (or restarted by its watcher) before its
+      // first autosave would otherwise remember the new version but keep the old chunks.
+      if (mended.length > 0) store.saveChunks(this.storeSeed, mended);
+      store.setJson(layoutKey, ADVENTURE_LAYOUT);
+    }
+    this.world.loadEdited(chunks);
+    const state = parseWorldState(store.getJson(`world:${this.storeSeed}`));
+    if (state) this.realm.loadState(state);
+  }
+
+  /** Write the changed chunks, the clock and weather, and every signed-in player. */
+  save(): void {
+    const store = this.opts.store;
+    if (!store) return;
+    // Each part on its own: one failing write must not stop the others from being saved.
+    const attempt = (what: string, fn: () => void): void => {
+      try {
+        fn();
+      } catch (err) {
+        console.error(`[solrift] saving ${what} failed`, err);
+      }
+    };
+    attempt('chunks', () => {
+      if (this.dirtyChunks.size === 0) return;
+      const dirty = this.world.editedChunks().filter((c) => this.dirtyChunks.has(`${c.cx},${c.cz}`));
+      store.saveChunks(this.storeSeed, dirty);
+      this.dirtyChunks.clear();
+    });
+    attempt('world state', () => store.setJson(`world:${this.storeSeed}`, this.realm.saveState()));
+    for (const m of this.members.values()) attempt(`player ${m.name}`, () => this.savePlayer(m));
+  }
+
+  private savePlayer(m: Member): void {
+    if (m.key && this.opts.store) this.opts.store.setJson(`player:${m.key}`, m.player.savePlayer());
+  }
+
+  // ---- joining and leaving ---------------------------------------------------
+
+  /** Add a player. Returns null (after telling the connection why) when the room is full. */
+  join(conn: RoomConnection, wantedName: string, accountId: string | null = null, wantedLook: number | null = null, classId: ClassId | null = null): number | null {
+    const key = accountId && this.opts.store ? accountId : null;
+    // One body per account, or the same items could be carried by two players. Signing in again (a reload before the old connection has been
+    // noticed to be gone, a second tab) takes the account over: the earlier session is saved and put out first, so the items exist once.
+    const earlier = key ? [...this.members.values()].find((o) => o.key === key) : undefined;
+    if (earlier) {
+      earlier.conn.send({ t: 'kicked', reason: 'signed in from another place' });
+      this.leave(earlier.id);
+      earlier.conn.close('signed in from another place');
+    }
+    if (this.members.size >= this.capacity) {
+      conn.send({ t: 'kicked', reason: 'server full' });
+      return null;
+    }
+    const name = this.uniqueName(wantedName);
+    const player = new Player(this.realm, { mode: this.opts.mode ?? 'survival', name, classId });
+    const saved = key ? parsePlayerSave(this.opts.store!.getJson(`player:${key}`)) : null;
+    if (saved) player.loadPlayer(saved);
+    player.finishLoading();
+    const id = this.nextId++;
+    // A look nobody chose (an old client, a bot) is made from the name, so players still tell apart.
+    const look = parseLookCode(wantedLook) ? (wantedLook as number) : lookCode(lookFromName(name));
+    const m: Member = { id, name, look, key, player, conn, queue: [], budget: 0, ack: 0, lastSeq: 0, invDirty: true, chatTokens: 5, socialTokens: SOCIAL_BURST, book: key && this.opts.store ? parseSocialBook(this.opts.store.getJson(`social:${key}`)) : new SocialBook(), replyTo: null, guildInvite: null, trade: null, tradeAsk: null, tradeTokens: TRADE_BURST, cmdTokens: CMD_BURST, score: 0, warned: false, messages: 0, fxSent: new Map() };
+    this.members.set(id, m);
+
+    conn.send({ t: 'joined', id, name, look, seed: this.seed, kind: this.kind, tickHz: this.tickHz, time: this.realm.time });
+    const edits = this.world.diffAgainstTerrain();
+    if (edits.length === 0) conn.send({ t: 'edits', blocks: [], last: true });
+    for (let i = 0; i < edits.length; i += EDITS_PER_MESSAGE) {
+      conn.send({ t: 'edits', blocks: edits.slice(i, i + EDITS_PER_MESSAGE), last: i + EDITS_PER_MESSAGE >= edits.length });
+    }
+    this.broadcast({ t: 'notice', text: `${name} joined` }, id);
+    this.presence(m, true);
+    player.drainEvents();
+    player.syncQuests(); // the log was among the events just thrown away
+    this.sendState(m);
+    return id;
+  }
+
+  leave(id: number): void {
+    const m = this.members.get(id);
+    if (!m) return;
+    // Items on the cursor or in a crafting grid go back to the player, so a disconnect loses nothing.
+    m.player.closeMenu();
+    m.player.leave();
+    try {
+      this.savePlayer(m);
+    } catch (err) {
+      console.error(`[solrift] saving player ${m.name} failed`, err);
+    }
+    this.members.delete(id);
+    if (m.trade) this.endTrade(m, `${m.name} left: the trade was called off.`);
+    this.broadcast({ t: 'notice', text: `${m.name} left` });
+    this.presence(m, false);
+  }
+
+  /** Tell the friends of somebody who came or went (the ones who have them on their list, found by account). */
+  private presence(m: Member, online: boolean): void {
+    if (!m.key) return;
+    const g = this.guilds.of(m.key);
+    if (g) {
+      const me = memberOf(g, m.key);
+      if (me && me.name !== m.name) {
+        me.name = m.name; // they play under another name now
+        this.guilds.save(g);
+      }
+      for (const o of this.guildOnline(g)) if (o !== m) this.tell(o, `${m.name} has ${online ? 'come online' : 'gone offline'}.`);
+      if (online && g.motd) this.tell(m, `Guild <${g.tag}>: ${g.motd}`);
+    }
+    for (const o of this.members.values()) {
+      if (o === m || !o.book.isFriend(entryOf(m))) continue;
+      o.book.add('friends', entryOf(m)); // keeps the name they play under now
+      this.tell(o, online ? `${m.name} is online.` : `${m.name} went offline.`);
+    }
+  }
+
+  private uniqueName(wanted: string): string {
+    const taken = new Set([...this.members.values()].map((m) => m.name.toLowerCase()));
+    if (!taken.has(wanted.toLowerCase())) return wanted;
+    for (let n = 2; ; n++) {
+      const candidate = `${wanted}${n}`;
+      if (!taken.has(candidate.toLowerCase())) return candidate;
+    }
+  }
+
+  private broadcast(msg: NetServerMessage, except?: number): void {
+    for (const m of this.members.values()) if (m.id !== except) m.conn.send(msg);
+  }
+
+  // ---- messages from clients -----------------------------------------------------
+
+  /** Handle an already validated message from a joined player. */
+  receive(id: number, msg: NetClientMessage): void {
+    const m = this.members.get(id);
+    if (!m) return;
+    switch (msg.t) {
+      case 'input':
+        for (const f of msg.frames) {
+          if (f.seq <= m.lastSeq) {
+            // TCP delivers in order, so an old sequence number is a replay or a broken client.
+            this.strike(m, STRIKES.staleInput, 'stale input');
+            continue;
+          }
+          m.lastSeq = f.seq;
+          if (m.queue.length < MAX_QUEUE) m.queue.push({ k: 'input', f });
+          else this.strike(m, STRIKES.droppedInput, 'input flood');
+          if (!this.members.has(id)) return; // kicked
+        }
+        return;
+      case 'cmd':
+        // Switching to creative is a cheat; only the server's rules may allow it.
+        if (msg.c.t === 'mode' && !this.opts.cheats) {
+          this.tell(m, 'Cheats are off on this server');
+          this.strike(m, STRIKES.forbidden, 'creative switch without cheats');
+          return;
+        }
+        if (m.cmdTokens < 1 || m.queue.length >= MAX_QUEUE) {
+          this.strike(m, STRIKES.commandFlood, 'command flood');
+          return;
+        }
+        m.cmdTokens -= 1;
+        m.queue.push({ k: 'cmd', c: msg.c });
+        return;
+      case 'chat':
+        this.chat(m, msg.text);
+        return;
+      case 'social':
+        if (this.socialLimit(m)) m.conn.send({ t: 'social', view: this.viewFor(m) });
+        return;
+      case 'socialAct':
+        if (this.socialLimit(m)) this.socialAct(m, msg.a, msg.name);
+        return;
+      case 'guild':
+        if (this.socialLimit(m)) this.guildCommand(m, msg.line.split(/\s+/));
+        return;
+      case 'trade':
+        this.tradeAct(m, msg.act);
+        return;
+      case 'inspect':
+        if (this.socialLimit(m)) {
+          const target = findMember(this.members.values(), msg.name);
+          m.conn.send({ t: 'inspected', name: target?.name ?? msg.name, view: target ? inspectView(target, itemView) : null });
+        }
+        return;
+      case 'leave':
+        this.leave(id);
+        return;
+      default:
+    }
+  }
+
+  private chat(m: Member, text: string): void {
+    if (m.chatTokens < 1) {
+      this.strike(m, STRIKES.chatSpam, 'chat spam');
+      return; // slow down
+    }
+    m.chatTokens -= 1;
+    if (text.startsWith('/')) {
+      this.command(m, text.slice(1));
+      return;
+    }
+    this.say(m, { t: 'chat', from: m.name, text, ch: 'say' });
+  }
+
+  /** Send a line of chat to everyone except the people who ignore its sender. */
+  private say(from: Member, msg: NetServerMessage, to: Iterable<Member> = this.members.values()): void {
+    for (const o of to) if (o === from || !o.book.isIgnored(entryOf(from))) o.conn.send(msg);
+  }
+
+  /** The social window and the look at another player cost a token each, so neither can be polled in a flood. */
+  private socialLimit(m: Member): boolean {
+    if (m.socialTokens < 1) {
+      this.strike(m, STRIKES.socialSpam, 'social spam');
+      return false;
+    }
+    m.socialTokens -= 1;
+    return true;
+  }
+
+  /** The social window of this player: friends, who is here, their guild and the guild that is asking them. */
+  private viewFor(m: Member) {
+    const g = this.guilds.of(m.key);
+    const inv = m.guildInvite && this.tickCount < m.guildInvite.until ? this.guilds.get(m.guildInvite.guildId) : null;
+    return socialView([...this.members.values()], m, g, inv && m.guildInvite ? { guild: inv.name, from: m.guildInvite.from } : null);
+  }
+
+  private tell(m: Member, text: string): void {
+    m.conn.send({ t: 'notice', text });
+  }
+
+  private saveBook(m: Member): void {
+    if (m.key && this.opts.store) this.opts.store.setJson(`social:${m.key}`, m.book.toJSON());
+  }
+
+  /** `/w name text` and the Whisper button: only the two of them see it. Returns what to tell the sender when it cannot go. */
+  private whisper(m: Member, target: Member, text: string): void {
+    if (target === m) return this.tell(m, 'You cannot whisper to yourself.');
+    if (!text) return this.tell(m, `Usage: /w ${target.name} <message>`);
+    m.conn.send({ t: 'chat', from: m.name, to: target.name, text, ch: 'whisper' });
+    m.replyTo = target.id;
+    // Somebody who ignores the sender hears nothing, and the sender is not told (so it cannot be used to check).
+    if (target.book.isIgnored(entryOf(m))) return;
+    target.conn.send({ t: 'chat', from: m.name, text, ch: 'whisper' });
+    target.replyTo = m.id;
+  }
+
+  /** The members of a guild who are in the room. */
+  private guildOnline(g: GuildData): Member[] {
+    return [...this.members.values()].filter((o) => o.key !== null && g.members.some((x) => x.key === o.key));
+  }
+
+  /** /guild create|invite|accept|decline|leave|kick|promote|demote|leader|disband|motd|info, for the command and the window alike. */
+  private guildCommand(m: Member, args: string[]): void {
+    const sub = (args[0] ?? 'info').toLowerCase();
+    const words = args.slice(1);
+    const rest = words.join(' ').trim();
+    const g = this.guilds.of(m.key);
+    const say = (text: string) => this.tell(m, text);
+    const push = (list: Member[]) => {
+      for (const o of list) o.conn.send({ t: 'social', view: this.viewFor(o) });
+    };
+    /** Tell the whole guild (and refresh their windows), whatever just changed. */
+    const announce = (guild: GuildData, text: string, extra: Member[] = []) => {
+      const all = [...new Set([...this.guildOnline(guild), ...extra])];
+      for (const o of all) this.tell(o, text);
+      push(all);
+    };
+    if (!m.key) return say('Guilds are for players with an account.');
+
+    switch (sub) {
+      case 'create': {
+        if (g) return say(`You are already in ${g.name}. Leave it first.`);
+        // "/guild create Name Of The Guild TAG": the last word is the tag.
+        const tag = cleanGuildTag(words.pop() ?? '');
+        const name = cleanGuildName(words.join(' '));
+        const bad = guildNameError(name, tag);
+        if (bad) return say(`${bad} Usage: /guild create <name> <TAG>`);
+        const taken = this.guilds.taken(name, tag);
+        if (taken) return say(`A guild with that ${taken} already exists.`);
+        if (!m.player.spendCoins(GUILD_COST)) return say(`Founding a guild costs ${GUILD_COST} coins.`);
+        const made = this.guilds.create(name, tag, { key: m.key, name: m.name });
+        m.guildInvite = null;
+        announce(made, `You founded ${made.name} <${made.tag}>.`);
+        return;
+      }
+      case 'invite': {
+        if (!g) return say('You are not in a guild.');
+        const bad = inviteError(g, m.key);
+        if (bad) return say(bad);
+        const target = findMember(this.members.values(), rest);
+        if (!target) return say(rest ? `${rest} is not online.` : 'Usage: /guild invite <player>');
+        if (!target.key) return say(`${target.name} is a guest: guilds are for players with an account.`);
+        if (this.guilds.of(target.key)) return say(`${target.name} is already in a guild.`);
+        if (target.book.isIgnored(entryOf(m))) return say(`Invited ${target.name}.`); // they are not told
+        target.guildInvite = { guildId: g.id, from: m.name, until: this.tickCount + GUILD_INVITE_SECONDS * this.tickHz };
+        this.tell(target, `${m.name} invites you to join ${g.name} <${g.tag}>. /guild accept or /guild decline.`);
+        push([target]);
+        return say(`Invited ${target.name}.`);
+      }
+      case 'accept':
+      case 'decline': {
+        const inv = m.guildInvite;
+        m.guildInvite = null;
+        const target = inv && this.tickCount < inv.until ? this.guilds.get(inv.guildId) : null;
+        if (!target) {
+          push([m]);
+          return say('You have no guild invitation.');
+        }
+        if (sub === 'decline') {
+          push([m]);
+          return say(`You turned down ${target.name}.`);
+        }
+        if (g) return say(`You are already in ${g.name}.`);
+        if (target.members.length >= MAX_GUILD_MEMBERS) return say(`${target.name} is full.`);
+        this.guilds.join(target, { key: m.key, name: m.name });
+        return announce(target, `${m.name} joined the guild.`);
+      }
+      case 'leave': {
+        if (!g) return say('You are not in a guild.');
+        const bad = leaveError(g, m.key);
+        if (bad) return say(bad);
+        const alone = g.members.length === 1;
+        this.guilds.remove(g, m.key);
+        say(alone ? `You left ${g.name}, and it is gone.` : `You left ${g.name}.`);
+        if (!alone) announce(g, `${m.name} left the guild.`);
+        push([m]);
+        return;
+      }
+      case 'kick': {
+        if (!g) return say('You are not in a guild.');
+        const t = findGuildMember(g, rest);
+        if (!t) return say(rest ? `${rest} is not in the guild.` : 'Usage: /guild kick <name>');
+        const bad = kickError(g, m.key, t.key);
+        if (bad) return say(bad);
+        const gone = [...this.members.values()].find((o) => o.key === t.key);
+        this.guilds.remove(g, t.key);
+        announce(g, `${t.name} was removed from the guild.`);
+        if (gone) {
+          this.tell(gone, `You were removed from ${g.name}.`);
+          push([gone]);
+        }
+        return;
+      }
+      case 'promote':
+      case 'demote': {
+        if (!g) return say('You are not in a guild.');
+        const t = findGuildMember(g, rest);
+        if (!t) return say(rest ? `${rest} is not in the guild.` : `Usage: /guild ${sub} <name>`);
+        const up = sub === 'promote';
+        const bad = rankError(g, m.key, t.key, up);
+        if (bad) return say(bad);
+        doRank(g, t.key, up);
+        this.guilds.save(g);
+        return announce(g, `${t.name} is ${up ? 'promoted to officer' : 'a member again'}.`);
+      }
+      case 'leader': {
+        if (!g) return say('You are not in a guild.');
+        const t = findGuildMember(g, rest);
+        if (!t) return say(rest ? `${rest} is not in the guild.` : 'Usage: /guild leader <name>');
+        const bad = leaderError(g, m.key, t.key);
+        if (bad) return say(bad);
+        doLeader(g, m.key, t.key);
+        this.guilds.save(g);
+        return announce(g, `${t.name} now leads ${g.name}.`);
+      }
+      case 'disband': {
+        if (!g) return say('You are not in a guild.');
+        const bad = disbandError(g, m.key);
+        if (bad) return say(bad);
+        const everyone = this.guildOnline(g);
+        this.guilds.disband(g);
+        for (const o of everyone) this.tell(o, `${g.name} was disbanded.`);
+        return push(everyone);
+      }
+      case 'motd': {
+        if (!g) return say('You are not in a guild.');
+        const bad = motdError(g, m.key);
+        if (bad) return say(bad);
+        g.motd = cleanMotd(rest);
+        this.guilds.save(g);
+        return announce(g, g.motd ? `Guild message: ${g.motd}` : 'The guild message was cleared.');
+      }
+      case 'info':
+      case 'roster': {
+        if (!g) return say('You are not in a guild. /guild create <name> <TAG> founds one for ' + GUILD_COST + ' coins.');
+        const on = this.guildOnline(g).length;
+        say(`${g.name} <${g.tag}>: ${g.members.length} members, ${on} online.${g.motd ? ` ${g.motd}` : ''}`);
+        return push([m]);
+      }
+      default:
+        return say('Guild commands: create, invite, accept, decline, leave, kick, promote, demote, leader, disband, motd, info.');
+    }
+  }
+
+  // ---- trading between players -------------------------------------------------
+
+  private sideView(side: TradeSide): TradeSideView {
+    return { offers: side.offers.map((o) => ({ slot: o.slot, item: itemView(o.stack)! })), coins: side.coins, ready: side.ready };
+  }
+
+  /** The table as this player sees it: theirs and the other's. */
+  private tradeViewOf(m: Member): TradeView | null {
+    if (!m.trade) return null;
+    const { trade, peer } = m.trade;
+    const mine = trade.sideOf(m.player);
+    const theirs = trade.sideOf(peer.player);
+    if (!mine || !theirs) return null;
+    const c = peer.player.cls;
+    return { with: peer.name, ...(c ? { cls: c.classId, level: c.level } : {}), mine: this.sideView(mine), theirs: this.sideView(theirs) };
+  }
+
+  private pushTrade(...list: Member[]): void {
+    for (const o of list) if (this.members.has(o.id)) o.conn.send({ t: 'trade', view: this.tradeViewOf(o) });
+  }
+
+  private startTrade(a: Member, b: Member): void {
+    for (const o of [a, b]) {
+      o.tradeAsk = null;
+      o.conn.send({ t: 'tradeAsk', from: null });
+    }
+    const trade = new Trade(a.player, b.player);
+    a.trade = { trade, peer: b };
+    b.trade = { trade, peer: a };
+    this.tell(a, `You are trading with ${b.name}.`);
+    this.tell(b, `You are trading with ${a.name}.`);
+    this.pushTrade(a, b);
+  }
+
+  /** Close the table for both (`text` tells them why). Safe on somebody who has just left. */
+  private endTrade(m: Member, text: string | null): void {
+    const t = m.trade;
+    if (!t) return;
+    const both = [m, t.peer];
+    for (const o of both) o.trade = null;
+    for (const o of both) {
+      if (!this.members.has(o.id)) continue;
+      if (text) this.tell(o, text);
+      o.conn.send({ t: 'trade', view: null });
+    }
+  }
+
+  /** Every tick: calls off the trades whose players drifted apart or died, takes lapsed offers off the table, ends old requests. */
+  private watchTrades(all: Member[]): void {
+    for (const m of all) {
+      if (m.tradeAsk && this.tickCount >= m.tradeAsk.until) {
+        m.tradeAsk = null;
+        m.conn.send({ t: 'tradeAsk', from: null });
+      }
+      if (!m.trade || m.id > m.trade.peer.id) continue; // each trade once
+      const why = m.trade.trade.broken();
+      if (why) this.endTrade(m, why);
+      else if (m.trade.trade.validate()) this.pushTrade(m, m.trade.peer);
+    }
+  }
+
+  /** Asking, answering, filling the table, accepting and calling off: what the trade window and /trade do. */
+  private tradeAct(m: Member, act: TradeAct): void {
+    if (m.tradeTokens < 1) {
+      this.strike(m, STRIKES.socialSpam, 'trade spam');
+      return;
+    }
+    m.tradeTokens -= 1;
+    const p = m.player;
+    switch (act.a) {
+      case 'ask': {
+        if (m.trade) return this.tell(m, 'You are already trading. Finish or cancel that trade first.');
+        const target = findMember(this.members.values(), act.name);
+        if (!target) return this.tell(m, `${act.name} is not online.`);
+        if (target === m) return this.tell(m, 'You cannot trade with yourself.');
+        if (target.trade) return this.tell(m, `${target.name} is busy trading.`);
+        const blocked = tradeBlocker(p, target.player);
+        if (blocked) return this.tell(m, blocked);
+        if (target.book.isIgnored(entryOf(m))) return this.tell(m, `Asked ${target.name} to trade.`); // they are not told
+        // They had asked already: that is the answer.
+        if (m.tradeAsk && m.tradeAsk.from === target.id && this.tickCount < m.tradeAsk.until) return this.startTrade(target, m);
+        target.tradeAsk = { from: m.id, until: this.tickCount + TRADE_ASK_SECONDS * this.tickHz };
+        target.conn.send({ t: 'tradeAsk', from: m.name });
+        this.tell(target, `${m.name} wants to trade with you. /trade accept or /trade decline.`);
+        return this.tell(m, `Asked ${target.name} to trade.`);
+      }
+      case 'accept':
+      case 'decline': {
+        const ask = m.tradeAsk;
+        m.tradeAsk = null;
+        m.conn.send({ t: 'tradeAsk', from: null });
+        const from = ask && this.tickCount < ask.until ? this.members.get(ask.from) : undefined;
+        if (!from) return this.tell(m, 'Nobody is asking you to trade.');
+        if (act.a === 'decline') return this.tell(from, `${m.name} turned down the trade.`);
+        if (m.trade || from.trade) return this.tell(m, from.trade ? `${from.name} is busy trading.` : 'You are already trading.');
+        const blocked = tradeBlocker(p, from.player);
+        if (blocked) return this.tell(m, blocked);
+        return this.startTrade(from, m);
+      }
+      default:
+    }
+    const t = m.trade;
+    if (!t) return this.tell(m, 'You are not trading.');
+    const { trade, peer } = t;
+    switch (act.a) {
+      case 'cancel':
+        return this.endTrade(m, `${m.name} called off the trade.`);
+      case 'put': {
+        const bad = trade.put(p, act.slot, act.count);
+        if (bad) this.tell(m, bad);
+        break;
+      }
+      case 'take':
+        trade.take(p, act.i);
+        break;
+      case 'coins':
+        trade.setCoins(p, act.n);
+        break;
+      case 'ready': {
+        const r = trade.setReady(p, act.on);
+        if (r.done) {
+          this.endTrade(m, 'The trade is complete.');
+          for (const o of [m, peer]) {
+            try {
+              this.savePlayer(o);
+            } catch (err) {
+              console.error(`[solrift] saving player ${o.name} failed`, err);
+            }
+          }
+          return;
+        }
+        if (r.error) {
+          this.tell(m, r.error);
+          this.tell(peer, r.error);
+        }
+        break;
+      }
+      default:
+    }
+    this.pushTrade(m, peer);
+  }
+
+  /** Friends and the ignore list, for the commands and the window alike. Says what happened. */
+  private socialAct(m: Member, a: SocialAction, name: string): void {
+    const target = findMember(this.members.values(), name);
+    const listed = (list: 'friends' | 'ignored') => m.book[list].find((e) => e.name.toLowerCase() === name.toLowerCase()) ?? null;
+    const done = (text: string) => {
+      this.tell(m, text);
+      this.saveBook(m);
+      m.conn.send({ t: 'social', view: this.viewFor(m) });
+    };
+    if (a === 'friend' || a === 'ignore') {
+      const list = a === 'friend' ? 'friends' : 'ignored';
+      if (!target) return this.tell(m, `${name} is not online.`);
+      if (target === m) return this.tell(m, a === 'friend' ? 'You cannot be your own friend.' : 'You cannot ignore yourself.');
+      if (a === 'friend' && !target.key) return this.tell(m, `${target.name} is a guest: only players with an account can be friends.`);
+      const r = m.book.add(list, entryOf(target));
+      if (r === 'full') return this.tell(m, a === 'friend' ? 'Your friends list is full.' : 'Your ignore list is full.');
+      if (r === 'exists') return this.tell(m, `${target.name} is already ${a === 'friend' ? 'your friend' : 'ignored'}.`);
+      return done(a === 'friend' ? `${target.name} is now your friend.` : `You ignore ${target.name}.`);
+    }
+    const list = a === 'unfriend' ? 'friends' : 'ignored';
+    const entry = listed(list);
+    if (!entry) return this.tell(m, `${name} is not on your ${list === 'friends' ? 'friends' : 'ignore'} list.`);
+    m.book.remove(list, entry);
+    done(a === 'unfriend' ? `${entry.name} is no longer your friend.` : `You hear ${entry.name} again.`);
+  }
+
+  private command(m: Member, line: string): void {
+    const [name, ...args] = line.trim().split(/\s+/);
+    const p = m.player;
+    switch ((name ?? '').toLowerCase()) {
+      case 'help':
+        this.tell(m, `Commands: /help /who /home /w /r /me /friend /ignore /inspect /trade /guild /g /party /p${this.opts.cheats ? ' /time /weather /gamemode /tp /xp /coins' : ''}`);
+        return;
+      case 'who':
+        this.tell(m, `Online (${this.members.size}): ${[...this.members.values()].map((x) => x.name).join(', ')}`);
+        return;
+      case 'home':
+        p.respawn();
+        return;
+      case 'party':
+        this.tell(m, this.partyCommand(p, args));
+        return;
+      case 'p': {
+        // Party chat: only the people in your party hear it.
+        const text = args.join(' ').trim();
+        if (!text) return this.tell(m, 'Usage: /p <message>');
+        const party = this.realm.parties.membersOf(p);
+        if (party.length < 2) return this.tell(m, 'You are not in a party.');
+        this.say(m, { t: 'chat', from: `${m.name} (party)`, text, ch: 'party' }, [...this.members.values()].filter((x) => party.includes(x.player)));
+        return;
+      }
+      case 'w':
+      case 'whisper':
+      case 'tell': {
+        const rest = args.join(' ');
+        const hit = splitTarget(this.members.values(), rest);
+        if (!hit) return this.tell(m, rest ? `No player called "${args[0]}" is online.` : 'Usage: /w <player> <message>');
+        return this.whisper(m, hit.target, hit.text);
+      }
+      case 'r':
+      case 'reply': {
+        const to = m.replyTo === null ? null : this.members.get(m.replyTo);
+        if (!to) return this.tell(m, m.replyTo === null ? 'Nobody has whispered you yet.' : 'That player is no longer online.');
+        return this.whisper(m, to, args.join(' ').trim());
+      }
+      case 'guild':
+        return this.guildCommand(m, args);
+      case 'g': {
+        const g = this.guilds.of(m.key);
+        const text = args.join(' ').trim();
+        if (!g) return this.tell(m, m.key ? 'You are not in a guild.' : 'Guilds are for players with an account.');
+        if (!text) return this.tell(m, 'Usage: /g <message>');
+        return this.say(m, { t: 'chat', from: m.name, text, ch: 'guild' }, this.guildOnline(g));
+      }
+      case 'me':
+      case 'emote': {
+        const text = args.join(' ').trim();
+        if (!text) return this.tell(m, 'Usage: /me <what you do>');
+        return this.say(m, { t: 'chat', from: m.name, text, ch: 'emote' });
+      }
+      case 'friend':
+      case 'friends':
+      case 'f': {
+        const sub = (args[0] ?? 'list').toLowerCase();
+        const who = args.slice(1).join(' ');
+        if (sub === 'add' || sub === 'remove') return who ? this.socialAct(m, sub === 'add' ? 'friend' : 'unfriend', who) : this.tell(m, `Usage: /friend ${sub} <player>`);
+        const v = this.viewFor(m);
+        return this.tell(m, v.friends.length === 0 ? 'You have no friends yet. /friend add <player>' : `Friends: ${v.friends.map((f) => (f.online ? f.name : `${f.name} (offline)`)).join(', ')}`);
+      }
+      case 'ignore':
+      case 'unignore': {
+        const undo = (name ?? '').toLowerCase() === 'unignore';
+        const who = args.join(' ');
+        if (!undo && !who) return this.tell(m, m.book.ignored.length === 0 ? 'You ignore nobody. /ignore <player>' : `Ignored: ${m.book.ignored.map((e) => e.name).join(', ')}`);
+        return who ? this.socialAct(m, undo ? 'unignore' : 'ignore', who) : this.tell(m, 'Usage: /unignore <player>');
+      }
+      case 'trade': {
+        const sub = (args[0] ?? '').toLowerCase();
+        if (sub === 'accept' || sub === 'decline' || sub === 'cancel') return this.tradeAct(m, { a: sub });
+        const who = args.join(' ');
+        return who ? this.tradeAct(m, { a: 'ask', name: who }) : this.tell(m, 'Usage: /trade <player>');
+      }
+      case 'inspect': {
+        const who = args.join(' ');
+        const target = findMember(this.members.values(), who);
+        if (!target) return this.tell(m, who ? `${who} is not online.` : 'Usage: /inspect <player>');
+        m.conn.send({ t: 'inspected', name: target.name, view: inspectView(target, itemView) });
+        return;
+      }
+      case 'time':
+      case 'weather':
+      case 'gamemode':
+      case 'tp':
+      case 'xp':
+      case 'coins':
+        if (!this.opts.cheats) {
+          this.tell(m, 'Cheats are off on this server');
+          this.strike(m, STRIKES.forbidden, 'cheat command without cheats');
+          return;
+        }
+        this.cheat(m, name.toLowerCase(), args);
+        return;
+      default:
+        this.tell(m, `Unknown command: /${name ?? ''}`);
+    }
+  }
+
+  /** /party invite|accept|decline|leave|kick|leader|list: up to four players share a dungeon. */
+  private partyCommand(p: Player, args: string[]): string {
+    return this.realm.parties.run(p, args[0], args[1]);
+  }
+
+  private cheat(m: Member, name: string, args: string[]): void {
+    const p = m.player;
+    if (name === 'time') {
+      const t = { day: 0.25, noon: 0.25, night: 0.75, midnight: 0.75, dawn: 0, sunrise: 0, dusk: 0.5, sunset: 0.5 }[args[0] ?? ''];
+      if (t === undefined) return this.tell(m, 'Usage: /time day|night|dawn|dusk');
+      this.realm.time = t;
+      this.tell(m, `Time set to ${args[0]}`);
+    } else if (name === 'weather') {
+      if (args[0] !== 'clear' && args[0] !== 'rain' && args[0] !== 'thunder') return this.tell(m, 'Usage: /weather clear|rain|thunder');
+      p.setWeather(args[0]);
+      this.tell(m, `Weather set to ${args[0]}`);
+    } else if (name === 'gamemode') {
+      if (args[0] !== 'survival' && args[0] !== 'creative') return this.tell(m, 'Usage: /gamemode survival|creative');
+      p.setMode(args[0]);
+    } else if (name === 'xp') {
+      const m1 = /^(\d{1,6})(l?)$/i.exec(args[0] ?? '');
+      if (!m1) return this.tell(m, 'Usage: /xp <points> or /xp <levels>L');
+      const n = Number(m1[1]);
+      let left = m1[2] ? Math.max(0, totalForLevel(Math.min(MAX_LEVEL, p.xp.level + n)) - p.xp.total) : n;
+      while (left > 0) {
+        const step = Math.min(left, MAX_AWARD);
+        p.addXp(step);
+        left -= step;
+      }
+      this.tell(m, `Level ${p.xp.level}`);
+    } else if (name === 'coins') {
+      const n = /^\d{1,9}$/.test(args[0] ?? '') ? Number(args[0]) : 0;
+      if (n <= 0) return this.tell(m, 'Usage: /coins <amount>');
+      p.addCoins(n);
+      this.tell(m, `You carry ${p.coins} coins`);
+    } else if (name === 'tp') {
+      const [x, y, z] = args.map(Number);
+      if (![x, y, z].every((v) => Number.isFinite(v) && Math.abs(v) < 30_000_000)) return this.tell(m, 'Usage: /tp x y z');
+      p.teleport(x, Math.max(-20, Math.min(255, y)), z);
+    }
+  }
+
+  // ---- misbehaviour ------------------------------------------------------------
+
+  /** Add suspicion points. Warns once, and kicks at the threshold. Safe to call for unknown ids. */
+  strike(target: Member | number, points: number, reason: string): void {
+    const m = typeof target === 'number' ? this.members.get(target) : target;
+    if (!m || !this.members.has(m.id)) return;
+    m.score += points;
+    this.stat.strikes++;
+    const limit = this.opts.kickScore ?? 50;
+    const kicked = m.score >= limit;
+    this.opts.onViolation?.({ id: m.id, name: m.name, reason, points, score: m.score, kicked });
+    if (kicked) {
+      this.kick(m.id, `kicked: ${reason}`);
+    } else if (m.score >= limit / 2 && !m.warned) {
+      m.warned = true;
+      this.tell(m, 'Warning: unusual activity detected. Slow down or you will be removed.');
+    }
+  }
+
+  kick(id: number, reason: string): void {
+    const m = this.members.get(id);
+    if (!m) return;
+    this.stat.kicks++;
+    m.conn.send({ t: 'kicked', reason });
+    this.leave(id);
+    m.conn.close(reason);
+  }
+
+  stats(reset = false): RoomStats {
+    const s = { players: this.members.size, ticks: this.tickCount, ...this.stat };
+    if (reset) this.stat.tickMsMax = 0;
+    return s;
+  }
+
+  // ---- the tick ----------------------------------------------------------------
+
+  tick(): void {
+    const t0 = performance.now();
+    this.tickInner();
+    const ms = performance.now() - t0;
+    this.stat.tickMsAvg += (ms - this.stat.tickMsAvg) * 0.05;
+    if (ms > this.stat.tickMsMax) this.stat.tickMsMax = ms;
+    if (ms > 1000 / this.tickHz) this.stat.overruns++;
+  }
+
+  private tickInner(): void {
+    const dt = 1 / this.tickHz;
+    this.tickCount++;
+    if (this.opts.store && this.tickCount % Math.round(this.tickHz * (this.opts.autosaveSeconds ?? 30)) === 0) this.save();
+    const all = [...this.members.values()];
+
+    for (const m of all) {
+      m.budget = Math.min(MAX_BUDGET, m.budget + dt);
+      m.chatTokens = Math.min(5, m.chatTokens + dt / 2);
+      m.socialTokens = Math.min(SOCIAL_BURST, m.socialTokens + dt * SOCIAL_RATE);
+      m.tradeTokens = Math.min(TRADE_BURST, m.tradeTokens + dt * TRADE_RATE);
+      m.cmdTokens = Math.min(CMD_BURST, m.cmdTokens + dt * CMD_RATE);
+      m.score = Math.max(0, m.score - dt);
+      if (m.score < (this.opts.kickScore ?? 50) / 4) m.warned = false;
+      this.runQueue(m);
+    }
+    if (all.length > 0) {
+      const players = all.map((m) => m.player);
+      this.realm.update(dt, players);
+      for (const p of players) p.postRealm(dt);
+    }
+    this.realm.advanceClock(dt);
+    this.watchTrades(all);
+    this.flush(all);
+  }
+
+  /** Run as much queued input as the player's time budget allows. */
+  private runQueue(m: Member): void {
+    const p = m.player;
+    let steps = 0;
+    while (m.queue.length > 0) {
+      const item = m.queue[0];
+      if (item.k === 'cmd') {
+        m.queue.shift();
+        p.apply(item.c);
+        continue;
+      }
+      if (m.budget < STEP - 1e-9 || steps >= MAX_STEPS_PER_TICK) break;
+      m.queue.shift();
+      m.budget -= STEP;
+      steps++;
+      const f: InputFrame = { t: 'frame', dt: STEP, locked: true, ...item.f };
+      p.beginFrame(f);
+      p.advanceOne(f);
+      if (p.screen === 'none') p.updateInteraction(STEP, f);
+      m.ack = item.f.seq;
+    }
+  }
+
+  private flush(all: Member[]): void {
+    if (this.pendingBlocks.length > 0) {
+      const blocks = this.pendingBlocks;
+      this.pendingBlocks = [];
+      for (let i = 0; i < blocks.length; i += EDITS_PER_MESSAGE) {
+        this.broadcast({ t: 'blocks', blocks: blocks.slice(i, i + EDITS_PER_MESSAGE) });
+      }
+    }
+    // Everybody sees the same views of the others: build them (and their JSON) once, not once per recipient.
+    this.frames = all.map((o) => this.playerFrame(o));
+    try {
+      for (const m of all) this.sendState(m);
+    } finally {
+      this.frames = null;
+    }
+  }
+
+  /** The views of all players for this tick (set while `flush` runs). */
+  private frames: PlayerFrame[] | null = null;
+
+  private playerFrame(o: Member): PlayerFrame {
+    const ob = o.player.body;
+    return {
+      x: ob.x,
+      z: ob.z,
+      id: o.id,
+      json: null,
+      view: {
+        id: o.id,
+        name: o.name,
+        look: o.look,
+        x: round(ob.x),
+        y: round(ob.y),
+        z: round(ob.z),
+        yaw: round(o.player.yaw),
+        pitch: round(o.player.pitch),
+        sneaking: o.player.sneaking,
+        onGround: ob.onGround,
+        held: o.player.held?.id ?? 0,
+        armor: o.player.armorIds(),
+        offhand: o.player.offhand.get(0)?.id ?? 0,
+        blocking: o.player.blocking,
+        ...(o.player.eatProgress > 0 ? { ea: 1 as const } : {}),
+        ...(o.player.screen === 'dead' ? { dd: 1 as const } : {}),
+        ...(o.player.swingAge < 0.35 ? { sw: round(o.player.swingAge) } : {}),
+        ...(o.player.slamPhase ? { sl: o.player.slamPhase } : {}),
+        ...(o.player.charging ? { rs: 1 as const } : {}),
+        ...(o.player.emberProgress > 0 ? { em: round(o.player.emberProgress) } : {}),
+        ...(o.player.bashAge < BASH_ANIM ? { bs: round(o.player.bashAge) } : {}),
+        sleeping: o.player.sleeping ? o.player.sleeping.dir + 1 : 0,
+        ...(o.player.mountId ? { mt: o.player.mountView().mount } : {}),
+        ...(o.player.cls ? { cls: o.player.cls.classId, clv: o.player.cls.level } : {}),
+        ...(o.key && this.guilds.of(o.key) ? { gt: this.guilds.of(o.key)!.tag } : {}),
+      },
+    };
+  }
+
+  private sendState(m: Member): void {
+    const events: SessionEvent[] = m.player.drainEvents();
+    if (events.length > 0) {
+      if (events.some((e) => e.t === 'inv')) m.invDirty = true;
+      m.conn.send({ t: 'events', events });
+    }
+    if (m.conn.sendSnapshot && this.frames) {
+      const snap = this.snapshot(m, true);
+      const { frames, keep } = this.framesFor(m);
+      if (keep.length > 0) snap.keep = keep;
+      m.conn.sendSnapshot(snap, '[' + frames.map((f) => (f.json ??= JSON.stringify(f.view))).join(',') + ']');
+    } else m.conn.send(this.snapshot(m));
+  }
+
+  /** The other players inside `m`'s view range, from this tick's frames (or built fresh outside a tick). */
+  private visibleFrames(m: Member): PlayerFrame[] {
+    const b = m.player.body;
+    const frames = this.frames ?? [...this.members.values()].map((o) => this.playerFrame(o));
+    return frames.filter((f) => f.id !== m.id && Math.abs(f.x - b.x) <= VIEW_PLAYERS && Math.abs(f.z - b.z) <= VIEW_PLAYERS);
+  }
+
+  /** What a real connection is sent of the players in its view (see NEAR_PLAYERS): the frames, and the ids it is to keep without news. */
+  private framesFor(m: Member): { frames: PlayerFrame[]; keep: number[] } {
+    const all = this.visibleFrames(m);
+    if (all.length <= NEAR_PLAYERS) return { frames: all, keep: [] };
+    const b = m.player.body;
+    const d = new Float64Array(all.length);
+    for (let i = 0; i < all.length; i++) d[i] = (all[i].x - b.x) ** 2 + (all[i].z - b.z) ** 2;
+    const order = Array.from(d.keys()).sort((a, c) => d[a] - d[c]);
+    const frames: PlayerFrame[] = [];
+    const keep: number[] = [];
+    for (let rank = 0; rank < order.length; rank++) {
+      const f = all[order[rank]];
+      if (rank < NEAR_PLAYERS || (this.tickCount + f.id) % FAR_PLAYER_EVERY === 0) frames.push(f);
+      else keep.push(f.id);
+    }
+    return { frames, keep };
+  }
+
+  // ---- snapshots ---------------------------------------------------------------
+
+  snapshot(m: Member, noPlayers = false): Snapshot {
+    const p = m.player;
+    const b = p.body;
+    const near = (x: number, z: number, r: number): boolean => Math.abs(x - b.x) <= r && Math.abs(z - b.z) <= r;
+
+    const you: SelfView = {
+      x: b.x,
+      y: b.y,
+      z: b.z,
+      vx: b.vx,
+      vy: b.vy,
+      vz: b.vz,
+      onGround: b.onGround,
+      inWater: b.inWater,
+      eyeInWater: b.eyeInWater,
+      flying: p.flying,
+      mode: p.mode,
+      selected: p.selected,
+      screen: p.screen,
+      health: p.vitals.health,
+      hunger: p.vitals.hunger,
+      saturation: p.vitals.saturation,
+      air: p.vitals.air,
+      dead: p.vitals.dead,
+      level: p.xp.level,
+      xpProgress: round(p.xp.progress),
+      coins: p.coins,
+      defense: p.defense,
+      deathMessage: p.screen === 'dead' ? p.deathMessage() : null,
+      target: p.target ? { x: p.target.x, y: p.target.y, z: p.target.z, id: p.target.id } : null,
+      breakProgress: round(p.breakProgress),
+      hudProgress: round(p.hudProgress),
+      bowDraw: round(p.bowDraw),
+      offhand: itemView(p.offhand.get(0)),
+      mountSlot: itemView(p.mountSlot.get(0)),
+      blocking: p.blocking,
+      ...(p.eatProgress > 0 ? { eat: round(p.eatProgress) } : {}),
+      ...(p.emberProgress > 0 ? { emb: Math.max(0.01, round(p.emberProgress)) } : {}),
+      ...(p.aimsAtTalker ? { talk: 1 as const } : {}),
+      burning: p.burning,
+      sleeping: p.sleeping ? p.sleeping.dir + 1 : 0,
+      riding: p.riding?.id ?? 0,
+      ...mountFields(p),
+      ...(p.cls ? { cls: p.classView()! } : {}),
+    };
+
+    const players: PlayerView[] = noPlayers ? [] : this.visibleFrames(m).map((f) => f.view);
+
+    const mobs: MobView[] = [];
+    for (const mob of this.realm.mobs.mobs) {
+      if (!near(mob.body.x, mob.body.z, VIEW_MOBS)) continue;
+      mobs.push({
+        id: mob.id,
+        kind: mob.kind,
+        x: round(mob.body.x),
+        y: round(mob.body.y),
+        z: round(mob.body.z),
+        yaw: round(mob.yaw),
+        walk: round(mob.walkPhase),
+        speed: round(mob.speedNow),
+        hurt: round(Math.min(mob.hurtTime, 9.99)),
+        dead: mob.dead,
+        deathTime: round(mob.deathTime),
+        burning: mob.burning,
+        fuse: round(mob.fuse),
+        ...(mob.attackTime < ATTACK_ANIM ? { atk: round(mob.attackTime) } : {}),
+        size: mob.size,
+        variant: mob.variant,
+        ...(mob.baby ? { baby: 1 as const } : {}),
+        ...(mob.sheared ? { sheared: 1 as const } : {}),
+        ...(mob.love > 0 ? { love: 1 as const } : {}),
+      });
+    }
+
+    const arrows: ArrowView[] = [];
+    for (const a of this.realm.mobs.arrows) {
+      if (near(a.x, a.z, VIEW_MOBS)) arrows.push({ x: round(a.x), y: round(a.y), z: round(a.z), vx: round(a.vx), vy: round(a.vy), vz: round(a.vz), ...(a.bottle ? { b: 1 as const } : {}), ...(a.pearl ? { p: 1 as const } : {}), ...(a.spell ? { s: a.spell } : {}) });
+    }
+
+    const vehicles: VehicleView[] = [];
+    for (const v of this.realm.vehicles.list) {
+      if (near(v.x, v.z, VIEW_MOBS)) vehicles.push({ id: v.id, kind: v.kind, x: round(v.x), y: round(v.y), z: round(v.z), yaw: round(v.yaw), speed: round(v.speed), hurt: round(Math.min(v.hurt, 9.99)), rider: !!v.rider });
+    }
+
+    const drops: DropView[] = [];
+    for (const d of this.realm.drops.drops) {
+      if (!near(d.x, d.z, VIEW_DROPS)) continue;
+      drops.push({ id: d.id, item: d.stack.id, count: d.stack.count, damage: d.stack.damage, ...(d.stack.name ? { name: d.stack.name } : {}), ...(d.stack.ench && d.stack.ench.length > 0 ? { ench: d.stack.ench } : {}), ...(d.stack.gear ? { g: d.stack.gear } : {}), x: round(d.x), y: round(d.y), z: round(d.z), age: round(d.age), phase: round(d.phase) });
+    }
+
+    const orbs: XpOrbView[] = [];
+    for (const o of this.realm.xpOrbs.orbs) {
+      if (near(o.x, o.z, VIEW_DROPS)) orbs.push({ id: o.id, v: o.value, x: round(o.x), y: round(o.y), z: round(o.z), age: round(o.age), phase: round(o.phase) });
+    }
+
+    // (A real connection is sent an effect in full when it is new or has moved, and later only its id in `fxKeep`: the client plays it by itself.)
+    const wire = noPlayers;
+    let live = this.realm.effects.fx.filter((f) => near(f.x, f.z, wire ? VIEW_FX : VIEW_MOBS));
+    if (wire && live.length > MAX_FX) live = live.sort((a, c) => (a.x - b.x) ** 2 + (a.z - b.z) ** 2 - ((c.x - b.x) ** 2 + (c.z - b.z) ** 2)).slice(0, MAX_FX);
+    const fxKeep: number[] = [];
+    const fx = [];
+    for (const f of live) {
+      const view = { ...f, x: round(f.x), y: round(f.y), z: round(f.z), age: round(f.age), ttl: round(f.ttl) };
+      if (wire) {
+        const at = `${view.x},${view.y},${view.z},${f.x2 ?? ''},${f.z2 ?? ''}`;
+        if (m.fxSent.get(f.id) === at) {
+          fxKeep.push(f.id);
+          continue;
+        }
+        m.fxSent.set(f.id, at);
+      }
+      fx.push(view);
+    }
+    if (wire) {
+      const ids = new Set(live.map((f) => f.id));
+      for (const id of m.fxSent.keys()) if (!ids.has(id)) m.fxSent.delete(id);
+    }
+    const w = this.realm.weather;
+    const snap: Snapshot = {
+      t: 'snap',
+      tick: this.tickCount,
+      ack: m.ack,
+      time: this.realm.time,
+      weather: { kind: w.kind, rain: round(w.rain), storm: round(w.storm), flash: round(w.flash) },
+      you,
+      players,
+      mobs,
+      arrows,
+      vehicles,
+      drops,
+      ...(orbs.length > 0 ? { orbs } : {}),
+      ...(fx.length > 0 ? { fx } : {}),
+      ...(fxKeep.length > 0 ? { fxKeep } : {}),
+    };
+    if (m.invDirty) {
+      m.invDirty = false;
+      snap.inv = this.inventoryView(p);
+    }
+    return snap;
+  }
+
+  private inventoryView(p: Player): InventoryView {
+    const slots: (ItemView | null)[] = [];
+    for (let i = 0; i < p.inventory.size; i++) slots.push(itemView(p.inventory.get(i)));
+    let menu: MenuView | null = null;
+    if (p.menu) {
+      menu = {
+        kind: p.menu.kind,
+        slots: p.menu.slots.map((_, i) => itemView(p.menu!.stackAt(i))),
+        cursor: itemView(p.menu.cursor),
+        furnace: p.furnaceState(),
+        trade: p.menu instanceof TradeMenu ? { profession: p.menu.villager.profession, level: p.menu.villager.level, xp: p.menu.villager.xp, offers: p.menu.villager.offers, selected: p.menu.selected } : null,
+        enchant: p.menu instanceof EnchantMenu ? { shelves: p.menu.shelves, offers: p.menu.offers.map((o) => ({ cost: o.cost, clue: o.clue })) } : null,
+        anvil: p.menu instanceof AnvilMenu ? { cost: p.menu.cost, tooExpensive: p.menu.tooExpensive, name: p.menu.name } : null,
+        grindstone: p.menu instanceof GrindstoneMenu ? { xp: p.menu.xp } : null,
+        craft: p.menu instanceof CraftingMenu ? { forging: p.menu.forging ? { duration: p.menu.forging.duration, sets: p.menu.forging.sets } : null, made: p.menu.hasMade } : null,
+      };
+    }
+    return { slots, bags: p.bags.slots.map((s) => itemView(s)), menu };
+  }
+
+  /** The players' sessions, for tests. */
+  player(id: number): Player | undefined {
+    return this.members.get(id)?.player;
+  }
+}

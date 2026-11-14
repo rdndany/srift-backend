@@ -1,0 +1,37 @@
+/* Experience bar, drawn as pixel art at 2x like the rest of the HUD (the original is 182 x 5 px). */
+#xp {
+  position: relative;
+  margin-top: 2px;
+}
+#xp-bar {
+  position: relative;
+  height: 18px;
+  box-sizing: border-box;
+  padding: 2px;
+  background: #000;
+  image-rendering: pixelated;
+  /* Cut one pixel (2px) off each corner, like the original texture. */
+  clip-path: polygon(2px 0, calc(100% - 2px) 0, calc(100% - 2px) 2px, 100% 2px, 100% calc(100% - 2px), calc(100% - 2px) calc(100% - 2px), calc(100% - 2px) 100%, 2px 100%, 2px calc(100% - 2px), 0 calc(100% - 2px), 0 2px, 2px 2px);
+}
+#xp-track {
+  position: relative;
+  height: 100%;
+  background: linear-gradient(#2a2a2a 0 2px, #4b4b4b 2px calc(100% - 2px), #6a6a6a calc(100% - 2px));
+}
+#xp-fill {
+  height: 100%;
+  background: linear-gradient(#d6ff7a 0 2px, #84e024 2px calc(100% - 2px), #3f8f10 calc(100% - 2px));
+}
+/* The level and points sit in the bar itself, like the label on the class resource bar below it. */
+#xp-label {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  text-align: center;
+  font: 11px/18px 'Monocraft', 'Courier New', monospace;
+  color: #fff;
+  text-shadow: 1px 1px #000, -1px -1px #000, 1px -1px #000, -1px 1px #000;
+  pointer-events: none;
+  white-space: nowrap;
+}

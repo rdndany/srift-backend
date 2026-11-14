@@ -1,0 +1,27 @@
+/* Coins: the purse in the corner and the merchant's counter. */
+.inv-label {
+  align-self: stretch !important;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+#coin-purse {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #ffe58a;
+  font-weight: bold;
+  text-shadow: 1px 1px 0 #000;
+}
+.coin-icon {
+  flex: none;
+  image-rendering: pixelated;
+  vertical-align: -3px;
+}
+.quest-coins {
+  font-size: 12px;
+  color: #8a5a00;
+  font-weight: bold;
+}
+
+

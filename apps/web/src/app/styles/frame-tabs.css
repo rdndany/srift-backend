@@ -1,0 +1,192 @@
+/* ---- tabs, the character's numbers, the hotbar kept below the window ---- */
+#menu-screen .wow {
+  --w-gold: #f0bc4c;
+  --w-gold-hi: #ffe49a;
+  --w-bronze-hi: #d0a24c;
+  --w-bronze: #8a6424;
+  --w-bronze-lo: #4f360f;
+  --w-edge: #0b0806;
+  --w-text: #f1e4c8;
+  --w-dim: #a48f6a;
+}
+/* Room under the window for its tabs and for the hotbar. */
+#menu-screen:has(.panel.wow) {
+  box-sizing: border-box;
+  padding-bottom: 112px;
+}
+#menu-screen .panel.wow {
+  box-sizing: border-box;
+  width: 556px;
+  min-height: 456px;
+}
+/* The tabs share one card: Crafting and Spellbook keep the height the Inventory has. */
+#menu-screen .panel.wow:has(.wow-tabs) {
+  min-height: 627px;
+}
+
+/* Tabs hang from the bottom edge of the frame; the chosen one is raised and lit, the others tuck behind the frame. */
+.wow-tabs {
+  position: absolute;
+  left: 34px;
+  top: 100%;
+  display: flex;
+  gap: 4px;
+  margin-top: -4px;
+  pointer-events: none;
+}
+.wow-tab {
+  pointer-events: auto;
+  position: relative;
+  z-index: -1;
+  min-width: 112px;
+  padding: 9px 20px 7px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--w-dim);
+  background: linear-gradient(#17120d, #0f0c09);
+  border: 3px solid var(--w-edge);
+  border-top: 0;
+  box-shadow: inset 2px 0 0 0 var(--w-bronze-lo), inset -2px -2px 0 0 var(--w-bronze-lo);
+  text-shadow: 1px 1px 0 #000;
+}
+.wow-tab:hover {
+  color: var(--w-gold-hi);
+  background: linear-gradient(#26200f, #14100a);
+}
+.wow-tab.on {
+  z-index: 1;
+  margin-top: 4px;
+  padding-top: 8px;
+  color: var(--w-gold-hi);
+  background: linear-gradient(#3a2d1a, #1f170d);
+  box-shadow: inset 2px 0 0 0 var(--w-bronze-hi), inset -2px -2px 0 0 var(--w-bronze-lo), inset 0 -2px 0 0 var(--w-bronze-lo);
+}
+
+/* The character's numbers, beside the paperdoll. */
+.wow .char-stats {
+  flex: 1;
+  min-width: 170px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* The crafting well takes all the room above the backpack, so the backpack and the purse sit where they do on the Inventory tab. */
+.wow .craft-page {
+  flex: 1;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 2px solid;
+  border-color: #000 #3d2c12 #3d2c12 #000;
+  box-shadow: inset 3px 3px 0 rgba(0, 0, 0, 0.45);
+}
+.wow .craft-page .craft-row {
+  flex: 1;
+  justify-content: center;
+  margin: 4px 0 2px;
+}
+
+/* The hotbar is where it always is, at the bottom of the screen, and works while the window is open. */
+#menu-hotbar {
+  position: fixed;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: linear-gradient(#26201a, #120e0a);
+  border: 2px solid var(--w-edge);
+  box-shadow: inset 2px 2px 0 0 var(--w-bronze-hi), inset -2px -2px 0 0 var(--w-bronze-lo), 0 6px 18px rgba(0, 0, 0, 0.6);
+}
+#menu-hotbar .slot.selected {
+  border-color: #fff;
+  box-shadow: inset 0 0 0 1px #000, 0 0 10px rgba(255, 255, 255, 0.55);
+}
+#menu-hotbar .slot em {
+  color: #d8c7a4;
+}
+
+/* The class is written over the character, as the level is under it. */
+.char-class {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  padding: 5px 0 14px;
+  text-align: center;
+  font-size: 12px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--w-gold-hi, #ffe49a);
+  text-shadow: 1px 1px 0 #000;
+  background: linear-gradient(rgba(0, 0, 0, 0.88) 40%, transparent);
+  pointer-events: none;
+  z-index: 1;
+}
+.wow .char-stats .cs-attrs .cls-stats {
+  gap: 8px;
+}
+.wow .char-stats .cls-stat {
+  font-size: 12px;
+}
+.wow .char-stats .cls-stat-value {
+  color: var(--w-gold-hi);
+  text-shadow: 1px 1px 0 #000;
+}
+.wow .char-stats .cls-stat-label {
+  color: #d8c7a4;
+}
+.wow .char-stats .cls-stat-bar {
+  height: 2px;
+  margin-top: 2px;
+  background: rgba(0, 0, 0, 0.5);
+}
+.wow .char-stats .cls-stat-bar i {
+  background: #c79a2a;
+}
+
+/* The slots that are not in the game yet: a necklace under the boots and two rings under the character. */
+#menu-screen .wow .char-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+#menu-screen .wow .char-col .char-box {
+  box-sizing: content-box;
+  height: 220px;
+  flex: none;
+}
+#menu-screen .wow .ring-row {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+}
+#menu-screen .wow .slot.locked,
+#menu-screen .wow .slot.locked:hover {
+  cursor: not-allowed;
+  background:
+    repeating-linear-gradient(135deg, rgba(0, 0, 0, 0.28) 0 4px, transparent 4px 8px),
+    linear-gradient(145deg, #1d1914, #0b0907);
+  border-color: #3d2c12;
+  box-shadow: inset 0 0 0 1px #000;
+  z-index: auto;
+}
+#menu-screen .wow .slot.locked span {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  letter-spacing: 2px;
+  color: #7a6a4a;
+  text-shadow: 1px 1px 0 #000;
+  pointer-events: none;
+}

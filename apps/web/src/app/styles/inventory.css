@@ -1,0 +1,61 @@
+/* Inventory screen: armor slots, the character, and the 2x2 crafting grid. */
+.inv-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 6px 0 8px;
+}
+.armor-col {
+  display: flex;
+  flex-direction: column;
+}
+.char-box {
+  position: relative;
+  width: 168px;
+  height: 208px;
+  /* A spotlight from above, a faint floor, and a vignette: the figure stands on a little stage. */
+  background:
+    radial-gradient(ellipse 70% 38% at 50% 91%, rgba(120, 140, 200, 0.2), transparent 70%),
+    radial-gradient(ellipse 90% 70% at 50% 28%, #34384e 0%, #1c1e2c 55%, #0e0f16 100%);
+  box-shadow: inset 0 0 22px rgba(0, 0, 0, 0.7);
+  border: 2px solid #0a0a10;
+  border-right-color: #4a4a5e;
+  border-bottom-color: #4a4a5e;
+  overflow: hidden;
+}
+/* The off-hand slot sits in the lower right corner of the character box. */
+.off-slot {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+}
+.char-preview {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+}
+.char-preview:active {
+  cursor: grabbing;
+}
+.craft-col {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  padding-top: 26px;
+}
+.craft-col .craft-row {
+  gap: 8px;
+}
+.slot .ghost {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  opacity: 0.2;
+  filter: grayscale(1) brightness(1.6);
+  pointer-events: none;
+}
+

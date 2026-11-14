@@ -1,0 +1,3976 @@
+import {
+  B,
+  BED_DIRS,
+  BED_HEIGHT,
+  BLOCKS,
+  BUILD_MATERIALS,
+  bedId,
+  bedInfo,
+  doorId,
+  doorInfo,
+  gateId,
+  gateInfo,
+  isAnvil,
+  isBed,
+  isInteractive,
+  leverInfo,
+  buttonInfo,
+  isSwitchable,
+  lanternId,
+  lanternInfo,
+  slabInfo,
+  trapdoorId,
+  trapdoorInfo,
+  woolId,
+} from './blocks';
+import { ARMOR_SLOTS, armorWear, reduceDamage } from './armor';
+import { ENCH, MAX_SHELVES, efficiencyBonus, levelOf, protectionFactor, protectionPoints, sharpnessBonus, wearAfterUnbreaking, type ProtectionKind } from './enchant';
+import { BLOCK_XP, Experience } from './experience';
+import type { BlockEntities } from './blockEntities';
+import type { DropWorld } from './dropEntities';
+import type { XpOrbWorld } from './xpOrbs';
+import type { WorldAccess } from './headlessWorld';
+import { BAG_SLOTS, bagInventory, strandedSlots } from './bags';
+import { organizeInventory } from './organize';
+import { formatEmberTime, EMBER_CAST, EMBER_COOLDOWN, EMBER_MOVE_LIMIT } from './emberstone';import { MOUNTS, MOUNT_BITE, MOUNT_BLOCK_TEXT, MOUNT_HOWL, MOUNT_CAST, MOUNT_MOVE_LIMIT, MOUNT_STEP_HEIGHT, MOUNTED_EYE, RIDE_CHECK, RIDE_GRACE, mountBlocker, mountDef, rideEnclosed, mountSpeedText, type MountId, type MountView } from './mounts';
+import { Container, HOTBAR_SLOTS, PLAYER_SLOTS, cloneStack, makeStack, type ItemStack } from './inventory';
+import { I, bagSlotsOf, bedItemColor, blockDrops, breakTime, canHarvest, dyeColor, getItem, harvestHint, holdsInOffhand, isUndroppable, mountOfItem, outfitItems, silkKeeps, skillBookAbility, usedOnBlock, type ItemDef, type ItemUse, type WeaponDef } from './items';
+import { AnvilMenu, ChestMenu, CraftingMenu, EnchantMenu, CreativeMenu, FurnaceMenu, GrindstoneMenu, TradeMenu, type Menu } from './menu';
+import { tooltipName } from './tooltip';
+import { ARROW_GRAVITY, WOOL_REGROW, arrowSpeed, rayAabb, type Mob, type MobKind, type MobManager } from './mobs';
+import { growTree, isSapling } from './trees';
+import { PLAYER_EYE, bodyOverlapsBlock, collides, createBody, stepPlayer, type Body, type MoveInput } from './physics';
+
+/** A Ground Slam: seconds the body crouches before it springs, and seconds the figure stays down on its shield after the blow. */
+export const SLAM_WIND = 0.2;
+export const SLAM_IMPACT = 0.4;
+/** A Shield Bash: seconds the figure takes to draw the shield back, drive it forward and come out of it (others see it from `bashAge`). */
+export const BASH_ANIM = 0.5;
+import { canStayAt, isTillable, lookDir, placementFor } from './plants';
+import { FLUID_KIND, FLUID_WATER, isFluidSource } from './fluids';
+import { IS_LIQUID, IS_SOLID } from './blocks';
+import { isRail, railPlaced } from './rails';
+import { type Rider, type Vehicle, type VehicleKind } from './vehicles';
+import { raycast, type RayHit } from './raycast';
+import { aimThroughCrosshair, lookVector, sanitizeCamera } from './crosshair';
+import type { Realm } from './realm';
+import type { PlayerSave, SaveMode } from './save';
+import type { Weather, WeatherKind } from './weather';
+import type { WorldGenerator } from './worldgen';
+import { COOK_SECONDS } from './smelting';
+import { EXHAUSTION, Vitals } from './survival';
+import type { ClassView, Command, InputFrame, SessionEvent, SessionScreen } from './sessionProtocol';
+import { MAX_COINS, stackSellPrice, shopOf } from './economy';
+import { FIRST_QUEST, NPCS, QuestLog, npcById, questById, rewardCoins, rewardItems, type QuestEvent, type QuestProgress } from './quests';
+import { ABILITY_BY_ID, ClassState, abilitiesOf, abilityAt, type AbilityDef, type AbilityId, type CastBlock } from './abilities';
+import type { EffectOwner, Fx } from './abilityEffects';
+import { creativeGear } from './creative';
+import { canRollGear, cloneGear, gearKey, gearModifiers } from './gear';
+import { jewelKind, useJewel } from './jewels';
+import { CLASSES, offhandModifier, rollDamage, type ClassId, type DamageKind } from './classes';
+
+/** Blocks per second under which a player counts as standing still (the speed dies away within a fifth of a second of letting go of the keys). */
+const STILL_SPEED = 0.3;
+export const REACH = 5;
+/** How far a blow reaches, and how far beside a mob's body or head it still lands: what the screen showed a moment ago is not exactly where the mob is now (it walks, and the picture is a tick or two behind). */
+const MELEE_REACH = 4;
+const MELEE_MARGIN = 0.15;
+const MELEE_LAG = 0.12;
+/** Fixed simulation step. */
+export const STEP = 1 / 60;
+/** Chance that one use of an anvil wears it down a step. */
+export const ANVIL_WEAR_CHANCE = 0.12;
+/** Points of damage an ender pearl's trip costs. */
+export const PEARL_DAMAGE = 5;
+const EAT_TIME = 1.4;
+const BOW_FULL_DRAW = 1.0;
+/** A crossbow is drawn fully or not at all, and takes this long to. */
+const CROSSBOW_DRAW = 0.8;
+
+/** Hard difficulty: mobs and explosions hurt this much more than on Normal. */
+export const HARD_DAMAGE = 1.5;
+/** Walk this far from the person you are talking to and the conversation ends. */
+export const DIALOG_RANGE = 7;
+
+/** A raised shield only stops hits after this long (the original's five ticks). */
+export const SHIELD_RAISE = 0.25;
+/** A hit that lands within this many seconds after the guard comes up (after `SHIELD_RAISE`) is parried: no wear on the shield. */
+export const PARRY_WINDOW = 0.2;
+
+/** Eye height above the mattress while lying down. */
+export const SLEEP_EYE = 0.2;
+
+/** Starting hotbar for creative mode. */
+/** Uses of the item in the main hand that keep the use button for themselves: a shield in the off hand is not raised by it. */
+const TAKES_THE_BUTTON: ReadonlySet<ItemUse> = new Set<ItemUse>(['xp_bottle', 'pearl', 'emberstone', 'skill_book', 'bucket']);
+
+export const CREATIVE_HOTBAR = [B.GRASS, B.DIRT, B.STONE, B.COBBLE, B.PLANKS, B.LOG, B.GLASS, B.SAND, B.GLOWSTONE];
+
+/** What a death costs: this share of the experience, and this share of the durability of the armor, shield and tool you have equipped (never breaking them). */
+export const DEATH_XP_LOSS = 0.25;
+export const DEATH_WEAR = 0.2;
+const DEATH_WEAR_PERCENT = Math.round(DEATH_WEAR * 100);
+
+export const DEATH_TEXT: Record<string, string> = {
+  fall: 'You hit the ground too hard',
+  drown: 'You drowned',
+  starve: 'You starved to death',
+  void: 'You fell out of the world',
+  mob: 'You were slain',
+  explosion: 'You were blown up',
+  lava: 'You tried to swim in lava',
+  cactus: 'You were pricked to death',
+  fire: 'You burned to death',
+  anvil: 'You were squashed by a falling anvil',
+};
+
+/** Turn one frame of input into movement for the physics step. Shared with client-side prediction. */
+/** While charging the body runs flat out along yaw, whatever the keys say (jumping the one block that is in the way). The server and the client's own prediction both use this. */
+export function rushMove(move: MoveInput, yaw: number, speed: number, hop = false): void {
+  move.forward = 1;
+  move.strafe = 0;
+  move.sprint = false;
+  move.sneak = false;
+  move.jump = hop;
+  move.yaw = yaw;
+  move.speed = speed;
+  move.accel = 90;
+}
+
+export function buildMove(f: InputFrame, flying: boolean, canSprint: boolean, noclip = false, speedMul = 1): MoveInput {
+  return {
+    ...(noclip ? { noclip: true } : {}),
+    ...(speedMul !== 1 ? { speedMul } : {}),
+    forward: f.forward,
+    strafe: f.strafe,
+    jump: f.jump,
+    sprint: f.sprint && f.forward > 0 && canSprint,
+    sneak: f.sneak && !flying,
+    fly: flying,
+    flyDown: flying && f.sneak,
+    yaw: f.yaw,
+  };
+}
+
+export interface PlayerOptions {
+  mode?: SaveMode;
+  /** One life on Hard difficulty (see `Player.hardcore`). */
+  hardcore?: boolean;
+  /** Shown to other players. */
+  name?: string;
+  /** The character's class (permanent). Without one the player plays the unmodified game. */
+  classId?: ClassId | null;
+}
+
+/**
+ * One player's side of the game: body, vitals, inventory, menus, mining and building. It lives in a
+ * `Realm`, which owns everything shared (blocks, mobs, drops, weather, the clock).
+ *
+ * It has no rendering, audio or DOM. A client feeds it `InputFrame`s and `Command`s and plays back
+ * the `SessionEvent`s it emits.
+ */
+export class Player implements EffectOwner {
+  readonly body: Body;
+  /** The class this character plays, with its level, resource and cooldowns (null: no class). Never changes: a class is permanent. */
+  readonly cls: ClassState | null;
+  /** The bags worn (up to four, see bags.ts): each opens room in `inventory` after the backpack. */
+  readonly bags = new Container(BAG_SLOTS);
+  readonly inventory = bagInventory(this.bags);
+  readonly vitals = new Vitals();
+  readonly xp = new Experience();
+  /** Worn armor: 0 helmet, 1 chestplate, 2 leggings, 3 boots. */
+  readonly armor = new Container(ARMOR_SLOTS.length);
+  /** The off hand: a single slot that takes a shield. */
+  readonly offhand = new Container(1);
+  readonly name: string;
+
+  mode: SaveMode;
+  /**
+   * Hardcore: survival with one life. Mobs hit 1.5 times as hard and starving can kill (Hard
+   * difficulty), the game mode cannot be changed, and dying ends the world: you can only spectate.
+   */
+  hardcore = false;
+  /** Hardcore: this player has died. Saved, so closing the page does not bring them back. */
+  gameOver = false;
+  /** Hardcore, after dying: floating through the world with no way to touch it. */
+  spectating = false;
+  selected = 0;
+  menu: Menu | null = null;
+  /** The villager whose trade screen is open. */
+  tradingWith: Mob | null = null;
+  /** Seeds the enchanting table's offers; it moves on after every enchantment (0 = not drawn yet). */
+  enchantSeed = 0;
+  screen: SessionScreen = 'none';
+  flying = false;
+  /** True once the terrain around the player exists and the simulation runs. */
+  ready = false;
+  yaw = 0;
+  pitch = 0;
+  /**
+   * Third person: where the client's camera is (it looks along yaw/pitch). The aim then goes from the eyes to what that camera's
+   * crosshair is on, see `look()`. Null in first person, where the eyes are the camera.
+   */
+  private camera: { x: number; y: number; z: number } | null = null;
+  /** The aim worked out from `camera`, once per frame (null: not yet). */
+  private aimCache: { x: number; y: number; z: number } | null = null;
+  sneaking = false;
+  /** Block under the crosshair (null when aiming at a mob or nothing). */
+  target: RayHit | null = null;
+  /** 0..1 mining progress of the targeted block. */
+  breakProgress = 0;
+  /** 0..1 value for the HUD action bar: mining, or eating. */
+  hudProgress = 0;
+  /** 0..1 how far the bow is drawn. */
+  bowDraw = 0;
+  /** The shield is raised (use button held with a shield in the off hand, or in the hand). */
+  blocking = false;
+  /** How long the shield has been up; it only stops hits after `SHIELD_RAISE`. */
+  blockTime = 0;
+  private shieldInOffhand = false;
+  /** The bed this player is lying in (its head block and the way it points), or null when awake. */
+  sleeping: { x: number; y: number; z: number; dir: number } | null = null;
+  /** The minecart or boat this player sits in (the body follows it; sneak gets out). */
+  riding: Vehicle | null = null;
+  /** Ability effects in the world (what a client draws as flashes, rings and falling meteors). */
+  get fx(): readonly Fx[] {
+    return this.realm.effects.fx;
+  }
+  /** Every minecart and boat in the world (what a client draws). */
+  get vehicles(): readonly Vehicle[] {
+    return this.realm.vehicles.list;
+  }
+  /** What the seat needs to know about this player (see vehicles.ts). */
+  readonly rider: Rider;
+  /** Seconds spent in bed; the night is skipped once everyone has slept SLEEP_SKIP_SECONDS. */
+  sleepTime = 0;
+  /** The bed (its head block) to respawn at; null = the world's spawn. */
+  spawnPoint: { x: number; y: number; z: number } | null = null;
+  killedBy = '';
+  /** Adventure mode: this player's quests (null in every other world). */
+  readonly quests: QuestLog | null;
+  /** The quest giver (an id of `NPCS`) being talked to, while the dialog is open. */
+  dialogNpc: string | null = null;
+  /** The money the character carries (see economy.ts). */
+  coins = 0;
+  /** The named place the player is in (an id of `ZONES`), and a timer for looking it up. */
+  private zoneId: string | null = null;
+  private questTimer = 0;
+
+  private events: SessionEvent[] = [];
+  private queue: Command[] = [];
+  private spawned = false;
+  private savedMobs: unknown = null;
+  private acc = 0;
+  private uiTimer = 0;
+  private prevOnGround = false;
+  private prevInWater = false;
+  private stepAcc = 0;
+  private lavaTimer = 0.5;
+  private cactusTimer = 0.5;
+  /** The mark that shows an Arcane Shield around this player while it holds: it follows them and ends with the shield. */
+  private shieldMark: Fx | null = null;
+  /** A Ground Slam in the air: the blast comes when the feet are back on the ground. */
+  private slamLeap: { def: AbilityDef; time: number; launched: boolean } | null = null;
+  /** Seconds left of the blow after a slam has landed (the figure is still down on its shield). */
+  private slamImpact = 0;
+  /** A Charge under way: the body runs along `yaw` at `speed` until `left` blocks are covered or it is stopped. */
+  private rush: { yaw: number; speed: number; left: number; time: number; stall: number; dx: number; dz: number; hit: Set<Mob>; def: AbilityDef; mark: Fx } | null = null;
+  /** Seconds left alight (flames and lava set you on fire; water puts it out). */
+  onFire = 0;
+  private fireTimer = 0.5;
+  private burnTimer = 0;
+  private peakY: number;
+  private lastHealth: number;
+  private breakKey = '';
+  private hitTimer = 0;
+  private placeCooldown = 0;
+  private breakCooldown = 0;
+  private attackCooldown = 0;
+  private eatTimer = 0;
+  /** The Emberstone: seconds cast so far (0: not casting), where the cast began, and the seconds it still has to rest. */
+  private emberTimer = 0;
+  private emberFrom = { x: 0, y: 0, z: 0, health: 0 };
+  /** After a cast is lost the button must be let go before the stone tries again. */
+  private emberHeld = false;
+  emberCooldown = 0;
+  /** The mount slot: the horn of the mount the mount key summons (shown top right of the screen, and beside the off hand in the inventory). */
+  readonly mountSlot = new Container(1);
+  /** The mount being ridden. */
+  mountId: MountId | null = null;
+  /** How long (seconds) the rider has been enclosed without a break, and the seconds to the next look (see `rideEnclosed`). */
+  private rideCover = 0;
+  private rideCheck = 0;
+  /** A mount being summoned: which, how many seconds so far, and where and how healthy the player was when it began (moving or a hit loses it). */
+  /** Seconds until the mount's two skills (the bite, the howl) can be used again. */
+  biteCd = 0;
+  howlCd = 0;
+  private mountCast: { id: MountId; time: number; x: number; y: number; z: number; health: number } | null = null;
+  private rightWas = false;
+  private bowCharge = 0;
+  /** Seconds before the next bolt of a staff, wand or spellbook. */
+  private castCooldown = 0;
+  /** What the last input frame asked for, so a roll goes the way the player was moving. */
+  private moveIn = { forward: 0, strafe: 0 };
+
+  constructor(
+    readonly realm: Realm,
+    opts: PlayerOptions = {},
+  ) {
+    this.mode = opts.mode ?? 'survival';
+    this.hardcore = opts.hardcore === true && this.mode === 'survival';
+    this.name = opts.name ?? 'player';
+    // A new survival character begins where the world puts newcomers (the Adventure cave); a creative one in the open.
+    const spawn = this.mode === 'survival' ? realm.nextStart() : realm.nextSpawn();
+    this.body = createBody(spawn.x, spawn.y, spawn.z);
+    this.quests = realm.generator.kind === 'adventure' ? new QuestLog() : null;
+    this.syncQuests();
+    this.rider = { body: this.body, input: { forward: 0, fx: 0, fz: -1 } };
+    this.cls = opts.classId ? new ClassState(opts.classId) : null;
+    this.applyClassVitals(true);
+    this.peakY = this.body.y;
+    this.lastHealth = this.vitals.health;
+    if (this.mode === 'creative') this.setCreativeHotbar();
+    realm.players.push(this);
+  }
+
+  /** Leave the realm (disconnect). */
+  leave(): void {
+    this.dismount();
+    this.realm.effects.dropOwner(this);
+    this.realm.parties.onLeave(this);
+    const i = this.realm.players.indexOf(this);
+    if (i >= 0) this.realm.players.splice(i, 1);
+  }
+
+  // ---- shared state, by shortcut ---------------------------------------------
+
+  get world(): WorldAccess {
+    return this.realm.world;
+  }
+  get generator(): WorldGenerator {
+    return this.realm.generator;
+  }
+  get rand(): () => number {
+    return this.realm.rand;
+  }
+  get mobs(): MobManager {
+    return this.realm.mobs;
+  }
+  get weather(): Weather {
+    return this.realm.weather;
+  }
+  get drops(): DropWorld {
+    return this.realm.drops;
+  }
+  get xpOrbs(): XpOrbWorld {
+    return this.realm.xpOrbs;
+  }
+  get blockEntities(): BlockEntities {
+    return this.realm.blockEntities;
+  }
+  get time(): number {
+    return this.realm.time;
+  }
+  set time(t: number) {
+    this.realm.time = t;
+  }
+
+  // ---- state views ---------------------------------------------------------
+
+  get held(): ItemStack | null {
+    return this.inventory.get(this.selected);
+  }
+
+  /** 0 (night) .. 1 (full day), including storm darkness and lightning. */
+  get daylight(): number {
+    return this.realm.daylight;
+  }
+
+  get invulnerable(): boolean {
+    return this.mode === 'creative' || this.spectating;
+  }
+
+  /** Eye position, the origin of aiming. */
+  eye(): { x: number; y: number; z: number } {
+    return this.eyeAt(this.body);
+  }
+
+  /** The eye of a body standing at `at` (for the real body, `eye()`). */
+  eyeAt(at: { x: number; y: number; z: number }): { x: number; y: number; z: number } {
+    if (this.sleeping) return { x: at.x, y: at.y + SLEEP_EYE, z: at.z };
+    // On a mount the eyes sit higher, and a rider cannot sneak.
+    if (this.mountId) return { x: at.x, y: at.y + MOUNTED_EYE, z: at.z };
+    return { x: at.x, y: at.y + PLAYER_EYE - (this.sneaking && !this.flying ? 0.2 : 0), z: at.z };
+  }
+
+  /** The body one physics step ago, and how far between it and the body the picture is (0..1): see `viewPos`. */
+  private viewPrev = { x: 0, y: 0, z: 0 };
+  private viewBlend = 1;
+
+  private markView(): void {
+    this.viewPrev.x = this.body.x;
+    this.viewPrev.y = this.body.y;
+    this.viewPrev.z = this.body.z;
+  }
+
+  /**
+   * Where the body is to be DRAWN: between its last two physics steps, by how far into the next one the frame is. The body itself moves in jumps
+   * of 1/60 s, which shows as judder on a screen that does not run at exactly 60 frames a second.
+   */
+  viewPos(): { x: number; y: number; z: number } {
+    const b = this.body;
+    const p = this.viewPrev;
+    // After a jump (a teleport, a respawn) there is nothing to blend from.
+    if (Math.abs(b.x - p.x) + Math.abs(b.y - p.y) + Math.abs(b.z - p.z) > 2) return { x: b.x, y: b.y, z: b.z };
+    const a = this.viewBlend;
+    return { x: p.x + (b.x - p.x) * a, y: p.y + (b.y - p.y) * a, z: p.z + (b.z - p.z) * a };
+  }
+
+  /**
+   * Unit vector of the aim, from the eyes. In first person that is the way the head points (yaw and pitch); in third person it
+   * is toward what the camera's crosshair is on, so a blow, an arrow or a spell lands where the crosshair shows.
+   */
+  look(): { x: number; y: number; z: number } {
+    if (!this.camera) return lookVector(this.yaw, this.pitch);
+    this.aimCache ??= aimThroughCrosshair(this.world, this.mobs, this.eye(), this.camera, this.yaw, this.pitch);
+    return { ...this.aimCache };
+  }
+
+  deathMessage(): string {
+    const base = DEATH_TEXT[this.vitals.lastDamage ?? ''] ?? 'You died';
+    if ((this.vitals.lastDamage === 'mob' || this.vitals.lastDamage === 'explosion') && this.killedBy) {
+      const by = this.killedBy === 'arrow' ? 'a skeleton' : this.killedBy === 'tnt' ? 'TNT' : `a ${this.killedBy.replace('_', ' ')}`;
+      return `${base} by ${by}`;
+    }
+    return base;
+  }
+
+  furnaceState(): { burn: number; cook: number } | null {
+    if (!(this.menu instanceof FurnaceMenu)) return null;
+    const f = this.menu.furnace;
+    return { burn: f.burnTotal > 0 ? Math.max(0, f.burnLeft / f.burnTotal) : 0, cook: Math.min(1, f.cook / COOK_SECONDS) };
+  }
+
+  // ---- events --------------------------------------------------------------
+
+  emit(e: SessionEvent): void {
+    this.events.push(e);
+    if (e.t === 'swing') this.swingAge = 0;
+  }
+
+  /** Seconds since the arm last swung (a blow, a placed block, a block being mined): other players see it from this. */
+  swingAge = 9;
+  /** Seconds since a Shield Bash was thrown (`BASH_ANIM` and more: none): other players see the figure drive its shield forward from this. */
+  bashAge = 9;
+
+  /** Hand over everything that happened since the last call. */
+  drainEvents(): SessionEvent[] {
+    const out = this.events;
+    this.events = [];
+    return out;
+  }
+
+  // ---- input ---------------------------------------------------------------
+
+  /** Queue a command; it runs at the start of the next frame. */
+  command(c: Command): void {
+    this.queue.push(c);
+  }
+
+  protected runCommands(): void {
+    const list = this.queue;
+    this.queue = [];
+    for (const c of list) this.apply(c);
+  }
+
+  /** Apply a command immediately (what a frame does for queued ones). */
+  apply(c: Command): void {
+    switch (c.t) {
+      case 'closeMenu':
+        this.closeMenu();
+        return;
+      case 'click':
+        if (this.menu) {
+          // Right-clicking a skill book in the bags reads it (it never goes onto the cursor).
+          if (c.button === 1 && !this.menu.cursor) {
+            const slot = this.menu.slots[c.slot];
+            if (slot && slot.container === this.inventory && slot.kind === 'normal' && (this.learnFromBook(slot.index) || this.equipHorn(slot.index))) return;
+          }
+          // A jewel on the cursor, clicked on a piece of equipment, is used on it (instead of swapping places with it).
+          if (c.button === 0 && this.useJewelOnSlot(c.slot)) {
+            this.emit({ t: 'inv' });
+            return;
+          }
+          this.menu.click(c.slot, c.button);
+          this.emit({ t: 'inv' });
+        }
+        return;
+      case 'shift':
+        if (this.menu) {
+          this.menu.shiftClick(c.slot);
+          this.emit({ t: 'inv' });
+        }
+        return;
+      case 'organize':
+        if (this.menu && organizeInventory(this.inventory)) this.emit({ t: 'inv' });
+        return;
+      case 'forge':
+        if (this.menu instanceof CraftingMenu && this.menu.startForge(() => this.rand(), c.all === true)) {
+          this.emit({ t: 'forgeStart', craft: (this.menu.forging?.sets ?? 0) > 0 });
+          this.emit({ t: 'inv' });
+        }
+        return;
+      case 'creativeAmount':
+        if (this.menu instanceof CreativeMenu) this.menu.setAmount(c.n);
+        return;
+      case 'creativeClear':
+        if (this.menu instanceof CreativeMenu) {
+          this.menu.clearAll();
+          this.emit({ t: 'inv' });
+        }
+        return;
+      case 'creativeGear':
+        if (this.menu instanceof CreativeMenu) {
+          const made = creativeGear(c.spec, () => this.rand());
+          const left = made ? this.menu.give(made) : null;
+          if (left) this.dropFromPlayer(left, 2);
+          this.emit({ t: 'inv' });
+        }
+        return;
+      case 'recipe':
+        if (this.menu instanceof CraftingMenu && this.menu.fillRecipe(c.index, c.all)) this.emit({ t: 'inv' });
+        return;
+      case 'trade':
+        if (this.menu instanceof TradeMenu) {
+          this.menu.select(c.index);
+          this.emit({ t: 'inv' });
+        }
+        return;
+      case 'anvilName':
+        if (this.menu instanceof AnvilMenu) {
+          this.menu.setName(c.name);
+          this.emit({ t: 'inv' });
+        }
+        return;
+      case 'enchant':
+        if (this.menu instanceof EnchantMenu && this.menu.enchant(c.index)) this.emit({ t: 'inv' });
+        return;
+      case 'respawn':
+        this.respawnFromDeath();
+        return;
+      case 'wake':
+        this.wake();
+        return;
+      case 'dropCursor': {
+        // A stack let go of outside the screen lands on the ground in front of the player.
+        const m = this.menu;
+        const s = m?.cursor;
+        if (!m || !s) return;
+        if (this.keepsItem(s.id)) return;
+        const n = c.all ? s.count : 1;
+        this.dropFromPlayer({ ...s, count: n });
+        s.count -= n;
+        if (s.count <= 0) m.cursor = null;
+        this.emit({ t: 'inv' });
+        return;
+      }
+      case 'quest':
+        this.questCommand(c);
+        return;
+      case 'shop':
+        this.shopCommand(c);
+        return;
+      case 'party': {
+        const reply = this.realm.parties.run(this, c.a, c.name);
+        if (reply) this.emit({ t: 'toast', text: reply });
+        this.realm.parties.sync();
+        return;
+      }
+      default:
+    }
+    // Everything else is something a player does while in control (and a spectator only watches).
+    if (!this.ready || this.screen !== 'none' || this.spectating || this.sleeping) return;
+    switch (c.t) {
+      case 'select':
+        this.selectSlot(c.slot);
+        return;
+      case 'scroll':
+        this.selectSlot(this.selected + c.delta);
+        return;
+      case 'mode':
+        this.setMode(c.mode);
+        return;
+      case 'fly':
+        if (this.mode === 'creative') this.flying = !this.flying;
+        return;
+      case 'swap':
+        this.swapHands();
+        return;
+      case 'home':
+        this.respawn();
+        return;
+      case 'inventory':
+        this.openMenu(this.mode === 'creative' ? new CreativeMenu(this.inventory) : new CraftingMenu(this.inventory, 2, this.armor, this.offhand, this.mountSlot));
+        return;
+      case 'ability':
+        this.useAbility(c.slot);
+        return;
+      case 'mount':
+        this.useMountKey();
+        return;
+      case 'drop': {
+        const s = this.held;
+        if (!s) return;
+        if (this.keepsItem(s.id)) return;
+        const n = c.all ? s.count : 1;
+        this.dropFromPlayer({ ...s, count: n });
+        s.count -= n;
+        if (s.count <= 0) this.inventory.set(this.selected, null);
+        this.emit({ t: 'inv' });
+        return;
+      }
+      default:
+    }
+  }
+
+  selectSlot(i: number, announce = true): void {
+    this.selected = ((i % HOTBAR_SLOTS) + HOTBAR_SLOTS) % HOTBAR_SLOTS;
+    if (announce) this.announceHeld();
+    this.emit({ t: 'inv' });
+  }
+
+  private announceHeld(): void {
+    const s = this.held;
+    this.emit({ t: 'toast', text: s ? getItem(s.id).name : '' });
+  }
+
+  setMode(next: SaveMode): void {
+    if (this.hardcore) return; // no creative mode in a hardcore world
+    this.mode = next;
+    if (next === 'survival') this.flying = false;
+    this.emit({ t: 'toast', text: `${next} mode` });
+    this.emit({ t: 'inv' });
+  }
+
+  private setCreativeHotbar(): void {
+    CREATIVE_HOTBAR.forEach((id, i) => this.inventory.set(i, makeStack(id)));
+  }
+
+  // ---- menus ---------------------------------------------------------------
+
+  openMenu(m: Menu): void {
+    m.attachBags(this.inventory, this.bags);
+    this.menu = m;
+    this.screen = m.kind;
+    if (this.emberTimer > 0) this.emberEvent('stop');
+    this.emberTimer = 0;
+    if (this.quests) m.taken = (stack, kind) => this.tookFromMenu(stack, kind);
+    this.lowerShield();
+    this.emit({ t: 'inv' });
+  }
+
+  /** Closes the open menu; returns held / crafting-grid stacks to the player. */
+  closeMenu(): void {
+    if (this.screen === 'dialog') {
+      this.closeDialog();
+      return;
+    }
+    if (!this.menu) return;
+    const leftovers = this.menu.close();
+    if (this.menu.kind !== 'creative') for (const s of leftovers) this.giveOrDrop(s);
+    this.menu = null;
+    this.screen = 'none';
+    if (this.tradingWith) {
+      if (this.tradingWith.customer?.body === this.body) this.tradingWith.customer = null;
+      this.tradingWith = null;
+    }
+    this.emit({ t: 'inv' });
+  }
+
+  private openForBlock(hit: RayHit): void {
+    if (isBed(hit.id)) {
+      this.useBed(hit);
+      return;
+    }
+    if (isSwitchable(hit.id)) {
+      this.toggleSwitch(hit);
+      return;
+    }
+    if (leverInfo(hit.id)) {
+      this.realm.redstone.toggleLever(hit.x, hit.y, hit.z);
+      this.emit({ t: 'swing' });
+      return;
+    }
+    if (buttonInfo(hit.id)) {
+      this.realm.redstone.pressButton(hit.x, hit.y, hit.z);
+      this.emit({ t: 'swing' });
+      return;
+    }
+    if (hit.id === B.CRAFTING_TABLE) this.openMenu(new CraftingMenu(this.inventory, 3));
+    else if (hit.id === B.FURNACE) this.openMenu(new FurnaceMenu(this.inventory, this.blockEntities.furnace(hit.x, hit.y, hit.z), (n) => this.spawnXpAtFeet(n)));
+    else if (hit.id === B.CHEST) this.openMenu(new ChestMenu(this.inventory, this.blockEntities.chest(hit.x, hit.y, hit.z)));
+    else if (hit.id === B.ENCHANTING_TABLE) this.openEnchantTable(hit);
+    else if (isAnvil(hit.id)) this.openAnvil(hit);
+    else if (hit.id === B.GRINDSTONE) this.openGrindstone();
+  }
+
+  /** Open one of the standard screens without a block (tests, hotkeys). */
+  openScreen(kind: 'inventory' | 'crafting' | 'furnace' | 'chest' | 'creative'): void {
+    if (kind === 'inventory') this.openMenu(new CraftingMenu(this.inventory, 2, this.armor, this.offhand, this.mountSlot));
+    else if (kind === 'crafting') this.openMenu(new CraftingMenu(this.inventory, 3));
+    else if (kind === 'furnace') this.openMenu(new FurnaceMenu(this.inventory, this.blockEntities.furnace(0, 0, 0), (n) => this.spawnXpAtFeet(n)));
+    else if (kind === 'chest') this.openMenu(new ChestMenu(this.inventory, this.blockEntities.chest(0, 0, 0)));
+    else this.openMenu(new CreativeMenu(this.inventory));
+  }
+
+  // ---- items ---------------------------------------------------------------
+
+  /** Some items cannot be thrown away (the Emberstone and the map): say so, and keep them. */
+  private keepsItem(id: number): boolean {
+    if (!isUndroppable(id)) return false;
+    this.emit({ t: 'toast', text: `The ${getItem(id).name.replace(/_/g, ' ')} cannot be dropped.` });
+    return true;
+  }
+
+  private dropFromPlayer(stack: ItemStack, speed = 4): void {
+    const d = this.look();
+    // A jewel let go of has its sound too, as when one falls from a monster.
+    const jewel = jewelKind(stack.id);
+    if (jewel) this.emit({ t: 'jewelDrop', kind: jewel, vol: 1 });
+    this.drops.spawn(
+      stack,
+      this.body.x + d.x * 0.4,
+      this.body.y + PLAYER_EYE - 0.35,
+      this.body.z + d.z * 0.4,
+      d.x * speed,
+      d.y * speed + 1.8,
+      d.z * speed,
+      1.5,
+    );
+  }
+
+  giveOrDrop(stack: ItemStack): void {
+    const left = this.inventory.add(stack);
+    if (left) this.dropFromPlayer(left, 2);
+  }
+
+  /** Like giveOrDrop, for what is picked up or won (a quest reward): it goes into the hotbar first, the backpack and the bags only when the bar is full. */
+  collectOrDrop(stack: ItemStack): void {
+    const left = this.inventory.collect(stack);
+    if (left) this.dropFromPlayer(left, 2);
+  }
+
+  // ---- enchantments -----------------------------------------------------------------
+
+  /** The held stack when its enchantments act (an enchanted book in the hand does nothing). */
+  private enchHeld(): ItemStack | null {
+    const h = this.held;
+    return h && h.ench && !getItem(h.id).storesEnchants ? h : null;
+  }
+
+  /** What the held tool's enchantments do to a block that is being broken. */
+  private toolEnchants(): { silk: boolean; fortune: number; efficiency: number } {
+    const h = this.enchHeld();
+    return { silk: levelOf(h, ENCH.SILK_TOUCH) > 0, fortune: levelOf(h, ENCH.FORTUNE), efficiency: efficiencyBonus(levelOf(h, ENCH.EFFICIENCY)) };
+  }
+
+  /** Protection points of everything worn against one kind of damage. */
+  private armorProtection(kind: ProtectionKind): number {
+    let p = 0;
+    for (let i = 0; i < this.armor.size; i++) p += protectionPoints(this.armor.get(i), kind);
+    return p;
+  }
+
+  /** Damage that gets through the enchantments of the worn armor. */
+  private protect(amount: number, kind: ProtectionKind): number {
+    return amount * protectionFactor(this.armorProtection(kind));
+  }
+
+  /** Bookshelves that feed an enchanting table: the ring two blocks out, one and two high, with a clear gap towards the table. */
+  countShelves(x: number, y: number, z: number): number {
+    let n = 0;
+    for (let dx = -2; dx <= 2; dx++) {
+      for (let dz = -2; dz <= 2; dz++) {
+        if (Math.abs(dx) < 2 && Math.abs(dz) < 2) continue;
+        const mx = x + Math.trunc(dx / 2);
+        const mz = z + Math.trunc(dz / 2);
+        if (this.world.getBlock(mx, y, mz) !== B.AIR || this.world.getBlock(mx, y + 1, mz) !== B.AIR) continue;
+        for (let dy = 0; dy <= 1; dy++) if (this.world.getBlock(x + dx, y + dy, z + dz) === B.BOOKSHELF) n++;
+      }
+    }
+    return Math.min(MAX_SHELVES, n);
+  }
+
+  /** A fresh number for the table to roll its offers from. */
+  private newEnchantSeed(): number {
+    return 1 + Math.floor(this.rand() * 0x7ffffffe);
+  }
+
+  private openEnchantTable(hit: RayHit): void {
+    if (!this.enchantSeed) this.enchantSeed = this.newEnchantSeed();
+    this.openMenu(
+      new EnchantMenu(this.inventory, {
+        shelves: this.countShelves(hit.x, hit.y, hit.z),
+        seed: () => this.enchantSeed,
+        level: () => this.xp.level,
+        creative: () => this.mode === 'creative',
+        spend: (n) => {
+          this.xp.spend(n);
+          this.emit({ t: 'xp' });
+        },
+        done: () => {
+          this.enchantSeed = this.newEnchantSeed();
+          this.emit({ t: 'enchant' });
+        },
+      }),
+    );
+  }
+
+  /** Using an anvil can wear it: one use in eight chips it, then damages it, then it breaks (not in creative). */
+  private wearAnvil(x: number, y: number, z: number): void {
+    if (this.mode === 'creative') return;
+    const id = this.world.getBlock(x, y, z);
+    if (!isAnvil(id) || this.rand() >= ANVIL_WEAR_CHANCE) return;
+    const next = id === B.ANVIL ? B.ANVIL_CHIPPED : id === B.ANVIL_DAMAGED ? B.AIR : B.ANVIL_DAMAGED;
+    this.world.setBlock(x, y, z, next);
+    this.realm.emitNear(x + 0.5, y + 0.5, z + 0.5, { t: 'sound', sound: 'stone', action: next === B.AIR ? 'break' : 'place', vol: 0.9 });
+    if (next === B.AIR) {
+      this.realm.emitNear(x + 0.5, y + 0.5, z + 0.5, { t: 'burst', id, x, y, z, count: 16 });
+      this.closeMenu();
+    }
+  }
+
+  private openGrindstone(): void {
+    this.openMenu(
+      new GrindstoneMenu(this.inventory, {
+        creative: () => this.mode === 'creative',
+        xp: (n) => this.spawnXpAtFeet(n),
+        rand: () => this.rand(),
+        done: () => this.emit({ t: 'enchant', anvil: true }),
+      }),
+    );
+  }
+
+  private openAnvil(hit: RayHit): void {
+    this.openMenu(
+      new AnvilMenu(this.inventory, {
+        level: () => this.xp.level,
+        creative: () => this.mode === 'creative',
+        spend: (n) => {
+          this.xp.spend(n);
+          this.emit({ t: 'xp' });
+        },
+        done: () => {
+          this.emit({ t: 'enchant', anvil: true });
+          this.wearAnvil(hit.x, hit.y, hit.z);
+        },
+      }),
+    );
+  }
+
+  /** Mending: experience mends the worn and held items that have it before it counts as levels. Returns what is left. */
+  private mend(amount: number): number {
+    const pool: ItemStack[] = [];
+    const add = (s: ItemStack | null) => {
+      if (s && !getItem(s.id).storesEnchants && s.ench && levelOf(s, ENCH.MENDING) > 0) pool.push(s);
+    };
+    add(this.held);
+    add(this.offhand.get(0));
+    for (let i = 0; i < this.armor.size; i++) add(this.armor.get(i));
+    let mended = false;
+    while (amount > 0) {
+      const live = pool.filter((s) => s.damage > 0);
+      if (live.length === 0) break;
+      const s = live[Math.floor(this.rand() * live.length)];
+      const fix = Math.min(s.damage, amount * 2);
+      s.damage -= fix;
+      amount -= Math.ceil(fix / 2);
+      mended = true;
+    }
+    if (mended) this.emit({ t: 'inv' });
+    return amount;
+  }
+  private damageHeld(amount: number): void {
+    const s = this.held;
+    const dur = s ? getItem(s.id).durability : 0;
+    if (!s || dur <= 0) return;
+    s.damage += wearAfterUnbreaking(amount, levelOf(s, ENCH.UNBREAKING), false, this.rand);
+    if (s.damage >= dur) {
+      this.inventory.set(this.selected, null);
+      this.emit({ t: 'sound', sound: 'stone', action: 'break', vol: 0.8 });
+    }
+    this.emit({ t: 'inv' });
+  }
+
+  // ---- dungeon portals -------------------------------------------------------
+
+  /** Seconds before a portal may take this player again (so that arriving does not send them straight back). */
+  portalCooldown = 0;
+  /** What the player was last told about their party and invitation (see `Parties.sync`); '' when nothing. */
+  partyView = '';
+  private pinsKey = '';
+  private pinsTimer = 0;
+
+  /**
+   * Whose copy of a dungeon this player goes into: everybody who answers with the same key shares one.
+   * A party shares one (see `party.ts`); everybody else is alone (names are unique within a server).
+   */
+  instanceKey(): string {
+    return this.realm.parties.keyOf(this) ?? `solo:${this.name}`;
+  }
+
+  // ---- world edits ---------------------------------------------------------
+
+  /** Seconds until the next "you can't change this" notice (so that holding the button does not flood the chat). */
+  private lockedNotice = 0;
+
+  /**
+   * Is this block part of a protected place (an Adventure village or dungeon) that this player may not change?
+   * Creative players (operators, online) may; so may everybody mine a monster spawner, which is what the quests ask for.
+   */
+  private breakLocked(id: number, x: number, y: number, z: number, say: boolean): boolean {
+    if (id === B.SPAWNER) return false;
+    return this.placeLocked(x, y, z, say);
+  }
+
+  private placeLocked(x: number, y: number, z: number, say: boolean): boolean {
+    if (this.mode === 'creative' || !this.realm.isProtected(x, y, z)) return false;
+    if (say && this.lockedNotice <= 0) {
+      this.lockedNotice = 2;
+      this.emit({ t: 'toast', text: 'This place is protected: you cannot change it' });
+    }
+    return true;
+  }
+
+  /** Remove a block as the player: sounds, particles and (survival) drops + tool wear. */
+  breakBlock(x: number, y: number, z: number): void {
+    const id = this.world.getBlock(x, y, z);
+    const def = BLOCKS[id];
+    if (id === B.AIR || !Number.isFinite(def.hardness)) return;
+    if (this.breakLocked(id, x, y, z, true)) return;
+    const held = this.held;
+    const tool = held ? getItem(held.id).tool : null;
+    const ench = { ...this.toolEnchants(), shears: !!held && getItem(held.id).shears };
+    // Silk Touch lifts the block whole (ice stays ice, and nothing falls out of it as experience).
+    const kept = ench.silk && silkKeeps(id) && canHarvest(def, tool);
+
+    this.realm.emitNear(x, y, z, { t: 'burst', id, x, y, z, count: 32 });
+    this.realm.emitNear(x, y, z, { t: 'sound', sound: def.sound, action: 'break', vol: 1 });
+    // Ice leaves water behind (the original needs silk touch to keep it).
+    this.world.setBlock(x, y, z, id === B.ICE && !kept && this.world.getBlock(x, y - 1, z) !== B.AIR ? B.WATER : B.AIR);
+    const contents = this.blockEntities.remove(id, x, y, z);
+
+    if (this.mode === 'survival') {
+      const hint = harvestHint(def, tool);
+      if (hint) this.emit({ t: 'toast', text: hint });
+      for (const drop of blockDrops(def, tool, this.rand, ench)) this.drops.spawnAtBlock(makeStack(drop.id, drop.count), x, y, z);
+      for (const s of contents) this.drops.spawnAtBlock(s, x, y, z);
+      const xpRange = BLOCK_XP[id];
+      if (xpRange && canHarvest(def, tool) && !kept) {
+        this.realm.awardXp(xpRange[0] + Math.floor(this.rand() * (xpRange[1] - xpRange[0] + 1)), x + 0.5, y + 0.5, z + 0.5);
+      }
+      if (def.hardness > 0) this.damageHeld(1);
+      this.vitals.addExhaustion(EXHAUSTION.breakBlock);
+    }
+    if (id === B.FIRE) {
+      this.realm.fire.extinguish(x, y, z);
+      this.realm.emitNear(x, y, z, { t: 'fire', kind: 'hiss', vol: 0.5 });
+    }
+    this.realm.settleAround(x, y, z, this.mode === 'survival');
+    this.questEvent({ t: 'mine', block: id });
+  }
+
+  /** Right-click the held item on a block face: till soil with a hoe, or place a block. */
+  useHeldOn(t: { x: number; y: number; z: number; id: number; nx: number; ny: number; nz: number; fy?: number }): boolean {
+    const held = this.held;
+    const item = held ? getItem(held.id) : null;
+    if (!held || !item) return false;
+    const world = this.world;
+    // Nothing is built, tilled or lit in a protected place (bone meal only helps what already grows there).
+    if (item.use !== 'bone_meal' && (this.placeLocked(t.x, t.y, t.z, true) || this.placeLocked(t.x + t.nx, t.y + t.ny, t.z + t.nz, true))) return false;
+
+    if (item.tool?.kind === 'hoe') {
+      if (!isTillable(t.id) || world.getBlock(t.x, t.y + 1, t.z) !== B.AIR) return false;
+      if (!world.setBlock(t.x, t.y, t.z, B.FARMLAND)) return false;
+      this.realm.emitNear(t.x, t.y, t.z, { t: 'sound', sound: 'dirt', action: 'place', vol: 1 });
+      if (this.mode === 'survival') this.damageHeld(1);
+      return true;
+    }
+    if (item.use === 'flint') return this.strikeFlint(t);
+    if (item.use === 'bone_meal' && this.useBoneMeal(t)) return true;
+    if (item.use === 'bed') return this.placeBed(t);
+    if (item.use === 'door') return this.placeDoor(t);
+    if (item.block == null) return false;
+    const slab = slabInfo(item.block);
+    if (slab && this.mergeSlab(t, slab.mat)) return true;
+
+    // Plants and grass are replaced in place rather than built against.
+    const inPlace = BLOCKS[t.id].replaceable;
+    const px = inPlace ? t.x : t.x + t.nx;
+    const py = inPlace ? t.y : t.y + t.ny;
+    const pz = inPlace ? t.z : t.z + t.nz;
+    const existing = world.getBlock(px, py, pz);
+    const placeable = existing === B.AIR || BLOCKS[existing].liquid || BLOCKS[existing].replaceable;
+    let id = placementFor(item.block, inPlace ? 0 : t.nx, inPlace ? 1 : t.ny, inPlace ? 0 : t.nz, this.yaw, t.fy ?? 0.5);
+    // A lantern with no floor under it hangs instead, if there is something above to hang it from.
+    const lantern = id === null ? null : lanternInfo(id);
+    if (id !== null && lantern && !canStayAt(id, world, px, py, pz)) id = lanternId(lantern.soul, !lantern.hanging);
+    if (id === null || !placeable || !canStayAt(id, world, px, py, pz)) return false;
+    if (BLOCKS[id].solid && this.realm.players.some((p) => bodyOverlapsBlock(p.body, px, py, pz))) return false;
+    if (!world.setBlock(px, py, pz, id)) return false;
+    if (isRail(id)) railPlaced(world, px, py, pz);
+    this.realm.checkFall(px, py, pz);
+    this.realm.blockChanged(px, py, pz);
+    this.realm.emitNear(px, py, pz, { t: 'sound', sound: BLOCKS[id].sound, action: 'place', vol: 1 });
+    this.emit({ t: 'swing' });
+    if (this.mode === 'survival') {
+      held.count -= 1;
+      if (held.count <= 0) this.inventory.set(this.selected, null);
+      this.emit({ t: 'inv' });
+    }
+    this.questEvent({ t: 'place', block: item.block });
+    return true;
+  }
+
+  /** Bone meal on a crop, a sapling or grass: it grows (a sapling only now and then, like the original). */
+  private useBoneMeal(t: { x: number; y: number; z: number; id: number }): boolean {
+    const world = this.world;
+    const rand = this.rand;
+    let used = false;
+    if (isSapling(t.id)) {
+      used = true;
+      if (rand() < 0.45) growTree(world, t.x, t.y, t.z, rand);
+    } else if (t.id >= B.WHEAT_0 && t.id < B.WHEAT_3) {
+      used = world.setBlock(t.x, t.y, t.z, Math.min(B.WHEAT_3, t.id + 1 + Math.floor(rand() * 3)));
+    } else if (t.id === B.GRASS && world.getBlock(t.x, t.y + 1, t.z) === B.AIR) {
+      used = true;
+      for (let i = 0; i < 14; i++) {
+        const x = t.x + Math.floor(rand() * 5) - 2;
+        const z = t.z + Math.floor(rand() * 5) - 2;
+        for (const y of [t.y, t.y + 1, t.y - 1]) {
+          if (world.getBlock(x, y, z) !== B.GRASS || world.getBlock(x, y + 1, z) !== B.AIR) continue;
+          world.setBlock(x, y + 1, z, rand() < 0.08 ? (rand() < 0.5 ? B.DANDELION : B.ROSE) : B.TALL_GRASS);
+          break;
+        }
+      }
+    }
+    if (!used) return false;
+    this.realm.emitNear(t.x, t.y, t.z, { t: 'burst', id: B.LEAVES, x: t.x, y: t.y + 1, z: t.z, count: 8 });
+    this.realm.emitNear(t.x, t.y, t.z, { t: 'sound', sound: 'grass', action: 'place', vol: 1 });
+    this.emit({ t: 'swing' });
+    this.useUpHeld();
+    return true;
+  }
+
+  /** Right-click with flint and steel: light a fire in the cell next to the face you click (or in the plant you click). */
+  private strikeFlint(t: { x: number; y: number; z: number; id: number; nx: number; ny: number; nz: number }): boolean {
+    if (t.id === B.FIRE) return false;
+    // TNT: the spark goes into it rather than beside it.
+    if (t.id === B.TNT) {
+      this.realm.primeTnt(t.x, t.y, t.z);
+      this.emit({ t: 'swing' });
+      if (this.mode === 'survival') this.damageHeld(1);
+      return true;
+    }
+    const inPlace = BLOCKS[t.id].replaceable && !BLOCKS[t.id].liquid;
+    const x = inPlace ? t.x : t.x + t.nx;
+    const y = inPlace ? t.y : t.y + t.ny;
+    const z = inPlace ? t.z : t.z + t.nz;
+    const there = this.world.getBlock(x, y, z);
+    if (there !== B.AIR && !(BLOCKS[there].replaceable && !BLOCKS[there].liquid)) return false;
+    if (!canStayAt(B.FIRE, this.world, x, y, z)) return false;
+    if (there !== B.AIR) this.world.setBlock(x, y, z, B.AIR);
+    if (!this.realm.fire.ignite(x, y, z)) return false;
+    this.realm.emitNear(x, y, z, { t: 'fire', kind: 'ignite', vol: 0.9 });
+    this.emit({ t: 'swing' });
+    if (this.mode === 'survival') this.damageHeld(1);
+    return true;
+  }
+
+  /** Take one of the held item after placing it (survival only). */
+  private useUpHeld(): void {
+    const held = this.held;
+    if (!held || this.mode !== 'survival') return;
+    held.count -= 1;
+    if (held.count <= 0) this.inventory.set(this.selected, null);
+    this.emit({ t: 'inv' });
+  }
+
+  /**
+   * Two slabs of one kind make a full block: click the top of a bottom slab (or the underside of a top
+   * one), or place the other half into the cell beside the face you click.
+   */
+  private mergeSlab(t: { x: number; y: number; z: number; id: number; nx: number; ny: number; nz: number; fy?: number }, mat: number): boolean {
+    const world = this.world;
+    const clicked = slabInfo(t.id);
+    let cell: [number, number, number] | null = null;
+    if (clicked && clicked.mat === mat && ((t.ny > 0 && !clicked.top) || (t.ny < 0 && clicked.top))) {
+      cell = [t.x, t.y, t.z];
+    } else {
+      const nx = t.x + t.nx;
+      const ny = t.y + t.ny;
+      const nz = t.z + t.nz;
+      const there = slabInfo(world.getBlock(nx, ny, nz));
+      const wantTop = t.ny < 0 || (t.ny === 0 && (t.fy ?? 0.5) > 0.5);
+      if (there && there.mat === mat && there.top !== wantTop) cell = [nx, ny, nz];
+    }
+    if (!cell) return false;
+    const [cx, cy, cz] = cell;
+    if (this.realm.players.some((p) => bodyOverlapsBlock(p.body, cx, cy, cz))) return false;
+    if (!world.setBlock(cx, cy, cz, BUILD_MATERIALS[mat].block)) return false;
+    this.realm.blockChanged(cx, cy, cz);
+    this.realm.emitNear(cx, cy, cz, { t: 'sound', sound: BLOCKS[BUILD_MATERIALS[mat].block].sound, action: 'place', vol: 1 });
+    this.emit({ t: 'swing' });
+    this.useUpHeld();
+    return true;
+  }
+
+  /** Right-click with a door: it fills two blocks, standing on the one under it, on the edge nearest you. */
+  private placeDoor(t: { x: number; y: number; z: number; id: number; nx: number; ny: number; nz: number }): boolean {
+    const world = this.world;
+    const inPlace = BLOCKS[t.id].replaceable;
+    const px = inPlace ? t.x : t.x + t.nx;
+    const py = inPlace ? t.y : t.y + t.ny;
+    const pz = inPlace ? t.z : t.z + t.nz;
+    const free = (y: number) => {
+      const id = world.getBlock(px, y, pz);
+      return id === B.AIR || (BLOCKS[id].replaceable && !BLOCKS[id].liquid);
+    };
+    if (!this.held || !free(py) || !free(py + 1) || !IS_SOLID[world.getBlock(px, py - 1, pz)]) return false;
+    if (this.realm.players.some((p) => bodyOverlapsBlock(p.body, px, py, pz) || bodyOverlapsBlock(p.body, px, py + 1, pz))) return false;
+    const facing = lookDir(this.yaw) ^ 1;
+    if (!world.setBlock(px, py, pz, doorId(false, false, facing))) return false;
+    if (!world.setBlock(px, py + 1, pz, doorId(true, false, facing))) {
+      world.setBlock(px, py, pz, B.AIR);
+      return false;
+    }
+    this.realm.blockChanged(px, py, pz);
+    this.realm.blockChanged(px, py + 1, pz);
+    this.realm.emitNear(px, py, pz, { t: 'sound', sound: 'wood', action: 'place', vol: 1 });
+    this.emit({ t: 'swing' });
+    this.useUpHeld();
+    return true;
+  }
+
+  /** Open or close a door, trapdoor or fence gate (a door moves both its halves). */
+  private toggleSwitch(hit: { x: number; y: number; z: number; id: number }): void {
+    const world = this.world;
+    const changes: [number, number, number, number, number][] = []; // x, y, z, new id, old id
+    const door = doorInfo(hit.id);
+    const trap = trapdoorInfo(hit.id);
+    const gate = gateInfo(hit.id);
+    let closing = false;
+    if (door) {
+      changes.push([hit.x, hit.y, hit.z, doorId(door.upper, !door.open, door.facing), hit.id]);
+      const oy = door.upper ? hit.y - 1 : hit.y + 1;
+      const other = world.getBlock(hit.x, oy, hit.z);
+      if (doorInfo(other)) changes.push([hit.x, oy, hit.z, doorId(!door.upper, !door.open, door.facing), other]);
+      closing = door.open;
+    } else if (trap) {
+      changes.push([hit.x, hit.y, hit.z, trapdoorId(trap.top, !trap.open, trap.facing), hit.id]);
+      closing = trap.open;
+    } else if (gate) {
+      changes.push([hit.x, hit.y, hit.z, gateId(!gate.open, gate.facing), hit.id]);
+      closing = gate.open;
+    } else return;
+    for (const [x, y, z, id] of changes) world.setBlock(x, y, z, id);
+    // Never shut one on somebody: they would be stuck inside it.
+    if (closing && this.realm.players.some((p) => collides(world, p.body.x, p.body.y, p.body.z, p.body.width, p.body.height))) {
+      for (const [x, y, z, , old] of changes) world.setBlock(x, y, z, old);
+      return;
+    }
+    this.realm.emitNear(hit.x, hit.y, hit.z, { t: 'sound', sound: 'wood', action: 'place', vol: 0.8 });
+    this.emit({ t: 'swing' });
+  }
+
+  /** Right-click with a bucket: scoop up a water or lava source, or pour out what it holds. */
+  useBucket(): boolean {
+    const held = this.held;
+    if (!held || (held.id !== I.BUCKET && held.id !== I.WATER_BUCKET && held.id !== I.LAVA_BUCKET)) return false;
+    const d = this.look();
+    const eye = this.eye();
+    const hit = raycast(this.world, eye.x, eye.y, eye.z, d.x, d.y, d.z, REACH, true);
+    if (!hit) return false;
+    const survival = this.mode === 'survival';
+    if (this.placeLocked(hit.x, hit.y, hit.z, true) || this.placeLocked(hit.x + hit.nx, hit.y + hit.ny, hit.z + hit.nz, true)) return false;
+
+    if (held.id === I.BUCKET) {
+      if (!isFluidSource(hit.id)) return false;
+      const filled = FLUID_KIND[hit.id] === FLUID_WATER ? I.WATER_BUCKET : I.LAVA_BUCKET;
+      this.world.setBlock(hit.x, hit.y, hit.z, B.AIR);
+      this.realm.blockChanged(hit.x, hit.y, hit.z);
+      this.realm.emitNear(hit.x, hit.y, hit.z, { t: 'splash', vol: 0.6 });
+      if (survival) {
+        held.count -= 1;
+        if (held.count <= 0) this.inventory.set(this.selected, makeStack(filled, 1));
+        else this.giveOrDrop(makeStack(filled, 1));
+      } else {
+        this.giveOrDrop(makeStack(filled, 1));
+      }
+      this.emit({ t: 'swing' });
+      this.emit({ t: 'inv' });
+      return true;
+    }
+
+    const water = held.id === I.WATER_BUCKET;
+    const into = IS_LIQUID[hit.id] === 1 || BLOCKS[hit.id].replaceable;
+    const px = into ? hit.x : hit.x + hit.nx;
+    const py = into ? hit.y : hit.y + hit.ny;
+    const pz = into ? hit.z : hit.z + hit.nz;
+    const existing = this.world.getBlock(px, py, pz);
+    if (IS_SOLID[existing]) return false;
+    if (isFluidSource(existing) && FLUID_KIND[existing] === (water ? FLUID_WATER : 2)) return false;
+    if (!this.world.setBlock(px, py, pz, water ? B.WATER : B.LAVA)) return false;
+    this.realm.blockChanged(px, py, pz);
+    this.realm.emitNear(px, py, pz, { t: 'splash', vol: 0.6 });
+    if (survival) this.inventory.set(this.selected, makeStack(I.BUCKET, 1));
+    this.emit({ t: 'swing' });
+    this.emit({ t: 'inv' });
+    return true;
+  }
+
+  // ---- mobs: damage taken, melee --------------------------------------------
+
+  /** Seconds of poison left (cave spider bites): a point of damage now and then, never the last heart. */
+  poison = 0;
+  private poisonTick = 0;
+
+  hurtByMob(amount: number, kx: number, kz: number, source: MobKind | 'arrow', effect?: 'poison'): void {
+    if (this.invulnerable || this.vitals.dead) return;
+    if (this.hardcore) amount *= HARD_DAMAGE;
+    // The class's toughness, a guard ability or a roll in progress come first; a hit that is fully avoided does not even push.
+    if (this.cls) amount = this.cls.mitigate(amount);
+    if (amount <= 0) return;
+    if (this.tryBlock(amount, kx, kz)) return;
+    const before = this.vitals.health;
+    this.vitals.damage(this.protect(this.afterArmor(amount), source === 'arrow' ? 'projectile' : 'all'), 'mob');
+    if (effect === 'poison' && this.mode === 'survival') this.poison = Math.max(this.poison, this.hardcore ? 12 : 7);
+    if (this.vitals.health < before) {
+      this.emit({ t: 'dmg', x: this.body.x, y: this.body.y + 1.2, z: this.body.z, amount: Math.round((before - this.vitals.health) * 10) / 10, taken: true, ...(this.cls && this.cls.reductionLeft > 0 ? { guarded: true } : {}) });
+      this.wearArmor(amount);
+      this.killedBy = source;
+      this.body.vx = kx * 7;
+      this.body.vz = kz * 7;
+      if (this.body.onGround) this.body.vy = 4.5;
+    }
+  }
+
+  /** A falling anvil lands on the player: two points a block of the fall, at most forty. */
+  hurtByAnvil(amount: number): void {
+    if (this.mode !== 'survival' || this.spectating || this.vitals.dead || amount <= 0) return;
+    this.vitals.damage(amount * (this.hardcore ? HARD_DAMAGE : 1), 'anvil');
+  }
+
+  hurtByExplosion(x: number, y: number, z: number, radius: number, source: MobKind | 'tnt'): void {
+    const b = this.body;
+    const dPlayer = Math.hypot(b.x - x, b.y + 0.9 - y, b.z - z);
+    if (this.mode !== 'survival' || this.spectating || dPlayer >= radius * 2 || this.vitals.dead) return;
+    if (this.cls && this.cls.immuneLeft > 0) return;
+    const f = 1 - dPlayer / (radius * 2);
+    // The original's formula (exposure ignored): about 43 points at the centre of a creeper blast on Normal, 17 halfway out.
+    const blast = Math.floor(((f * f + f) / 2) * 7 * radius * 2 + 1) * (this.hardcore ? HARD_DAMAGE : 1);
+    const raw = this.cls ? this.cls.mitigate(blast) : blast;
+    const hp = this.vitals.health;
+    // A raised shield stops the blast's damage when it comes from the front (the push still happens).
+    if (!this.tryBlock(raw, b.x - x, b.z - z)) {
+      this.vitals.damage(this.protect(this.afterArmor(raw), 'blast'), 'explosion');
+      if (this.vitals.health < hp) this.wearArmor(raw);
+      this.killedBy = source;
+    }
+    const len = dPlayer || 1;
+    b.vx = ((b.x - x) / len) * 12 * f;
+    b.vz = ((b.z - z) / len) * 12 * f;
+    b.vy = 6 * f + 2;
+  }
+
+  /** The mob under the crosshair, if it is closer than any block in the way. */
+  aimedMob(): { mob: Mob; dist: number } | null {
+    const d = this.look();
+    const { x: ox, y: oy, z: oz } = this.eye();
+    const hit = this.mobs.raycast(ox, oy, oz, d.x, d.y, d.z, MELEE_REACH, MELEE_MARGIN, MELEE_LAG);
+    if (!hit) return null;
+    const block = raycast(this.world, ox, oy, oz, d.x, d.y, d.z, REACH);
+    if (block) {
+      const t = rayAabb(ox, oy, oz, d.x, d.y, d.z, [block.x, block.y, block.z], [block.x + 1, block.y + 1, block.z + 1], REACH + 1);
+      if (t !== null && t < hit.dist) return null;
+    }
+    return hit;
+  }
+
+  /** Whether the crosshair is on someone to talk to: a villager or a quest giver. */
+  get aimsAtTalker(): boolean {
+    const hit = this.aimedMob();
+    return !!hit && !hit.mob.dead && (hit.mob.kind === 'villager' || hit.mob.kind === 'npc');
+  }
+
+  /** Where a Ground Slam is (see slamLeap): 1 crouching, 2 in the air, 3 down on the shield after the blow, 0 none. The figure is drawn from it. */
+  get slamPhase(): number {
+    const leap = this.slamLeap;
+    if (leap) return leap.launched ? 2 : 1;
+    return this.slamImpact > 0 ? 3 : 0;
+  }
+
+  /** Whether a Charge (not a roll) is running: the figure is drawn leaning into it, shield first. */
+  get charging(): boolean {
+    return !!this.rush && this.rush.def.id === 'charge';
+  }
+
+  attackMob(mob: Mob): void {
+    if (mob.def.invulnerable) return;
+    this.leaveMount(); // a quest giver is spoken to, not struck
+    const held = this.held;
+    const item = held ? getItem(held.id) : null;
+    const tool = item ? item.tool : null;
+    const weapon = item ? item.weapon : null;
+    const d = this.look();
+    const hs = this.enchHeld();
+    // A class weapon hits as it says (a wand or a bow in melee is a poke); anything else as before. The class multiplies it.
+    const base = weapon ? (weapon.kind === 'melee' ? weapon.damage : 1) : tool ? tool.damage : 1;
+    const roll = rollDamage(this.cls?.stats ?? null, 'melee', base + sharpnessBonus(levelOf(hs, ENCH.SHARPNESS)), this.rand);
+    const dealt = roll.amount;
+    this.mobs.damage(mob, dealt, d.x, d.z, this.realm.mobEvents, true, true, true, {
+      knock: 1 + levelOf(hs, ENCH.KNOCKBACK),
+      fire: 4 * levelOf(hs, ENCH.FIRE_ASPECT),
+      looting: levelOf(hs, ENCH.LOOTING),
+    });
+    this.showHit(mob, dealt, roll.crit);
+    this.attackCooldown = (weapon?.kind === 'melee' ? weapon.cooldown : 0.5) / (this.cls ? this.cls.stats.attackSpeed : 1);
+    this.emit({ t: 'swing' });
+    if (tool || weapon?.kind === 'melee') this.damageHeld(1);
+    this.vitals.addExhaustion(EXHAUSTION.attack);
+    this.emit({ t: 'inv' });
+  }
+
+  // ---- interaction ---------------------------------------------------------
+
+  /** Aim, mine, attack, use and place for one frame. Call while the player is in control. */
+  updateInteraction(dt: number, f: InputFrame): void {
+    this.swingAge = Math.min(9, this.swingAge + dt);
+    this.bashAge = Math.min(9, this.bashAge + dt);
+    if (this.spectating || this.sleeping) {
+      this.target = null;
+      this.breakProgress = 0;
+      this.hudProgress = 0;
+      this.bowDraw = 0;
+      this.lowerShield();
+      return;
+    }
+    let rightPressed = f.right && !this.rightWas;
+    this.rightWas = f.right;
+    this.breakCooldown -= dt;
+    this.placeCooldown -= dt;
+    this.attackCooldown -= dt;
+    this.castCooldown -= dt;
+    this.lockedNotice -= dt;
+    if (this.emberCooldown > 0) this.emberCooldown = Math.max(0, this.emberCooldown - dt);
+    if (!f.right) this.emberHeld = false;
+
+    // Summoning a mount: nothing else is done while the cast goes on (it is ticked with the physics, see tickMount).
+    if (this.mountCast) {
+      this.target = null;
+      this.breakProgress = 0;
+      this.bowDraw = 0;
+      this.hudProgress = Math.min(1, this.mountCast.time / MOUNT_CAST);
+      return;
+    }
+
+    // Mounted: the two buttons are the mount's skills, and nothing else is done from the saddle.
+    if (this.mountId) {
+      this.updateMountSkills(dt, f);
+      return;
+    }
+
+    // A map in the hand is only for reading: it does not attack, mine, place or use anything (but it still speaks to a villager or a quest giver).
+    if (this.held && getItem(this.held.id).use === 'map') {
+      const talk = rightPressed;
+      f = { ...f, left: false, right: false };
+      rightPressed = false;
+      if (talk && this.aimsAtTalker && this.useOnMob()) return;
+    }
+
+    const d = this.look();
+    const eye = this.eye();
+    const mobHit = this.aimedMob();
+    if (mobHit && f.left && this.attackCooldown <= 0) this.attackMob(mobHit.mob);
+    if (rightPressed && this.useOnMob()) return;
+    const rigHit = mobHit ? null : this.aimedVehicle();
+    if (rigHit && f.left && this.attackCooldown <= 0) this.hitVehicle(rigHit.vehicle);
+    if (rigHit && rightPressed && !f.sneak && this.mount(rigHit.vehicle)) return;
+    // Aiming at a mob or a vehicle: don't also mine the block behind it.
+    this.target = mobHit || rigHit ? null : raycast(this.world, eye.x, eye.y, eye.z, d.x, d.y, d.z, REACH);
+
+    const held = this.held;
+    const item = held ? getItem(held.id) : null;
+    const target = this.target;
+
+    // ---- skill book: right-click to learn what is written in it (before anything the cursor is on can take the click) ----
+    if (rightPressed && item?.use === 'skill_book') {
+      this.learnFromBook(this.selected);
+      this.hudProgress = 0;
+      return;
+    }
+    // ---- mount horn: right-click to put it in the mount slot ----
+    if (rightPressed && item?.use === 'horn') {
+      this.equipHorn(this.selected);
+      this.hudProgress = 0;
+      return;
+    }
+
+    if (!target) {
+      this.breakProgress = 0;
+      this.breakKey = '';
+    } else {
+      // ---- breaking ----
+      const key = `${target.x},${target.y},${target.z}`;
+      const def = BLOCKS[target.id];
+      // A protected block does not even start to crack.
+      if (f.left && Number.isFinite(def.hardness) && !this.breakLocked(target.id, target.x, target.y, target.z, true)) {
+        if (key !== this.breakKey) {
+          this.breakKey = key;
+          this.breakProgress = 0;
+          this.hitTimer = 0;
+        }
+        const time = this.mode === 'creative' ? 0 : breakTime(def, item?.tool ?? null, this.toolEnchants().efficiency, !!item?.shears);
+        if (this.mode === 'creative') {
+          if (this.breakCooldown <= 0) {
+            this.breakCooldown = 0.22;
+            this.breakBlock(target.x, target.y, target.z);
+            this.breakKey = '';
+          }
+        } else {
+          this.breakProgress += dt / Math.max(0.05, time);
+          this.hitTimer -= dt;
+          // Mining swings the arm again and again (the others see it, though no swing event is sent).
+          if (this.swingAge >= 0.3) this.swingAge = 0;
+          if (this.hitTimer <= 0 && this.breakProgress < 1) {
+            this.hitTimer = 0.24;
+            this.realm.emitNear(target.x, target.y, target.z, { t: 'sound', sound: def.sound, action: 'hit', vol: 1 });
+            // Each blow knocks a few chips off the block.
+            this.realm.emitNear(target.x, target.y, target.z, { t: 'burst', id: target.id, x: target.x, y: target.y, z: target.z, count: 3 });
+          }
+          if (this.breakProgress >= 1) {
+            this.breakBlock(target.x, target.y, target.z);
+            this.breakProgress = 0;
+            this.breakKey = '';
+          }
+        }
+      } else {
+        this.breakProgress = 0;
+        this.breakKey = '';
+      }
+
+      // ---- use block (open GUI) ----
+      if (rightPressed && isInteractive(target.id) && !f.sneak) {
+        this.openForBlock(target);
+        this.hudProgress = 0;
+        return;
+      }
+    }
+    this.hudProgress = this.breakProgress;
+    this.updateShield(dt, f, item);
+
+    // ---- eating ----
+    if (item?.food && f.right && this.mode === 'survival' && this.vitals.canEat()) {
+      this.eatTimer += dt;
+      this.hudProgress = Math.min(1, this.eatTimer / EAT_TIME);
+      if (this.eatTimer >= EAT_TIME) {
+        this.eatTimer = 0;
+        this.vitals.eat(item.food);
+        held!.count -= 1;
+        if (held!.count <= 0) this.inventory.set(this.selected, null);
+        this.emit({ t: 'eat' });
+        this.emit({ t: 'inv' });
+      }
+      return;
+    }
+    this.eatTimer = 0;
+
+    // ---- emberstone: hold the button and stand still, and it takes you home ----
+    if (item?.use === 'emberstone' && f.right && !this.emberHeld && this.updateEmberstone(dt)) return;
+    if (this.emberTimer > 0) this.cancelEmberstone('The Emberstone was interrupted.');
+
+    // ---- armor: right-click to put it on ----
+    if (rightPressed && item?.armor) {
+      this.equipHeld();
+      return;
+    }
+
+    // ---- buckets ----
+    if (rightPressed && item?.use === 'bucket') {
+      this.useBucket();
+      return;
+    }
+
+    // ---- bottle o' enchanting: throw it ----
+    if (rightPressed && held && item?.use === 'xp_bottle') {
+      this.throwBottle(held);
+      return;
+    }
+
+    // ---- minecart on a rail, boat on the water ----
+    if (rightPressed && held && item?.use === 'vehicle' && this.placeVehicle(held)) return;
+
+    // ---- ender pearl: throw it, and go where it lands ----
+    if (rightPressed && held && item?.use === 'pearl') {
+      this.throwPearl(held);
+      return;
+    }
+
+    // ---- bow (a rider has to get off to draw it) ----
+    const aims = item?.use === 'bow' || item?.use === 'crossbow';
+    if (this.mountId && f.right && aims) this.leaveMount();
+    this.updateBow(dt, f, aims && held ? held : null);
+
+    // ---- staff, wand, spellbook: right-click casts ----
+    if (f.right && item?.weapon?.kind === 'spell' && this.castCooldown <= 0) this.castWeapon(item.weapon, item.id);
+
+    // ---- tilling / placing ----
+    if (this.target && f.right && this.placeCooldown <= 0 && item && usedOnBlock(item)) {
+      this.placeCooldown = item.tool ? 0.25 : 0.22;
+      this.useHeldOn(this.target);
+    }
+  }
+
+  /**
+   * One frame of casting the Emberstone (the button is held on it). Returns true while the cast goes on. It is lost when you
+   * walk off, are hurt or let go, and the stone then has to be tried again from the start.
+   */
+  private updateEmberstone(dt: number): boolean {
+    const b = this.body;
+    if (this.emberTimer <= 0) {
+      if (this.mode !== 'creative' && this.emberCooldown > 0) {
+        this.emit({ t: 'toast', text: `The Emberstone is resting: ${formatEmberTime(this.emberCooldown)} left.` });
+        this.emberHeld = true;
+        return false;
+      }
+      if (!this.standingStill()) {
+        this.emit({ t: 'toast', text: 'The Emberstone needs you to stand still: not while moving or jumping.' });
+        this.emberHeld = true;
+        return false;
+      }
+      this.emberFrom = { x: b.x, y: b.y, z: b.z, health: this.vitals.health };
+      this.emberTimer = Math.max(dt, 1e-3);
+      this.emberEvent('start');
+    } else {
+      if (Math.hypot(b.x - this.emberFrom.x, b.z - this.emberFrom.z) > EMBER_MOVE_LIMIT || !b.onGround) {
+        this.cancelEmberstone('The Emberstone was interrupted: you moved.');
+        return false;
+      }
+      if (this.vitals.health < this.emberFrom.health) {
+        this.cancelEmberstone('The Emberstone was interrupted: you were hurt.');
+        return false;
+      }
+      this.emberTimer += dt;
+    }
+    this.hudProgress = Math.min(1, this.emberTimer / EMBER_CAST);
+    if (this.emberTimer >= EMBER_CAST) this.finishEmberstone();
+    return true;
+  }
+
+  /** Tell everyone near where the cast began what the Emberstone is doing. */
+  private emberEvent(what: 'start' | 'stop'): void {
+    const f = this.emberFrom;
+    this.realm.emitNear(f.x, f.y, f.z, { t: 'ember', what, x: f.x, y: f.y, z: f.z }, 48);
+  }
+
+  private cancelEmberstone(text: string): void {
+    this.emberEvent('stop');
+    this.emberTimer = 0;
+    this.emberHeld = true;
+    this.hudProgress = 0;
+    this.emit({ t: 'toast', text });
+  }
+
+  /** The cast is done: stand at the bed, or in the village when there is no bed, and let the stone rest. */
+  private finishEmberstone(): void {
+    const b = this.body;
+    this.emberTimer = 0;
+    this.emberHeld = true;
+    this.hudProgress = 0;
+    if (this.mode !== 'creative') this.emberCooldown = EMBER_COOLDOWN;
+    this.slamLeap = null;
+    const f = { x: b.x, y: b.y, z: b.z };
+    this.realm.emitNear(f.x, f.y, f.z, { t: 'ember', what: 'depart', x: f.x, y: f.y, z: f.z }, 48);
+    const home = this.respawnAtBed();
+    if (!home) this.respawn();
+    this.realm.emitNear(b.x, b.y, b.z, { t: 'ember', what: 'arrive', x: b.x, y: b.y, z: b.z }, 48);
+    this.emit({ t: 'toast', text: home ? 'The Emberstone took you home.' : 'You have no bed: the Emberstone took you to the village.' });
+  }
+
+  private throwPearl(held: ItemStack): void {
+    const d = this.look();
+    const e = this.eye();
+    this.mobs.throwPearl(e.x + d.x * 0.5, e.y + d.y * 0.5 - 0.1, e.z + d.z * 0.5, d.x, d.y, d.z, this);
+    this.realm.emitNear(e.x, e.y, e.z, { t: 'mob', kind: 'skeleton', sound: 'shoot', vol: 0.5 });
+    this.emit({ t: 'swing' });
+    if (this.mode === 'survival') {
+      held.count -= 1;
+      if (held.count <= 0) this.inventory.set(this.selected, null);
+    }
+    this.emit({ t: 'inv' });
+  }
+
+  /**
+   * A thrown ender pearl came down at (x, y, z) (the last free spot of its flight): the thrower is carried there,
+   * landing on the ground below, and takes five points of fall damage (not in creative). Nothing happens when there
+   * is no room to stand.
+   */
+  pearlLand(x: number, y: number, z: number): void {
+    if (this.vitals.dead || this.spectating || this.screen === 'dead') return;
+    this.dismount();
+    const world = this.world;
+    const body = this.body;
+    let feet = Math.floor(y);
+    let found = false;
+    // The pearl stops against a wall, so back off from it when the exact spot is too tight for a person.
+    const nudges: [number, number][] = [[0, 0], [0.4, 0], [-0.4, 0], [0, 0.4], [0, -0.4], [0.4, 0.4], [-0.4, 0.4], [0.4, -0.4], [-0.4, -0.4]];
+    outer: for (const [nx, nz] of nudges) {
+      for (const dy of [0, 1, 2, -1]) {
+        if (!collides(world, x + nx, feet + dy, z + nz, body.width, body.height)) {
+          feet += dy;
+          x += nx;
+          z += nz;
+          found = true;
+          break outer;
+        }
+      }
+    }
+    if (!found) return;
+    // Settle onto whatever is below.
+    for (let i = 0; i < 12 && feet > 1 && !collides(world, x, feet - 1, z, body.width, body.height); i++) feet--;
+    this.realm.emitNear(body.x, body.y, body.z, { t: 'mob', kind: 'enderman', sound: 'teleport', vol: 0.6 });
+    this.teleport(x, feet, z);
+    this.realm.emitNear(x, feet, z, { t: 'mob', kind: 'enderman', sound: 'teleport', vol: 0.6 });
+    if (this.mode === 'survival') this.vitals.damage(PEARL_DAMAGE * (this.hardcore ? HARD_DAMAGE : 1), 'fall');
+    this.emit({ t: 'inv' });
+  }
+
+  private throwBottle(held: ItemStack): void {
+    const d = this.look();
+    const e = this.eye();
+    this.mobs.throwBottle(e.x + d.x * 0.5, e.y + d.y * 0.5 - 0.1, e.z + d.z * 0.5, d.x, d.y, d.z);
+    this.realm.emitNear(e.x, e.y, e.z, { t: 'mob', kind: 'skeleton', sound: 'shoot', vol: 0.5 });
+    this.emit({ t: 'swing' });
+    if (this.mode === 'survival') {
+      held.count -= 1;
+      if (held.count <= 0) this.inventory.set(this.selected, null);
+    }
+    this.emit({ t: 'inv' });
+  }
+
+  /**
+   * Bow: hold right-click to draw (needs an arrow, free in creative), release to shoot. Like the
+   * original, a quick tap fires a weak arrow, a full second of draw a fast, strong one.
+   */
+  private updateBow(dt: number, f: InputFrame, bow: { id: number } | null): void {
+    const canDraw = !!bow && (this.mode === 'creative' || this.inventory.countOf(I.ARROW) > 0);
+    const crossbow = !!bow && getItem(bow.id).use === 'crossbow';
+    const full = crossbow ? CROSSBOW_DRAW : BOW_FULL_DRAW;
+    if (canDraw && f.right) {
+      this.bowCharge = Math.min(full * 1.2, this.bowCharge + dt * (this.cls ? this.cls.stats.attackSpeed : 1));
+    } else if (this.bowCharge > 0) {
+      const c = Math.min(1, this.bowCharge / full);
+      this.bowCharge = 0;
+      if (canDraw && c >= (crossbow ? 1 : 0.15)) {
+        const power = crossbow ? 1 : (c * c + 2 * c) / 3;
+        const e = this.eye();
+        const hb = this.enchHeld();
+        // It leaves from the bow, held low on the right, not from the middle of the view.
+        const look = this.look();
+        const sx = e.x + look.x * 1 + Math.cos(this.yaw) * 0.28;
+        const sy = e.y + look.y * 1 - 0.2;
+        const sz = e.z + look.z * 1 - Math.sin(this.yaw) * 0.28;
+        // Arrows fall as they fly, so it is aimed a little above the crosshair: it lands on what the crosshair is on.
+        const d = this.ballisticAim(sx, sy, sz, arrowSpeed(power));
+        const arrow = this.mobs.shootArrow(sx, sy, sz, d.x, d.y, d.z, power, {
+          power: levelOf(hb, ENCH.POWER),
+          punch: levelOf(hb, ENCH.PUNCH),
+          flame: levelOf(hb, ENCH.FLAME) > 0,
+        });
+        // A crossbow bolt hits as hard as the weapon says (9 is a full bow); the class's ranged multiplier and crits come on top.
+        const weapon = bow ? getItem(bow.id).weapon : null;
+        const shot = weapon ? (arrow.damage * weapon.damage) / 9 : arrow.damage;
+        arrow.damage = rollDamage(this.cls?.stats ?? null, 'ranged', shot, this.rand).amount;
+        this.realm.emitNear(e.x, e.y, e.z, { t: 'mob', kind: 'skeleton', sound: 'shoot', vol: 0.6 });
+        if (this.mode === 'survival') {
+          if (levelOf(this.enchHeld(), ENCH.INFINITY) <= 0) this.inventory.remove(I.ARROW, 1);
+          this.damageHeld(1);
+          this.vitals.addExhaustion(0.02);
+        }
+        this.emit({ t: 'inv' });
+      }
+    }
+    this.bowDraw = bow ? Math.min(1, this.bowCharge / full) : 0;
+  }
+
+  // ---- classes: abilities, damage dealt, experience -------------------------------------------------------
+  // Everything a class does is decided here, on the server's copy of the player. A client names a button (`Command
+  // 'ability'`); what the ability costs, whether it is ready, where it aims and what it hits come from this file and
+  // from the player's own state. Abilities act on mobs only: players are never targets (PvP is off), and passive
+  // animals and villagers are left alone by the area abilities.
+
+  /** In the realm and alive: pending effects (a meteor on its way) are dropped when this is false. */
+  alive(): boolean {
+    return !this.vitals.dead && this.screen !== 'dead' && !this.spectating && this.realm.players.includes(this);
+  }
+
+  /** How fast this player moves compared with a person without a class. */
+  get speedMul(): number {
+    // A mount runs at its own speed, whoever rides it.
+    const mount = mountDef(this.mountId);
+    if (mount) return mount.speed;
+    return this.cls ? this.cls.stats.moveSpeed : 1;
+  }
+
+  /** The off-hand item that is giving the class its bonus right now (0: none), see offhandModifier. */
+  private offhandBonusId = 0;
+
+  /** Keep the class stats in step with the item in the off hand (an orb or a dagger adds to them, a shield or nothing does not). */
+  private syncOffhandBonus(): void {
+    const cls = this.cls;
+    if (!cls) return;
+    const id = this.offhand.get(0)?.id ?? 0;
+    const mod = offhandModifier(id);
+    const key = mod ? id : 0;
+    if (key === this.offhandBonusId) return;
+    this.offhandBonusId = key;
+    const full = cls.resource >= cls.stats.maxResource - 1e-6;
+    cls.setOffhandModifier(mod);
+    if (full) cls.resource = cls.stats.maxResource; // a pool that was full stays full when it gets deeper
+    this.applyClassVitals(false);
+  }
+
+  /** What the worn and held gear gave the class stats last time (see gearKey). */
+  private gearBonusKey = '';
+
+  /**
+   * Keep the class stats in step with the gear: the armor worn, the off hand and the item in hand add their bonus stats
+   * (the pieces that need a higher level or another class add nothing). Recomputed only when something changed.
+   */
+  private syncGearBonus(): void {
+    const cls = this.cls;
+    if (!cls) return;
+    const worn: (ItemStack | null)[] = [this.held, this.offhand.get(0)];
+    for (let i = 0; i < this.armor.size; i++) worn.push(this.armor.get(i));
+    const who = { id: cls.classId, level: cls.level };
+    const key = gearKey(worn, who);
+    if (key === this.gearBonusKey) return;
+    this.gearBonusKey = key;
+    const full = cls.resource >= cls.stats.maxResource - 1e-6;
+    cls.setGearModifiers(gearModifiers(worn, who));
+    if (full) cls.resource = cls.stats.maxResource; // a pool that was full stays full when it gets deeper
+    this.applyClassVitals(false);
+  }
+
+  /** Make health follow the class's stats (at a level-up the new health comes as a gain, not a full heal). */
+  private applyClassVitals(fill: boolean): void {
+    const cls = this.cls;
+    if (!cls) return;
+    const max = Math.max(1, Math.round(cls.stats.maxHealth));
+    const gained = max - this.vitals.maxHealth;
+    this.vitals.maxHealth = max;
+    if (fill) this.vitals.health = max;
+    else if (gained > 0 && !this.vitals.dead) this.vitals.health = Math.min(max, this.vitals.health + gained);
+    else this.vitals.health = Math.min(max, this.vitals.health);
+    this.lastHealth = this.vitals.health;
+  }
+
+  /** What every new character starts a world with, whatever the class: an Emberstone in the second slot of the bottom bar and a map in the third (survival only). */
+  grantStarterItems(): void {
+    if (this.mode !== 'survival') return;
+    // The Emberstone in the second slot of the bottom bar and the map in the third (they go into the bags only when those are taken).
+    for (const [slot, id] of [[1, I.EMBERSTONE], [2, I.MAP]] as const) {
+      if (!this.inventory.get(slot)) this.inventory.set(slot, makeStack(id, 1));
+      else this.collectOrDrop(makeStack(id, 1));
+    }
+  }
+
+  /**
+   * How an Adventure character begins: with nothing at all, on a cot in the Undercroft (the cave under the village), where the
+   * healer has the first quest for them (the map, the compass, the Emberstone and the weapons are rewards along the way, see
+   * quests.ts). A creative character skips all of it.
+   */
+  private beginAdventure(): void {
+    const log = this.quests;
+    if (!log) return;
+    if (this.mode !== 'survival') {
+      log.done.add(FIRST_QUEST);
+      this.syncQuests();
+      return;
+    }
+    this.emit({ t: 'toast', text: 'You wake in a lamplit cave. A woman is bending over you: right-click her to speak.' });
+    this.syncQuests();
+  }
+
+  /** Whether the character has been given the clothes of its class yet (once given, they are items like any other: taking them off keeps them off). */
+  private outfitted = false;
+
+  /** Dress a character of a class in its clothes (only into slots that are empty): they are real items in the armor slots, and may be taken off. */
+  grantOutfit(): void {
+    this.outfitted = true;
+    if (!this.cls) return;
+    outfitItems(this.cls.classId).forEach((id, slot) => {
+      if (!this.armor.get(slot)) this.armor.set(slot, makeStack(id, 1));
+    });
+    this.emit({ t: 'inv' });
+  }
+
+  /** The items a new character of the class starts a world with (survival only; nothing for a classless player). */
+  grantClassKit(): void {
+    if (!this.cls || this.mode !== 'survival') return;
+    const def = CLASSES[this.cls.classId];
+    for (const it of def.startingKit) {
+      // The off-hand piece (shield, orb, dagger) goes straight to its slot.
+      if (it.id === def.startingOffhand && !this.offhand.get(0)) this.offhand.set(0, makeStack(it.id, 1));
+      else this.giveOrDrop(makeStack(it.id, it.count));
+    }
+    this.selected = 0;
+    this.emit({ t: 'inv' });
+  }
+
+  /**
+   * Class experience, with the level-up it may bring. The game itself no longer gives any (the class follows the
+   * character's level, see `syncClassLevel`); this stays as a way to push the class level for tests and debugging.
+   */
+  addClassXp(amount: number): void {
+    const cls = this.cls;
+    if (!cls || this.spectating || this.vitals.dead) return;
+    this.announceClassLevel(cls.addXp(amount), true);
+  }
+
+  /**
+   * The class follows the character's level (the experience level on the green bar): levels it reaches teach the
+   * abilities that unlock at them and strengthen the class. Never goes back down, so spending levels costs nothing.
+   * `announce` is false when a save was just loaded.
+   */
+  syncClassLevel(announce = true): void {
+    const cls = this.cls;
+    if (!cls || this.spectating || this.vitals.dead) return;
+    this.announceClassLevel(cls.raiseLevel(this.xp.level), announce);
+  }
+
+  private announceClassLevel(gained: { levels: number }, announce: boolean): void {
+    const cls = this.cls;
+    if (!cls || gained.levels <= 0) return;
+    this.applyClassVitals(false);
+    if (!announce) return;
+    this.emit({ t: 'classlevel', level: cls.level });
+    // A skill book in the bags that the new level has made readable: say so (abilities are learned from books, not by levelling).
+    const readable: string[] = [];
+    for (let i = 0; i < this.inventory.size; i++) {
+      const s = this.inventory.get(i);
+      const id = s ? skillBookAbility(s.id) : null;
+      const def = id ? ABILITY_BY_ID.get(id) : undefined;
+      if (def && def.classId === cls.classId && !cls.unlocked.has(def.id) && def.unlockLevel <= cls.level && def.unlockLevel > cls.level - gained.levels) readable.push(def.name);
+    }
+    this.emit({ t: 'toast', text: readable.length ? `You can now learn ${readable.join(', ')}: right-click the skill book` : `${CLASSES[cls.classId].name} grows stronger` });
+  }
+
+  /**
+   * Use the jewel on the cursor on the piece of equipment in slot `i` of the open screen (the bags, the armor slots or the off
+   * hand). The jewel is used up unless it was refused, and the player is told how it went. False when this is not such a
+   * click: no jewel, an empty slot, or something a jewel does not work on (the click then does what it always does).
+   */
+  private useJewelOnSlot(i: number): boolean {
+    const m = this.menu;
+    const cursor = m?.cursor;
+    const kind = cursor ? jewelKind(cursor.id) : null;
+    const slot = m?.slots[i];
+    const target = m?.jewelTarget(i);
+    if (!m || !cursor || !kind || !slot || !target) return false;
+    const result = useJewel(kind, target, () => this.rand());
+    this.emit({ t: 'toast', text: result.text });
+    if (result.used) {
+      if (result.stack) slot.container.set(slot.index, result.stack);
+      cursor.count -= 1;
+      if (cursor.count <= 0) m.cursor = null;
+      this.emit({ t: 'jewel', ok: result.ok, kind, slot: i, label: result.label, detail: result.detail });
+    }
+    return true;
+  }
+
+  /**
+   * Read a skill book in the bags (`index` is its slot): the ability it teaches is learned and the book is used up.
+   * Nothing is lost when it cannot be learned, and the player is told why: the book is of another class, the level is
+   * too low, or the ability is known already. Returns whether the slot held a skill book at all (so the click that
+   * read it does not also pick it up).
+   */
+  learnFromBook(index: number): boolean {
+    const stack = this.inventory.get(index);
+    const ability = stack ? skillBookAbility(stack.id) : null;
+    const def = ability ? ABILITY_BY_ID.get(ability) : undefined;
+    if (!stack || !ability || !def) return false;
+    if (this.vitals.dead || this.spectating || this.sleeping) return true;
+    const cls = this.cls;
+    const result = cls ? cls.learn(ability) : 'class';
+    if (result === 'learned') {
+      if (this.mode === 'survival') {
+        stack.count -= 1;
+        if (stack.count <= 0) this.inventory.set(index, null);
+      }
+      this.emit({ t: 'learned', ability });
+      this.emit({ t: 'toast', text: `You have learned ${def.name}` });
+    } else {
+      const own = CLASSES[def.classId].name;
+      this.emit({
+        t: 'toast',
+        text:
+          result === 'level'
+            ? `${def.name} needs level ${def.unlockLevel} (you are level ${cls?.level ?? 1})`
+            : result === 'known'
+              ? `You already know ${def.name}`
+              : `Only a ${own} can learn ${def.name}`,
+      });
+    }
+    this.emit({ t: 'inv' });
+    return true;
+  }
+
+  // ---- mounts (see mounts.ts) ---------------------------------------------------------------------------------
+
+  /** The level a mount asks for: the class level, or the experience level for a character without a class. */
+  private get mountLevel(): number {
+    return this.cls ? this.cls.level : Math.max(1, this.xp.level);
+  }
+
+  /** The mount whose horn is in the mount slot (null: the slot is empty). */
+  get slotMount(): MountId | null {
+    const s = this.mountSlot.get(0);
+    return s ? mountOfItem(s.id) : null;
+  }
+
+  /** What the interface needs to know about the mounts: the one being ridden and the one in the slot (1 + their place in MOUNTS, 0 for none), and the cooldowns of the skills. */
+  mountView(): MountView {
+    const at = (id: MountId | null): number => (id ? MOUNTS.findIndex((m) => m.id === id) + 1 : 0);
+    return { mount: at(this.mountId), pick: at(this.slotMount), cd: [Math.ceil(this.biteCd * 10) / 10, Math.ceil(this.howlCd * 10) / 10] };
+  }
+
+  /**
+   * Put a mount horn of the bags (`index` is its slot) in the mount slot; a horn already there goes back to where this one
+   * was. Returns whether the slot held a horn at all (so the click that used it does not also pick it up).
+   */
+  equipHorn(index: number): boolean {
+    const stack = this.inventory.get(index);
+    const id = stack ? mountOfItem(stack.id) : null;
+    const def = mountDef(id);
+    if (!stack || !id || !def) return false;
+    if (this.vitals.dead || this.spectating || this.sleeping || this.mountId || this.mountCast) return true;
+    const worn = this.mountSlot.get(0);
+    this.mountSlot.set(0, cloneStack({ ...stack, count: 1 }));
+    this.inventory.set(index, worn);
+    this.emit({ t: 'toast', text: `${def.name} is in the mount slot: press H to ride (${mountSpeedText(def)}, level ${def.level})` });
+    this.emit({ t: 'inv' });
+    return true;
+  }
+
+  /**
+   * The mount key. Mounted: get off. Summoning: cancel. Otherwise begin to summon the mount of the horn in the mount slot: a
+   * cast that needs the player to stand still (see tickMount), and is refused indoors, in water and in the air.
+   */
+  useMountKey(): void {
+    if (!this.ready || this.vitals.dead || this.spectating || this.sleeping || this.screen !== 'none') return;
+    if (this.mountCast) {
+      this.cancelMountCast('Summoning cancelled.');
+      return;
+    }
+    if (this.mountId) {
+      this.leaveMount();
+      return;
+    }
+    if (this.riding) return;
+    const id = this.slotMount ?? (this.mode === 'creative' ? MOUNTS[MOUNTS.length - 1].id : null);
+    const def = mountDef(id);
+    if (!id || !def) {
+      this.emit({ t: 'toast', text: 'The mount slot is empty. Fenna Longbow, at the market, sells horns: put one in the slot (top right).' });
+      return;
+    }
+    if (this.mode === 'survival' && this.mountLevel < def.level) {
+      this.emit({ t: 'toast', text: `${def.horn} needs level ${def.level} (you are level ${this.mountLevel})` });
+      return;
+    }
+    const b = this.body;
+    if (this.flying) {
+      this.emit({ t: 'toast', text: "You can't mount while flying." });
+      return;
+    }
+    if (!this.standingStill()) {
+      this.emit({ t: 'toast', text: "You can't mount while moving or jumping: stand still." });
+      return;
+    }
+    const block = mountBlocker(this.world, b.x, b.y, b.z, b.inWater);
+    if (block) {
+      this.emit({ t: 'toast', text: MOUNT_BLOCK_TEXT[block] });
+      return;
+    }
+    this.lowerShield();
+    this.mountCast = { id, time: 0, x: b.x, y: b.y, z: b.z, health: this.vitals.health };
+    this.realm.emitNear(b.x, b.y, b.z, { t: 'mount', what: 'start', id, x: b.x, y: b.y, z: b.z }, 48);
+  }
+
+  /** The summoning is lost (`text`: told to the player), and everyone near sees it end. */
+  private cancelMountCast(text?: string): void {
+    const cast = this.mountCast;
+    if (!cast) return;
+    this.mountCast = null;
+    this.hudProgress = 0;
+    this.realm.emitNear(cast.x, cast.y, cast.z, { t: 'mount', what: 'stop', id: cast.id, x: cast.x, y: cast.y, z: cast.z }, 48);
+    if (text) this.emit({ t: 'toast', text });
+  }
+
+  /** Get off the mount (and lose a summoning that is under way). */
+  leaveMount(text?: string): void {
+    this.cancelMountCast();
+    const id = this.mountId;
+    if (!id) return;
+    this.mountId = null;
+    const b = this.body;
+    this.peakY = b.y;
+    this.realm.emitNear(b.x, b.y, b.z, { t: 'mount', what: 'off', id, x: b.x, y: b.y, z: b.z }, 48);
+    if (text) this.emit({ t: 'toast', text });
+  }
+
+  /** One frame of the mount's skills: the left button bites, the right one howls up a thunderstorm (each when it is ready). */
+  private updateMountSkills(dt: number, f: InputFrame): void {
+    this.biteCd = Math.max(0, this.biteCd - dt);
+    this.howlCd = Math.max(0, this.howlCd - dt);
+    this.target = null;
+    this.breakProgress = 0;
+    this.breakKey = '';
+    this.bowDraw = 0;
+    this.eatTimer = 0;
+    this.hudProgress = 0;
+    this.lowerShield();
+    const def = mountDef(this.mountId);
+    if (!def || this.vitals.dead || this.spectating) return;
+    if (f.left && this.biteCd <= 0) this.mountBite(def.id, def.power);
+    if (f.right && this.howlCd <= 0) this.mountHowl(def.id, def.power);
+  }
+
+  /** The bite: a sweep in front of the mount, hurting every foe in reach and throwing them back. */
+  private mountBite(id: MountId, power: number): void {
+    const b = this.body;
+    const s = MOUNT_BITE;
+    const look = this.flatLook();
+    const min = Math.cos(s.arc / 2);
+    const attackSpeed = this.cls ? this.cls.stats.attackSpeed : 1;
+    this.biteCd = s.cooldown / attackSpeed;
+    for (const m of this.foesNear(b.x, b.y, b.z, s.range, 5)) {
+      const dx = m.body.x - b.x;
+      const dz = m.body.z - b.z;
+      const len = Math.hypot(dx, dz);
+      if (len > 0.5 && (dx * look.x + dz * look.z) / len < min) continue;
+      this.strike(m, s.damage * power, 'melee', { x: b.x, z: b.z }, s.knock);
+    }
+    this.vitals.addExhaustion(EXHAUSTION.attack);
+    // The bite leaves a mark running to the far end of its reach, in the colour of the mount's lightning.
+    this.realm.effects.mark('fang', this.name, b.x, b.y, b.z, s.range, 0.7, { x: b.x + look.x * s.range, y: b.y, z: b.z + look.z * s.range }).mount = id;
+    this.realm.emitNear(b.x, b.y, b.z, { t: 'mount', what: 'bite', id, x: b.x, y: b.y, z: b.z, yaw: this.yaw }, 48);
+  }
+
+  /**
+   * The Thunder Howl: the mount throws up its head and howls, and the storm answers. The ground the rider's crosshair is on is marked
+   * and, a moment later, lightning strikes it again and again, hurting every foe within reach of the strike.
+   */
+  private mountHowl(id: MountId, power: number): void {
+    const b = this.body;
+    const s = MOUNT_HOWL;
+    const look = this.flatLook();
+    this.howlCd = s.cooldown / (this.cls ? this.cls.stats.attackSpeed : 1);
+    let { x, y, z } = this.aimGround(s.reach);
+    // Not at the mount's own feet: a storm that close would strike the saddle, so it is called a few blocks ahead instead.
+    if (Math.hypot(x - b.x, z - b.z) < 3) {
+      x = b.x + look.x * 3;
+      z = b.z + look.z * 3;
+      y = this.groundBelow(x, b.y + 1, z, 4);
+    }
+    this.realm.effects.addZone({ owner: this, by: this.name, x, y, z, radius: s.radius, damage: s.damage * power, kind: 'spell', delay: s.delay, waves: s.strikes, interval: s.interval, warn: 'thunder_warn', hit: 'thunder_hit', knock: s.knock, mount: id });
+    this.vitals.addExhaustion(EXHAUSTION.attack);
+    this.realm.emitNear(b.x, b.y, b.z, { t: 'mount', what: 'howl', id, x: b.x, y: b.y, z: b.z, yaw: this.yaw }, 48);
+  }
+
+  /** One physics step of the mount: the summoning counts up (and is lost if the player moves or is hurt), and a rider in deep water or lava is thrown off. */
+  private tickMount(dt: number): void {
+    const b = this.body;
+    const cast = this.mountCast;
+    if (cast) {
+      if (this.vitals.dead || this.screen !== 'none' || this.sleeping || this.riding || this.flying) {
+        this.cancelMountCast();
+        return;
+      }
+      if (Math.hypot(b.x - cast.x, b.z - cast.z) > MOUNT_MOVE_LIMIT || Math.abs(b.y - cast.y) > 0.6 || !b.onGround) {
+        this.cancelMountCast('Summoning interrupted: you moved.');
+        return;
+      }
+      if (this.vitals.health < cast.health) {
+        this.cancelMountCast('Summoning interrupted: you were hurt.');
+        return;
+      }
+      if (b.inWater) {
+        this.cancelMountCast("You can't mount in the water.");
+        return;
+      }
+      cast.health = Math.max(cast.health, this.vitals.health);
+      cast.time += dt;
+      if (cast.time >= MOUNT_CAST) {
+        this.mountCast = null;
+        this.mountId = cast.id;
+        this.hudProgress = 0;
+        this.peakY = b.y;
+        this.realm.emitNear(b.x, b.y, b.z, { t: 'mount', what: 'on', id: cast.id, x: b.x, y: b.y, z: b.z }, 48);
+      }
+      return;
+    }
+    if (this.mountId) {
+      if (this.vitals.dead || this.spectating) this.leaveMount();
+      else if (this.flying) this.leaveMount();
+      else if (b.eyeInWater || b.inLava) this.leaveMount('The water is too deep: you are off your mount.');
+      else {
+        // A mount is for the open: the inside of a house, a cellar or a cave puts the rider off after a moment (a gate or a bridge does not: see `rideEnclosed`).
+        this.rideCheck -= dt;
+        if (this.rideCheck <= 0) {
+          this.rideCheck = RIDE_CHECK;
+          this.rideCover = rideEnclosed(this.world, b.x, b.y, b.z) ? this.rideCover + RIDE_CHECK : 0;
+          if (this.rideCover >= RIDE_GRACE) this.leaveMount('You are off your mount: you cannot ride indoors.');
+        }
+      }
+    } else {
+      this.rideCover = 0;
+      this.rideCheck = 0;
+    }
+  }
+
+  /** Whether the player is standing still on the ground: not walking, not jumping or falling (the Emberstone and the mount are only cast like that). */
+  private standingStill(): boolean {
+    const b = this.body;
+    return b.onGround && Math.hypot(b.vx, b.vz) < STILL_SPEED;
+  }
+  /** A mob is a target for abilities: anything hostile, and the farm animals (cows, pigs, sheep...), but not villagers, quest givers or other bystanders. */
+  private isFoe(m: Mob): boolean {
+    return !m.dead && (m.def.hostile || !m.def.ambient) && !m.def.invulnerable;
+  }
+
+  private foesNear(x: number, y: number, z: number, radius: number, height = 3.5): Mob[] {
+    const out: Mob[] = [];
+    for (const m of this.mobs.mobs) {
+      if (!this.isFoe(m)) continue;
+      if (Math.hypot(m.body.x - x, m.body.z - z) <= radius + (m.body.width ?? 0.6) / 2 && Math.abs(m.body.y - y) <= height) out.push(m);
+    }
+    return out;
+  }
+
+  /**
+   * One hit on a mob by this player's class: the class's multiplier for the kind of damage and a critical roll
+   * (the server's own dice), then the mob's usual damage and knockback. `from` is where the push comes from.
+   */
+  strike(mob: Mob, base: number, kind: DamageKind, from: { x: number; z: number }, knock = 1, lift = 0): void {
+    if (mob.dead || mob.def.invulnerable) return;
+    const roll = rollDamage(this.cls?.stats ?? null, kind, base, this.rand);
+    this.mobs.damage(mob, roll.amount, mob.body.x - from.x, mob.body.z - from.z, this.realm.mobEvents, true, knock > 0, true, { knock, lift });
+    this.showHit(mob, roll.amount, roll.crit);
+  }
+
+  /** Tell the player how much a hit of theirs did (the number floats up over the mob). */
+  private showHit(mob: Mob, amount: number, crit: boolean): void {
+    // A training dummy also reports what it has taken so far (it starts over when it has taken all it has).
+    const total = mob.kind === 'dummy' ? { total: Math.round(mob.maxHealth - mob.health) } : {};
+    this.emit({ t: 'dmg', x: mob.body.x, y: mob.body.y + (mob.body.height ?? 1.8) + 0.25, z: mob.body.z, amount: Math.round(amount * 10) / 10, ...(crit ? { crit: true } : {}), ...total });
+  }
+
+  /** The way the player faces on the ground (unit length). */
+  private flatLook(): { x: number; z: number } {
+    return { x: -Math.sin(this.yaw), z: -Math.cos(this.yaw) };
+  }
+
+  /** The ground at (x, z) at or below `y` (up to `depth` blocks down), as the height of a foot standing on it. */
+  private groundBelow(x: number, y: number, z: number, depth = 12): number {
+    let by = Math.floor(y);
+    for (let i = 0; i < depth && by > 0; i++, by--) {
+      if (IS_SOLID[this.world.getBlock(Math.floor(x), by - 1, Math.floor(z))]) return by;
+    }
+    return Math.floor(y);
+  }
+
+  /**
+   * The direction to loose an arrow from (sx, sy, sz) at `speed` so that, falling as it flies, it passes through whatever
+   * the crosshair is on (a mob or a block; far ahead if it is on nothing). Falls back to the line of sight when the target
+   * is out of range or straight above or below.
+   */
+  private ballisticAim(sx: number, sy: number, sz: number, speed: number): { x: number; y: number; z: number } {
+    const d = this.look();
+    const e = this.eye();
+    const REACH = 64;
+    let dist = 40;
+    const block = raycast(this.world, e.x, e.y, e.z, d.x, d.y, d.z, REACH);
+    if (block) dist = Math.hypot(block.x + 0.5 + block.nx * 0.5 - e.x, block.y + 0.5 + block.ny * 0.5 - e.y, block.z + 0.5 + block.nz * 0.5 - e.z);
+    const mob = this.mobs.raycast(e.x, e.y, e.z, d.x, d.y, d.z, Math.min(dist, REACH), 0.2);
+    if (mob) dist = mob.dist;
+    const hx = e.x + d.x * dist - sx;
+    const hz = e.z + d.z * dist - sz;
+    const dy = e.y + d.y * dist - sy;
+    const h = Math.hypot(hx, hz);
+    if (h < 1.5) return d;
+    const g = ARROW_GRAVITY;
+    const v2 = speed * speed;
+    const disc = v2 * v2 - g * (g * h * h + 2 * dy * v2);
+    // Out of range: lob it up as far as is natural, so it falls short of the target instead of flying flat.
+    const tan = disc < 0 ? Math.min(0.45, v2 / (g * h)) : (v2 - Math.sqrt(disc)) / (g * h); // else the flatter of the two ways to get there
+    const cos = 1 / Math.sqrt(1 + tan * tan);
+    return { x: (hx / h) * cos, y: tan * cos, z: (hz / h) * cos };
+  }
+
+  /** The point on the ground the player is looking at, within `reach` blocks (the end of the reach, brought down to the ground, if nothing is hit). */
+  private aimGround(reach: number): { x: number; y: number; z: number } {
+    const d = this.look();
+    const e = this.eye();
+    const hit = raycast(this.world, e.x, e.y, e.z, d.x, d.y, d.z, reach);
+    if (hit && hit.ny > 0) return { x: hit.x + 0.5, y: hit.y + 1, z: hit.z + 0.5 };
+    const px = hit ? hit.x + 0.5 + hit.nx : e.x + d.x * reach;
+    const pz = hit ? hit.z + 0.5 + hit.nz : e.z + d.z * reach;
+    const py = hit ? hit.y + 0.5 + hit.ny : e.y + d.y * reach;
+    return { x: px, y: this.groundBelow(px, py, pz, 24), z: pz };
+  }
+
+  /**
+   * The ability on a button: checks it is unlocked, off cooldown and affordable, pays for it and does it. Returns what
+   * happened. Everything here is decided by the server's own state, so asking for a button is all a client can do.
+   */
+  useAbility(slot: number): 'cast' | 'noclass' | 'busy' | CastBlock {
+    const cls = this.cls;
+    if (!cls) return 'noclass';
+    const def = abilityAt(cls.classId, slot);
+    if (!def) return 'locked';
+    if (!this.ready || this.vitals.dead || this.spectating || this.sleeping || this.riding || this.screen !== 'none') return 'busy';
+    if (this.mountId) {
+      this.emit({ t: 'toast', text: 'On a mount your buttons are its skills: get off to use abilities.' });
+      return 'busy';
+    }
+    const why = cls.block(def.id);
+    if (why) {
+      const text =
+        why === 'locked'
+          ? `You have not learned ${def.name}: find or buy its skill book`
+          : why === 'cooldown'
+            ? `${def.name} is not ready (${Math.ceil(cls.cooldownLeft(def.id))}s)`
+            : `Not enough ${CLASSES[cls.classId].resource.name.toLowerCase()}`;
+      this.emit({ t: 'toast', text });
+      return why;
+    }
+    cls.commit(def.id);
+    this.leaveMount();
+    this.runAbility(def);
+    this.emit({ t: 'cast', slot });
+    // The sword swings for the others; a shield bash, a charge and a guard have their own pictures (the client draws them from the cast).
+    if (def.id !== 'shield_bash' && def.id !== 'charge' && def.id !== 'iron_defense' && def.id !== 'ground_slam') this.emit({ t: 'swing' });
+    return 'cast';
+  }
+
+  /** A blast around a point: hurts (and stuns or slows) every foe within the radius, and leaves its mark. */
+  private novaAt(def: AbilityDef, e: Extract<AbilityDef['effect'], { t: 'nova' }>, x: number, y: number, z: number, from: { x: number; z: number }): void {
+    for (const m of this.foesNear(x, y, z, e.radius)) {
+      this.strike(m, e.damage, def.kind, from, e.knock ?? 0, e.lift ?? 0);
+      if (e.stun || e.slow) this.mobs.applyStatus(m, { ...(e.stun ? { stun: e.stun } : {}), ...(e.slow ? { slow: e.slow } : {}) });
+    }
+    // The frost stays on the ground a little while after the wave has passed; a slam leaves its cracks.
+    if (def.id === 'frost_nova') this.realm.effects.mark('frost_nova', this.name, x, y, z, e.radius, 1.6);
+    else this.realm.effects.mark('slam', this.name, x, y, z, e.radius, 1.4);
+  }
+
+  /** Start a Charge: the body runs, a step at a time, along the way it was aimed (see stepRush). */
+  private startRush(def: AbilityDef, e: Extract<AbilityDef['effect'], { t: 'dash' }>, dx: number, dz: number): void {
+    const b = this.body;
+    const speed = e.speed ?? 20;
+    // A charge's mark follows the body; a roll's is the path it takes (to wherever the way is clear, up to its distance).
+    let mark: Fx;
+    if (e.hit) mark = this.realm.effects.mark('charge', this.name, b.x, b.y, b.z, 1.2, e.distance / speed + 0.5);
+    else {
+      let reach = 0;
+      for (let at = 0.4; at <= e.distance; at += 0.4) {
+        if (collides(this.world, b.x + dx * at, b.y, b.z + dz * at, b.width, b.height) && collides(this.world, b.x + dx * at, b.y + 1, b.z + dz * at, b.width, b.height)) break;
+        reach = at;
+      }
+      mark = this.realm.effects.mark('roll', this.name, b.x, b.y + 0.9, b.z, 1, e.distance / speed + 0.5, { x: b.x + dx * reach, y: b.y + 0.9, z: b.z + dz * reach });
+    }
+    this.rush = { yaw: Math.atan2(-dx, -dz), speed, left: e.distance, time: 0, stall: 0, dx, dz, hit: new Set(), def, mark };
+    // Off the mark at once rather than building up speed.
+    b.vx = dx * speed * 0.6;
+    b.vz = dz * speed * 0.6;
+    if (e.immune) this.cls?.grantImmunity(e.immune);
+  }
+
+  private endRush(): void {
+    const r = this.rush;
+    if (!r) return;
+    this.rush = null;
+    if (r.mark.k === 'charge') r.mark.ttl = Math.min(r.mark.ttl, r.mark.age + 0.6);
+    else {
+      // a roll comes out of it with a little run left, not at full speed
+      this.body.vx *= 0.35;
+      this.body.vz *= 0.35;
+    }
+  }
+
+  /** Called every step while charging: count the distance, hit what is in the way, hop a block that stops it, and stop at the end or at a wall. */
+  private stepRush(px: number, pz: number): void {
+    const r = this.rush;
+    if (!r) return;
+    const b = this.body;
+    const e = r.def.effect;
+    if (e.t !== 'dash') return this.endRush();
+    r.time += STEP;
+    const moved = Math.hypot(b.x - px, b.z - pz);
+    r.left -= moved;
+    if (r.mark.k === 'charge') {
+      r.mark.x = b.x;
+      r.mark.y = b.y;
+      r.mark.z = b.z;
+    }
+    if (e.hit) {
+      for (const m of this.foesNear(b.x, b.y, b.z, e.hit.radius, 2)) {
+        if (r.hit.has(m)) continue;
+        r.hit.add(m);
+        this.strike(m, e.hit.damage, r.def.kind, { x: b.x - r.dx, z: b.z - r.dz }, e.hit.knock ?? 0, e.hit.lift ?? 0);
+      }
+    }
+    // Stopped by something: a block high enough to hop is hopped, a wall ends it.
+    r.stall = moved < r.speed * STEP * 0.35 ? r.stall + 1 : 0;
+    if (r.stall > 16 || this.vitals.dead || this.flying || this.riding || b.inWater || r.time > (e.distance / r.speed) * 2 + 0.6 || r.left <= 0) {
+      this.peakY = b.y;
+      this.endRush();
+    }
+  }
+
+  /** Called every step: a Ground Slam in the air comes down (the blast), or is called off if the player cannot land normally. */
+  private stepSlamLeap(): void {
+    if (this.slamImpact > 0) this.slamImpact = Math.max(0, this.slamImpact - STEP);
+    const leap = this.slamLeap;
+    if (!leap) return;
+    const b = this.body;
+    leap.time += STEP;
+    if (this.vitals.dead || this.flying || this.riding || b.inWater || b.onLadder || b.inWeb || leap.time > 4 + SLAM_WIND) {
+      this.slamLeap = null;
+      this.endRush();
+      return;
+    }
+    const e = leap.def.effect;
+    if (e.t !== 'nova' || !e.leap) {
+      this.slamLeap = null;
+      return;
+    }
+    if (!leap.launched) {
+      // Crouching (the body keeps moving as it was) until it springs.
+      if (SLAM_WIND > leap.time) return;
+      // The spring: thrown up and ahead, the way the player is looking now, with a puff of dust from the ground under the feet.
+      const look = this.flatLook();
+      b.vy = e.leap.up;
+      b.vx = look.x * e.leap.forward;
+      b.vz = look.z * e.leap.forward;
+      b.onGround = false;
+      this.prevOnGround = false;
+      this.peakY = b.y;
+      leap.launched = true;
+      leap.time = 0;
+      this.realm.effects.mark('leap', this.name, b.x, b.y, b.z, 1.4, 0.6);
+      this.realm.emitNear(b.x, b.y, b.z, { t: 'sound', sound: this.soundUnderfoot(), action: 'land', vol: 1.5 });
+      return;
+    }
+    // Still going up on the first steps: the body has not left the ground yet in the eyes of the physics.
+    if (0.2 > leap.time || !b.onGround) return;
+    this.slamLeap = null;
+    this.endRush();
+    // The landing is the attack, not a fall.
+    this.peakY = b.y;
+    b.vx = b.vz = 0;
+    this.slamImpact = SLAM_IMPACT;
+    this.novaAt(leap.def, e, b.x, b.y, b.z, { x: b.x, z: b.z });
+    this.realm.emitNear(b.x, b.y, b.z, { t: 'sound', sound: this.soundUnderfoot(), action: 'land', vol: 1.2 });
+  }
+
+  private runAbility(def: AbilityDef): void {
+    const b = this.body;
+    const fx = this.realm.effects;
+    const e = def.effect;
+    const from = { x: b.x, z: b.z };
+    const look = this.flatLook();
+    switch (e.t) {
+      case 'nova': {
+        if (e.leap) {
+          // A leap: a crouch first (the body is held still), then thrown up and ahead; the blast comes when the feet are back on the ground.
+          this.slamLeap = { def, time: 0, launched: false };
+          this.slamImpact = 0;
+          return;
+        }
+        this.novaAt(def, e, b.x, b.y, b.z, from);
+        return;
+      }
+      case 'cone': {
+        if (def.id === 'shield_bash') this.bashAge = 0;
+        const min = Math.cos(e.arc / 2);
+        for (const m of this.foesNear(b.x, b.y, b.z, e.range)) {
+          const dx = m.body.x - b.x;
+          const dz = m.body.z - b.z;
+          const len = Math.hypot(dx, dz);
+          if (len > 0.5 && (dx * look.x + dz * look.z) / len < min) continue;
+          this.strike(m, e.damage, def.kind, from, e.knock ?? 0, e.lift ?? 0);
+          if (e.stun) this.mobs.applyStatus(m, { stun: e.stun });
+        }
+        // The far end of the mark says which way the blow went.
+        fx.mark('bash', this.name, b.x + look.x * 1.2, b.y + 0.9, b.z + look.z * 1.2, e.range / 2, 0.7, { x: b.x + look.x * e.range, y: b.y + 0.9, z: b.z + look.z * e.range });
+        return;
+      }
+      case 'dash': {
+        let dx = look.x;
+        let dz = look.z;
+        if (e.direction === 'move') {
+          // Where you are moving; standing still, backwards.
+          const fwd = this.moveIn.forward;
+          const side = this.moveIn.strafe;
+          if (fwd === 0 && side === 0) {
+            dx = -look.x;
+            dz = -look.z;
+          } else {
+            // Strafe +1 is to the right of the facing direction, which is (cos yaw, -sin yaw).
+            dx = look.x * fwd + Math.cos(this.yaw) * side;
+            dz = look.z * fwd - Math.sin(this.yaw) * side;
+            const len = Math.hypot(dx, dz) || 1;
+            dx /= len;
+            dz /= len;
+          }
+        }
+        if (e.speed) {
+          this.startRush(def, e, dx, dz);
+          return;
+        }
+        const start = { x: b.x, y: b.y, z: b.z };
+        const hit = new Set<Mob>();
+        const stepLen = 0.4;
+        for (let travelled = 0; travelled < e.distance; travelled += stepLen) {
+          const nx = b.x + dx * stepLen;
+          const nz = b.z + dz * stepLen;
+          if (!collides(this.world, nx, b.y, nz, b.width, b.height)) {
+            b.x = nx;
+            b.z = nz;
+          } else if (!collides(this.world, nx, b.y + 1, nz, b.width, b.height)) {
+            b.x = nx;
+            b.y += 1;
+            b.z = nz;
+          } else break;
+          if (e.hit) {
+            for (const m of this.foesNear(b.x, b.y, b.z, e.hit.radius, 2)) {
+              if (hit.has(m)) continue;
+              hit.add(m);
+              this.strike(m, e.hit.damage, def.kind, { x: b.x - dx, z: b.z - dz }, e.hit.knock ?? 0, e.hit.lift ?? 0);
+            }
+          }
+        }
+        b.vx = 0;
+        b.vz = 0;
+        this.peakY = b.y;
+        if (e.immune) this.cls?.grantImmunity(e.immune);
+        fx.mark(e.hit ? 'charge' : 'roll', this.name, start.x, start.y + 0.9, start.z, 1, 0.6, { x: b.x, y: b.y + 0.9, z: b.z });
+        return;
+      }
+      case 'bolt': {
+        const d = this.look();
+        const eye = this.eye();
+        const spell = def.id === 'fireball' ? 1 : 2;
+        this.mobs.castBolt(eye.x + d.x * 0.6, eye.y + d.y * 0.6 - 0.1, eye.z + d.z * 0.6, d.x, d.y, d.z, e.speed, spell, (hx, hy, hz, target) => {
+          this.boltBurst(hx, hy, hz, target, e.damage, def.kind, e.radius ?? 0, e.burn ?? 0, spell === 1 ? 'fireball_burst' : 'bolt');
+        });
+        this.realm.emitNear(eye.x, eye.y, eye.z, { t: 'mob', kind: 'skeleton', sound: 'shoot', vol: 0.5 });
+        return;
+      }
+      case 'zone': {
+        const at = this.aimGround(e.reach);
+        const rain = def.id === 'rain_of_arrows';
+        fx.addZone({ owner: this, by: this.name, ...at, radius: e.radius, damage: e.damage, kind: def.kind, delay: e.delay, waves: e.waves, interval: e.interval, warn: rain ? 'rain_mark' : 'meteor_warn', hit: rain ? 'rain_hit' : 'meteor_hit', knock: rain ? 0.12 : 0.8 });
+        return;
+      }
+      case 'pierce': {
+        const d = this.look();
+        const eye = this.eye();
+        const wall = raycast(this.world, eye.x, eye.y, eye.z, d.x, d.y, d.z, e.range);
+        const reach = wall ? Math.hypot(wall.x + 0.5 - eye.x, wall.y + 0.5 - eye.y, wall.z + 0.5 - eye.z) : e.range;
+        for (const m of this.mobs.mobs) {
+          if (!this.isFoe(m)) continue;
+          const t = m.hitDistance(eye.x, eye.y, eye.z, d.x, d.y, d.z, reach, e.width / 2);
+          if (t !== null) this.strike(m, e.damage, def.kind, { x: eye.x, z: eye.z }, 0.6);
+        }
+        fx.mark('pierce', this.name, eye.x + d.x * 0.6, eye.y + d.y * 0.6 - 0.15, eye.z + d.z * 0.6, e.width, 0.5, { x: eye.x + d.x * reach, y: eye.y + d.y * reach, z: eye.z + d.z * reach });
+        this.realm.emitNear(eye.x, eye.y, eye.z, { t: 'mob', kind: 'skeleton', sound: 'shoot', vol: 0.6 });
+        return;
+      }
+      case 'guard': {
+        if (e.reduction) this.cls?.guardReduction(1 - e.reduction, e.seconds);
+        if (e.absorb) this.cls?.guardAbsorb(e.absorb, e.seconds);
+        if (def.id === 'iron_defense') // The mark outlives the guard by half a second, which is the time the armour takes to fly off.
+          this.shieldMark = fx.mark('guard_iron', this.name, b.x, b.y, b.z, 1.2, Math.max(0.9, e.seconds) + 0.5);
+        else this.shieldMark = fx.mark('guard_arcane', this.name, b.x, b.y, b.z, 1.2, Math.max(0.9, e.seconds));
+        return;
+      }
+      case 'trap': {
+        // Thrown to the ground under the crosshair, never nearer than a step and never farther than its reach.
+        const eye = this.eye();
+        const at = this.aimGround(e.reach);
+        let x = at.x;
+        let z = at.z;
+        const far = Math.hypot(x - b.x, z - b.z);
+        if (far < 1.5) {
+          x = b.x + look.x * 1.5;
+          z = b.z + look.z * 1.5;
+        }
+        const y = far < 1.5 ? this.groundBelow(x, b.y + 1, z, 4) : at.y;
+        fx.addTrap({ owner: this, by: this.name, x, y, z, radius: e.radius, damage: e.damage, root: e.root, kind: def.kind, ttl: e.ttl, max: e.max, from: { x: eye.x + look.x * 0.4, y: eye.y - 0.3, z: eye.z + look.z * 0.4 } });
+        return;
+      }
+    }
+  }
+
+  /** Keep the Arcane Shield's (or Iron Defense's) mark on its owner, and end it when the shield has run out or been soaked up. */
+  private followShieldMark(): void {
+    const m = this.shieldMark;
+    if (!m) return;
+    const spent = this.cls ? (m.k === 'guard_iron' ? false : this.cls.absorbAmount <= 0) : true;
+    if (m.age >= m.ttl || this.vitals.dead || spent) {
+      m.ttl = Math.min(m.ttl, m.age);
+      this.shieldMark = null;
+      return;
+    }
+    m.x = this.body.x;
+    m.y = this.body.y;
+    m.z = this.body.z;
+  }
+
+  /** A spell ended at a point: the thing it struck takes the hit, and with `radius` so does everything hostile near the burst. */
+  private boltBurst(x: number, y: number, z: number, target: Mob | null, damage: number, kind: DamageKind, radius: number, burn: number, mark: 'fireball_burst' | 'bolt'): void {
+    const hurt = new Set<Mob>();
+    if (target) hurt.add(target);
+    if (radius > 0) for (const m of this.foesNear(x, y, z, radius, radius + 1)) hurt.add(m);
+    for (const m of hurt) {
+      this.strike(m, damage, kind, { x, z }, 0.7);
+      if (burn > 0 && !m.dead && !m.body.inWater) m.onFire = Math.max(m.onFire, burn);
+    }
+    this.realm.effects.mark(mark, this.name, x, y, z, radius || 0.8, 0.6);
+  }
+
+  /** Right-click with a staff, wand or spellbook: a bolt that costs the class's resource (a classless player pays in hunger). */
+  private castWeapon(weapon: WeaponDef, itemId: number): void {
+    this.leaveMount();
+    const cls = this.cls;
+    const d = this.look();
+    const eye = this.eye();
+    if (this.mode === 'survival') {
+      if (cls) {
+        if (!cls.spend(weapon.cost)) {
+          this.castCooldown = 0.5;
+          this.emit({ t: 'toast', text: `Not enough ${CLASSES[cls.classId].resource.name.toLowerCase()}` });
+          return;
+        }
+      } else this.vitals.addExhaustion(weapon.cost * 0.05);
+    }
+    this.castCooldown = weapon.cooldown / (cls ? cls.stats.attackSpeed : 1);
+    const radius = weapon.radius ?? 0;
+    this.mobs.castBolt(eye.x + d.x * 0.6, eye.y + d.y * 0.6 - 0.1, eye.z + d.z * 0.6, d.x, d.y, d.z, weapon.speed ?? 18, 2, (hx, hy, hz, target) => {
+      this.boltBurst(hx, hy, hz, target, weapon.damage, weapon.kind, radius, 0, 'bolt');
+    });
+    // Its own sound for each (a wand zaps, a staff booms, a spellbook hums), heard by the players near.
+    this.realm.emitNear(eye.x, eye.y, eye.z, { t: 'spell', weapon: itemId === I.STAFF ? 'staff' : itemId === I.SPELLBOOK ? 'spellbook' : 'wand', vol: 0.8 });
+    this.emit({ t: 'swing' });
+  }
+
+  /** What a class player's interface shows (null without a class). */
+  classView(): ClassView | null {
+    const cls = this.cls;
+    if (!cls) return null;
+    return {
+      id: cls.classId,
+      level: cls.level,
+      xp: cls.xp,
+      xpNext: cls.xpToNext,
+      xpProgress: cls.xpProgress,
+      resource: Math.round(cls.resource * 10) / 10,
+      maxResource: cls.stats.maxResource,
+      maxHealth: this.vitals.maxHealth,
+      speedMul: cls.stats.moveSpeed,
+      abilities: abilitiesOf(cls.classId).map((a) => ({ id: a.id, cd: Math.round(cls.cooldownLeft(a.id) * 10) / 10, unlocked: cls.unlocked.has(a.id) })),
+      guard: Math.round(cls.reductionLeft * 10) / 10,
+      shield: Math.round(cls.absorbAmount * 10) / 10,
+      immune: Math.round(cls.immuneLeft * 10) / 10,
+      ...(this.slamPhase ? { slam: this.slamPhase } : {}),
+      ...(this.rush ? { rush: { yaw: this.rush.yaw, speed: this.rush.speed, ...(this.rush.def.id === 'evasive_roll' ? { roll: true } : {}) } } : {}),
+    };
+  }
+
+  // ---- shield -------------------------------------------------------------------
+
+  /** Hold the use button with a shield in the hand, or in the off hand when the hand has nothing to use. */
+  private updateShield(dt: number, f: InputFrame, item: ItemDef | null): void {
+    const off = this.offhand.get(0);
+    const offShield = !!off && getItem(off.id).shield;
+    let want = false;
+    let inOff = false;
+    if (f.right) {
+      if (item?.shield) want = true;
+      else if (offShield && !this.mainHandBusy(item)) {
+        want = true;
+        inOff = true;
+      }
+    }
+    if (!want) {
+      this.lowerShield();
+      return;
+    }
+    if (!this.blocking || inOff !== this.shieldInOffhand) this.blockTime = 0;
+    this.blocking = true;
+    this.shieldInOffhand = inOff;
+    this.blockTime += dt;
+  }
+
+  /** The main hand has its own use for the button (eat, draw a bow, place, pour, tame soil, wear). */
+  private mainHandBusy(item: ItemDef | null): boolean {
+    if (!item) return false;
+    if (item.food && this.mode === 'survival' && this.vitals.canEat()) return true;
+    if (item.armor || (item.use !== null && TAKES_THE_BUTTON.has(item.use))) return true;
+    if (item.use === 'bow' && (this.mode === 'creative' || this.inventory.countOf(I.ARROW) > 0)) return true;
+    return !!this.target && usedOnBlock(item);
+  }
+
+  lowerShield(): void {
+    this.blocking = false;
+    this.blockTime = 0;
+  }
+
+  /** The shield being held up, if any. */
+  private shieldStack(): ItemStack | null {
+    const s = this.shieldInOffhand ? this.offhand.get(0) : this.held;
+    return s && getItem(s.id).shield ? s : null;
+  }
+
+  /**
+   * Stop a hit coming from the front. (kx, kz) points from the attacker to the player, so the hit is
+   * in front when it points against where the player looks. Like the original, a hit of 3 or more
+   * hurts the shield (1 + the damage), and a shield that wears out breaks.
+   */
+  private tryBlock(amount: number, kx: number, kz: number): boolean {
+    if (!this.blocking || this.blockTime < SHIELD_RAISE) return false;
+    const s = this.shieldStack();
+    if (!s) return false;
+    const d = this.look();
+    if (kx * d.x + kz * d.z >= 0) return false;
+    // A parry: the hit lands just as the guard comes up, so the shield turns it aside and takes no wear.
+    const parry = this.blockTime < SHIELD_RAISE + PARRY_WINDOW;
+    let broke = false;
+    if (amount >= 3 && !parry) {
+      s.damage += 1 + Math.floor(amount);
+      if (s.damage >= getItem(s.id).durability) {
+        if (this.shieldInOffhand) this.offhand.set(0, null);
+        else this.inventory.set(this.selected, null);
+        this.lowerShield();
+        broke = true;
+      }
+      this.emit({ t: 'inv' });
+    }
+    const b = this.body;
+    this.realm.emitNear(b.x, b.y + 1, b.z, { t: 'shield', vol: 1, ...(broke ? { broke: true } : {}), ...(parry ? { parry: true } : {}) });
+    // The word that floats up in front of this player's own view.
+    this.emit({ t: 'guard', what: parry ? 'parry' : 'block' });
+    return true;
+  }
+
+  /** Swap the hand with the off hand. The off hand only takes a shield, an orb, a dagger or a map, so any other tool in hand stays put. */
+  swapHands(): void {
+    const held = this.held;
+    const off = this.offhand.get(0);
+    if (held && !holdsInOffhand(held.id)) {
+      this.emit({ t: 'toast', text: 'the off hand only holds a shield, an orb, a dagger or a map' });
+      return;
+    }
+    if (!held && !off) return;
+    this.inventory.set(this.selected, off);
+    this.offhand.set(0, held);
+    this.lowerShield();
+    this.emit({ t: 'equip' });
+    this.emit({ t: 'inv' });
+  }
+
+  /** Only a mount horn, and one of it, may be in the mount slot (a hostile or old save). */
+  private sanitizeMountSlot(): void {
+    const s = this.mountSlot.get(0);
+    if (s && mountOfItem(s.id) === null) this.mountSlot.set(0, null);
+    else if (s) s.count = 1;
+  }
+
+  /** Keep only a single shield, orb, dagger or map in the off hand (a hostile or old save). */
+  private sanitizeOffhand(): void {
+    const s = this.offhand.get(0);
+    if (s && !holdsInOffhand(s.id)) this.offhand.set(0, null);
+    else if (s) s.count = 1;
+  }
+
+  /** Only bags can be worn in a bag slot, one each (a hand-edited save could say otherwise). */
+  private sanitizeBags(): void {
+    for (let i = 0; i < this.bags.size; i++) {
+      const s = this.bags.get(i);
+      if (s && bagSlotsOf(s.id) === 0) this.bags.set(i, null);
+      else if (s) s.count = 1;
+    }
+  }
+
+  /** Items in the room of a bag that is not worn would be out of reach: they go back into the open slots (or to the ground). */
+  private reclaimStranded(): void {
+    for (const i of strandedSlots(this.inventory)) {
+      const s = this.inventory.get(i);
+      this.inventory.set(i, null);
+      if (s) this.collectOrDrop(s);
+    }
+  }
+
+  // ---- armor ------------------------------------------------------------------
+
+  /** Defense points of everything worn (0..20). */
+  get defense(): number {
+    let n = 0;
+    for (let i = 0; i < this.armor.size; i++) {
+      const s = this.armor.get(i);
+      if (s) n += getItem(s.id).armor?.defense ?? 0;
+    }
+    return n;
+  }
+
+  /** Item ids of the worn pieces (0 = nothing): what other players see. */
+  armorIds(): number[] {
+    return Array.from({ length: this.armor.size }, (_, i) => this.armor.get(i)?.id ?? 0);
+  }
+
+  private get toughness(): number {
+    let n = 0;
+    for (let i = 0; i < this.armor.size; i++) {
+      const s = this.armor.get(i);
+      if (s) n += getItem(s.id).armor?.toughness ?? 0;
+    }
+    return n;
+  }
+
+  /** Damage after the worn armor has taken its share. Only survival players are protected from anything. */
+  private afterArmor(damage: number): number {
+    return reduceDamage(damage, this.defense, this.toughness);
+  }
+
+  /** Every worn piece takes wear from a hit; a piece that wears out breaks. */
+  private wearArmor(damage: number): void {
+    const wear = armorWear(damage);
+    let broke = false;
+    for (let i = 0; i < this.armor.size; i++) {
+      const s = this.armor.get(i);
+      const dur = s ? getItem(s.id).durability : 0;
+      if (!s || dur <= 0) continue;
+      s.damage += wearAfterUnbreaking(wear, levelOf(s, ENCH.UNBREAKING), true, this.rand);
+      if (s.damage >= dur) {
+        this.armor.set(i, null);
+        broke = true;
+      }
+    }
+    if (broke) this.emit({ t: 'sound', sound: 'stone', action: 'break', vol: 0.8 });
+    this.emit({ t: 'inv' });
+  }
+
+  /** Put the held piece on, swapping with whatever is worn in that slot. */
+  equipHeld(): boolean {
+    const held = this.held;
+    const def = held ? getItem(held.id).armor : null;
+    if (!held || !def) return false;
+    const worn = this.armor.get(def.slotIndex);
+    this.armor.set(def.slotIndex, cloneStack({ ...held, count: 1 }));
+    this.inventory.set(this.selected, worn);
+    this.emit({ t: 'equip' });
+    this.emit({ t: 'inv' });
+    return true;
+  }
+
+  /** Drop anything in an armor slot that does not belong there (a hostile or old save). */
+  private sanitizeArmor(): void {
+    for (let i = 0; i < this.armor.size; i++) {
+      const s = this.armor.get(i);
+      if (s && getItem(s.id).armor?.slotIndex !== i) this.armor.set(i, null);
+      else if (s) s.count = 1;
+    }
+  }
+
+  /** How far into the Emberstone's cast the player is (0..1, never exactly 0 while it goes on); 0 when not casting it. The figure is drawn from it. */
+  get emberProgress(): number {
+    return this.emberTimer > 0 ? Math.max(0.01, Math.min(1, this.emberTimer / EMBER_CAST)) : 0;
+  }
+
+  /** How far into a meal the player is (0..1); 0 when not eating. */
+  get eatProgress(): number {
+    return this.eatTimer > 0 ? Math.min(1, this.eatTimer / EAT_TIME) : 0;
+  }
+
+  // ---- experience -----------------------------------------------------------
+
+  /** Absorb experience (an orb reached you, or a cheat). Plays the pickup sound and announces new levels. */
+  addXp(amount: number, orb = false): void {
+    const gained = this.xp.add(this.mode === 'survival' ? this.mend(amount) : amount);
+    // (An orb makes the sound only: a kill drops several, and a number over each would be noise.)
+    this.emit(orb ? { t: 'xp' } : { t: 'xp', gain: Math.floor(amount) });
+    if (gained > 0) {
+      this.emit({ t: 'levelup', level: this.xp.level });
+      // Everyone nearby sees it too (the client draws the column of light on the player).
+      this.realm.effects.mark('level_up', this.name, this.body.x, this.body.y, this.body.z, 1, 0.6);
+      this.syncClassLevel();
+    }
+  }
+
+  // ---- coins ------------------------------------------------------------------------
+
+  /** Take in coins (a kill, a quest, a sale). Returns how many were really added (a full purse takes no more). */
+  addCoins(amount: number): number {
+    const n = Math.min(Math.floor(amount), MAX_COINS - this.coins);
+    if (!(n > 0)) return 0;
+    this.coins += n;
+    this.emit({ t: 'coins', gain: n });
+    return n;
+  }
+
+  /** Pay coins for something. False (and nothing taken) when there are not enough. */
+  spendCoins(amount: number): boolean {
+    const n = Math.floor(amount);
+    if (!(n >= 0) || n > this.coins) return false;
+    this.coins -= n;
+    return true;
+  }
+
+  /** The server changed what the bags hold (a trade): tell the client to read them again. */
+  inventoryChanged(): void {
+    this.emit({ t: 'inv' });
+  }
+
+  /** Experience from a furnace goes straight to you. */
+  private spawnXpAtFeet(amount: number): void {
+    this.realm.awardXp(amount, this.body.x, this.body.y + 0.6, this.body.z);
+  }
+
+  // ---- beds ----------------------------------------------------------------
+
+  /** Is the bed this player lies in (its head block) still there? */
+  private bedIntact(): boolean {
+    const s = this.sleeping;
+    return !!s && this.world.getBlock(s.x, s.y, s.z) === bedId(true, s.dir);
+  }
+
+  /** A hostile mob close enough to the bed to stop you resting (8 blocks across, 5 up and down). */
+  private monstersNear(x: number, y: number, z: number): boolean {
+    return this.mobs.mobs.some(
+      (m) => !m.dead && m.def.hostile && !m.def.ambient && Math.abs(m.body.x - x) <= 8 && Math.abs(m.body.z - z) <= 8 && Math.abs(m.body.y - y) <= 5,
+    );
+  }
+
+  /** Right-click a bed: it becomes your respawn point, and at night you go to sleep in it. */
+  useBed(hit: RayHit): void {
+    const info = bedInfo(hit.id);
+    if (!info || this.sleeping || this.spectating) return;
+    const hx = hit.x + (info.head ? 0 : info.dx);
+    const hz = hit.z + (info.head ? 0 : info.dz);
+    const hy = hit.y;
+    if (this.world.getBlock(hx, hy, hz) !== bedId(true, info.dir)) return;
+    if (this.realm.players.some((p) => p !== this && p.sleeping && p.sleeping.x === hx && p.sleeping.y === hy && p.sleeping.z === hz)) {
+      this.emit({ t: 'toast', text: 'This bed is occupied' });
+      return;
+    }
+    const sp = this.spawnPoint;
+    const changed = !sp || sp.x !== hx || sp.y !== hy || sp.z !== hz;
+    this.spawnPoint = { x: hx, y: hy, z: hz };
+    const say = (text: string) => this.emit({ t: 'toast', text: changed ? `Respawn point set - ${text}` : text[0].toUpperCase() + text.slice(1) });
+    if (!this.realm.allowSleep) {
+      // A shared world has one clock for everybody: the bed only remembers where you respawn.
+      this.emit({ t: 'toast', text: changed ? 'Respawn point set' : 'Respawn point already set here' });
+      return;
+    }
+    if (!this.realm.canSleep) {
+      say('you can only sleep at night or during thunderstorms');
+      return;
+    }
+    if (this.monstersNear(hx + 0.5, hy, hz + 0.5)) {
+      say('you may not rest now, there are monsters nearby');
+      return;
+    }
+    this.startSleep(hx, hy, hz, info.dir);
+  }
+
+  private startSleep(x: number, y: number, z: number, dir: number): void {
+    this.leaveMount();
+    this.sleeping = { x, y, z, dir };
+    this.sleepTime = 0;
+    const b = this.body;
+    b.x = x + 0.5;
+    b.z = z + 0.5;
+    b.y = y + BED_HEIGHT;
+    b.vx = b.vy = b.vz = 0;
+    b.onGround = true;
+    this.peakY = b.y;
+    this.flying = false;
+    this.target = null;
+    this.breakProgress = 0;
+    this.hudProgress = 0;
+    this.bowDraw = 0;
+    this.bowCharge = 0;
+    this.eatTimer = 0;
+    this.lowerShield();
+  }
+
+  /** Get out of bed (sneaking, the Leave Bed button, morning, a hit). `exit` stands you up beside the bed. */
+  wake(exit = true): void {
+    const s = this.sleeping;
+    if (!s) return;
+    this.sleeping = null;
+    this.sleepTime = 0;
+    if (!exit) return;
+    const at = this.bedExit(s);
+    const b = this.body;
+    if (at) {
+      b.x = at.x;
+      b.y = at.y;
+      b.z = at.z;
+    }
+    b.vx = b.vy = b.vz = 0;
+    this.peakY = b.y;
+  }
+
+  /** Room to stand: two free cells above a solid floor that is not itself a bed. */
+  private canStandAt(x: number, y: number, z: number): boolean {
+    const w = this.world;
+    const free = (yy: number) => {
+      const id = w.getBlock(x, yy, z);
+      return !IS_SOLID[id] && !IS_LIQUID[id] && id !== B.COBWEB;
+    };
+    const floor = w.getBlock(x, y - 1, z);
+    return free(y) && free(y + 1) && IS_SOLID[floor] === 1 && !isBed(floor);
+  }
+
+  /** Where someone leaving a bed stands: beside it, nearest the pillow first (null = nowhere). */
+  private bedExit(s: { x: number; y: number; z: number; dir: number }): { x: number; y: number; z: number } | null {
+    const [dx, dz] = BED_DIRS[s.dir];
+    const px = -dz;
+    const pz = dx;
+    const fx = s.x - dx;
+    const fz = s.z - dz;
+    const cells: [number, number][] = [
+      [s.x + px, s.z + pz],
+      [s.x - px, s.z - pz],
+      [s.x + dx, s.z + dz],
+      [fx + px, fz + pz],
+      [fx - px, fz - pz],
+      [fx - dx, fz - dz],
+    ];
+    for (const [cx, cz] of cells) {
+      for (const cy of [s.y, s.y - 1]) {
+        if (this.canStandAt(cx, cy, cz)) return { x: cx + 0.5, y: cy, z: cz + 0.5 };
+      }
+    }
+    return null;
+  }
+
+  /** Put the player at their bed. False when there is none, or it is gone or boxed in (then the spawn point is forgotten). */
+  private respawnAtBed(): boolean {
+    const sp = this.spawnPoint;
+    if (!sp) return false;
+    const b = this.body;
+    let at: { x: number; y: number; z: number } | null;
+    if (this.world.surfaceY(sp.x, sp.z) < 0) {
+      // Not loaded here (the browser streams terrain): trust the saved bed and land on top of it.
+      at = { x: sp.x + 0.5, y: sp.y + BED_HEIGHT + 0.01, z: sp.z + 0.5 };
+    } else {
+      const info = bedInfo(this.world.getBlock(sp.x, sp.y, sp.z));
+      at = info?.head ? this.bedExit({ x: sp.x, y: sp.y, z: sp.z, dir: info.dir }) : null;
+    }
+    if (!at) {
+      this.spawnPoint = null;
+      this.emit({ t: 'toast', text: 'Your home bed was missing or obstructed' });
+      return false;
+    }
+    b.x = at.x;
+    b.y = at.y;
+    b.z = at.z;
+    b.vx = b.vy = b.vz = 0;
+    this.peakY = b.y;
+    return true;
+  }
+
+  /** Right-click with a bed: two blocks lie down in front of you, foot where you click, head the way you face. */
+  private placeBed(t: { x: number; y: number; z: number; id: number; nx: number; ny: number; nz: number }): boolean {
+    const world = this.world;
+    const held = this.held;
+    const inPlace = BLOCKS[t.id].replaceable;
+    const px = inPlace ? t.x : t.x + t.nx;
+    const py = inPlace ? t.y : t.y + t.ny;
+    const pz = inPlace ? t.z : t.z + t.nz;
+    const fx = -Math.sin(this.yaw);
+    const fz = -Math.cos(this.yaw);
+    const dir = Math.abs(fx) > Math.abs(fz) ? (fx > 0 ? 0 : 1) : fz > 0 ? 2 : 3;
+    const [dx, dz] = BED_DIRS[dir];
+    const hx = px + dx;
+    const hz = pz + dz;
+    const free = (x: number, z: number) => {
+      const id = world.getBlock(x, py, z);
+      return id === B.AIR || (BLOCKS[id].replaceable && !BLOCKS[id].liquid);
+    };
+    if (!held || !free(px, pz) || !free(hx, hz)) return false;
+    if (this.realm.players.some((p) => bodyOverlapsBlock(p.body, px, py, pz) || bodyOverlapsBlock(p.body, hx, py, hz))) return false;
+    if (!world.setBlock(px, py, pz, bedId(false, dir, bedItemColor(held.id)))) return false;
+    world.setBlock(hx, py, hz, bedId(true, dir));
+    this.realm.blockChanged(px, py, pz);
+    this.realm.blockChanged(hx, py, hz);
+    this.realm.emitNear(px, py, pz, { t: 'sound', sound: 'wood', action: 'place', vol: 1 });
+    this.emit({ t: 'swing' });
+    if (this.mode === 'survival') {
+      held.count -= 1;
+      if (held.count <= 0) this.inventory.set(this.selected, null);
+      this.emit({ t: 'inv' });
+    }
+    return true;
+  }
+
+  // ---- life and death ------------------------------------------------------
+
+  respawn(): void {
+    const s = this.realm.nextSpawn();
+    const b = this.body;
+    b.x = s.x;
+    b.z = s.z;
+    b.y = s.y + 2;
+    b.vx = b.vy = b.vz = 0;
+    this.peakY = b.y;
+    this.onFire = 0;
+  }
+
+  /** Move the player (tests, teleport tools). Clears velocity and fall tracking. */
+  teleport(x: number, y: number, z: number, yaw = this.yaw, pitch = this.pitch): void {
+    const b = this.body;
+    b.x = x;
+    b.y = y;
+    b.z = z;
+    b.vx = b.vy = b.vz = 0;
+    this.peakY = y;
+    this.yaw = yaw;
+    this.pitch = pitch;
+    this.camera = null;
+    this.aimCache = null;
+  }
+
+  private die(): void {
+    if (this.screen === 'dead') return;
+    this.slamLeap = null;
+    this.slamImpact = 0;
+    this.endRush();
+    this.wake(false);
+    this.dismount();
+    this.cancelMountCast();
+    this.leaveMount();
+    if (this.screen === 'dialog') this.closeDialog();
+    if (this.menu) this.closeMenu();
+    this.lowerShield();
+    this.realm.effects.dropOwner(this);
+    // Nothing is dropped. What you wear and hold is worn by the fall, and some of your experience is lost.
+    const worn = this.wearOnDeath();
+    const lost = this.xp.lose(DEATH_XP_LOSS);
+    if (worn > 0 || lost > 0) {
+      const parts: string[] = [];
+      if (lost > 0) parts.push(`${lost} experience`);
+      if (worn > 0) parts.push(`${DEATH_WEAR_PERCENT}% of the durability of your equipment`);
+      this.emit({ t: 'toast', text: `You lost ${parts.join(' and ')}.` });
+    }    this.flying = false;
+    this.screen = 'dead';
+    if (this.hardcore) this.gameOver = true;
+    this.emit({ t: 'died' });
+    this.emit({ t: 'inv' });
+  }
+
+  /**
+   * What a death does to the gear: the armor you wear, the shield in your off hand and the tool or weapon in your hand each
+   * lose a fifth of their durability (at least one point), but are never broken by it. Returns how many pieces were worn.
+   */
+  private wearOnDeath(): number {
+    let n = 0;
+    const wear = (s: ItemStack | null): void => {
+      const dur = s ? getItem(s.id).durability : 0;
+      if (!s || dur <= 0) return;
+      const worn = Math.min(s.damage + Math.max(1, Math.ceil(dur * DEATH_WEAR)), dur - 1);
+      if (worn > s.damage) {
+        s.damage = worn;
+        n++;
+      }
+    };
+    for (let i = 0; i < this.armor.size; i++) wear(this.armor.get(i));
+    wear(this.offhand.get(0));
+    wear(this.held);
+    return n;
+  }
+
+  respawnFromDeath(): void {
+    if (this.screen !== 'dead') return;
+    this.cls?.resetCombat();
+    if (this.hardcore) {
+      // One life: the world cannot be played on. Stay where you fell and look around.
+      this.vitals.respawn();
+      this.spectating = true;
+      this.flying = true;
+      this.screen = 'none';
+      this.lastHealth = this.vitals.health;
+      this.emit({ t: 'respawned' });
+      this.emit({ t: 'inv' });
+      return;
+    }
+    this.vitals.respawn();
+    this.onFire = 0;
+    if (!this.respawnAtBed()) this.respawn();
+    this.screen = 'none';
+    this.lastHealth = this.vitals.health;
+    this.emit({ t: 'respawned' });
+    this.emit({ t: 'inv' });
+  }
+
+  // ---- loading and saving --------------------------------------------------
+
+  /** Restore the player. `keepMode` ignores the saved game mode (a mode forced by the URL). */
+  loadPlayer(p: PlayerSave, keepMode = false): void {
+    this.body.x = p.x;
+    this.body.y = p.y;
+    this.body.z = p.z;
+    this.yaw = p.yaw;
+    this.pitch = p.pitch;
+    this.savedMobs = p.mobs;
+    this.spawned = true; // trust the saved position; chunks stream in underneath
+    if (this.cls) {
+      // Class level first: it sets the most health there can be, which the saved health is then held to.
+      this.cls.load(p.cls);
+      this.applyClassVitals(true);
+    }
+    // The bags first: they decide which of the inventory's slots are open.
+    for (let i = 0; i < this.bags.size; i++) this.bags.set(i, null); // an older save has none
+    this.bags.loadJSON(p.bags);
+    this.sanitizeBags();
+    if (p.inv) this.inventory.loadJSON(p.inv);
+    this.reclaimStranded();
+    if (p.vitals) this.vitals.loadJSON(p.vitals as never);
+    this.xp.loadJSON(p.xp);
+    this.syncClassLevel(false); // a character whose level is above what the class remembers catches it up
+    this.coins = typeof p.coins === 'number' && Number.isFinite(p.coins) ? Math.max(0, Math.min(MAX_COINS, Math.floor(p.coins))) : 0;
+    for (let i = 0; i < this.armor.size; i++) this.armor.set(i, null); // an older save has none
+    this.armor.loadJSON(p.armor);
+    this.sanitizeArmor();
+    // A character saved before the clothes were items is dressed once; after that, what it takes off stays off.
+    this.outfitted = p.of === true;
+    if (this.cls && !this.outfitted) this.grantOutfit();
+    this.offhand.set(0, null);
+    this.offhand.loadJSON(p.offhand);
+    this.sanitizeOffhand();
+    if (!keepMode) {
+      this.mode = p.mode;
+      this.hardcore = p.hardcore === true && p.mode === 'survival';
+      this.gameOver = this.hardcore && p.gameOver === true;
+      this.spectating = this.gameOver && p.spectating === true;
+      if (this.spectating) this.flying = true;
+      else if (this.gameOver) {
+        // Closed the page on the death screen: still dead.
+        this.vitals.dead = true;
+        this.screen = 'dead';
+      }
+    }
+    this.spawnPoint = p.spawn ? { x: p.spawn.x, y: p.spawn.y, z: p.spawn.z } : null;
+    this.emberCooldown = typeof p.hs === 'number' && p.hs > 0 ? Math.min(EMBER_COOLDOWN, p.hs) : 0;
+    this.emberTimer = 0;
+    this.mountId = null;
+    this.mountCast = null;
+    this.mountSlot.set(0, null);
+    this.mountSlot.loadJSON(p.mountSlot);
+    this.sanitizeMountSlot();
+    this.enchantSeed = p.es && Number.isInteger(p.es) && p.es > 0 ? p.es : 0;
+    this.selected = Math.max(0, Math.min(HOTBAR_SLOTS - 1, p.selected));
+    this.peakY = this.body.y;
+    this.lastHealth = this.vitals.health;
+    if (this.quests) {
+      this.quests.loadJSON(p.quests);
+      // A character saved before the cave start who has already got on with the quests has long since left it: the quests
+      // that come after need the first one done. (A brand-new character, with an empty log, still has it to do.)
+      const first = this.quests.status(FIRST_QUEST);
+      if (!this.quests.empty && first !== 'active' && first !== 'ready') this.quests.done.add(FIRST_QUEST);
+      this.syncQuests();
+    }
+  }
+
+  /**
+   * Call once the terrain around the player has been built. Places a new player on the ground,
+   * restores saved mobs and starts the simulation.
+   */
+  finishLoading(): void {
+    if (this.ready) return;
+    if (!this.spawned) {
+      // A start the world picked underground (the Adventure cave) is kept when there is room to stand there; any other
+      // is put on the ground above it.
+      const bx = Math.floor(this.body.x);
+      const bz = Math.floor(this.body.z);
+      const by = Math.floor(this.body.y);
+      const solid = (y: number): boolean => BLOCKS[this.world.getBlock(bx, y, bz)].solid;
+      const roomToStand = by >= 2 && solid(by - 1) && !solid(by) && !solid(by + 1);
+      if (!roomToStand) this.body.y = Math.max(this.world.surfaceY(bx, bz) + 1, 1);
+      this.spawned = true;
+      this.grantOutfit();
+      if (this.quests) {
+        // A new Adventure character wakes in the wilds with a compass and a quest to find the village; the rest is earned.
+        this.beginAdventure();
+      } else {
+        // The starter items first: they own hotbar slots 2 and 3, the class kit takes the free ones around them.
+        this.grantStarterItems();
+        this.grantClassKit();
+      }
+    }
+    this.peakY = this.body.y;
+    if (this.savedMobs) this.mobs.loadJSON(this.savedMobs);
+    this.savedMobs = null;
+    this.ready = true;
+  }
+
+  /** Persist-ready snapshot (plain JSON data, exactly what the save format promises). */
+  savePlayer(): PlayerSave {
+    const plain = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
+    // Saved mid-sleep, you wake up beside the bed.
+    const at = this.sleeping ? (this.bedExit(this.sleeping) ?? this.body) : this.body;
+    return {
+      v: 1,
+      x: at.x,
+      y: at.y,
+      z: at.z,
+      yaw: this.yaw,
+      pitch: this.pitch,
+      mode: this.mode,
+      selected: this.selected,
+      inv: plain(this.inventory.toJSON()),
+      ...(this.bags.isEmpty() ? {} : { bags: plain(this.bags.toJSON()) }),
+      vitals: plain(this.vitals.toJSON()),
+      mobs: plain(this.mobs.toJSON(this.body.x, this.body.z, 28)),
+      xp: this.xp.toJSON(),
+      ...(this.coins > 0 ? { coins: this.coins } : {}),
+      ...(this.enchantSeed ? { es: this.enchantSeed } : {}),
+      armor: plain(this.armor.toJSON()),
+      offhand: plain(this.offhand.toJSON()),
+      ...(this.spawnPoint ? { spawn: { ...this.spawnPoint } } : {}),
+      ...(this.emberCooldown > 0 ? { hs: Math.ceil(this.emberCooldown) } : {}),
+      ...(this.mountSlot.get(0) ? { mountSlot: plain(this.mountSlot.toJSON()) } : {}),
+      ...(this.quests && !this.quests.empty ? { quests: plain(this.quests.toJSON()) } : {}),
+      ...(this.cls ? { cls: this.cls.toJSON() } : {}),
+      ...(this.outfitted ? { of: true } : {}),
+      ...(this.hardcore ? { hardcore: true, ...(this.gameOver ? { gameOver: true } : {}), ...(this.spectating ? { spectating: true } : {}) } : {}),
+    };
+  }
+
+  // ---- the frame, in parts ---------------------------------------------------
+
+  private vitalsCtx() {
+    return {
+      eyeInWater: this.body.eyeInWater && !this.body.eyeInLava,
+      invulnerable: this.invulnerable,
+      hard: this.hardcore,
+      respiration: levelOf(this.armor.get(0), ENCH.RESPIRATION),
+    };
+  }
+
+  private soundUnderfoot() {
+    const b = this.body;
+    return BLOCKS[this.world.getBlock(Math.floor(b.x), Math.floor(b.y - 0.2), Math.floor(b.z))].sound;
+  }
+
+  /** Take over the look angles and sneak state of a frame. */
+  beginFrame(f: InputFrame): void {
+    this.yaw = f.yaw;
+    this.pitch = f.pitch;
+    this.aimCache = null;
+    // The eyes are where the body is after this frame's step; the camera is believed only as far as it is from them (see `look`).
+    this.camera = f.cam ? { x: f.cam[0], y: f.cam[1], z: f.cam[2] } : null;
+    if (this.camera) this.camera = sanitizeCamera(this.eye(), this.camera);
+    this.sneaking = f.sneak;
+    this.moveIn.forward = f.forward;
+    this.moveIn.strafe = f.strafe;
+  }
+
+  /**
+   * Lava and cactus hurt whoever touches them, a couple of times a second. The timers start full so the
+   * first touch hurts at once, and keep their value while out of contact so that bobbing at the surface
+   * of lava does not keep resetting them.
+   */
+  private environmentalDamage(): void {
+    if (this.spectating || this.invulnerable || this.vitals.dead) {
+      this.lavaTimer = 0;
+      this.cactusTimer = 0;
+      this.poison = 0;
+      this.onFire = 0;
+      return;
+    }
+    if (this.poison > 0) {
+      this.poison = Math.max(0, this.poison - STEP);
+      this.poisonTick += STEP;
+      if (this.poisonTick >= 1.25) {
+        this.poisonTick = 0;
+        if (this.vitals.health > 1) this.vitals.damage(1, 'generic');
+      }
+    }
+    const b = this.body;
+    if (b.inLava) {
+      this.lavaTimer += STEP;
+      if (this.lavaTimer >= 0.5) {
+        this.lavaTimer = 0;
+        this.vitals.damage(this.protect(4, 'fire'), 'lava');
+      }
+      this.catchFire(15);
+    }
+    const inFlames = this.touchingFire();
+    if (inFlames) {
+      this.fireTimer += STEP;
+      if (this.fireTimer >= 0.5) {
+        this.fireTimer = 0;
+        this.vitals.damage(this.protect(1, 'fire'), 'fire');
+      }
+      this.catchFire(8);
+    }
+    if (this.onFire > 0) {
+      if (b.inWater && !b.inLava) {
+        this.onFire = 0;
+        this.realm.emitNear(b.x, b.y, b.z, { t: 'fire', kind: 'hiss', vol: 0.7 });
+      } else {
+        this.onFire = Math.max(0, this.onFire - STEP);
+        this.burnTimer += STEP;
+        // Standing in the flames already hurts; burning on its own is a point a second.
+        if (this.burnTimer >= 1) {
+          this.burnTimer = 0;
+          if (!inFlames && !b.inLava) this.vitals.damage(this.protect(1, 'fire'), 'fire');
+        }
+      }
+    } else {
+      this.burnTimer = 0;
+    }
+    if (this.touchingCactus()) {
+      this.cactusTimer += STEP;
+      if (this.cactusTimer >= 0.5) {
+        this.cactusTimer = 0;
+        this.vitals.damage(this.protect(1, 'all'), 'cactus');
+      }
+    }
+  }
+
+  /** Set alight for seconds (fire protection shortens it). Creative players and spectators do not burn. */
+  private catchFire(seconds: number): void {
+    if (this.invulnerable) return;
+    this.onFire = Math.max(this.onFire, seconds * protectionFactor(this.armorProtection('fire')));
+  }
+
+  get burning(): boolean {
+    return this.onFire > 0;
+  }
+
+  private touchingFire(): boolean {
+    const b = this.body;
+    const r = 0.3;
+    for (const dy of [0.1, 0.9, 1.6]) {
+      const y = Math.floor(b.y + dy);
+      for (let x = Math.floor(b.x - r); x <= Math.floor(b.x + r); x++) {
+        for (let z = Math.floor(b.z - r); z <= Math.floor(b.z + r); z++) {
+          if (this.world.getBlock(x, y, z) === B.FIRE) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  private touchingCactus(): boolean {
+    const b = this.body;
+    const r = 0.42;
+    for (const dy of [0.1, 0.9, 1.6]) {
+      const y = Math.floor(b.y + dy);
+      for (let x = Math.floor(b.x - r); x <= Math.floor(b.x + r); x++) {
+        for (let z = Math.floor(b.z - r); z <= Math.floor(b.z + r); z++) {
+          if (this.world.getBlock(x, y, z) === B.CACTUS) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /** One fixed physics step, with fall damage, exhaustion and footsteps. */
+  simulateStep(f: InputFrame): void {
+    // Cooldowns and the resource run on the fixed step the server controls, never on anything a client reports.
+    if (this.cls && !this.vitals.dead) this.cls.tick(STEP);
+    this.syncOffhandBonus();
+    this.syncGearBonus();
+    this.followShieldMark();
+    this.tickMount(STEP);
+    if (this.riding) {
+      // Sitting in a minecart or boat: the vehicle carries the body. The forward key and where you look steer it; sneak gets out.
+      const v = this.riding;
+      const input = this.rider.input;
+      input.forward = f.forward;
+      input.fx = -Math.sin(f.yaw);
+      input.fz = -Math.cos(f.yaw);
+      this.environmentalDamage();
+      this.vitals.tick(STEP, this.vitalsCtx());
+      if (f.sneak || v.gone) this.dismount();
+      return;
+    }
+    if (this.sleeping) {
+      // Lying in bed: no movement, but the body still hungers and heals. Sneak (or the Leave Bed button) gets up.
+      this.sleepTime += STEP;
+      this.environmentalDamage();
+      this.vitals.tick(STEP, this.vitalsCtx());
+      if (f.sneak || !this.realm.canSleep || !this.bedIntact()) this.wake();
+      return;
+    }
+    const b = this.body;
+    const px = b.x;
+    const pz = b.z;
+    // A mount runs at its own speed: no sprinting on it (and so no hunger), and no sneaking.
+    const canSprint = (this.mode === 'creative' || this.vitals.hunger > 6) && !this.blocking && !this.mountId;
+    const move = buildMove(f, this.flying, canSprint, this.spectating, this.speedMul);
+    if (this.mountId) {
+      move.sneak = false;
+      move.stepHeight = MOUNT_STEP_HEIGHT;
+    }
+    // In a leap the body carries on in the air (the keys only steer it a little).
+    // (the crouch before it does not hold the body: it keeps walking or running into the spring)
+    if (this.slamLeap?.launched) move.accel = 0.5;
+    if (this.rush) rushMove(move, this.rush.yaw, this.rush.speed, this.rush.stall > 0);
+    const vyBefore = b.vy;
+    const wasOnGround = b.onGround;
+    stepPlayer(this.world.physicsReader, b, move, STEP);
+    this.stepSlamLeap();
+    this.stepRush(px, pz);
+
+    if (!this.prevOnGround && b.onGround && vyBefore < -8) {
+      this.realm.emitNear(b.x, b.y, b.z, { t: 'sound', sound: this.soundUnderfoot(), action: 'land', vol: Math.min(1.2, 0.35 + (-vyBefore - 8) / 18) });
+    }
+    if (!this.prevInWater && b.inWater && vyBefore < -2.5) this.realm.emitNear(b.x, b.y, b.z, { t: 'splash', vol: Math.min(1, -vyBefore / 12) });
+
+    // ---- fall damage: distance from the highest point since leaving the ground ----
+    if (b.onGround) {
+      if (!this.prevOnGround && !b.inWater && !b.inWeb && !b.onLadder) {
+        if (this.world.getBlock(Math.floor(b.x), Math.floor(b.y - 0.05), Math.floor(b.z)) === B.SLIME_BLOCK) {
+          // Slime takes the fall, and gives it back as a bounce (crouch to stay put).
+          if (!move.sneak && vyBefore < -6) {
+            b.vy = Math.min(20, -vyBefore * 0.8);
+            b.onGround = false;
+            this.realm.emitNear(b.x, b.y, b.z, { t: 'sound', sound: 'dirt', action: 'land', vol: 1 });
+          }
+        } else {
+          this.vitals.land(this.peakY - b.y, this.vitalsCtx(), protectionFactor(this.armorProtection('fall')));
+        }
+      }
+      this.peakY = b.y;
+    } else if (b.inWater || b.inWeb || b.onLadder || this.flying) {
+      this.peakY = b.y;
+    } else {
+      this.peakY = Math.max(this.peakY, b.y);
+    }
+    this.prevOnGround = b.onGround;
+    this.prevInWater = b.inWater;
+    this.environmentalDamage();
+
+    // ---- exhaustion ----
+    if (move.jump && wasOnGround && !b.onGround && b.vy > 0) {
+      this.vitals.addExhaustion(move.sprint ? EXHAUSTION.sprintJump : EXHAUSTION.jump);
+      if (!this.flying && !b.inWater && !b.onLadder && !this.mountId) this.realm.emitNear(b.x, b.y, b.z, { t: 'sound', sound: this.soundUnderfoot(), action: 'jump', vol: move.sprint ? 1 : 0.8 });
+    }
+    if (move.sprint && b.onGround) this.vitals.addExhaustion(EXHAUSTION.sprintPerBlock * Math.hypot(b.x - px, b.z - pz));
+    this.vitals.tick(STEP, this.vitalsCtx());
+
+    // (A mount's paws make their own sound, in time with its stride: the client plays them.)
+    if (b.onGround && !this.flying && !move.sneak && !this.mountId) {
+      this.stepAcc += Math.hypot(b.x - px, b.z - pz);
+      const stride = move.sprint ? 2.5 : 1.9;
+      if (this.stepAcc >= stride) {
+        this.stepAcc = 0;
+        this.realm.emitNear(b.x, b.y, b.z, { t: 'sound', sound: this.soundUnderfoot(), action: 'step', vol: move.sprint ? 1 : 0.7 });
+      }
+    }
+  }
+
+  /** Run the physics steps that `dt` of real time buys, plus the fell-out-of-the-world check. */
+  advance(f: InputFrame): void {
+    if (this.spectating) this.flying = true;
+    else if (this.mode === 'survival') this.flying = false;
+    this.acc += f.dt;
+    while (this.acc >= STEP) {
+      this.markView();
+      this.simulateStep(f);
+      this.acc -= STEP;
+    }
+    this.viewBlend = Math.min(1, this.acc / STEP);
+    this.voidCheck();
+  }
+
+  /** Exactly one physics step (the server runs clients' inputs this way). */
+  advanceOne(f: InputFrame): void {
+    if (this.spectating) this.flying = true;
+    else if (this.mode === 'survival') this.flying = false;
+    this.markView();
+    this.simulateStep(f);
+    this.viewBlend = 1;
+    this.voidCheck();
+  }
+
+  private voidCheck(): void {
+    if (this.body.y < -30) {
+      if (this.mode === 'survival' && !this.spectating) this.vitals.damage(1000, 'void');
+      else this.respawn();
+    }
+  }
+
+  /** After the shared world updated: damage feedback, death, furnace screen refresh. */
+  postRealm(dt: number): void {
+    if (this.vitals.health < this.lastHealth) {
+      this.emit({ t: 'hurt' });
+      this.wake(); // being hurt wakes you at once
+    }
+    this.lastHealth = this.vitals.health;
+    if (this.vitals.dead) this.die();
+
+    // The forge in the crafting grid: when it is done the outcome is announced like a jewel's, over the slot the piece is in.
+    if (this.menu instanceof CraftingMenu && this.menu.forging) {
+      const done = this.menu.stepForge(dt);
+      if (done && done.sets > 0) {
+        this.emit({ t: 'crafted', slot: this.menu.resultSlot, label: tooltipName(done.stack), detail: done.stack.count > 1 ? `x${done.stack.count}` : 'Crafted' });
+        this.emit({ t: 'inv' });
+      } else if (done) {
+        this.emit({ t: 'toast', text: done.text });
+        this.emit({ t: 'jewel', ok: done.ok, kind: 'rift', slot: this.menu.resultSlot, label: done.label, detail: done.detail });
+        this.emit({ t: 'inv' });
+      }
+    }
+    if (this.menu?.kind === 'furnace') {
+      this.uiTimer += dt;
+      if (this.uiTimer > 0.25) {
+        this.uiTimer = 0;
+        this.emit({ t: 'inv' });
+      }
+    }
+    // Walk away from a villager (or lose it) and the trade screen closes.
+    const v = this.tradingWith;
+    if (v && (v.dead || Math.hypot(v.body.x - this.body.x, v.body.z - this.body.z) > 6 || Math.abs(v.body.y - this.body.y) > 4)) this.closeMenu();
+    if (this.quests) this.updateQuests(dt);
+    this.updatePins(dt);
+  }
+
+  /**
+   * Keep the map's pins up to date: the other members of the party who are in the same place. Told to the client when it
+   * changes, a few times a second at most.
+   */
+  private updatePins(dt: number): void {
+    this.pinsTimer += dt;
+    if (this.pinsTimer < 0.25) return;
+    this.pinsTimer = 0;
+    const here = this.realm.copyAt(this);
+    const party = this.realm.parties
+      .membersOf(this)
+      .filter((m) => m !== this && !m.vitals.dead && this.realm.copyAt(m) === here)
+      .map((m) => ({ name: m.name, x: Math.round(m.body.x), z: Math.round(m.body.z) }));
+    const key = party.length === 0 ? '' : JSON.stringify(party);
+    if (key === this.pinsKey) return;
+    this.pinsKey = key;
+    this.emit({ t: 'pins', party });
+  }
+  // ---- quests (Adventure mode) ---------------------------------------------
+
+  /** Send the whole quest log (it is small): what the log window, the tracker and the marks over the quest givers draw. */
+  syncQuests(): void {
+    if (this.quests) this.emit({ t: 'quests', log: this.quests.toJSON() });
+  }
+
+  /** The game did something a quest may count; tell the log and say what moved. */
+  questEvent(e: QuestEvent): void {
+    const log = this.quests;
+    if (!log || this.spectating) return;
+    this.noteQuests(log.record(e));
+  }
+
+  private noteQuests(list: QuestProgress[]): void {
+    if (list.length === 0) return;
+    for (const p of list) {
+      const o = p.quest.objectives[p.index];
+      this.emit({ t: 'quest', what: 'step', text: `${o.label}: ${p.now}/${p.count}` });
+      if (p.ready && p.stepDone) this.emit({ t: 'quest', what: 'ready', text: `${p.quest.name} (ready to hand in)` });
+    }
+    this.syncQuests();
+  }
+
+  /** What came out of a crafting grid or a furnace. */
+  private tookFromMenu(stack: ItemStack, kind: string): void {
+    if (kind === 'inventory' || kind === 'crafting') this.questEvent({ t: 'craft', item: stack.id, count: stack.count });
+    else if (kind === 'furnace') this.questEvent({ t: 'smelt', item: stack.id, count: stack.count });
+  }
+
+  /** The things that are not a single action: where the player stands, what they carry, and who they are talking to. */
+  private updateQuests(dt: number): void {
+    const log = this.quests!;
+    if (this.dialogNpc) {
+      const npc = npcById(this.dialogNpc);
+      if (!npc || Math.hypot(npc.x - this.body.x, npc.z - this.body.z) > DIALOG_RANGE) this.closeDialog();
+    }
+    this.questTimer += dt;
+    if (this.questTimer < 0.25) return;
+    this.questTimer = 0;
+    if (!this.ready || this.screen === 'dead' || this.spectating) return;
+    const b = this.body;
+    const zone = this.generator.zoneAt(b.x, b.y, b.z);
+    if (zone !== this.zoneId) {
+      this.zoneId = zone;
+      if (zone) {
+        this.emit({ t: 'zone', id: zone });
+        this.questEvent({ t: 'enter', zone });
+      }
+    }
+    this.noteQuests(log.sync((items) => items.reduce((n, id) => n + this.inventory.countOf(id), 0)));
+  }
+
+  /** Right-click on a quest giver: the dialog opens (the client draws it from the log and the NPC's lines). */
+  talkNpc(mob: Mob): boolean {
+    const npc = NPCS[mob.variant];
+    if (!this.quests || !npc || mob.dead || this.screen !== 'none' || this.spectating) return false;
+    this.dialogNpc = npc.id;
+    this.screen = 'dialog';
+    this.lowerShield();
+    this.realm.mobEvents.sound('say', mob);
+    this.emit({ t: 'dialog', npc: npc.id });
+    this.emit({ t: 'swing' });
+    return true;
+  }
+
+  closeDialog(): void {
+    if (this.screen !== 'dialog') return;
+    this.dialogNpc = null;
+    this.screen = 'none';
+    this.emit({ t: 'dialog', npc: null });
+  }
+
+  /** Taking up, handing in and giving up quests. Every id and every claim is checked: a client cannot take a reward it has not earned. */
+  private questCommand(c: Extract<Command, { t: 'quest' }>): void {
+    const log = this.quests;
+    const q = questById(c.id);
+    if (!log || !q || this.spectating || this.screen === 'dead') return;
+    if (c.a === 'abandon') {
+      if (log.abandon(q.id)) {
+        this.emit({ t: 'quest', what: 'step', text: `Quest abandoned: ${q.name}` });
+        this.syncQuests();
+      }
+      return;
+    }
+    // The rest happens face to face.
+    const talking = this.screen === 'dialog' ? this.dialogNpc : null;
+    if (c.a === 'accept') {
+      if (talking !== q.giver || !log.accept(q.id)) return;
+      this.emit({ t: 'quest', what: 'accept', text: `Quest accepted: ${q.name}` });
+      this.noteQuests(log.sync((items) => items.reduce((n, id) => n + this.inventory.countOf(id), 0)));
+      // A place you are standing in already counts for a quest that asks you to go there.
+      if (this.zoneId) this.questEvent({ t: 'enter', zone: this.zoneId });
+      this.syncQuests();
+      if (log.status(q.id) === 'ready') this.emit({ t: 'quest', what: 'ready', text: `${q.name} (ready to hand in)` });
+      return;
+    }
+    if (talking !== q.turnIn) return;
+    // The items a quest asks you to gather are handed over (like a quest item in the old MMOs).
+    log.sync((items) => items.reduce((n, id) => n + this.inventory.countOf(id), 0));
+    if (log.status(q.id) !== 'ready') return;
+    for (const o of q.objectives) {
+      if (o.kind !== 'collect') continue;
+      let left = o.count;
+      for (const id of o.items) {
+        const n = Math.min(left, this.inventory.countOf(id));
+        if (n > 0 && this.inventory.remove(id, n)) left -= n;
+      }
+    }
+    const reward = log.complete(q.id);
+    if (!reward) return;
+    if (reward.xp > 0) {
+      this.addXp(reward.xp);
+    }
+    for (const it of rewardItems(reward, this.cls?.classId ?? null)) this.collectOrDrop(makeStack(it.id, it.count));
+    this.addCoins(rewardCoins(reward));
+    this.emit({ t: 'quest', what: 'done', text: `Quest complete: ${q.name}` });
+    this.emit({ t: 'inv' });
+    this.syncQuests();
+  }
+
+  /**
+   * Buying from and selling to the merchant being talked to. Everything is checked here: the keeper must be in reach,
+   * the stock index and the slot must exist, the coins must be there and the wares must fit in the bags.
+   */
+  private shopCommand(c: Extract<Command, { t: 'shop' }>): void {
+    const shop = this.screen === 'dialog' && this.dialogNpc ? shopOf(this.dialogNpc) : null;
+    if (!shop || this.spectating) return;
+    if (c.a === 'buy') {
+      const ware = shop.stock[c.i];
+      if (!ware) return;
+      // As many purchases as asked, as long as coins and room last (the first one must go through).
+      let bought = 0;
+      for (let k = 0; k < c.n; k++) {
+        const stack = makeStack(ware.id, ware.count);
+        if (ware.gear) stack.gear = cloneGear(ware.gear);
+        if (this.coins < ware.price || !this.inventory.canFit(stack)) break;
+        this.spendCoins(ware.price);
+        this.inventory.collect(stack);
+        bought++;
+      }
+      if (bought === 0) {
+        this.emit({ t: 'toast', text: this.coins < ware.price ? 'Not enough coins.' : 'Your bags are full.' });
+        return;
+      }
+      this.emit({ t: 'inv' });
+      this.emit({ t: 'shop', what: 'buy' });
+      return;
+    }
+    const s = this.inventory.get(c.i);
+    if (!s) return;
+    const each = stackSellPrice(s);
+    if (each <= 0) {
+      this.emit({ t: 'toast', text: 'The merchant has no use for that.' });
+      return;
+    }
+    const n = Math.min(c.n, s.count);
+    s.count -= n;
+    this.inventory.set(c.i, s.count > 0 ? s : null);
+    this.addCoins(each * n);
+    this.emit({ t: 'inv' });
+    this.emit({ t: 'shop', what: 'sell' });
+  }
+
+  // ---- test and debug helpers ---------------------------------------------
+  // These bypass the protocol on purpose. They are the "dev back door" behind `window.__solrift`
+  // and the unit tests, and are never reachable from a client message.
+
+  giveItem(id: number, count = 1): void {
+    this.giveOrDrop(makeStack(id, count));
+    this.emit({ t: 'inv' });
+  }
+
+  clearInventory(): void {
+    for (let i = 0; i < this.inventory.size; i++) this.inventory.set(i, null);
+    this.emit({ t: 'inv' });
+  }
+
+  breakTimeAt(x: number, y: number, z: number): number {
+    const s = this.held;
+    return breakTime(BLOCKS[this.world.getBlock(x, y, z)], s ? getItem(s.id).tool : null, this.toolEnchants().efficiency, !!s && getItem(s.id).shears);
+  }
+
+  useOn(x: number, y: number, z: number, nx: number, ny: number, nz: number, fy?: number): boolean {
+    return this.useHeldOn({ x, y, z, id: this.world.getBlock(x, y, z), nx, ny, nz, fy });
+  }
+
+  /** Use a block the way a right-click does (open a screen, swing a door...); for tests and hotkeys. */
+  useBlock(x: number, y: number, z: number): boolean {
+    const id = this.world.getBlock(x, y, z);
+    if (!isInteractive(id)) return false;
+    this.openForBlock({ x, y, z, id, nx: 0, ny: 1, nz: 0 });
+    return true;
+  }
+
+  setWeather(kind: WeatherKind): void {
+    this.weather.set(kind, 100000);
+  }
+
+  spawnMob(kind: MobKind, x: number, y: number, z: number, variant = 0): number {
+    return this.mobs.spawn(kind, x, y, z, { variant }).id;
+  }
+
+  /** Talk to a villager by mob id, as a right-click would (tests and hooks). */
+  talkToMob(id: number): boolean {
+    const m = this.mobs.mobs.find((x) => x.id === id);
+    if (m?.kind === 'npc') return this.talkNpc(m);
+    return !!m && m.kind === 'villager' && this.talkTo(m);
+  }
+
+  clearMobs(): void {
+    this.mobs.mobs.length = 0;
+    this.mobs.arrows.length = 0;
+  }
+
+  /** Hurt a mob like a player hit would (no cooldown), knocking it away along +x. */
+  damageMob(id: number, amount: number): boolean {
+    const m = this.mobs.mobs.find((x) => x.id === id);
+    return m ? this.mobs.damage(m, amount, 1, 0, this.realm.mobEvents, true, true, true) : false;
+  }
+
+  // ---- vehicles ---------------------------------------------------------------
+
+  /** The minecart or boat under the crosshair, if it is closer than any block in the way. */
+  aimedVehicle(): { vehicle: Vehicle; dist: number } | null {
+    const d = this.look();
+    const { x: ox, y: oy, z: oz } = this.eye();
+    const all = this.realm.vehicles;
+    // Not the one you are sitting in (the ray starts inside it).
+    const hit = all.raycast(ox, oy, oz, d.x, d.y, d.z, 3.8, this.riding ?? undefined);
+    if (!hit) return null;
+    const block = raycast(this.world, ox, oy, oz, d.x, d.y, d.z, REACH);
+    // The rail a cart stands on never hides it.
+    if (block && !isRail(block.id)) {
+      const t = rayAabb(ox, oy, oz, d.x, d.y, d.z, [block.x, block.y, block.z], [block.x + 1, block.y + 1, block.z + 1], REACH + 1);
+      if (t !== null && t < hit.dist) return null;
+    }
+    return hit;
+  }
+
+  /** Climb into a minecart or boat. */
+  mount(v: Vehicle): boolean {
+    if (v.rider || this.riding || this.mountId || this.mountCast || this.spectating || this.sleeping || this.vitals.dead || this.screen === 'dead') return false;
+    if (Math.hypot(v.x - this.body.x, v.z - this.body.z) > 5) return false;
+    this.riding = v;
+    v.rider = this.rider;
+    this.flying = false;
+    this.peakY = this.body.y;
+    this.emit({ t: 'toast', text: 'Press Shift to get out' });
+    this.emit({ t: 'swing' });
+    return true;
+  }
+
+  /** Get out of the vehicle, onto a free spot beside it. */
+  dismount(): void {
+    const v = this.riding;
+    if (!v) return;
+    this.riding = null;
+    if (v.rider === this.rider) v.rider = null;
+    const spot = this.realm.vehicles.exitSpot(v, this.body);
+    const b = this.body;
+    b.x = spot.x;
+    b.y = spot.y;
+    b.z = spot.z;
+    b.vx = b.vy = b.vz = 0;
+    this.peakY = b.y;
+  }
+
+  /** A punch breaks a minecart or boat: it drops as an item (nothing in creative mode). */
+  hitVehicle(v: Vehicle): void {
+    this.attackCooldown = 0.5;
+    this.emit({ t: 'swing' });
+    this.realm.destroyVehicle(v, this.mode === 'survival');
+  }
+
+  /** Set a minecart on the rail you aim at, or a boat on the water. Returns whether it did. */
+  private placeVehicle(held: ItemStack): boolean {
+    const d = this.look();
+    const e = this.eye();
+    const boat = held.id === I.BOAT;
+    const hit = raycast(this.world, e.x, e.y, e.z, d.x, d.y, d.z, REACH, boat);
+    if (!hit) return false;
+    let kind: VehicleKind;
+    let x = hit.x + 0.5;
+    let y: number;
+    let z = hit.z + 0.5;
+    if (boat) {
+      if (!IS_LIQUID[hit.id] || FLUID_KIND[hit.id] !== FLUID_WATER) return false;
+      kind = 'boat';
+      let top = hit.y;
+      while (FLUID_KIND[this.world.getBlock(hit.x, top + 1, hit.z)] === FLUID_WATER && IS_LIQUID[this.world.getBlock(hit.x, top + 1, hit.z)]) top++;
+      y = top + 0.65;
+    } else {
+      if (!isRail(hit.id)) return false;
+      kind = 'minecart';
+      y = hit.y + 0.1;
+    }
+    if (this.realm.vehicles.list.some((o) => Math.abs(o.x - x) < 0.9 && Math.abs(o.z - z) < 0.9 && Math.abs(o.y - y) < 0.9)) return false;
+    if (!this.realm.vehicles.spawn(kind, x, y, z, this.yaw)) return false;
+    this.realm.emitNear(x, y, z, { t: 'sound', sound: boat ? 'wood' : 'stone', action: 'place', vol: 1 });
+    this.emit({ t: 'swing' });
+    this.useUpHeld();
+    return true;
+  }
+
+  /** Right-click on the mob under the crosshair with whatever is held (a dye on a sheep). Returns whether it did something. */
+  useOnMob(): boolean {
+    const hit = this.aimedMob();
+    const held = this.held;
+    if (hit && hit.mob.kind === 'villager') return this.talkTo(hit.mob);
+    if (hit && hit.mob.kind === 'npc') return this.talkNpc(hit.mob);
+    if (!hit || !held || hit.mob.dead) return false;
+    if (hit.mob.kind === 'sheep' && this.dyeSheep(hit.mob, held)) return true;
+    if (getItem(held.id).shears) return hit.mob.kind === 'sheep' && this.shear(hit.mob);
+    return this.feedMob(hit.mob, held);
+  }
+
+  /** Shears on a sheep: one to three pieces of its wool, and it stays bare for a while. */
+  private shear(mob: Mob): boolean {
+    if (mob.sheared || mob.baby) return false;
+    mob.sheared = true;
+    mob.woolTimer = WOOL_REGROW;
+    const n = 1 + Math.floor(this.rand() * 3);
+    this.realm.mobEvents.drop({ id: woolId(mob.variant), count: n }, mob.body.x, mob.body.y + 0.8, mob.body.z);
+    this.realm.emitNear(mob.body.x, mob.body.y, mob.body.z, { t: 'sound', sound: 'grass', action: 'break', vol: 0.9 });
+    this.emit({ t: 'swing' });
+    if (this.mode === 'survival') this.damageHeld(1);
+    return true;
+  }
+
+  /** The right food puts a grown animal in love, or helps a young one grow up. */
+  private feedMob(mob: Mob, held: ItemStack): boolean {
+    if (!this.mobs.feed(mob, held.id, this.realm.mobEvents)) return false;
+    this.emit({ t: 'swing' });
+    if (this.mode === 'survival') {
+      held.count -= 1;
+      if (held.count <= 0) this.inventory.set(this.selected, null);
+    }
+    this.emit({ t: 'inv' });
+    return true;
+  }
+
+  /**
+   * Right-click on a villager: open its trade screen, or, when it has nothing to trade (a nitwit, one that is
+   * busy, one that is not in a state to talk), it shakes its head. Returns whether it did something.
+   */
+  talkTo(mob: Mob): boolean {
+    const book = mob.villager;
+    if (mob.dead || this.screen !== 'none' || this.spectating) return false;
+    if (!book || book.offers.length === 0 || (mob.customer && mob.customer.body !== this.body)) {
+      this.realm.mobEvents.sound('no', mob);
+      this.emit({ t: 'swing' });
+      return true;
+    }
+    mob.customer = this;
+    this.tradingWith = mob;
+    this.openMenu(
+      new TradeMenu(this.inventory, book, {
+        onTrade: () => {
+          this.realm.awardXp(3 + Math.floor(this.realm.rand() * 4), mob.body.x, mob.body.y + 0.8, mob.body.z);
+          this.realm.mobEvents.sound('yes', mob);
+        },
+      }),
+    );
+    return true;
+  }
+
+  /** Dye a sheep's wool with the held dye (right-click). Returns whether it did. */
+  private dyeSheep(mob: Mob, held: ItemStack): boolean {
+    const c = dyeColor(held.id);
+    if (c < 0 || mob.dead || mob.variant === c) return false;
+    mob.variant = c;
+    if (this.mode === 'survival') {
+      held.count -= 1;
+      if (held.count <= 0) this.inventory.set(this.selected, null);
+    }
+    this.emit({ t: 'inv' });
+    return true;
+  }
+
+  /** Swing at whatever is under the crosshair, exactly like a left click. Returns the mob id hit. */
+  swing(): number | null {
+    const hit = this.aimedMob();
+    if (hit) this.attackMob(hit.mob);
+    return hit ? hit.mob.id : null;
+  }
+
+  /** Run drop physics (and pickup) without real time passing. */
+  tickDrops(seconds: number): void {
+    const b = this.body;
+    for (let t = 0; t < seconds; t += 1 / 30) {
+      this.drops.update(1 / 30, b.x, b.y, b.z, (s) => this.inventory.canFit(s), (s) => this.inventory.collect(s));
+    }
+    this.emit({ t: 'inv' });
+  }
+
+  tickFurnaces(seconds: number): void {
+    for (let t = 0; t < seconds; t += 0.25) this.blockEntities.tick(0.25);
+    this.emit({ t: 'inv' });
+  }
+}

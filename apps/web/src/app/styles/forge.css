@@ -1,0 +1,422 @@
+/* ---- the forge in the crafting grid -------------------------------------------------------------------------------------
+   Where the arrow is: the Forge button with its chance. While it works (2.4 s, as long as FORGE_TIME) the jewels shake, glow and
+   are drawn into the piece, the piece shakes harder and glows hotter, and a shockwave goes out; then the piece is in the result
+   slot with the outcome floating above it. */
+.forge-box {
+  width: 96px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.forge-btn {
+  width: 100%;
+  padding: 8px 0 9px;
+  font: inherit;
+  font-size: 15px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #ffe9b8;
+  text-shadow: 0 1px 0 #000, 0 0 8px rgba(255, 150, 50, 0.7);
+  cursor: pointer;
+  background: linear-gradient(#8a3a14, #4a1a08);
+  border: 2px solid #1a0a04;
+  border-top-color: #d98a3a;
+  border-left-color: #c0702a;
+  box-shadow: 0 0 14px rgba(255, 120, 40, 0.45), inset 0 0 10px rgba(255, 180, 80, 0.25);
+  animation: forge-ready 1.6s ease-in-out infinite;
+}
+.forge-btn:hover:not(:disabled) {
+  background: linear-gradient(#a64a1a, #5c2410);
+}
+.forge-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.forge-btn:disabled {
+  cursor: progress;
+  animation: none;
+  filter: saturate(0.7) brightness(0.85);
+}
+@keyframes forge-ready {
+  50% {
+    box-shadow: 0 0 22px rgba(255, 140, 50, 0.8), inset 0 0 14px rgba(255, 200, 100, 0.4);
+  }
+}
+.forge-chance {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  color: #c8b27a;
+  text-shadow: 1px 1px 0 #000;
+}
+.forge-chance b {
+  font-size: 16px;
+  letter-spacing: 1px;
+  color: #ff9a4a;
+}
+.forge-bar {
+  width: 100%;
+  height: 7px;
+  overflow: hidden;
+  background: #150f08;
+  border: 1px solid #000;
+}
+.forge-bar i {
+  display: block;
+  height: 100%;
+  transform-origin: left;
+  background: linear-gradient(90deg, #ff5a1a, #ffd24a);
+  box-shadow: 0 0 8px #ff8a3a;
+  animation: forge-bar 2.4s linear both;
+}
+@keyframes forge-bar {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+.slot.forge-pull,
+.slot.forge-core {
+  z-index: 6;
+  cursor: progress !important;
+  --c: 255, 210, 74;
+}
+.slot.forge-pull[data-jewel='rift'] {
+  --c: 176, 128, 255;
+}
+.slot.forge-pull[data-jewel='bloom'] {
+  --c: 255, 128, 190;
+}
+.forge-item {
+  position: absolute;
+  inset: 0;
+}
+/* What the grid would craft, in the result slot: a faint preview until the button makes it. */
+.slot.result.preview {
+  cursor: default;
+}
+/* The piece the forge would make, in the empty result slot: the item as it will be, +N badge and all, a little faded. */
+.forge-preview {
+  position: absolute;
+  inset: 0;
+  opacity: 0.55;
+  filter: saturate(0.7);
+  pointer-events: none;
+}
+.slot.result.preview .item-icon,
+.slot.result.preview .count,
+.slot.result.preview .plus-badge {
+  opacity: 0.4;
+  filter: grayscale(0.6);
+}
+/* The jewels: they glow, wobble, and then fly into the piece. */
+.slot.forge-pull {
+  animation: forge-cell var(--ft, 2.4s) ease-in-out both;
+}
+.slot.forge-pull .forge-item {
+  animation: forge-pull var(--ft, 2.4s) cubic-bezier(0.45, 0, 0.55, 1) both;
+}
+@keyframes forge-cell {
+  0%,
+  100% {
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.3), 0 0 0 rgba(var(--c), 0);
+  }
+  35%,
+  70% {
+    box-shadow: inset 0 0 10px rgba(var(--c), 0.55), 0 0 12px rgba(var(--c), 0.6);
+  }
+  88% {
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.3), 0 0 0 rgba(var(--c), 0);
+  }
+}
+@keyframes forge-pull {
+  0% {
+    transform: translate(0, 0) scale(1);
+    filter: drop-shadow(0 0 0 rgba(var(--c), 0));
+  }
+  12% {
+    transform: translate(0, -3px) scale(1.1);
+    filter: drop-shadow(0 0 6px rgba(var(--c), 0.95));
+  }
+  28% {
+    transform: translate(0, 0) scale(1.12) rotate(-6deg);
+  }
+  44% {
+    transform: translate(0, -4px) scale(1.18) rotate(6deg);
+    filter: drop-shadow(0 0 10px rgba(var(--c), 1));
+  }
+  60% {
+    transform: translate(0, -6px) scale(1.22) rotate(-4deg);
+  }
+  88% {
+    transform: translate(var(--dx), var(--dy)) scale(0.5);
+    opacity: 1;
+    filter: drop-shadow(0 0 14px rgba(var(--c), 1));
+  }
+  100% {
+    transform: translate(var(--dx), var(--dy)) scale(0.1);
+    opacity: 0;
+  }
+}
+/* The piece: it heats up, shakes harder and harder, and a white flash and a shockwave end it. */
+.slot.forge-core {
+  animation: forge-core 2.4s ease-in both;
+}
+.slot.forge-core .forge-item {
+  animation: forge-shake 2.4s linear both;
+}
+.slot.forge-core::after {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  pointer-events: none;
+  border: 3px solid rgba(255, 210, 120, 0.95);
+  box-shadow: 0 0 16px rgba(255, 150, 50, 0.9), inset 0 0 12px rgba(255, 170, 60, 0.6);
+  opacity: 0;
+  animation: forge-wave 2.4s ease-out both;
+}
+@keyframes forge-core {
+  0% {
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.3), 0 0 0 rgba(255, 140, 40, 0);
+  }
+  50% {
+    box-shadow: inset 0 0 8px rgba(255, 150, 50, 0.5), 0 0 12px rgba(255, 140, 40, 0.55);
+  }
+  85% {
+    box-shadow: inset 0 0 16px rgba(255, 190, 90, 0.9), 0 0 26px rgba(255, 150, 40, 0.95);
+  }
+  93% {
+    background: #fff;
+    box-shadow: inset 0 0 30px #fff, 0 0 44px #fff;
+  }
+  100% {
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.3), 0 0 0 rgba(255, 140, 40, 0);
+  }
+}
+@keyframes forge-shake {
+  0%,
+  30% {
+    transform: translate(0, 0) scale(1);
+    filter: brightness(1);
+  }
+  36% {
+    transform: translate(-1px, 0) scale(1.02);
+  }
+  42% {
+    transform: translate(1px, 1px) scale(1.02);
+  }
+  48% {
+    transform: translate(-1.5px, -1px) scale(1.04);
+    filter: brightness(1.2);
+  }
+  54% {
+    transform: translate(1.5px, 1px) scale(1.04);
+  }
+  60% {
+    transform: translate(-2px, 1px) scale(1.06);
+    filter: brightness(1.4);
+  }
+  66% {
+    transform: translate(2px, -1px) scale(1.06);
+  }
+  72% {
+    transform: translate(-2.5px, 0) scale(1.08);
+    filter: brightness(1.7);
+  }
+  78% {
+    transform: translate(2.5px, 1px) scale(1.08);
+  }
+  84% {
+    transform: translate(-3px, -1px) scale(1.1);
+    filter: brightness(2);
+  }
+  90% {
+    transform: translate(0, 0) scale(1.2);
+    filter: brightness(3);
+  }
+  100% {
+    transform: translate(0, 0) scale(1);
+    filter: brightness(1);
+  }
+}
+@keyframes forge-wave {
+  0%,
+  88% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  90% {
+    opacity: 1;
+    transform: scale(0.6);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(2.4);
+  }
+}
+.bloom-dot {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  width: 6px;
+  height: 6px;
+  transform: rotate(45deg);
+  background: #ff7ab8;
+  box-shadow: 0 0 0 1px #000, 0 0 6px rgba(255, 122, 184, 0.9);
+  pointer-events: none;
+}
+
+/* With a jewel in hand, every item it does not work on sits under a dark mask that fades in. */
+.slot.jewel-dim::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  pointer-events: none;
+  background: rgba(6, 6, 12, 0.62);
+  animation: jewel-dim-in 0.25s ease-out both;
+}
+@keyframes jewel-dim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+/* What a jewel did to a piece: a soft flash on the slot and the result floating up above it. */
+.jewel-flash {
+  --jewel-rgb: 255, 210, 74;
+  position: absolute;
+  inset: -2px;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 50%, rgba(var(--jewel-rgb), 0.55), rgba(var(--jewel-rgb), 0) 72%);
+  box-shadow: inset 0 0 10px rgba(var(--jewel-rgb), 0.8), 0 0 14px rgba(var(--jewel-rgb), 0.7);
+  animation: jewel-flash 0.9s ease-out both;
+}
+.jewel-flash[data-jewel='rift'],
+.jewel-float[data-jewel='rift'] {
+  --jewel-rgb: 176, 128, 255;
+}
+.jewel-flash[data-jewel='bloom'],
+.jewel-float[data-jewel='bloom'] {
+  --jewel-rgb: 255, 128, 190;
+}
+.jewel-flash.fail,
+.jewel-float.fail {
+  --jewel-rgb: 255, 96, 96;
+}
+.jewel-flash.fail {
+  animation: jewel-flash 0.9s ease-out both, jewel-shake 0.4s ease-in-out both;
+}
+@keyframes jewel-flash {
+  0% {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  20% {
+    opacity: 1;
+    transform: scale(1.06);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.2);
+  }
+}
+@keyframes jewel-shake {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  20% {
+    translate: -3px 0;
+  }
+  40% {
+    translate: 3px 0;
+  }
+  60% {
+    translate: -2px 0;
+  }
+  80% {
+    translate: 2px 0;
+  }
+}
+.jewel-float {
+  --jewel-rgb: 255, 210, 74;
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  z-index: 60;
+  margin-bottom: 4px;
+  padding: 4px 12px 5px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  white-space: nowrap;
+  pointer-events: none;
+  border-radius: 6px;
+  background: linear-gradient(rgba(18, 16, 26, 0.92), rgba(8, 8, 14, 0.92));
+  border: 1px solid rgba(var(--jewel-rgb), 0.7);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.55), 0 0 16px rgba(var(--jewel-rgb), 0.35);
+  animation: jewel-float 2.1s cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+.jewel-float b {
+  font-size: 17px;
+  line-height: 1.1;
+  letter-spacing: 0.5px;
+  color: rgb(var(--jewel-rgb));
+  text-shadow: 0 1px 0 #000, 0 0 10px rgba(var(--jewel-rgb), 0.8);
+}
+.jewel-float i {
+  font-size: 10px;
+  font-style: normal;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: #c8c8d8;
+  text-shadow: 1px 1px 0 #000;
+}
+/* A little arrow pointing at the piece. */
+.jewel-float::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  width: 7px;
+  height: 7px;
+  margin-top: -4px;
+  background: rgba(8, 8, 14, 0.95);
+  border-right: 1px solid rgba(var(--jewel-rgb), 0.7);
+  border-bottom: 1px solid rgba(var(--jewel-rgb), 0.7);
+  transform: translateX(-50%) rotate(45deg);
+}
+@keyframes jewel-float {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 10px) scale(0.7);
+  }
+  14% {
+    opacity: 1;
+    transform: translate(-50%, -4px) scale(1.08);
+  }
+  26% {
+    transform: translate(-50%, -2px) scale(1);
+  }
+  76% {
+    opacity: 1;
+    transform: translate(-50%, -8px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -18px) scale(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .jewel-flash.fail {
+    animation: jewel-flash 0.9s ease-out both;
+  }
+}

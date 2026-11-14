@@ -1,0 +1,154 @@
+/* The connection status: shown in the pause screen only (see GameView). */
+#net {
+  display: inline-block;
+  margin-top: 10px;
+  font-size: 12px;
+  padding: 3px 10px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(214, 170, 70, 0.3);
+  pointer-events: none;
+}
+#net.ok {
+  color: #7dff7d;
+}
+#net.off {
+  color: #aaa;
+}
+
+#underwater {
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(ellipse at center, rgba(40, 100, 220, 0.3), rgba(14, 40, 150, 0.55));
+  pointer-events: none;
+  display: none;
+}
+
+/* The start / pause screen (#overlay) is styled in components/pause.css. */
+.world-tools {
+  margin-top: 16px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  cursor: default;
+}
+.world-tools button {
+  background: #2b2b33;
+  color: #eee;
+  border: 2px solid #555;
+  padding: 6px 14px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.world-tools button:hover:not(:disabled) {
+  border-color: #14f195;
+}
+.world-tools button:disabled {
+  opacity: 0.5;
+}
+#world-msg {
+  font-size: 12px;
+  color: #bbb;
+  max-width: 340px;
+}
+
+.account-panel {
+  margin-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  align-items: center;
+  min-height: 30px;
+  font-size: 13px;
+  color: #ddd;
+  cursor: default;
+}
+.account-panel button {
+  background: #2b2b33;
+  color: #eee;
+  border: 2px solid #555;
+  padding: 6px 14px;
+  font: inherit;
+  cursor: pointer;
+}
+.account-panel button:hover:not(:disabled) {
+  border-color: #9945ff;
+}
+.account-panel button:disabled {
+  opacity: 0.5;
+}
+.account-panel button.link {
+  border: none;
+  background: none;
+  text-decoration: underline;
+  padding: 0;
+  color: #bbb;
+}
+.account-panel img {
+  vertical-align: middle;
+}
+.account-panel code {
+  color: #14f195;
+}
+#account-msg {
+  color: #ff9b9b;
+}
+.account-hint {
+  flex-basis: 100%;
+  font-size: 11px;
+  color: #888;
+}
+
+.cloud-panel {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  align-items: center;
+  max-width: 640px;
+  font-size: 12px;
+  color: #ccc;
+  cursor: default;
+}
+.cloud-panel > span {
+  flex-basis: 100%;
+  text-align: center;
+}
+.cloud-panel .warn {
+  color: #ffcf6b;
+}
+.cloud-panel button {
+  background: #2b2b33;
+  color: #eee;
+  border: 2px solid #555;
+  padding: 5px 12px;
+  font: inherit;
+  cursor: pointer;
+}
+.cloud-panel button:hover:not(:disabled) {
+  border-color: #14f195;
+}
+.cloud-panel button:disabled {
+  opacity: 0.5;
+}
+.cloud-panel button.link {
+  border: none;
+  background: none;
+  text-decoration: underline;
+  padding: 0;
+  color: #bbb;
+}
+.cloud-panel ul {
+  flex-basis: 100%;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  text-align: center;
+  color: #aaa;
+}
+.cloud-panel li {
+  margin: 3px 0;
+}
+

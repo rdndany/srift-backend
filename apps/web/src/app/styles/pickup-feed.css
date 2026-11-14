@@ -1,0 +1,100 @@
+/* Pickup feed: what was just picked up, stacked up from the bottom right; the newest line is at the bottom. */
+#pickup-feed {
+  position: fixed;
+  right: 16px;
+  bottom: 128px;
+  z-index: 55;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  pointer-events: none;
+  font-size: 15px;
+  text-shadow: 2px 2px 0 #0a0a10;
+}
+.pickup-row {
+  animation: pickup-in 0.2s steps(4, end);
+}
+.pickup-fade {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 170px;
+  padding: 3px 10px 3px 4px;
+  color: #f4f4f8;
+  background: rgba(0, 0, 0, 0.55);
+  border-right: 4px solid #c8c8d4;
+  animation: pickup-out 0.5s ease-in 2.7s forwards;
+}
+.pickup-row.rare .pickup-fade {
+  border-right-color: #55d7ff;
+}
+.pickup-row.rare .pickup-name {
+  color: #8fe6ff;
+}
+.pickup-row.book .pickup-fade {
+  border-right-color: #c28bff;
+}
+.pickup-row.book .pickup-name {
+  color: #d9b4ff;
+}
+.pickup-icon {
+  position: relative;
+  flex: none;
+  order: 4;
+  width: 30px;
+  height: 30px;
+}
+.pickup-icon .item-icon {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.5));
+}
+.pickup-icon .count,
+.pickup-icon .dur {
+  display: none;
+}
+.pickup-name {
+  order: 1;
+  flex: 1;
+  text-align: right;
+  white-space: nowrap;
+}
+.pickup-count {
+  order: 2;
+  color: #ffe45c;
+  animation: pickup-bump 0.3s ease-out;
+}
+.pickup-total {
+  order: 3;
+  min-width: 2.2em;
+  color: #9a9aae;
+  font-size: 13px;
+}
+@keyframes pickup-in {
+  from {
+    opacity: 0;
+    transform: translateX(60%);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes pickup-out {
+  to {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+@keyframes pickup-bump {
+  0% {
+    transform: scale(1.7);
+  }
+  100% {
+    transform: scale(1);
+  }
+}

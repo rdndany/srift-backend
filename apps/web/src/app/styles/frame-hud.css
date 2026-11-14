@@ -1,0 +1,160 @@
+/* ---- The HUD wears the inventory's frame: dark leather, a bronze bevel, gold lettering ---- */
+:root {
+  --w-gold: #f0bc4c;
+  --w-gold-hi: #ffe49a;
+  --w-bronze-hi: #d0a24c;
+  --w-bronze: #8a6424;
+  --w-bronze-lo: #4f360f;
+  --w-edge: #0b0806;
+  --w-text: #f1e4c8;
+  --w-dim: #a48f6a;
+  --w-panel: linear-gradient(#2a2216, #14100a);
+  --w-frame: inset 2px 2px 0 0 var(--w-bronze-hi), inset -2px -2px 0 0 var(--w-bronze-lo);
+  --w-well: #000 #6b4f1e #6b4f1e #000;
+}
+
+/* The hotbar: a framed strip of the same cells the backpack has. */
+#hotbar {
+  gap: 3px;
+  padding: 5px;
+  background: var(--w-panel);
+  border: 3px solid var(--w-edge);
+  box-shadow: var(--w-frame), 0 6px 18px rgba(0, 0, 0, 0.55);
+}
+#hotbar .slot {
+  background: linear-gradient(145deg, #2a241c, #0e0c09);
+  border: 2px solid #6b4f1e;
+  box-shadow: inset 0 0 0 1px #000, inset 3px 3px 7px rgba(0, 0, 0, 0.65);
+}
+#hotbar .slot.selected {
+  background: linear-gradient(145deg, #4a3d28, #1e1810);
+  border-color: var(--w-gold-hi);
+  box-shadow: inset 0 0 0 1px #000, 0 0 9px rgba(255, 208, 100, 0.6);
+}
+#hotbar .cb-slot {
+  background: linear-gradient(145deg, #2a241c, #0e0c09);
+}
+#hotbar .cb-slot:not(.poor) {
+  box-shadow: inset 0 0 0 1px #000, inset 3px 3px 7px rgba(0, 0, 0, 0.65);
+}
+
+/* The experience bar and the class resource bar are sunken wells like the ones in the inventory. */
+#xp-bar {
+  height: 18px;
+  padding: 1px;
+  clip-path: none;
+  background: rgba(0, 0, 0, 0.6);
+  border: 2px solid;
+  border-color: var(--w-well);
+}
+#xp-track {
+  background: #1a140c;
+}
+#xp-label {
+  line-height: 14px;
+  color: var(--w-gold-hi);
+}
+#hotbar .cb-res,
+#class-bar .cb-res {
+  background: #0b0806;
+  border: 2px solid;
+  border-color: var(--w-well);
+  box-shadow: none;
+}
+
+/* The character frame, top left. */
+#player-frame .pf-portrait {
+  box-shadow:
+    0 0 0 3px var(--w-edge),
+    0 0 0 5px var(--w-bronze-hi),
+    0 0 0 7px var(--w-edge),
+    0 5px 14px rgba(0, 0, 0, 0.6);
+}
+#player-frame .pf-level {
+  color: var(--w-gold-hi);
+  background: linear-gradient(#3a2d1a, #1c150c);
+  border: 2px solid var(--w-bronze-hi);
+  box-shadow: 0 0 0 2px var(--w-edge), 0 2px 6px rgba(0, 0, 0, 0.6);
+}
+#player-frame .pf-plate {
+  background: var(--w-panel);
+  border: 3px solid var(--w-edge);
+  border-left: 0;
+  border-radius: 0;
+  box-shadow: var(--w-frame), 0 5px 14px rgba(0, 0, 0, 0.5);
+}
+#player-frame .pf-name {
+  color: var(--w-gold-hi);
+}
+#player-frame .pf-bar {
+  background: #0b0806;
+  border: 2px solid;
+  border-color: var(--w-well);
+  box-shadow: none;
+}
+#player-frame .pf-bar.health.hardcore {
+  border-color: #efe3b0;
+}
+
+/* The minimap: a bronze frame, a gold plate for the north mark and one for the coordinates. */
+#minimap .minimap-north {
+  top: -5px;
+  padding: 0 6px;
+  color: var(--w-gold-hi);
+  background: linear-gradient(#3a2d1a, #1c150c);
+  border: 2px solid var(--w-edge);
+  border-radius: 0;
+  box-shadow: inset 1px 1px 0 0 var(--w-bronze-hi), inset -1px -1px 0 0 var(--w-bronze-lo);
+}
+#minimap .minimap-place {
+  margin-top: 8px;
+  padding: 1px 10px;
+  color: var(--w-gold-hi);
+  background: linear-gradient(#3a2d1a, #1c150c);
+  border: 2px solid var(--w-edge);
+  border-radius: 0;
+  box-shadow: inset 1px 1px 0 0 var(--w-bronze-hi), inset -1px -1px 0 0 var(--w-bronze-lo);
+}
+#minimap .minimap-coords {
+  margin-top: 4px;
+  padding: 1px 8px;
+  color: var(--w-text);
+  background: var(--w-panel);
+  border: 2px solid var(--w-edge);
+  border-radius: 0;
+  box-shadow: inset 1px 1px 0 0 var(--w-bronze), inset -1px -1px 0 0 var(--w-bronze-lo);
+}
+
+/* The quests, under the minimap: only each quest's title and what it asks for, as lettering on the screen. */
+#quest-tracker {
+  width: 204px;
+  gap: 10px;
+  text-align: right;
+  color: var(--w-text);
+  text-shadow: 1px 1px 0 #000, -1px 0 0 #000, 0 1px 0 #000, 0 0 6px rgba(0, 0, 0, 0.9);
+}
+#quest-tracker .tracker-name {
+  font-size: 13px;
+  color: var(--w-gold);
+}
+#quest-tracker .tracker-quest.ready .tracker-name {
+  color: var(--w-gold-hi);
+}
+#quest-tracker .tracker-line {
+  color: var(--w-text);
+}
+#quest-tracker .tracker-line.done {
+  color: #7fd36b;
+}
+/* The party, under the character frame. */
+#party-frame {
+  background: var(--w-panel);
+  border: 3px solid var(--w-edge);
+  border-radius: 0;
+  box-shadow: var(--w-frame), 0 5px 14px rgba(0, 0, 0, 0.5);
+}
+#party-frame .party-hp {
+  background: #0b0806;
+  border: 1px solid #000;
+}
+

@@ -1,0 +1,85 @@
+/* ---- Bags, as in World of Warcraft: a bar of four bag slots in the corner, and each worn bag in a window of its own above it ---- */
+#bag-hud {
+  position: fixed;
+  right: 16px;
+  bottom: 12px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  /* The windows wrap before they would reach the inventory window in the middle. */
+  max-width: max(240px, calc(50vw - 300px));
+}
+#bag-hud .bag-windows {
+  display: flex;
+  flex-flow: row-reverse wrap-reverse;
+  justify-content: flex-start;
+  align-content: flex-end;
+  gap: 10px;
+}
+#bag-hud .bag-window {
+  padding: 6px 8px 8px;
+  background: linear-gradient(#26201a, #120e0a);
+  border: 2px solid var(--w-edge);
+  box-shadow: inset 2px 2px 0 0 var(--w-bronze-hi), inset -2px -2px 0 0 var(--w-bronze-lo), 0 6px 18px rgba(0, 0, 0, 0.6);
+}
+#bag-hud .bag-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+  padding: 0 2px 4px;
+  font-size: 12px;
+  color: var(--w-gold);
+  text-shadow: 1px 1px 0 #000;
+  border-bottom: 2px solid rgba(0, 0, 0, 0.5);
+  box-shadow: 0 1px 0 rgba(208, 162, 76, 0.18);
+}
+#bag-hud .bag-count {
+  font-size: 11px;
+  color: var(--w-dim, #a48f6a);
+}
+/* The bigger the bag, the richer its frame. */
+#bag-hud .bag-window.tier-2,
+#bag-hud .bag-window.tier-3 {
+  box-shadow: inset 2px 2px 0 0 #6fcf6f, inset -2px -2px 0 0 #2d6a2d, 0 6px 18px rgba(0, 0, 0, 0.6);
+}
+#bag-hud .bag-window.tier-4 {
+  box-shadow: inset 2px 2px 0 0 #6fd6ff, inset -2px -2px 0 0 #1f5f80, 0 6px 18px rgba(0, 0, 0, 0.6);
+}
+#bag-hud .bag-window.tier-5 {
+  box-shadow: inset 2px 2px 0 0 #c28bff, inset -2px -2px 0 0 #54308a, 0 6px 18px rgba(0, 0, 0, 0.6);
+}
+#bag-hud .bag-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 4px;
+  background: linear-gradient(#26201a, #120e0a);
+  border: 2px solid var(--w-edge);
+  box-shadow: inset 2px 2px 0 0 var(--w-bronze-hi), inset -2px -2px 0 0 var(--w-bronze-lo), 0 6px 18px rgba(0, 0, 0, 0.6);
+}
+/* Each bag of the bar says how full it is, in the corner of its slot: 3/10. */
+#bag-hud .bag-cell {
+  position: relative;
+}
+#bag-hud .bag-fill {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  padding: 0 3px;
+  font-size: 11px;
+  line-height: 14px;
+  color: #f1e3b8;
+  background: rgba(0, 0, 0, 0.78);
+  text-shadow: 1px 1px 0 #000;
+  pointer-events: none;
+}
+#bag-hud .bag-fill.empty {
+  color: #8f8a7c;
+}
+#bag-hud .bag-fill.full {
+  color: #ff7a6a;
+}

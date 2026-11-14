@@ -1,0 +1,157 @@
+/* ---- Adventure mode: the party ---- */
+#party-frame {
+  position: fixed;
+  top: 188px;
+  left: 14px;
+  z-index: 40;
+  width: 180px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  color: #f2ead2;
+  font-size: 12px;
+  background: linear-gradient(rgba(20, 14, 6, 0.62), rgba(10, 8, 4, 0.5));
+  border: 1px solid rgba(214, 170, 70, 0.45);
+  border-radius: 3px;
+  text-shadow: 1px 1px 0 #000;
+  pointer-events: none;
+}
+#party-frame .party-name {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+#party-frame .party-member.you .party-name span:not(.party-crown):not(.party-level) {
+  color: #ffe9a8;
+}
+.party-crown {
+  color: #ffd24a;
+}
+#party-frame .party-level {
+  margin-left: auto;
+  color: #cbbd95;
+  font-size: 10px;
+}
+#party-frame .party-hp {
+  height: 6px;
+  margin-top: 2px;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(0, 0, 0, 0.8);
+}
+#party-frame .party-hp div {
+  height: 100%;
+  background: #4cc44a;
+  transition: width 0.2s;
+}
+#party-frame .party-hp div.low {
+  background: #d4452d;
+}
+#party-frame .party-hint {
+  color: #b9ad8a;
+  font-size: 10px;
+}
+#party-frame kbd,
+#party-invite kbd {
+  font-family: inherit;
+  font-size: 10px;
+  padding: 0 4px;
+  color: #cbbd95;
+  border: 1px solid rgba(214, 170, 70, 0.5);
+  border-radius: 2px;
+}
+#party-invite {
+  position: fixed;
+  top: 27%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px 12px;
+  color: #f2ead2;
+  font-size: 15px;
+  text-shadow: 1px 1px 0 #000;
+  background: linear-gradient(rgba(30, 20, 8, 0.9), rgba(14, 10, 4, 0.88));
+  border: 2px solid rgba(214, 170, 70, 0.7);
+  border-radius: 3px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.6);
+  animation: quest-note-in 0.3s ease-out;
+}
+#party-invite b {
+  color: #ffd24a;
+}
+#party-invite .invite-buttons {
+  display: flex;
+  gap: 10px;
+}
+#party-invite .quest-btn kbd {
+  color: #ffe9a8;
+}
+#party-window {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(ellipse at center, rgba(8, 6, 2, 0.4), rgba(0, 0, 0, 0.75));
+}
+.party-card {
+  width: min(520px, 92vw);
+  display: flex;
+  flex-direction: column;
+}
+.party-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  min-height: 90px;
+}
+.party-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 8px;
+  background: rgba(74, 48, 16, 0.12);
+  border: 1px solid rgba(74, 48, 16, 0.3);
+}
+.party-row-name {
+  flex: 1;
+  color: #5b1e0a;
+}
+.party-row-level,
+.party-row-hp {
+  font-size: 12px;
+  color: #6b5326;
+}
+.party-row-actions {
+  display: flex;
+  gap: 6px;
+}
+.quest-btn.small {
+  font-size: 11px;
+  padding: 3px 8px;
+}
+.quest-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.party-invite-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.party-invite-form input {
+  flex: 1;
+  font-family: inherit;
+  font-size: 14px;
+  padding: 5px 8px;
+  color: #2b1d0b;
+  background: #f3e8c6;
+  border: 2px solid #4a3010;
+}
+

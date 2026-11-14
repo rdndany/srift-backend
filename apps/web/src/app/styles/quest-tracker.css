@@ -1,0 +1,101 @@
+body.minimap-on #quest-tracker {
+  top: 290px;
+}
+#quest-tracker {
+  position: fixed;
+  top: 44px;
+  right: 16px;
+  z-index: 40;
+  width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: right;
+  color: #f2ead2;
+  font-size: 12px;
+  line-height: 1.4;
+  text-shadow: 1px 1px 0 #000, -1px 0 0 rgba(0, 0, 0, 0.7), 0 1px 0 #000, 0 0 6px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+}
+#quest-tracker .tracker-name {
+  color: #ffd24a;
+  font-size: 13px;
+}
+#quest-tracker .tracker-quest.ready .tracker-name {
+  color: #ffe98a;
+}
+#quest-tracker .tracker-line {
+  color: #e8e2d0;
+}
+#quest-tracker .tracker-line.done {
+  color: #7fd36b;
+}
+
+#quest-notes {
+  position: fixed;
+  top: 18%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+}
+.quest-note {
+  font-size: 17px;
+  color: #ffd24a;
+  text-shadow: 2px 2px 0 #000, 0 0 10px rgba(0, 0, 0, 0.8);
+  animation: quest-note-in 0.3s ease-out;
+}
+.quest-note.step {
+  font-size: 15px;
+  color: #f2ead2;
+}
+.quest-note.ready,
+.quest-note.done {
+  color: #7fe06b;
+}
+@keyframes quest-note-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+#zone-banner {
+  position: fixed;
+  top: 11%;
+  left: 0;
+  right: 0;
+  z-index: 44;
+  text-align: center;
+  pointer-events: none;
+  animation: zone-banner 4.2s ease-in-out forwards;
+}
+#zone-banner .zone-name {
+  font-size: 40px;
+  letter-spacing: 3px;
+  color: #ffe9a8;
+  text-shadow: 0 0 18px rgba(255, 190, 70, 0.7), 3px 3px 0 #000;
+}
+#zone-banner .zone-sub {
+  margin-top: 4px;
+  font-size: 15px;
+  color: #d8cfae;
+  text-shadow: 2px 2px 0 #000;
+}
+@keyframes zone-banner {
+  0% {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  12%,
+  75% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+  }
+}

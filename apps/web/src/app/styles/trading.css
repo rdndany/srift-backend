@@ -1,0 +1,95 @@
+/* ---- villager trading ---- */
+.trade-row {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+}
+.trade-list {
+  width: 230px;
+  max-height: 420px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-right: 4px;
+}
+.trade-xp {
+  height: 8px;
+  background: #1c1c26;
+  border: 1px solid #14141c;
+  flex: none;
+  margin-bottom: 4px;
+}
+.trade-xp div {
+  height: 100%;
+  background: linear-gradient(#a8ff6a, #3ec24a);
+}
+.offer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: #3c3c4c;
+  border: 2px solid #1c1c26;
+  border-right-color: #5a5a6e;
+  border-bottom-color: #5a5a6e;
+  cursor: pointer;
+  color: #e6e6f0;
+  font: inherit;
+  position: relative;
+  flex: none;
+}
+.offer:hover {
+  background: #5a5a72;
+}
+.offer.on {
+  outline: 2px solid #f4d35e;
+  background: #4c4c64;
+}
+.offer .chip {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.offer .chip.none {
+  width: 12px;
+}
+.offer .chip img {
+  width: 32px;
+  height: 32px;
+  image-rendering: pixelated;
+}
+.offer .chip b {
+  position: absolute;
+  right: 0;
+  bottom: -2px;
+  font-size: 12px;
+  text-shadow: 1px 1px 0 #000;
+}
+.offer .to {
+  margin: 0 auto 0 4px;
+  font-size: 20px;
+  color: #b8b8d0;
+}
+.offer.out {
+  opacity: 0.55;
+}
+.offer.out::after {
+  content: '';
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  top: 50%;
+  height: 3px;
+  background: #d04a4a;
+  transform: rotate(-8deg);
+}
+.trade-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+

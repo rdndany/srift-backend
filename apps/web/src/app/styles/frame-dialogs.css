@@ -1,0 +1,345 @@
+/* ---- Party, quest log, quest dialog, shop: the same bronze-and-leather window as the inventory ---- */
+:root {
+  --w-stone: #211c17;
+  --w-leather:
+    conic-gradient(rgba(255, 240, 210, 0.028) 25%, transparent 0 50%, rgba(255, 240, 210, 0.028) 0 75%, transparent 0),
+    linear-gradient(rgba(255, 230, 180, 0.05), rgba(0, 0, 0, 0.18));
+  --w-cell: linear-gradient(145deg, #2a241c, #0e0c09);
+}
+.dialog-card,
+.log-card,
+#party-invite {
+  position: relative;
+  color: var(--w-text);
+  background-color: var(--w-stone);
+  background-image: var(--w-leather);
+  background-size: 16px 16px, 100% 100%;
+  border: 4px solid var(--w-edge);
+  border-radius: 0;
+  text-shadow: none;
+  box-shadow:
+    inset 4px 4px 0 0 var(--w-bronze-hi),
+    inset -4px -4px 0 0 var(--w-bronze-lo),
+    inset 6px 6px 0 0 var(--w-edge),
+    inset -6px -6px 0 0 var(--w-edge),
+    inset 0 0 50px rgba(0, 0, 0, 0.55),
+    0 24px 60px rgba(0, 0, 0, 0.7);
+  scrollbar-width: thin;
+  scrollbar-color: var(--w-bronze) #14100a;
+}
+.dialog-card *,
+.log-card * {
+  scrollbar-width: thin;
+  scrollbar-color: var(--w-bronze) #14100a;
+}
+
+/* The head of a window: a gold title, a fading rule under it, the close block at the right. */
+.dialog-head,
+.log-head {
+  position: relative;
+  padding: 16px 24px 12px;
+  border-bottom: 0;
+}
+.dialog-head::after,
+.log-head::after {
+  content: '';
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  bottom: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--w-bronze), transparent);
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.5);
+}
+.dialog-head h2,
+.log-head h2 {
+  font-size: 15px;
+  font-weight: 400;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--w-gold-hi);
+  text-shadow: 2px 2px 0 #000;
+}
+.dialog-title,
+.log-count {
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: var(--w-dim);
+  text-shadow: 1px 1px 0 #000;
+}
+.dialog-x {
+  position: relative;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  font-size: 0;
+  color: transparent;
+  background: linear-gradient(#3a2d1a, #1c150c);
+  border: 3px solid var(--w-edge);
+  border-radius: 0;
+  box-shadow: inset 2px 2px 0 0 var(--w-bronze-hi), inset -2px -2px 0 0 var(--w-bronze-lo);
+}
+.dialog-x::before,
+.dialog-x::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 14px;
+  height: 3px;
+  margin: -1px 0 0 -7px;
+  background: var(--w-gold-hi);
+  box-shadow: 0 2px 0 #000;
+  transform: rotate(45deg);
+}
+.dialog-x::after {
+  transform: rotate(-45deg);
+}
+.dialog-x:hover {
+  background: linear-gradient(#b02a1c, #6a140c);
+  box-shadow: inset 2px 2px 0 0 #e0806a, inset -2px -2px 0 0 #3a0804;
+}
+.dialog-x:hover::before,
+.dialog-x:hover::after {
+  background: #fff;
+}
+
+/* Body text. */
+.dialog-body {
+  padding: 14px 24px;
+}
+.dialog-quest h3 {
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 1px;
+  color: var(--w-gold-hi);
+  text-shadow: 1px 1px 0 #000;
+}
+.dialog-quest p,
+.dialog-greeting {
+  color: var(--w-text);
+}
+.dialog-greeting {
+  color: #d8c7a4;
+}
+.mark {
+  color: var(--w-gold);
+  text-shadow: 1px 1px 0 #000;
+}
+.mark.grey {
+  color: #8a8478;
+}
+.quest-objectives li {
+  color: var(--w-text);
+}
+.quest-objectives li::before {
+  color: var(--w-bronze-hi);
+}
+.quest-objectives li.done {
+  color: #9fe08a;
+}
+.quest-rewards-label {
+  font-size: 11px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--w-gold);
+  text-shadow: 1px 1px 0 #000;
+}
+.quest-reward-item {
+  color: var(--w-text);
+}
+.quest-reward-item .reward-icon,
+.shop-row .reward-icon {
+  background: var(--w-cell);
+  border: 2px solid #b88a2e;
+  box-shadow: inset 0 0 0 1px #000, inset 2px 2px 5px rgba(0, 0, 0, 0.6);
+}
+.quest-xp {
+  color: #9fe08a;
+}
+.quest-coins {
+  color: var(--w-gold-hi);
+}
+
+/* Buttons: bronze plates; the first choice is lit gold. */
+.quest-btn {
+  font-size: 12px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--w-gold-hi);
+  text-shadow: 1px 1px 0 #000;
+  background: linear-gradient(#6a4a14, #3a2808);
+  border: 2px solid var(--w-edge);
+  border-radius: 0;
+  box-shadow: inset 2px 2px 0 0 var(--w-bronze-hi), inset -2px -2px 0 0 var(--w-bronze-lo);
+}
+.quest-btn:hover:not(:disabled) {
+  color: #fff;
+  background: linear-gradient(#8a6420, #4a3410);
+}
+.quest-btn.secondary {
+  color: var(--w-text);
+  background: linear-gradient(#2c2418, #17120b);
+  box-shadow: inset 2px 2px 0 0 var(--w-bronze), inset -2px -2px 0 0 var(--w-bronze-lo);
+}
+.quest-btn.secondary:hover:not(:disabled) {
+  background: linear-gradient(#3a2d1a, #1c150c);
+}
+.quest-btn.danger {
+  color: #ffd8cc;
+  background: linear-gradient(#6a2018, #36100a);
+  box-shadow: inset 2px 2px 0 0 #b0604c, inset -2px -2px 0 0 #2a0804;
+}
+.quest-btn.danger:hover:not(:disabled) {
+  background: linear-gradient(#8a2c20, #4a160e);
+}
+.dialog-foot {
+  padding: 10px 24px 18px;
+  border-top: 2px solid #4f360f;
+}
+
+/* The quest log: the chapters on the left, the quest on the right. */
+.log-list {
+  border-right: 2px solid #4f360f;
+  box-shadow: 2px 0 0 rgba(0, 0, 0, 0.45);
+  padding: 8px 10px 10px 24px;
+}
+.log-chapter h4 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 6px;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--w-gold);
+  text-shadow: 1px 1px 0 #000;
+}
+.log-chapter h4::after {
+  content: '';
+  flex: 1;
+  height: 2px;
+  background: linear-gradient(90deg, var(--w-bronze), transparent);
+}
+.log-entry {
+  color: var(--w-text);
+  text-shadow: 1px 1px 0 #000;
+  border: 2px solid transparent;
+}
+.log-entry:hover {
+  background: rgba(240, 188, 76, 0.08);
+}
+.log-entry.sel {
+  color: var(--w-gold-hi);
+  background: linear-gradient(90deg, rgba(240, 188, 76, 0.2), rgba(240, 188, 76, 0.02));
+  border-color: var(--w-bronze);
+}
+.log-entry.done {
+  color: #7d7364;
+}
+.log-entry.ready {
+  color: #9fe08a;
+}
+.log-detail {
+  padding: 14px 24px 14px 18px;
+}
+.log-detail h3 {
+  font-size: 16px;
+  font-weight: 400;
+  letter-spacing: 1px;
+  color: var(--w-gold-hi);
+  text-shadow: 2px 2px 0 #000;
+}
+.log-giver {
+  color: var(--w-dim);
+}
+.log-summary {
+  color: #d8c7a4;
+}
+.log-empty {
+  color: var(--w-dim);
+}
+
+/* The party window. */
+.party-body {
+  padding: 14px 24px;
+}
+.party-row {
+  background: rgba(0, 0, 0, 0.3);
+  border: 2px solid;
+  border-color: #000 #3d2c12 #3d2c12 #000;
+  box-shadow: inset 3px 3px 0 rgba(0, 0, 0, 0.45);
+  padding: 6px 10px;
+}
+.party-row-name {
+  color: var(--w-gold-hi);
+  text-shadow: 1px 1px 0 #000;
+}
+.party-row-level,
+.party-row-hp {
+  color: var(--w-dim);
+}
+.party-invite-form input {
+  color: var(--w-text);
+  background: rgba(0, 0, 0, 0.45);
+  border: 2px solid;
+  border-color: #000 #6b4f1e #6b4f1e #000;
+  border-radius: 0;
+  box-shadow: inset 2px 2px 0 rgba(0, 0, 0, 0.45);
+  outline: none;
+}
+.party-invite-form input:focus {
+  border-color: #000 var(--w-gold) var(--w-gold) #000;
+}
+.party-invite-form input::placeholder {
+  color: var(--w-dim);
+}
+#party-invite {
+  position: fixed;
+  padding: 14px 24px 16px;
+  font-size: 14px;
+}
+/* The quest log and the party window are cut to the size of the inventory window. */
+.log-card,
+.party-card {
+  box-sizing: border-box;
+  width: min(556px, 94vw);
+  height: min(627px, 94vh);
+}
+.log-cols {
+  grid-template-columns: 200px 1fr;
+}
+/* Room under them for the hotbar, as under the inventory. */
+#quest-log,
+#party-window {
+  box-sizing: border-box;
+  padding-bottom: 112px;
+}
+.party-body {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+.party-invite-form input {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.party-invite-form .quest-btn {
+  flex: none;
+}
+#party-invite b {
+  color: var(--w-gold-hi);
+}
+#party-invite kbd {
+  color: var(--w-gold-hi);
+  background: linear-gradient(#3a2d1a, #1c150c);
+  border: 1px solid var(--w-edge);
+  border-radius: 0;
+  box-shadow: inset 1px 1px 0 var(--w-bronze);
+}
+
+

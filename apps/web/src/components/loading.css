@@ -1,0 +1,299 @@
+/* The loading screen: a turning grass block, a gold progress bar and a tip, over the dark title-screen colours. */
+
+#loading-screen {
+  --gold: #f6cf72;
+  --gold-hi: #fff0b8;
+  --gold-line: #6d5420;
+  --serif: 'Trajan Pro', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif;
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  color: #e9e1cf;
+  background:
+    radial-gradient(ellipse at 50% 45%, rgba(70, 48, 20, 0.55), rgba(10, 8, 5, 0) 62%),
+    radial-gradient(ellipse at 50% 120%, rgba(246, 170, 50, 0.22), rgba(10, 8, 5, 0) 55%),
+    #0a0806;
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.6s ease, visibility 0s linear 0s;
+}
+#loading-screen * {
+  box-sizing: border-box;
+}
+/* Finished: fades away and stops catching the mouse. */
+#loading-screen.gone {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.6s ease, visibility 0s linear 0.6s;
+}
+#loading-screen.ready {
+  cursor: pointer;
+}
+
+.ld-center {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: min(440px, 86vw);
+  text-align: center;
+}
+
+/* ---- the block ---- */
+.ld-stage {
+  position: relative;
+  width: 120px;
+  height: 150px;
+  perspective: 600px;
+  margin-bottom: 10px;
+}
+.ld-cube {
+  --s: 84px;
+  position: absolute;
+  left: 50%;
+  top: 14px;
+  width: var(--s);
+  height: var(--s);
+  margin-left: calc(var(--s) / -2);
+  transform-style: preserve-3d;
+  animation:
+    ld-spin 7s linear infinite,
+    ld-float 2.4s ease-in-out infinite;
+}
+.ld-cube .f {
+  position: absolute;
+  inset: 0;
+  border: 2px solid rgba(20, 12, 4, 0.55);
+  image-rendering: pixelated;
+}
+.ld-cube .front {
+  transform: translateZ(calc(var(--s) / 2));
+}
+.ld-cube .back {
+  transform: rotateY(180deg) translateZ(calc(var(--s) / 2));
+}
+.ld-cube .right {
+  transform: rotateY(90deg) translateZ(calc(var(--s) / 2));
+}
+.ld-cube .left {
+  transform: rotateY(-90deg) translateZ(calc(var(--s) / 2));
+}
+.ld-cube .top {
+  transform: rotateX(90deg) translateZ(calc(var(--s) / 2));
+  background: conic-gradient(#5fae3a 25%, #4f9930 0 50%, #5fae3a 0 75%, #56a335 0) 0 0 / 21px 21px;
+  filter: brightness(1.1);
+}
+.ld-cube .bottom {
+  transform: rotateX(-90deg) translateZ(calc(var(--s) / 2));
+  background: conic-gradient(#5b3d24 25%, #4d321d 0 50%, #5b3d24 0 75%, #503520 0) 0 0 / 21px 21px;
+  filter: brightness(0.55);
+}
+/* Sides: a fringe of grass over dirt. */
+.ld-cube .front,
+.ld-cube .back,
+.ld-cube .left,
+.ld-cube .right {
+  background:
+    linear-gradient(#5fae3a 0 17%, #4a8f2c 17% 25%, transparent 25%),
+    conic-gradient(#7a5233 25%, #6b4528 0 50%, #7a5233 0 75%, #70492b 0) 0 0 / 21px 21px;
+}
+.ld-cube .left,
+.ld-cube .right {
+  filter: brightness(0.82);
+}
+.ld-cube .back {
+  filter: brightness(0.68);
+}
+.ld-shadow {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  width: 78px;
+  height: 16px;
+  margin-left: -39px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0) 70%);
+  animation: ld-shadow 2.4s ease-in-out infinite;
+}
+@keyframes ld-spin {
+  from {
+    transform: translateY(0) rotateX(-24deg) rotateY(0deg);
+  }
+  to {
+    transform: translateY(0) rotateX(-24deg) rotateY(360deg);
+  }
+}
+@keyframes ld-float {
+  0%,
+  100% {
+    top: 22px;
+  }
+  50% {
+    top: 8px;
+  }
+}
+@keyframes ld-shadow {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(0.78);
+    opacity: 0.6;
+  }
+}
+
+/* ---- name, bar, text ---- */
+.ld-logo {
+  margin: 0;
+  font-size: clamp(34px, 6vw, 54px);
+  line-height: 1.05;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-weight: 400;
+  background: linear-gradient(#fffbe6 0%, #ffe07a 34%, #e2a22b 50%, #b8741a 52%, #f3c15a 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 3px 0 #3a2306) drop-shadow(0 0 16px rgba(255, 160, 40, 0.4));
+}
+.ld-logo b {
+  font-weight: 400;
+  background: inherit;
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+.ld-bar {
+  position: relative;
+  width: 100%;
+  height: 12px;
+  margin-top: 22px;
+  padding: 2px;
+  background: rgba(8, 6, 3, 0.85);
+  border: 2px solid var(--gold-line);
+  box-shadow:
+    inset 0 0 0 1px #0b0906,
+    0 0 24px rgba(246, 170, 50, 0.12);
+}
+#loading-bar {
+  position: relative;
+  width: 4%;
+  height: 100%;
+  overflow: hidden;
+  background: linear-gradient(#ffe07a, #e2a22b 55%, #b8741a);
+  box-shadow: 0 0 10px rgba(246, 190, 70, 0.6);
+  transition: width 0.35s ease-out;
+}
+#loading-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, 0.55) 50%, transparent 70%);
+  transform: translateX(-100%);
+  animation: ld-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes ld-shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+#loading-text {
+  margin: 12px 0 0;
+  min-height: 18px;
+  font-family: var(--serif);
+  font-size: 13px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+.ld-enter {
+  display: none;
+  margin: 22px 0 0;
+  padding: 10px 26px;
+  font-family: var(--serif);
+  font-size: 15px;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: #2a1a05;
+  background: linear-gradient(#ffe07a, #e2a22b 55%, #c98a1f);
+  border: 2px solid #6d5420;
+  box-shadow: 0 0 22px rgba(246, 190, 70, 0.45);
+  animation: ld-pulse 1.6s ease-in-out infinite;
+}
+#loading-screen.ready .ld-bar,
+#loading-screen.ready #loading-text {
+  display: none;
+}
+#loading-screen.ready .ld-enter {
+  display: block;
+}
+@keyframes ld-pulse {
+  50% {
+    box-shadow: 0 0 36px rgba(255, 210, 100, 0.8);
+    transform: scale(1.03);
+  }
+}
+.ld-tip {
+  margin: 26px 0 0;
+  min-height: 40px;
+  max-width: 380px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: #a99d84;
+  animation: ld-tip 0.8s ease-out;
+}
+@keyframes ld-tip {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* ---- embers drifting up ---- */
+.ld-embers {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.ld-embers i {
+  position: absolute;
+  bottom: -10px;
+  width: 4px;
+  height: 4px;
+  background: #ffcf6a;
+  box-shadow: 0 0 8px 2px rgba(255, 170, 50, 0.7);
+  opacity: 0;
+  animation: ld-ember linear infinite;
+}
+@keyframes ld-ember {
+  0% {
+    transform: translate(0, 0);
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: translate(40px, -105vh);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ld-cube,
+  .ld-shadow,
+  .ld-embers i,
+  #loading-bar::after,
+  .ld-enter {
+    animation: none;
+  }
+  .ld-cube {
+    transform: rotateX(-24deg) rotateY(35deg);
+  }
+}

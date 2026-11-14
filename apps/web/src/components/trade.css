@@ -1,0 +1,117 @@
+/* Trading between players: the table is two columns of slots over your bags, in the merchant window's bronze frame. */
+#menu-screen.trade-screen {
+  z-index: 75;
+}
+#menu-screen .panel.wow.trade-win {
+  position: relative;
+  gap: 4px; /* the window must fit above the hotbar's room */
+}
+.trade-cols {
+  display: flex;
+  gap: 16px;
+  align-self: stretch;
+}
+.trade-side {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.trade-table {
+  display: grid;
+  grid-template-columns: repeat(3, 52px);
+  gap: 0;
+  justify-content: center;
+  padding: 4px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 2px solid;
+  border-color: #000 #3d2c12 #3d2c12 #000;
+  box-shadow: inset 3px 3px 0 rgba(0, 0, 0, 0.45);
+}
+.trade-cell:disabled {
+  cursor: default;
+  opacity: 1;
+}
+.trade-cell.full {
+  box-shadow: inset 0 0 0 1px #000, inset 3px 3px 7px rgba(0, 0, 0, 0.65), inset 0 0 10px rgba(255, 208, 100, 0.18);
+}
+
+/* Coins: a box to type in on your side, a plain figure on theirs. */
+.trade-coins {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  font-size: 13px;
+  color: var(--w-gold-hi, #ffe49a);
+  text-shadow: 1px 1px 0 #000;
+  background: rgba(0, 0, 0, 0.35);
+  border: 2px solid;
+  border-color: #000 #3d2c12 #3d2c12 #000;
+}
+.trade-coins.theirs {
+  min-height: 26px;
+}
+.trade-coins input {
+  flex: 1;
+  min-width: 0;
+  width: 70px;
+  box-sizing: border-box;
+  padding: 3px 6px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--w-text, #f1e4c8);
+  background: rgba(0, 0, 0, 0.45);
+  border: 2px solid;
+  border-color: #000 #6b4f1e #6b4f1e #000;
+  border-radius: 0;
+  outline: none;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.trade-coins input::-webkit-outer-spin-button,
+.trade-coins input::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+.trade-coins input:focus {
+  border-color: #000 var(--w-gold, #f0bc4c) var(--w-gold, #f0bc4c) #000;
+}
+.trade-coins small {
+  flex: none;
+  font-size: 10px;
+  color: var(--w-dim, #a48f6a);
+}
+.trade-state {
+  text-align: center;
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--w-dim, #a48f6a);
+  text-shadow: 1px 1px 0 #000;
+}
+.trade-state.ok {
+  color: #6bff8a;
+}
+
+/* An item on the table is still in your bags: it is dimmed there, with the count offered when it is only a part. */
+.shop-slot.offered .item-icon,
+.shop-slot.offered .count {
+  opacity: 0.35;
+}
+.shop-slot.offered {
+  position: relative;
+  border-color: #6bff8a;
+}
+.trade-part {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  font-size: 10px;
+  color: #6bff8a;
+  text-shadow: 1px 1px 0 #000;
+}
+.trade-foot {
+  justify-content: space-between;
+}

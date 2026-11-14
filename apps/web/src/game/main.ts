@@ -1,0 +1,1504 @@
+import * as THREE from 'three';
+import {
+  BED_DIRS,
+  BLOCKS,
+  SOUL_LANTERN_LIGHT,
+  NPCS,
+  GameSession,
+  LoopbackLink,
+  ADVENTURE_SEED,
+  instanceFootprint,
+  SaveError,
+  SessionHost,
+  isWorldKind,
+  isClassId,
+  caveKindHere,
+  placeNameAt,
+  lookCode,
+  lookOfCode,
+  makeGenerator,
+  type WorldKind,
+  type ClassId,
+  type Command,
+  type InputFrame,
+  type PlayerSave,
+  getItem,
+  MOUNTS,
+  IS_LIQUID,
+  type SaveMode,
+  type WorldState,
+} from '@solrift/shared';
+import { bumpUi, showZone, useUi } from '../ui/store';
+import { Chat } from './chat';
+import { paramsFor, prettyAddress } from './route';
+import type { ClientSession } from './clientSession';
+import { GameAudio } from './audio';
+import { buildAtlas } from './atlas';
+import { HeldItem } from './heldItem';
+import { Hud } from './hud';
+import { ItemIcons } from './icons';
+import { MapData, blockColors, type MapPin } from './mapData';
+import { MapSheet } from './heldMap';
+import { Input } from './input';
+import { ItemEntities } from './itemEntities';
+import { BookRenderer } from './bookRenderer';
+import { MobRenderer, disposeMobAssets } from './mobRenderer';
+import { VehicleRenderer, disposeVehicleAssets } from './vehicleRenderer';
+import { NetClient } from './net';
+import { Particles } from './particles';
+import { PlayerRenderer } from './playerRenderer';
+import { DeathFx } from './deathFx';
+import { SelfView, cameraPose } from './selfView';
+import { ChaseCamera } from './chaseCamera';
+import { Rain } from './rain';
+import { RemoteSession } from './remote';
+import { saveBridge } from './saveBridge';
+import { Sky } from './sky';
+import { DEFAULT_FX, PostFx, type FxFlags } from './postfx';
+import { SunShadows } from './shadows';
+import { AdminBar, type AdminDetails } from './adminBar';
+import { TorchGlow } from './torchGlow';
+import { CRACK_STAGES, makeCrackTexture, setCrackStage } from './breakCracks';
+import { XpOrbRenderer } from './xpOrbRenderer';
+import { EatFx } from './eatFx';
+import { LevelUpFx } from './levelUpFx';
+import { CHEWS_PER_SECOND } from './character';
+import { EntityLight } from './entityLight';
+import { LocalSaveStore } from './storage';
+import { paletteOfCode } from './lookPalette';
+import { hydrateProfile, useProfile } from '../profile/store';
+import { useAuth } from '../auth/store';
+import { AbilityFx } from './abilityFx';
+import { EmberFx } from './emberFx';
+import { MOUNT_LOOK } from './mountFx';
+import { DamageNumbers } from './damageNumbers';
+import { WindBlur } from './windBlur';
+import { ShaderKeeper } from './shaderKeep';
+import { HitchLog, describeHitch, hitchShaders, type Hitch } from './hitch';
+import { FigureWarm } from './figureWarm';
+import { warmPreview } from './characterPreview';
+import { RushLines } from './spellFx';
+import { GuardVeil } from './guardFx';
+import { FireParticles } from './fireFx';
+import { World } from './world';
+import { installDebugHooks } from './debugHooks';
+import { makeWindows } from './gameWindows';
+import { CompassNeedle } from './compassNeedle';
+import { makeEventHandler } from './gameEvents';
+import { KeyActions } from './gameKeys';
+import { RecipeMemory } from './recipeMemory';
+import { makeUiApi } from './uiApi';
+import { makeUiSync } from './uiSync';
+import { TargetPicker } from './targeting';
+import { ViewFeel, type FeelFrame } from './viewFeel';
+
+
+const BIOME_NAMES = ['ocean', 'beach', 'plains', 'forest', 'desert', 'snow', 'mountain'];
+
+/** "143 blocks NE" for an offset (north is -z, as on the F3 screen of the original). */
+function compass(dx: number, dz: number): string {
+  const names = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE'];
+  const dir = names[(Math.round(Math.atan2(dz, dx) / (Math.PI / 4)) + 8) % 8];
+  return `${Math.round(Math.hypot(dx, dz))} blocks ${dir}`;
+}
+
+/** Is this a map: the thing that is read in the hand rather than used? */
+const isMap = (stack: { id: number } | null | undefined): boolean => !!stack && getItem(stack.id).use === 'map';
+
+function byId<T extends HTMLElement>(id: string): T {
+  const el = document.getElementById(id);
+  if (!el) throw new Error(`missing #${id}`);
+  return el as T;
+}
+
+export interface StartOptions {
+  /** Lets React Strict Mode abort a start that was superseded before it began. */
+  isCancelled?: () => boolean;
+  /** The world to play (the title screen's choice). Without it `?seed=` decides, then 1337. */
+  seed?: number;
+  /** The mode a brand new world starts in; a saved world keeps its own. */
+  mode?: SaveMode;
+  /** A new world with one life on Hard difficulty. */
+  hardcore?: boolean;
+  /** Which world to enter: the generated one (default) or the flat square platform (?world=square). */
+  world?: WorldKind;
+  /** Asks the page to restart the game in the other world (what /world does); the game saves first. */
+  switchWorld?: (kind: WorldKind, mode: SaveMode) => void;
+  /** Play as a guest: nothing is read from or written to this device (the world lives only until the page closes). */
+  guest?: boolean;
+}
+
+/**
+ * Boots the game into the DOM rendered by `GameView`. Returns a disposer.
+ *
+ * This file is the *client*: rendering, audio, input and the HUD. The game itself (physics, vitals,
+ * mining, mobs, menus, saves) is a `GameSession` that the client drives through a loopback link:
+ * one `InputFrame` per animation frame plus discrete commands, answered with events to show and hear.
+ */
+export async function startGame(opts: StartOptions = {}): Promise<() => void> {
+  if (opts.isCancelled?.()) return () => undefined;
+
+  const canvas = byId<HTMLCanvasElement>('game');
+  const overlay = byId('overlay');
+  const statusEl = byId('status');
+  const params = paramsFor(location);
+
+  // The loading screen covers everything until the world is ready (see components/LoadingScreen.tsx).
+  const loadingEl = document.getElementById('loading-screen');
+  const loadingBar = document.getElementById('loading-bar');
+  const loadingText = document.getElementById('loading-text');
+  loadingEl?.classList.remove('gone', 'ready');
+  let loadingPct = 4;
+  const setLoading = (text: string, pct: number): void => {
+    loadingPct = Math.max(loadingPct, pct);
+    if (loadingText) loadingText.textContent = text;
+    if (loadingBar) loadingBar.style.width = `${loadingPct}%`;
+  };
+  const hideLoading = (): void => {
+    loadingEl?.classList.remove('ready');
+    loadingEl?.classList.add('gone');
+  };
+  setLoading('Preparing the world...', 4);
+  // An old-style `/?online&name=Alice` shows as `/play/Alice` (the page is not reloaded).
+  const pretty = prettyAddress(location);
+  if (pretty) history.replaceState(null, '', pretty);
+  /** ?online (or ?server=ws://...) plays on a game server instead of a local world. */
+  const online = params.has('online') || params.has('server');
+  document.body.classList.toggle('online', online);
+
+  const ac = new AbortController();
+  const { signal } = ac;
+
+  const atlas = buildAtlas();
+  const icons = new ItemIcons(atlas.canvas);
+  // Multisampling keeps the hard block edges and the texture-aliased far terrain from crawling.
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: !params.has('noaa'), powerPreference: 'high-performance' });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight, false);
+  // A frame is many renders (shadow maps, the world, the effects, the hand): the counts are of all of them, started over each frame.
+  renderer.info.autoReset = false;
+  // A shader program is built once and kept, however often the things drawn with it come and go.
+  const shaderKeeper = new ShaderKeeper(renderer);
+
+  // Automatic quality: if the game stays slow, give back the expensive things in order (shadows, then resolution)
+  // instead of stuttering. It only ever steps down, so it cannot flip-flop. Off with ?debug or ?noautoquality.
+  const autoQuality = !params.has('debug') && !params.has('noautoquality');
+  let qualityLevel = 0;
+  let shadowsOff = false;
+  let aqTime = 0;
+  let aqFrames = 0;
+  let aqSlow = 0;
+  const stepQuality = (): void => {
+    qualityLevel++;
+    // First the ambient occlusion goes (it is the dearest), then the shadows, then the resolution.
+    if (qualityLevel === 1) {
+      applyPostfx();
+      return void console.info('[solrift] low frame rate: ambient occlusion off');
+    }
+    if (qualityLevel === 2) shadowsOff = true;
+    else if (qualityLevel === 3) renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1));
+    else renderer.setPixelRatio(0.75);
+    if (qualityLevel >= 3) renderer.setSize(window.innerWidth, window.innerHeight, false);
+    console.info(`[solrift] low frame rate: quality level ${qualityLevel}`);
+  };
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.05, 600);
+  camera.rotation.order = 'YXZ';
+  scene.add(camera);
+
+  // ---- online: join the server first, because the world's seed is the server's ----
+  const chat = new Chat(
+    (text) => (remote ? remote.chat(text) : localCommand(text)),
+    (open) => {
+      if (open && document.pointerLockElement) document.exitPointerLock();
+      else if (!open && session.ready) input.lock();
+    },
+  );
+  /** Single-player has no one to talk to, but `/` still takes the few cheats (they need creative mode). */
+  function localCommand(text: string): void {
+    const [name, arg] = text.replace(/^\//, '').trim().toLowerCase().split(/\s+/);
+    if (!text.startsWith('/')) return;
+    if (name === 'help') {
+      chat.add('Commands: /help /world [overworld|square]', 'notice');
+    } else if (name === 'world') {
+      if (KIND === 'adventure') chat.add('Adventure is its own world: leave it from the pause menu and pick another from the title screen.', 'notice');
+      else if (!arg) chat.add(`You are in the ${KIND === 'square' ? 'square platform' : 'overworld'}. Use /world overworld or /world square.`, 'notice');
+      else if (arg !== 'overworld' && arg !== 'square') chat.add('Worlds: overworld, square.', 'notice');
+      else if (session.mode !== 'creative') chat.add('Switching worlds is a cheat: it needs creative mode (F4).', 'notice');
+      else if (arg === KIND) chat.add(`You are already in the ${arg === 'square' ? 'square platform' : 'overworld'}.`, 'notice');
+      else switchWorld(arg);
+    } else {
+      chat.add(`Unknown command: /${name}. Try /help.`, 'notice');
+    }
+  }
+  /** Save this world, then have the page start the game again in the other one. */
+  function switchWorld(kind: WorldKind): void {
+    if (online || kind === KIND || !opts.switchWorld) return;
+    chat.add('Travelling...', 'notice');
+    void (saveBridge.flush?.() ?? Promise.resolve()).finally(() => opts.switchWorld?.(kind, session.mode));
+  }
+  let remote: RemoteSession | null = null;
+  let onlineError: string | null = null;
+  // The class this character plays: a wallet character's is on its account; a guest picked theirs on the title screen. ?class= is for tests and developers.
+  hydrateProfile();
+  const classParam = params.get('class');
+  const myClass: ClassId | null = isClassId(classParam) ? classParam : ((useProfile.getState().identity === 'wallet' ? useAuth.getState().account?.class : useProfile.getState().classId) ?? null);
+  if (online) {
+    const serverUrl = params.get('server') ?? process.env.NEXT_PUBLIC_SERVER_URL ?? `ws://${location.hostname}:8787`;
+    const saved = localStorage.getItem('solrift-name');
+    hydrateProfile();
+    const name = params.get('name') ?? saved ?? `player${Math.floor(Math.random() * 900 + 100)}`;
+    localStorage.setItem('solrift-name', name);
+    statusEl.textContent = 'Connecting to the server...';
+    setLoading('Connecting to the server...', 8);
+    try {
+      remote = await RemoteSession.connect(serverUrl, name, lookCode(useProfile.getState().look), {
+        onEvents: (events) => {
+          handleEvents(events);
+          syncUi();
+        },
+        onChat: (from, text, ch, to) => {
+          if (ch === 'whisper') chat.add(to ? `To ${to}: ${text}` : `${from} whispers: ${text}`, 'whisper');
+          else if (ch === 'emote') chat.add(`* ${from} ${text}`, 'emote');
+          else if (ch === 'guild') chat.add(`[Guild] ${from}: ${text}`, 'guild');
+          else if (ch === 'party') chat.add(`[Party] ${from.replace(/ \(party\)$/, '')}: ${text}`, 'party');
+          else chat.add(`<${from}> ${text}`);
+        },
+        onSocial: (view) => useUi.setState({ social: view }),
+        onInspect: (name, view) => useUi.setState({ inspect: { name, view } }),
+        onTrade: (view) => showTrade(view),
+        onTradeAsk: (from) => useUi.setState({ tradeAsk: from }),
+        onNotice: (text) => chat.add(text, 'notice'),
+        onClose: (reason) => {
+          onlineError = reason;
+          hideLoading(); // the reason is on the pause screen
+          overlay.style.display = 'flex';
+          statusEl.textContent = `Disconnected: ${reason.replace(/^Disconnected( from the server)?\.?/, 'connection lost').trim()} Reload the page to reconnect.`;
+          statusEl.style.color = '#ff6b6b';
+          if (document.pointerLockElement) document.exitPointerLock();
+        },
+      }, myClass);
+    } catch (err) {
+      chat.dispose();
+      renderer.dispose();
+      atlas.dispose();
+      throw new Error(err instanceof Error ? err.message : 'Cannot reach the game server.');
+    }
+  }
+  const KIND: WorldKind = remote ? remote.kind : opts.world ?? (isWorldKind(params.get('world')) ? (params.get('world') as WorldKind) : 'overworld');
+  // Adventure is an online mode (a shared village and dungeon). Offline it opens only for developers and tests, with ?debug.
+  if (!online && KIND === 'adventure' && !params.has('debug')) {
+    chat.dispose();
+    renderer.dispose();
+    atlas.dispose();
+    throw new Error('Adventure is an online mode. Pick the Dawnwatch Adventure realm under Multiplayer.');
+  }
+  /** Adventure is one fixed world (the village and the dungeon are made for it), so it has no seed to choose. */
+  const SEED = remote ? remote.seed : KIND === 'adventure' ? ADVENTURE_SEED : opts.seed ?? Number(params.get('seed') ?? 1337);
+  /** Each kind of world keeps its own save, so the square never touches the overworld's blocks. */
+  const worldId = KIND === 'overworld' ? String(SEED) : `${SEED}-${KIND}`;
+  const store = new LocalSaveStore(worldId);
+  /** A guest keeps nothing: a frozen store drops every write, and the world keeps the blocks they change in memory for this visit only. */
+  const guest = !online && opts.guest === true;
+  if (guest) store.freeze();
+  const world = new World(SEED, atlas, online || guest ? null : store, KIND);
+  if (!online && !guest) await world.loadSaved();
+  if (opts.isCancelled?.()) {
+    remote?.leave();
+    chat.dispose();
+    world.dispose();
+    renderer.dispose();
+    atlas.dispose();
+    return () => undefined;
+  }
+  scene.add(world.group);
+  const cardMultisamples = renderer.getContext().getParameter(renderer.getContext().SAMPLES) > 1;
+  // The picture's finishing: F6 ambient occlusion, F7 glow, F8 colour grade, F9 sun rays, F10 blur behind menus (the choice is kept;
+  // `?nopostfx` turns all off, `?postfx` all on). The card's own multisampling does not go with it: edges are smoothed by a pass, and the
+  // cut-outs (leaves, grass) use a plain alpha test.
+
+  // ---- the game itself -------------------------------------------------
+  const forcedMode: SaveMode | null = params.get('mode') === 'creative' ? 'creative' : null;
+  /** Single-player: the game runs right here. Online: the server runs it and `remote` mirrors it. */
+  const local: GameSession | null = online
+    ? null
+    : new GameSession({
+        seed: SEED,
+        world,
+        generator: makeGenerator(SEED, KIND),
+        mode: forcedMode ?? opts.mode ?? 'survival',
+        hardcore: forcedMode === null && opts.hardcore === true,
+        classId: myClass,
+        /** `?nomobs` turns off natural spawning (used by deterministic tests). */
+        naturalSpawning: !params.has('nomobs'),
+        /** ?villagers brings the villages' people back into a ?nomobs world. */
+        villagers: !params.has('nomobs') || params.has('villagers'),
+      });
+  const session: ClientSession = local ?? remote!;
+  remote?.attachWorld(world, (blocks) => world.applyRemoteEdits(blocks));
+  const body = session.body;
+  const weather = session.weather;
+
+  const sky = new Sky();
+  /** The sun's shadow map (`?noshadows` turns it off, `?shadows=4096` sharpens the near map, `?shadowfar=0` drops the wide one). */
+  const shadowSize = Math.min(4096, Math.max(512, Number(params.get('shadows')) || 2048));
+  const shadows = params.has('noshadows') ? null : new SunShadows(world.materials, shadowSize, 64, params.get('shadowfar') === '0' ? 0 : 256);
+  if (shadows) {
+    shadows.setTerrain(world.group);
+    shadows.setView(camera);
+    world.onRemesh = (x0, y0, z0, x1, y1, z1) => shadows.terrainChanged(x0, y0, z0, x1, y1, z1);
+  }
+  const shadowFocus = new THREE.Vector3();
+  /** 0 in the open, 1 deep underground: fades the sky-coloured fog to black so caves have a dark horizon. */
+  let caveDark = 0;
+  /** The kind of cave the player was last in (see the banner below) and the time to the next look. */
+  let lastCaveKind = 'plain';
+  let caveBannerWait = 0;
+  let placeWait = 0;
+  const caveFog = new THREE.Color();
+  scene.add(sky.group);
+  const postfx = new PostFx(renderer, scene, camera, sky.sunMesh);
+  const fxWanted: FxFlags = ((): FxFlags => {
+    const all = (on: boolean): FxFlags => ({ ao: on, glow: on, grade: on, rays: on, menuBlur: on });
+    if (params.has('nopostfx')) return all(false);
+    if (params.has('postfx')) return all(true);
+    try {
+      const raw = localStorage.getItem('solrift.fx');
+      if (raw) return { ...DEFAULT_FX, ...(JSON.parse(raw) as Partial<FxFlags>) };
+      if (localStorage.getItem('solrift.postfx') === '0') return all(false); // (the first version had one switch)
+    } catch {
+      // (no storage: the defaults)
+    }
+    return { ...DEFAULT_FX };
+  })();
+  const applyPostfx = (): void => {
+    const wasOn = postfx.on;
+    postfx.setFlags(qualityLevel < 1 ? fxWanted : { ao: false, glow: false, grade: false, rays: false, menuBlur: false });
+    if (postfx.on && !wasOn) postfx.resize(window.innerWidth, window.innerHeight);
+    world.materials.setMultisampled(!postfx.on && cardMultisamples);
+  };
+  applyPostfx();
+  const rain = new Rain((x, z) => world.surfaceY(x, z));
+  scene.add(rain.object);
+  const startWeather = params.get('weather');
+  scene.background = sky.color;
+
+  // Two passes (world, then the hand on top), so clearing is manual.
+  renderer.autoClear = false;
+  const hand = new HeldItem(atlas.canvas, atlas.texture);
+
+  const particles = new Particles(atlas.canvas);
+  scene.add(particles.mesh);
+  const torchGlow = new TorchGlow();
+  scene.add(torchGlow.group);
+  const audio = new GameAudio();
+
+  const drops = new ItemEntities(icons, (id) => hand.dropModel(id));  scene.add(drops.group);
+  const xpOrbs = new XpOrbRenderer();
+  scene.add(xpOrbs.group);
+  const eatFx = new EatFx();
+  scene.add(eatFx.group);
+  let eatClock = 0;
+  let eatBites = 0;
+  const eatDir = new THREE.Vector3();
+  const fire = new FireParticles();
+  scene.add(fire.group);
+  const abilityFx = new AbilityFx(fire);
+  scene.add(abilityFx.group);
+  abilityFx.setViewer(camera.position);
+  // An effect that stays on someone (Iron Defense) is put on the figure as it is drawn: yours, or the other player of that name.
+  abilityFx.setLocator((who) => (!remote || who === remote.name ? body : ([...remote.others.values()].find((p) => p.name === who) ?? null)));
+  // The effects' shaders are compiled while the game loads, and kept: not at the first use of an ability, and not again at each one.
+  abilityFx.keeper = shaderKeeper;
+  abilityFx.warm();
+  // A level gained: the golden column of light on the player (a level of one's own at once, others' from the marks the server shows).
+  const levelFx = new LevelUpFx();
+  scene.add(levelFx.group);
+  levelFx.viewer = camera.position;
+  const levelSeen = new Set<number>();
+  // The Emberstone: the runes and the column of light while it is cast, the flash when it takes hold and the one at the bed.
+  const emberFx = new EmberFx();
+  scene.add(emberFx.group);
+  emberFx.onSound = (sound, x, y, z, progress) => {
+    const d = Math.hypot(x - camera.position.x, y - camera.position.y, z - camera.position.z);
+    audio.ability(sound, Math.max(0, 1 - d / 40), progress);
+  };
+  // A mount being called: the same, in violet; a burst when it arrives and a puff of dust when the rider gets off.
+  const mountFx = new EmberFx(MOUNT_LOOK);
+  scene.add(mountFx.group);
+  mountFx.onSound = emberFx.onSound;
+  emberFx.viewer = camera.position;
+  mountFx.viewer = camera.position;
+  /** Which ear a sound at a point is heard in: -1 (left) .. 1 (right), 0 when it is at your feet; the nearer, the less it leans. */
+  const panDir = new THREE.Vector3();
+  const panOf = (x: number, z: number): number => {
+    const dx = x - camera.position.x;
+    const dz = z - camera.position.z;
+    const d = Math.hypot(dx, dz);
+    if (d < 0.8) return 0;
+    const f = camera.getWorldDirection(panDir);
+    const h = Math.hypot(f.x, f.z) || 1;
+    // The camera's right-hand side on the ground is (-fz, fx).
+    return ((dx * -f.z + dz * f.x) / (d * h)) * Math.min(1, d / 5) * 0.85;
+  };
+  // A mount's paws: a thud and a rattle of armour for each one that comes down, in time with its stride, and dust kicked up (more of it, and more
+  // noise, the harder and faster it runs; a landing is the heaviest). The ground says what it sounds like, as for a person's step. Over water it splashes.
+  const mountStep = (x: number, y: number, z: number, power: number, dx: number, dz: number): void => {
+    const d = Math.hypot(x - camera.position.x, y - camera.position.y, z - camera.position.z);
+    if (d > 40) return;
+    const near = 1 - d / 40;
+    const under = world.getBlock(Math.floor(x), Math.floor(y - 0.2), Math.floor(z));
+    if (IS_LIQUID[under]) {
+      audio.splash(near * 0.35 * power);
+      return;
+    }
+    audio.ability('mount_step', near * Math.min(1, 0.35 + power * 0.5), 1, panOf(x, z));
+    const kind = BLOCKS[under].sound;
+    audio.play(kind, 'land', near * 0.3 * power, panOf(x, z));
+    if (d < 36 && (kind === 'dirt' || kind === 'sand' || kind === 'gravel' || kind === 'stone' || kind === 'grass')) fire.pawDust(x, y, z, dx, dz, power);
+  };
+  // What the camera does besides looking where the player looks: shakes, dips on a landing, kicks with a blow, leans into a roll, widens in a charge.
+  const feel = new ViewFeel();
+  const DUSTY = new Set(['dirt', 'grass', 'sand', 'gravel', 'stone', 'snow']);
+  /** Dust under a foot: a puff of the ground's own colour, a few flecks for a step and a cloud for a landing. */
+  const footDust = (kind: string, action: string, x: number, y: number, z: number, vol: number): void => {
+    if (!DUSTY.has(kind)) return;
+    if (Math.hypot(x - camera.position.x, z - camera.position.z) > 22) return;
+    const id = world.getBlock(Math.floor(x), Math.floor(y - 0.2), Math.floor(z));
+    if (!id || IS_LIQUID[id]) return;
+    const tiles = BLOCKS[id].tiles;
+    // (a hard stomp, like the spring of a Ground Slam, sends up far more)
+    if (action === 'land') particles.dust(x, y, z, tiles.top, Math.round(6 + 12 * Math.min(1, vol) + 40 * Math.max(0, vol - 1.2)), vol > 1.2 ? 1.5 : 1);
+    else particles.dust(x, y, z, tiles.top, 2, 0.3);
+  };
+  // A charge: streaks of light rush past (and the view widens: see ViewFeel).
+  const rushLines = new RushLines();
+  scene.add(rushLines.group);
+  // Iron Defense seen from inside: a bluish mask of cubes over the edges of the view (see GuardVeil).
+  const guardVeil = new GuardVeil();
+  scene.add(guardVeil.group);
+  // Numbers for the damage the player deals and takes.
+  const damageNumbers = new DamageNumbers();
+  // The wind of a fast dash: blurred sides and streaks of air.
+  const windBlur = new WindBlur();
+  const noWind = params.has('nowind');
+  // What the last freeze was made of, for the admin bar and the console (a tab that was hidden is not a freeze).
+  const hitches = new HitchLog();
+  let lastHitch: Hitch | null = null;
+  let hiddenAt = -Infinity;
+  document.addEventListener('visibilitychange', () => void (hiddenAt = performance.now()), { signal });
+  scene.add(damageNumbers.group);
+  abilityFx.onImpact = (x, y, z, strength) => {
+    const d = Math.hypot(x - camera.position.x, y - camera.position.y, z - camera.position.z);
+    feel.impact(strength * Math.max(0, 1 - d / 24));
+  };
+  // What abilities sound like where they happen (the caster's own and everyone else's near them): quieter with distance.
+  abilityFx.onSound = (sound, x, y, z, seconds) => {
+    const d = Math.hypot(x - camera.position.x, y - camera.position.y, z - camera.position.z);
+    audio.ability(sound, Math.max(0, 1 - d / 40), seconds, panOf(x, z));
+  };
+  const books = new BookRenderer();
+  scene.add(books.group);
+  const figureOf = (id: number): THREE.Object3D | null => (getItem(id).shield ? hand.figureShield(id) : hand.figureModel(id));
+  const players = new PlayerRenderer(figureOf);
+  scene.add(players.group);
+  players.onMountStep = mountStep;
+  const selfView = new SelfView(figureOf);
+  selfView.onMountStep = mountStep;
+  // The third-person camera (from behind), over the shoulder the player chose last time (mouse 3 swaps it).
+  const chase = new ChaseCamera();
+  try {
+    if (localStorage.getItem('solrift-shoulder') === 'left') chase.swapShoulder();
+  } catch {
+    /* no storage: the right shoulder */
+  }
+  /** What holds the camera back: whole blocks (low or thin ones, like beds, slabs and fences, do not). */
+  const cameraSolid = (x: number, y: number, z: number): boolean => {
+    const d = BLOCKS[world.getBlock(x, y, z)];
+    return d.solid && d.shape === 'cube';
+  };
+  // Your own body wears the character you made (online, the one the server has for you).
+  hydrateProfile();
+  const myLook = remote ? remote.look : lookCode(useProfile.getState().look);
+  selfView.setLook(paletteOfCode(myLook));
+  hand.setLook(paletteOfCode(myLook));
+  useProfile.setState({ look: lookOfCode(myLook) });
+  scene.add(selfView.group);
+  // When someone dies the body comes apart into the little cubes it is made of (one of three ways, picked at random).
+  const deathFx = new DeathFx((x, y, z) => world.getBlock(x, y, z));
+  scene.add(deathFx.group);
+  players.onDeath = (c, x, y, z, yaw) => deathFx.spawn(c.voxels(), x, y, z, yaw, -1, sky.brightness);
+  /** Your own body falls apart where it stood (`variant` picks the way: any other number is random). */
+  let debugDeadUntil = 0;
+  const breakSelf = (variant = -1): void => {
+    deathFx.spawn(selfView.voxels(), body.x, body.y, body.z, selfView.mode !== 0 ? selfView.facing : input.yaw, variant, sky.brightness);
+  };
+
+  const mobRenderer = new MobRenderer(fire);
+  // Mobs, other players and your own body are lit like the world: sky colour, caves, torches, sun on each face.
+  const handLight = new THREE.Color();
+  const heldLightFull = new THREE.Color();
+  const heldLightColor = new THREE.Color();
+  const heldLightAt = new THREE.Vector3();
+  const heldLightDir = new THREE.Vector3();
+  let debugHideHand = false;
+
+  // The map: painted from the chunks around you and remembered. The minimap in the corner and the map item draw from it.
+  const mapData = new MapData({ chunk: (cx, cz) => world.chunkData(cx, cz) }, blockColors(atlas.canvas), (cx, cz) => world.chunkRev(cx, cz));
+  /** The picture of the map item, as it is painted on the sheet in the hand (see HeldItem). */
+  const mapSheet = new MapSheet();
+  hand.setMapSheet(mapSheet);
+  let mapPaintWait = 0;
+  let mapWasShown = false;
+  /** The shaders of the hand are built in the first frame, behind the loading screen (see `HeldItem.warm`). */
+  let handWarm = false;
+  /** What the world only shows later (your body in gear, the mount, the block outline, the rain) is drawn once while loading (see `FigureWarm`). */
+  let figureWarm: FigureWarm | null = null;
+  let figureWarmStarted = false;
+  let figureWarmWait = 1;
+  /** What the server last said the map should mark besides the quest givers: the rest of your party. */
+  let mapPartyPins: { name: string; x: number; z: number }[] = [];
+  /** The pins for this frame: quest givers (Adventure) and party members. Far-off places in another map (a dungeon copy) are left out. */
+  function mapPins(): MapPin[] {
+    const pins: MapPin[] = [];
+    const near = (x: number, z: number, r: number): boolean => Math.hypot(x - body.x, z - body.z) < r;
+    if (KIND === 'adventure') {
+      const log = useUi.getState().quests;
+      for (const n of NPCS) {
+        const kind = log.markerFor(n.id);
+        if (kind && near(n.x, n.z, 400)) pins.push({ kind, name: n.name, x: n.x, z: n.z });
+      }
+    }
+    for (const p of mapPartyPins) if (near(p.x, p.z, 3000)) pins.push({ kind: 'party', name: p.name, x: p.x, z: p.z });
+    return pins;
+  }
+  function setMapUp(up: boolean): void {
+    if (useUi.getState().mapUp !== up) useUi.setState({ mapUp: up });
+  }
+  function toggleMinimap(): void {
+    const next = !useUi.getState().minimap;
+    useUi.setState({ minimap: next });
+    try {
+      localStorage.setItem('solrift-minimap', next ? 'on' : 'off');
+    } catch {
+      /* storage may be blocked; the choice then lasts until the page is closed */
+    }
+  }
+  const entityLight = new EntityLight((x, z) => world.surfaceY(x, z), torchGlow);
+  mobRenderer.setEnvironment(entityLight);
+  players.setEnvironment(entityLight);
+  drops.setEnvironment(entityLight);
+  scene.add(mobRenderer.group);
+  const vehicleRenderer = new VehicleRenderer();
+  vehicleRenderer.setEnvironment(entityLight);
+  scene.add(vehicleRenderer.group);
+  // Everything that walks, rides or rolls casts a shadow on the ground (?noentshadows turns it off).
+  if (!params.has('noentshadows')) shadows?.setCasters(players.group, selfView.group, mobRenderer.group, vehicleRenderer.group);
+
+  const input = new Input(canvas, signal);
+
+  // ---- target highlight ----------------------------------------------
+  const highlightGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(1.004, 1.004, 1.004));
+  const highlight = new THREE.LineSegments(highlightGeo, new THREE.LineBasicMaterial({ color: 0x000000 }));
+  highlight.visible = false;
+  scene.add(highlight);
+  // The breaking animation: ten stages of cracks drawn over every face of the block being mined.
+  const crackTexture = makeCrackTexture();
+  const crack = new THREE.Mesh(
+    new THREE.BoxGeometry(1.004, 1.004, 1.004),
+    new THREE.MeshBasicMaterial({ map: crackTexture, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }),
+  );
+  crack.visible = false;
+  scene.add(crack);
+
+  const hud = new Hud();
+  /** The admin bar at the top centre (F2, or ?admin): the choice is remembered. */
+  const admin = new AdminBar(
+    document.getElementById('admin-bar')!,
+    params.has('admin') ||
+      ((): boolean => {
+        try {
+          return localStorage.getItem('solrift-admin') === 'on';
+        } catch {
+          return false;
+        }
+      })(),
+  );
+  let flash = 0;
+
+  // ---- load the save (migrating the pre-versioning localStorage format on first run) ----
+  let savedPlayer: PlayerSave | null = null;
+  let savedWorld: WorldState | null = null;
+  try {
+    if (!online && !guest) {
+      await store.importLegacy();
+      savedPlayer = await store.loadPlayer();
+      savedWorld = await store.loadWorldState();
+    }
+  } catch (err) {
+    if (err instanceof SaveError) {
+      store.freeze(); // never overwrite a save we cannot read
+      world.dispose();
+      renderer.dispose();
+      throw new Error(`This world cannot be loaded: ${err.message}. Nothing was changed.`);
+    }
+    console.warn('failed to read save', err);
+  }
+  if (local && savedWorld) {
+    local.loadWorldState(savedWorld, { weather: !params.has('weather') });
+    sky.time = session.time;
+  }
+  if (local && (startWeather === 'rain' || startWeather === 'thunder' || startWeather === 'clear')) {
+    local.weather.set(startWeather, 100000);
+    weather.rain = startWeather === 'clear' ? 0 : 1;
+    weather.storm = startWeather === 'thunder' ? 1 : 0;
+  }
+  if (local && savedPlayer) {
+    local.loadPlayer(savedPlayer, forcedMode !== null);
+    input.yaw = local.yaw;
+    input.pitch = local.pitch;
+  }
+
+  // ---- loopback link: client <-> session ------------------------------------
+
+  // The recipe book: remembers which items this player has held (per world, on this device). See recipeMemory.ts.
+  const recipes = new RecipeMemory(session, `solrift-recipes-${LocalSaveStore.scopeKey()}${online ? 'online' : worldId}`, !guest);
+
+  /** Mirror session state into the React store, and react to screen changes: see uiSync.ts. */
+  const syncUi = makeUiSync(session, input, overlay, recipes);
+
+  // What is shown and played for each thing the game says has happened: see gameEvents.ts.
+  const handleEvents = makeEventHandler({
+    session, input, camera, hud, audio, particles, damageNumbers, hand, selfView, players, feel, abilityFx, emberFx, mountFx, levelFx, panOf, footDust,
+    hurtFlash: () => void (flash = 1),
+    setPartyPins: (party) => void (mapPartyPins = party),
+    breakSelf: () => breakSelf(),
+  });
+
+  const link = local
+    ? new LoopbackLink(new SessionHost(local), (events) => {
+        handleEvents(events);
+        syncUi();
+      })
+    : null;
+  /** One door for everything the player does: the loopback session, or the server. */
+  function sendCommand(c: Command): void {
+    if (link) link.send(c);
+    else remote!.command(c);
+  }
+
+  /** Dev back door: run something directly on the session, then deliver the events it caused. */
+  function act<T>(fn: () => T): T {
+    const r = fn();
+    link?.flush();
+    syncUi();
+    return r;
+  }
+
+  // The windows over the game (quest log, party, social, trade, a player's menu) and who has the mouse: see gameWindows.ts.
+  const windows = makeWindows({ session, remote, online, input, chat, overlay, sendCommand });
+  const { toggleQuestLog, togglePartyWindow, toggleSocialWindow, showTrade, openPlayerMenu, closePlayerMenu } = windows;
+
+  // The needle of the compass, and whether the map is carried (the Adventure minimap needs it): see compassNeedle.ts.
+  const compassNeedle = new CompassNeedle(session, input, hand, KIND);
+  // The target frame (online): the player the crosshair rests on. See targeting.ts.
+  const targets = remote ? new TargetPicker(remote, session, input, camera) : null;
+  /** The spellbook (key K): the third tab of the inventory window, which opens on it. */
+  function openSpellbook(): void {
+    if (!session.classView() || session.screen !== 'none' || session.mode === 'creative') return;
+    useUi.setState({ invTab: 'spells' });
+    sendCommand({ t: 'inventory' });
+  }
+  mobRenderer.markerFor = KIND === 'adventure' ? (npc) => useUi.getState().quests.markerFor(npc) : null;
+
+  useUi.setState({
+    adventure: KIND === 'adventure',
+    map: mapData,
+    mapUp: false,
+    minimap: (() => {
+      try {
+        return localStorage.getItem('solrift-minimap') !== 'off';
+      } catch {
+        return true;
+      }
+    })(),
+    questLogOpen: false,
+    partyOpen: false,
+    social: null,
+    socialOpen: false,
+    inspect: null,
+    target: null,
+    playerMenu: null,
+    trade: null,
+    tradeAsk: null,
+    invTab: 'inventory',
+    dialogNpc: null,
+    shopOpen: false,
+    api: makeUiApi({ session, remote, input, chat, icons, store, guest, recipes, windows, sendCommand, openSpellbook }),
+    mode: session.mode,
+    hardcore: session.hardcore,
+    spectating: session.spectating,
+    selected: session.selected,
+    screen: 'none',
+    health: session.vitals.health,
+    hunger: session.vitals.hunger,
+    air: session.vitals.air,
+    level: session.xp.level,
+    xpProgress: session.xp.progress,
+    coins: session.coins,
+    armor: session.defense,
+  });
+  bumpUi();
+
+  // ---- networking (optional) -----------------------------------------
+  const net = online
+    ? null
+    : new NetClient(process.env.NEXT_PUBLIC_SERVER_URL ?? `ws://${location.hostname}:8787`, 'player', () => {
+        const s = net!.state;
+        hud.setNet(s.connected ? `online - ${s.pingMs}ms - ${s.players} player(s)${s.user ? ` - ${s.user}` : ''}` : 'offline (single-player)', s.connected);
+      });
+  net?.connect();
+  if (net) saveBridge.reconnectNet = () => net.reconnect();
+
+  // ---- loop -----------------------------------------------------------
+  let last = performance.now();
+  let fps = 0;
+  /** Draw calls and triangles of the last scene render (the hand is drawn separately afterwards). */
+  let sceneCalls = 0;
+  let sceneTris = 0;
+  /** Triangles drawn into the shadow maps this frame. */
+  let shadowTris = 0;
+  let fpsFrames = 0;
+  let fpsTime = 0;
+  let saveTimer = 0;
+  let rafId = 0;
+  let stopped = false;
+  let lastFar = 0;
+  /** 0..1 how black the screen is while sleeping; it fades up in bed and back down on waking. */
+  let sleepFade = 0;
+  let wasSleeping = false;
+
+
+  /** Wait for the terrain around the player, then let the session start. */
+  function tryFinishLoading(): void {
+    const pcx = Math.floor(body.x / 16);
+    const pcz = Math.floor(body.z / 16);
+    let total = 0;
+    let done = 0;
+    for (let dx = -2; dx <= 2; dx++) {
+      for (let dz = -2; dz <= 2; dz++) {
+        total++;
+        if (world.isChunkMeshed(pcx + dx, pcz + dz)) done++;
+      }
+    }
+    const pct = Math.round((done / total) * 100);
+    // While the warm-up (see `FigureWarm`) goes, the words and the bar are its (they are set in the frame, see there).
+    const warming = !figureWarmStarted || !!figureWarm;
+    if (!warming) {
+      statusEl.textContent = `Generating world... ${pct}%`;
+      setLoading(`Generating world... ${pct}%`, 40 + Math.round(pct * 0.58));
+    }
+    if (done < total || warming) return;
+    if (local) act(() => local.finishLoading());
+    else remote!.ready = true;
+    statusEl.textContent = '';
+    enterWorld();
+  }
+
+  let entered = false;
+  /**
+   * The world is ready: go straight in, with the mouse taken, instead of stopping at the pause screen. A browser only
+   * hands over the mouse after a click or key press, so when that was too long ago (or the page was just opened, as it
+   * is for the online realm) the loading screen turns into "Click to enter the world".
+   */
+  function enterWorld(): void {
+    if (entered) return;
+    entered = true;
+    // Developers and tests (?debug) keep the pause screen as the way in.
+    if (params.has('debug') || !loadingEl) return hideLoading();
+    setLoading('World ready', 100);
+    overlay.style.display = 'none';
+    audio.resume();
+    void input.lock().then((ok) => {
+      if (ok || input.locked) hideLoading();
+      else loadingEl.classList.add('ready');
+    });
+  }
+
+  // Keys that start something (as opposed to held keys, which go in the frame): see gameKeys.ts.
+  const keys = new KeyActions({
+    session, remote, online, input, world, hud, admin, chat, audio, selfView, chase, fxWanted, applyPostfx, windows, sendCommand, toggleMinimap, openSpellbook,
+    quality: () => qualityLevel,
+  });
+
+  function buildFrame(dt: number, cam: { x: number; y: number; z: number } | null = null): InputFrame {
+    const round = (v: number): number => Math.round(v * 100) / 100;
+    return {
+      t: 'frame',
+      dt,
+      locked: input.locked,
+      yaw: input.yaw,
+      pitch: input.pitch,
+      ...(cam ? { cam: [round(cam.x), round(cam.y), round(cam.z)] as [number, number, number] } : {}),
+      forward: (input.isDown('KeyW') ? 1 : 0) - (input.isDown('KeyS') ? 1 : 0),
+      strafe: (input.isDown('KeyD') ? 1 : 0) - (input.isDown('KeyA') ? 1 : 0),
+      jump: input.isDown('Space'),
+      sprint: keys.sprinting || input.isDown('ControlLeft'),
+      sneak: input.isDown('ShiftLeft'),
+      left: input.leftDown,
+      right: input.rightDown,
+    };
+  }
+
+  /** What the admin bar shows besides the frame's own numbers. */
+  const adminDetails = (): AdminDetails => {
+    const w = world.refreshStats();
+    return {
+      chunksMeshed: w.meshed,
+      chunksLoaded: w.loaded,
+      chunksQueued: w.pendingGen,
+      renderDistance: world.renderDistance,
+      mobs: session.mobs.mobs.length,
+      drops: session.drops.count,
+      geometries: renderer.info.memory.geometries,
+      textures: renderer.info.memory.textures,
+      programs: renderer.info.programs?.length ?? 0,
+      programsBuilt: shaderKeeper.built,
+      hitch: lastHitch ? `${describeHitch(lastHitch, 3)}${hitchShaders(lastHitch)}, ${Math.round((performance.now() - lastHitch.at) / 1000)} s ago` : 'none',
+      width: renderer.domElement.width,
+      height: renderer.domElement.height,
+      quality: qualityLevel,
+      shadows: shadows !== null && !shadowsOff,
+      net: remote ? { ping: remote.connected ? remote.pingMs : null, players: remote.others.size + 1 } : null,
+    };
+  };
+
+  /** A frame, and its measure for the admin bar. */
+  function tick(now: number): void {
+    if (stopped) return;
+    const began = performance.now();
+    const frameMs = now - last;
+    const hitch = hitches.begin(now, frameMs);
+    if (hitch && session.ready && hitch.at - hiddenAt > hitch.ms + 50) {
+      lastHitch = hitch;
+      console.info(`[solrift] freeze of ${describeHitch(hitch, 6)}${hitchShaders(hitch)}`);
+    }
+    renderer.info.reset();
+    shadowTris = 0;
+    frame(now);
+    shaderKeeper.hold();
+    hitches.end(shaderKeeper.fresh);
+    if (admin.visible) admin.frame(frameMs, performance.now() - began, renderer.info.render.calls, renderer.info.render.triangles, shadowTris, adminDetails);
+  }
+
+  function frame(now: number): void {
+    rafId = requestAnimationFrame(tick);
+    const dt = Math.min(0.1, (now - last) / 1000);
+    last = now;
+
+    if (autoQuality && session.ready && document.visibilityState === 'visible' && qualityLevel < 4) {
+      aqTime += dt;
+      aqFrames++;
+      if (aqTime >= 2.5) {
+        aqSlow = aqTime / aqFrames > 1 / 36 ? aqSlow + 1 : 0;
+        aqTime = 0;
+        aqFrames = 0;
+        if (aqSlow >= 2) {
+          aqSlow = 0;
+          stepQuality();
+        }
+      }
+    }
+
+    fpsFrames++;
+    fpsTime += dt;
+    if (fpsTime >= 0.5) {
+      fps = Math.round(fpsFrames / fpsTime);
+      fpsFrames = 0;
+      fpsTime = 0;
+    }
+
+    world.update(body.x, body.z);
+    if (!session.ready) tryFinishLoading();
+    else if (input.locked && loadingEl && !loadingEl.classList.contains('gone')) hideLoading();
+
+    const playing = input.locked && session.screen === 'none';
+    // The map: keep it painted, and raise or lower the map item on a right click while it is in hand.
+    const rightClick = input.consumeRightClick();
+    if (session.ready) {
+      const roof = world.surfaceY(Math.floor(body.x), Math.floor(body.z));
+      // In a dungeon copy the map is that dungeon alone: its level at head height, and only the people and places inside it.
+      mapData.inside = KIND === 'adventure' ? instanceFootprint(body.x, body.z) : null;
+      mapData.underground = !!mapData.inside || (roof >= 0 && roof - body.y > 6);
+      mapData.update(body.x, body.y, body.z, input.yaw);
+      // What the minimap calls the place: worked out a couple of times a second, written only when it changes.
+      placeWait -= dt;
+      if (placeWait <= 0) {
+        placeWait = 0.4;
+        const place = placeNameAt(session.generator, body.x, body.y, body.z, KIND === 'adventure');
+        if (useUi.getState().place !== place) useUi.setState({ place });
+      }
+      const box = mapData.inside;
+      const within = (x: number, z: number): boolean => !box || (x >= box.x0 && x <= box.x1 + 1 && z >= box.z0 && z <= box.z1 + 1);
+      mapData.pins = mapPins().filter((p) => within(p.x, p.z));
+      // Party members are drawn as pins (they are seen from any distance), the rest as plain dots.
+      const inParty = new Set(mapPartyPins.map((p) => p.name));
+      mapData.others = remote ? [...remote.others.values()].filter((o) => !inParty.has(o.name)).filter((o) => within(o.x, o.z)).map((o) => ({ name: o.name, x: o.x, z: o.z })) : [];
+      // The map opens in the hands, so only in first person, and only the one in the hand (the one in the off hand is just carried, open to glance at).
+      const readable = selfView.mode === 0 && isMap(session.held);
+      // (Aimed at a villager or a quest giver, the click talks to it instead: the map stays as it is, or closes when the talk opens.)
+      if (playing && readable && rightClick && !session.aimsAtTalker) setMapUp(!useUi.getState().mapUp);
+      else if (useUi.getState().mapUp && (!playing || !readable || session.sleeping || session.spectating)) setMapUp(false);
+    }
+    // Mouse 3 puts the third-person camera on the other shoulder (the choice is kept for next time).
+    if (input.consumeMiddleClick() && playing && selfView.mode === 1) {
+      chase.swapShoulder();
+      localStorage.setItem('solrift-shoulder', chase.shoulder === 1 ? 'right' : 'left');
+    }
+    if (session.ready && playing) keys.handle();
+    // From behind, the camera is placed before the frame is sent: the game aims at what its crosshair is on (see `aimThroughCrosshair`).
+    // The camera and the body are both placed from one smoothed position (see `viewPos`), taken here, so the body never jitters against the camera.
+    const view = session.viewPos();
+    const viewEye = session.eyeAt(view);
+    const chasing =
+      selfView.mode === 1 && session.ready
+        ? chase.update(dt, viewEye, input.yaw, input.pitch, cameraSolid, session.mountView().mount > 0, session.bowDraw, Math.hypot(body.vx, body.vz))
+        : null;
+    if (link) link.send(buildFrame(dt, chasing));
+    else remote!.frame(buildFrame(dt, chasing));
+    syncUi();
+    hitches.lap('input');
+    if (session.ready && playing && input.leftDown) {
+      hand.swingIfIdle();
+      selfView.swingIfIdle();
+    }
+
+    // The red damage flash fades in real time, even while the simulation is paused.
+    flash = Math.max(0, flash - dt / 0.6);
+    feel.fade(dt);
+    hud.setDamageFlash(flash);
+
+    // Lying in bed: turn to look down the bed, and fade the screen to black (and back up on waking).
+    const sleeping = session.sleeping;
+    if (sleeping && !wasSleeping) {
+      input.yaw = Math.atan2(BED_DIRS[sleeping.dir][0], BED_DIRS[sleeping.dir][1]);
+      input.pitch = 0;
+    }
+    wasSleeping = !!sleeping;
+    sleepFade += ((sleeping ? 1 : 0) - sleepFade) * Math.min(1, dt * (sleeping ? 1.3 : 1.6));
+    if (sleepFade < 0.01 && !sleeping) sleepFade = 0;
+    const shownFade = Math.round(sleepFade * 40) / 40;
+    if (useUi.getState().sleep !== shownFade || useUi.getState().sleeping !== !!sleeping) useUi.setState({ sleep: shownFade, sleeping: !!sleeping });
+
+    const eye = session.eye();
+    // The view stays as it is when mounting (first person: you see the head of the mount ahead of you, from the saddle).
+    const mountNow = session.mountView().mount;
+    const pose = chasing ?? cameraPose(selfView.mode, viewEye, input.yaw, input.pitch, cameraSolid, undefined, mountNow > 0);
+    selfView.cameraInHead = !!chasing?.bodyHidden;
+    camera.position.set(pose.x, pose.y, pose.z);
+    camera.rotation.set(pose.pitch, pose.yaw, 0);
+    // What the view does on top of that (see ViewFeel): first the shake, the dip of a landing and the kick of a blow...
+    const classNow = session.classView();
+    const feelNow: FeelFrame = { dt, ready: session.ready, firstPerson: selfView.mode === 0, body, yaw: input.yaw, bowDraw: session.bowDraw, rush: classNow?.rush, slam: classNow?.slam ?? 0 };
+    feel.jolt(camera, feelNow);
+    // (the warrior's Charge streaks light past; the ranger's roll has its own look, the wind at the sides)
+    rushLines.update(dt, !!classNow?.rush && !classNow.rush.roll, camera);
+    guardVeil.update(dt, selfView.mode === 0 && session.ready && classNow?.id === 'warrior' && classNow.guard > 0, camera);
+    damageNumbers.update(dt, camera);
+    // ...then what a dash or a Ground Slam does to it, and the angle of the lens.
+    const dash = feel.carry(camera, feelNow);
+    // (?nowind leaves the wind of a dash out: a page layer over the picture, for telling whether a freeze is its doing.)
+    windBlur.update(dt, noWind ? 0 : dash.wind, dash.lateral);
+
+    // Target highlight, mining cracks and the action bar all read the session's aim state.
+    const target = session.target;
+    highlight.visible = !!target;
+    if (target) highlight.position.set(target.x + 0.5, target.y + 0.5, target.z + 0.5);
+    crack.visible = !!target && session.breakProgress > 0;
+    if (crack.visible) {
+      crack.position.copy(highlight.position);
+      setCrackStage(crackTexture, Math.floor(Math.min(0.999, session.breakProgress) * CRACK_STAGES));
+    }
+    hud.setBreakProgress(session.hudProgress);
+
+    sky.time = session.time;
+    sky.rain = weather.rain;
+    sky.dim = weather.darkness;
+    sky.flash = weather.flash;
+    sky.update(camera);
+    const fogFar = world.renderDistance * 16;
+    const fogScale = 1 - 0.35 * weather.rain;
+    const light = sky.lighting;
+    if (body.eyeInWater) {
+      const lava = body.eyeInLava === true;
+      const water = lava ? new THREE.Color(0xc2480a) : new THREE.Color(0x1b3a8a).multiplyScalar(sky.brightness);
+      world.setFog(water, 0.1, lava ? 4 : 22);
+      scene.background = water;
+      sky.setView(water, 0, true);
+      light.glow.setScalar(0);
+    } else {
+      const sy = world.surfaceY(Math.floor(camera.position.x), Math.floor(camera.position.z));
+      const under = sy >= 0 && camera.position.y < sy - 2 ? 1 : 0;
+      caveDark += (under - caveDark) * Math.min(1, dt * 1.5);
+      caveFog.copy(sky.color).multiplyScalar(1 - 0.94 * caveDark);
+      sky.setView(caveFog, caveDark, false);
+      world.setFog(caveFog, fogFar * 0.55 * fogScale * (1 - 0.45 * caveDark), fogFar * 0.98 * fogScale * (1 - 0.35 * caveDark), sky.domeZenith);
+      scene.background = caveFog;
+      light.glow.multiplyScalar(1 - caveDark);
+      // Walking into lush, dripstone or deep dark country shows its name, as walking into a village does.
+      caveBannerWait -= dt;
+      if (caveBannerWait <= 0) {
+        caveBannerWait = 0.6;
+        const px = Math.floor(camera.position.x);
+        const pz = Math.floor(camera.position.z);
+        // (Against the land as the world made it: a house on the ground is not a cave, however tall its rooms.)
+        const kind = under ? caveKindHere(session.generator, px, camera.position.y, pz, KIND === 'adventure') : 'plain';
+        if (kind !== lastCaveKind) {
+          lastCaveKind = kind;
+          if (kind !== 'plain') showZone(kind === 'lush' ? 'lush_cave' : kind === 'dripstone' ? 'dripstone_cave' : 'deep_dark');
+        }
+      }
+    }
+    hud.setUnderwater(body.eyeInWater, body.eyeInLava === true);
+    world.setDay(sky.brightness);
+    world.setTime(performance.now() / 1000);
+    world.materials.setLighting(light);
+    // An item that gives light (a lantern: see `ItemDef.heldLight`) in either hand lights up its surroundings (the main hand's wins):
+    // a point of its light by the hand.
+    const handLamp = getItem(session.held ? session.held.id : 0).heldLight ?? getItem(session.offhand.get(0)?.id ?? 0).heldLight;
+    if (handLamp && !body.eyeInWater && session.screen !== 'dead' && !session.spectating) {
+      camera.getWorldDirection(heldLightDir);
+      heldLightAt.copy(camera.position).addScaledVector(heldLightDir, 0.5);
+      heldLightAt.y -= 0.25;
+      heldLightColor.setRGB(handLamp.r, handLamp.g, handLamp.b);
+      world.materials.setHeldLight(heldLightAt, heldLightColor, handLamp.level);
+    } else world.materials.setHeldLight(heldLightAt, heldLightColor, 0);
+    // Shadows only matter while the sun (or moon) shines on the open; underground and underwater they would be wasted work.
+    if (shadows) {
+      // (Not before the warm-up is over: it builds the depth shader of the maps, and the first chunks drawn into one would build it in the middle of the loading.)
+      const warmingUp = !figureWarmStarted || figureWarm !== null;
+      if (!shadowsOff && !warmingUp && light.sun.r > 0.02 && caveDark < 0.7 && !body.eyeInWater) {
+        shadowFocus.copy(camera.position);
+        const before = renderer.info.render.triangles;
+        shadows.update(renderer, scene, shadowFocus, sky.lightDir, sky.lightHeight, performance.now() / 1000);
+        shadowTris = renderer.info.render.triangles - before;
+      } else shadows.suspend();
+    }
+    hitches.lap('light');
+    updateWeatherFx(dt);
+    torchGlow.soulLights(world.materials.soulLights, SOUL_LANTERN_LIGHT + 1);
+    torchGlow.update(dt, camera.position, (x, y, z) => world.getBlock(x, y, z), sky.brightness, performance.now() / 1000, !body.eyeInWater && !params.has('nohalos'));
+    entityLight.update(sky);
+    particles.update(dt);
+    deathFx.update(dt);
+    particles.setBrightness(sky.brightness);
+    drops.setBrightness(sky.brightness);
+    remote?.update(dt);
+    updateNetText(dt);
+    players.setBrightness(sky.brightness);
+    if (remote) {
+      players.sync(remote.others.values(), dt, camera.position);
+      targets?.update();
+    }
+    const heldId = session.held ? session.held.id : 0;
+    compassNeedle.sync(dt);
+    selfView.update(dt, {
+      x: view.x,
+      y: view.y,
+      z: view.z,
+      yaw: input.yaw,
+      pitch: input.pitch,
+      speed: Math.hypot(body.vx, body.vz),
+      vx: body.vx,
+      vz: body.vz,
+      aiming: session.bowDraw > 0.02,
+      vy: body.vy,
+      airborne: !body.onGround && !body.inWater && !body.onLadder,
+      sneaking: session.sneaking,
+      armor: [0, 1, 2, 3].map((i) => session.armor.get(i)?.id ?? 0),
+      held: heldId,
+      offhand: session.offhand.get(0)?.id ?? 0,
+      blocking: session.blocking,
+      eating: session.eatProgress > 0,
+      slam: session.classView()?.slam ?? 0,
+      charging: !!classNow?.rush && !classNow.rush.roll,
+      casting: session.emberProgress,
+      sleeping: sleeping ? sleeping.dir + 1 : 0,
+      mount: mountNow > 0 ? (MOUNTS[mountNow - 1]?.id ?? null) : null,
+      dead: session.screen === 'dead' || performance.now() < debugDeadUntil,
+      brightness: sky.brightness,
+      viewer: camera.position,
+      light: entityLight,
+    });
+    chat.tick();
+    drops.sync(session.drops.drops, camera.position, session.classView()?.id ?? myClass);
+    xpOrbs.sync(session.xpOrbs.orbs, camera, eye);
+    hitches.lap('things');
+    abilityFx.sync(session.fx, dt);
+    hitches.lap('effects');
+    // Someone else's level: the column stands on them and follows them (the mark is only the news; our own came with the event).
+    for (const f of session.fx) {
+      if (f.k !== 'level_up' || levelSeen.has(f.id)) continue;
+      levelSeen.add(f.id);
+      const who = remote ? [...remote.others.values()].find((p) => p.name === f.by) : undefined;
+      if (!who) continue;
+      levelFx.start(() => (remote!.others.has(who.id) ? { x: who.x, y: who.y, z: who.z } : null));
+      audio.levelUp(0.4);
+    }
+    for (const id of levelSeen) if (!session.fx.some((f) => f.id === id)) levelSeen.delete(id);
+    levelFx.update(dt);
+    emberFx.update(dt, performance.now() / 1000);
+    mountFx.update(dt, performance.now() / 1000);
+    books.update(dt, eye, (x, y, z) => world.getBlock(x, y, z));
+    mobRenderer.sync(session.mobs.mobs, session.mobs.arrows, dt, sky.brightness);
+    fire.update(dt);
+    vehicleRenderer.sync(session.vehicles, sky.brightness);
+
+    const far = fogFar * 2 + 100;
+    if (far !== lastFar) {
+      lastFar = far;
+      camera.far = far;
+      camera.updateProjectionMatrix();
+    }
+
+    const stats = world.refreshStats();
+    hud.tick(dt, debugText(stats));
+    hitches.lap('things');
+    const callsBefore = renderer.info.render.calls;
+    const trisBefore = renderer.info.render.triangles;
+    if (!figureWarmStarted) {
+      figureWarmStarted = true;
+      figureWarm = new FigureWarm({
+        figure: figureOf,
+        mobs: () => mobRenderer.warm(),
+        inventory: () => {
+          try {
+            warmPreview();
+          } catch {
+            // (no second graphics context: the inventory goes without its figure)
+          }
+        },
+        shadows: () => {
+          shadows?.warmEntities(renderer);
+          shadows?.warmTerrain(renderer);
+        },
+      });
+      scene.add(figureWarm.group);
+    }
+    // One group of things per frame (the first frame only puts up the words); the last one also draws everything the world keeps hidden (see `FigureWarm`).
+    const warmFrame = figureWarm !== null && figureWarmWait-- <= 0;
+    if (warmFrame) figureWarm?.begin();
+    figureWarm?.show(scene);
+    if (postfx.on) {
+      postfx.render({
+        dt,
+        dusk: sky.dusk,
+        day: sky.day,
+        underground: caveDark,
+        rain: weather.rain,
+        underwater: body.eyeInWater,
+        menu: session.screen !== 'none' || !!figureWarm?.world,
+        warm: !!figureWarm?.world,
+      });
+    } else {
+      renderer.clear();
+      renderer.render(scene, camera);
+    }
+    if (figureWarm && warmFrame && figureWarm.hide()) {
+      scene.remove(figureWarm.group);
+      figureWarm.dispose();
+      figureWarm = null;
+    } else if (figureWarm) {
+      // What is put up now stays on the screen during the next frame, the one that does it.
+      const next = figureWarm.status();
+      const text = `${next.label} ${Math.round(next.fraction * 100)}%`;
+      statusEl.textContent = text;
+      setLoading(text, 12 + Math.round(next.fraction * 28));
+    }
+    sceneCalls = renderer.info.render.calls - callsBefore;
+    sceneTris = renderer.info.render.triangles - trisBefore;
+    hitches.lap('draw');
+
+    const heldNow = session.held;
+    hand.setLight(entityLight.at(body.x, body.y, body.z, handLight));
+    // The hand that holds a light is lit by it: nothing about it goes dark.
+    if (handLamp) hand.setLight(heldLightFull.setRGB(1, 1, 1));
+    hand.setArmor([0, 1, 2, 3].map((i) => session.armor.get(i)?.id ?? 0));
+    hand.visible = !debugHideHand && mountNow === 0 && session.screen !== 'dead' && !session.spectating && !body.eyeInWater && !session.sleeping && selfView.mode === 0;
+    hand.setMapUp(useUi.getState().mapUp);
+    hand.setDraw(session.bowDraw);
+    const guardNow = session.classView();
+    hand.setStance(guardNow?.rush && !guardNow.rush.roll ? 1 : guardNow && guardNow.id === 'warrior' && guardNow.guard > 0 ? 0.3 : 0);
+    hand.setSlam(guardNow?.slam ?? 0, body.vy);
+    hand.update(feel.hitStop > 0 ? dt * 0.1 : dt, heldNow ? heldNow.id : 0, body.onGround && session.ready ? Math.hypot(body.vx, body.vz) : 0, camera.aspect, session.offhand.get(0)?.id ?? 0, session.blocking, session.eatProgress, session.emberProgress);
+    // Eating: a bite every quarter of a second, each with its crunch and a few crumbs of the food falling from the mouth.
+    if (session.eatProgress > 0 && heldNow) {
+      eatClock += dt;
+      const bites = Math.floor(eatClock * CHEWS_PER_SECOND);
+      if (bites > eatBites) {
+        eatBites = bites;
+        audio.munch();
+        let mx: number;
+        let my: number;
+        let mz: number;
+        if (selfView.mode === 0) {
+          camera.getWorldDirection(eatDir);
+          mx = camera.position.x + eatDir.x * 0.45;
+          my = camera.position.y - 0.3;
+          mz = camera.position.z + eatDir.z * 0.45;
+        } else {
+          const r = selfView.group.rotation.y;
+          eatDir.set(-Math.sin(r), 0, -Math.cos(r));
+          mx = selfView.group.position.x + eatDir.x * 0.28;
+          my = selfView.group.position.y + 1.45;
+          mz = selfView.group.position.z + eatDir.z * 0.28;
+        }
+        eatFx.burst(mx, my, mz, eatDir.x * 0.4, eatDir.z * 0.4, hand.crumbColors(heldNow.id), 4);
+      }
+    } else {
+      eatClock = 0;
+      eatBites = 0;
+    }
+    eatFx.update(dt);
+    hitches.lap('hand');
+    // The map in the hand is live: repainted a few times a second (more while it is open) when it can be seen.
+    const mapShown = hand.visible && (isMap(heldNow) || isMap(session.offhand.get(0)));
+    mapPaintWait -= dt;
+    if (mapShown && (!mapWasShown || mapPaintWait <= 0)) {
+      mapPaintWait = useUi.getState().mapUp ? 0.066 : 0.2;
+      mapSheet.paint(mapData, useUi.getState().mapZoom);
+    }
+    mapWasShown = mapShown;
+    hitches.lap('map');
+    if (!handWarm) {
+      handWarm = true;
+      hand.warm(renderer);
+    }
+    hand.render(renderer);
+    hitches.lap('hand draw');
+
+    saveTimer += dt;
+    if (saveTimer > 4) {
+      saveTimer = 0;
+      void world.save();
+      savePlayer();
+    }
+  }
+
+  let weatherTimer = 0;
+  let shelter = 0;
+  /** Rain streaks, rain and thunder audio, music, birds and cave drones. */
+  function updateWeatherFx(dt: number): void {
+    const roof = world.surfaceY(Math.floor(body.x), Math.floor(body.z));
+    const covered = roof >= 0 && camera.position.y < roof + 1;
+    shelter += ((covered ? 1 : 0) - shelter) * Math.min(1, dt * 3);
+    rain.update(dt, weather.rain, camera.position);
+    weatherTimer -= dt;
+    if (weatherTimer > 0) return;
+    weatherTimer = 0.1;
+    audio.setRain(weather.rain, shelter);
+    audio.setCave(caveDark);
+    audio.ambient(0.1, { underground: covered && roof - body.y > 6, day: sky.brightness, rain: weather.rain });
+  }
+
+  let netTimer = 0;
+  function updateNetText(dt: number): void {
+    if (!remote) return;
+    netTimer -= dt;
+    if (netTimer > 0) return;
+    netTimer = 0.5;
+    hud.setNet(remote.connected ? `online - ${remote.pingMs}ms - ${remote.others.size + 1} player(s)` : (onlineError ?? 'disconnected'), remote.connected);
+  }
+
+  function debugText(stats: ReturnType<World['refreshStats']>): string {
+    const col = session.generator.columnAt(Math.floor(body.x), Math.floor(body.z));
+    const target = session.target;
+    const hit = target ? `${BLOCKS[target.id].name} @ ${target.x} ${target.y} ${target.z}` : 'none';
+    const v = session.vitals;
+    const village = session.generator.nearestVillage(body.x, body.z);
+    return [
+      `SolRift 0.2  ${fps} fps`,
+      `XYZ ${body.x.toFixed(2)} ${body.y.toFixed(2)} ${body.z.toFixed(2)}`,
+      `Chunk ${Math.floor(body.x / 16)} ${Math.floor(body.z / 16)}  biome ${BIOME_NAMES[col.biome]}`,
+      `Chunks ${stats.meshed}/${stats.loaded}  gen pending ${stats.pendingGen}`,
+      `Tris ${Math.round(stats.triangles).toLocaleString()}  mesh ${stats.lastMeshMs.toFixed(1)}ms`,
+      `Render dist ${world.renderDistance}  seed ${SEED}`,
+      `Target ${hit}`,
+      village ? `Village ${compass(village.x - body.x, village.z - body.z)} (${village.x} ${village.z})` : 'Village none nearby',
+      `${session.mode}  hp ${v.health.toFixed(1)}  food ${v.hunger} sat ${v.saturation.toFixed(1)}  drops ${session.drops.count}  mobs ${session.mobs.mobs.length}`,
+      `${session.flying ? 'flying ' : ''}${body.onGround ? 'ground ' : ''}${body.inWater ? 'water' : ''}`,
+      // session.time 0 = sunrise (06:00), 0.25 = noon.
+      `Time ${((session.time * 24 + 6) % 24).toFixed(1)}h  light ${sky.brightness.toFixed(2)}  weather ${weather.kind}`,
+    ].join('\n');
+  }
+
+  /** Persist the player and the world clock/weather/chests (chunks are saved by world.save()). */
+  function savePlayer(): Promise<void> {
+    if (!local || !local.ready) return Promise.resolve();
+    return Promise.all([store.savePlayer(local.savePlayer()), store.saveWorldState(local.saveWorldState())]).then(
+      () => undefined,
+      (err) => console.warn('save failed', err),
+    );
+  }
+
+  saveBridge.flush = async () => {
+    await world.save();
+    await savePlayer();
+  };
+  saveBridge.freeze = () => store.freeze();
+  // Tab hidden or closing: the most reliable moment to write.
+  document.addEventListener(
+    'visibilitychange',
+    () => {
+      if (document.hidden) void saveBridge.flush?.();
+    },
+    { signal },
+  );
+  // ---- UI wiring ------------------------------------------------------
+  overlay.addEventListener(
+    'click',
+    (e) => {
+      // Buttons inside the overlay (export/import) must not start the game.
+      if ((e.target as HTMLElement | null)?.closest('[data-no-play]')) return;
+      if (!session.ready) return;
+      audio.resume();
+      input.lock();
+    },
+    { signal },
+  );
+  // "Click to enter the world": the click gives the browser the gesture it wants for the mouse.
+  loadingEl?.addEventListener(
+    'click',
+    () => {
+      if (!loadingEl.classList.contains('ready')) return;
+      audio.resume();
+      void input.lock().then((ok) => {
+        if (!ok && !input.locked) overlay.style.display = 'flex'; // still refused: fall back to the pause screen
+        hideLoading();
+      });
+    },
+    { signal },
+  );
+  document.addEventListener(
+    'pointerlockchange',
+    () => {
+      overlay.style.display = input.locked || chat.isOpen || session.screen !== 'none' || useUi.getState().questLogOpen || useUi.getState().partyOpen || useUi.getState().socialOpen || !!useUi.getState().trade || !!useUi.getState().playerMenu || !!useUi.getState().inspect ? 'none' : 'flex';
+      if (!input.locked) {
+        void world.save();
+        savePlayer();
+      }
+    },
+    { signal },
+  );
+  // Inventory screens close with E / Escape (pointer lock is released while they are open).
+  document.addEventListener(
+    'keydown',
+    (e) => {
+      if (e.repeat) return;
+      if (windows.handleKey(e)) return;
+      if (!session.menu && session.screen !== 'dialog') return;
+      // E closes the screen, except while typing in the recipe search box.
+      if (e.code === 'KeyE' && (e.target as HTMLElement | null)?.tagName === 'INPUT') return;
+      if (e.code === 'KeyE' || e.code === 'Escape') {
+        e.preventDefault();
+        useUi.getState().api?.close();
+      }
+    },
+    { signal },
+  );
+  window.addEventListener(
+    'beforeunload',
+    () => {
+      void world.save();
+      savePlayer();
+    },
+    { signal },
+  );
+  window.addEventListener(
+    'resize',
+    () => {
+      renderer.setSize(window.innerWidth, window.innerHeight, false);
+      postfx.resize(window.innerWidth, window.innerHeight);
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+    },
+    { signal },
+  );
+
+  // The developer hooks for automated tests and screenshots (?debug): see debugHooks.ts.
+  if (params.has('debug')) {
+    installDebugHooks({
+      local, remote, session, kind: KIND, seed: SEED, guest, myLook, world, store, atlas, input, camera, sky, rain, audio, hud, admin, chat,
+      postfx, fxWanted, applyPostfx, torchGlow, shadows, particles, players, hand, selfView, deathFx, chase, books, abilityFx, mapData,
+      act, syncUi, sendCommand, setMapUp, switchWorld,
+      caveDark: () => caveDark,
+      drawn: () => ({ calls: sceneCalls, triangles: sceneTris, fps }),
+      setHandHidden: (hidden) => void (debugHideHand = hidden),
+      setPartyPins: (party) => void (mapPartyPins = party),
+      die: (variant) => {
+        debugDeadUntil = performance.now() + 30000;
+        breakSelf(variant);
+      },
+    });
+  }
+
+  rafId = requestAnimationFrame(tick);
+
+  return () => {
+    stopped = true;
+    cancelAnimationFrame(rafId);
+    ac.abort();
+    void world.save();
+    savePlayer();
+    net?.close();
+    remote?.leave();
+    chat.dispose();
+    players.dispose();
+    selfView.dispose();
+    deathFx.dispose();
+    audio.dispose();
+    saveBridge.flush = null;
+    saveBridge.freeze = null;
+    saveBridge.reconnectNet = null;
+    particles.dispose();
+    torchGlow.dispose();
+    rain.dispose();
+    sky.dispose();
+    shadows?.dispose();
+    hand.dispose();
+    drops.dispose();
+    xpOrbs.dispose();
+    eatFx.dispose();
+    levelFx.dispose();
+    abilityFx.destroy();
+    emberFx.destroy();
+    mountFx.destroy();
+    rushLines.dispose();
+    guardVeil.dispose();
+    damageNumbers.dispose();
+    windBlur.dispose();
+    hitches.dispose();
+    shaderKeeper.dispose();
+    fire.dispose();
+    books.dispose();
+    mobRenderer.dispose();
+    disposeMobAssets();
+    vehicleRenderer.dispose();
+    disposeVehicleAssets();
+    highlightGeo.dispose();
+    (highlight.material as THREE.Material).dispose();
+    crack.geometry.dispose();
+    (crack.material as THREE.Material).dispose();
+    crackTexture.dispose();
+    world.dispose();
+    atlas.dispose();
+    postfx.dispose();
+    renderer.dispose();
+    useUi.setState({ api: null, screen: 'none', adventure: false, questLogOpen: false, partyOpen: false, socialOpen: false, social: null, inspect: null, target: null, playerMenu: null, trade: null, tradeAsk: null, invTab: 'inventory', mount: { mount: 0, pick: 0, cd: [0, 0] }, cls: null, party: [], partyInvite: null, dialogNpc: null, shopOpen: false, zone: null, questNotes: [], map: null, mapUp: false });
+    mapData.dispose();
+    mapSheet.dispose();
+    useUi.getState().quests.loadJSON(null);
+    if (document.pointerLockElement) document.exitPointerLock();
+  };
+}

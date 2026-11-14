@@ -1,0 +1,264 @@
+/* The social window (O) and the look at another player. It wears the party window's frame (`.log-card.party-card`). */
+#social-window {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  box-sizing: border-box;
+  padding-bottom: 112px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(ellipse at center, rgba(8, 6, 2, 0.4), rgba(0, 0, 0, 0.75));
+}
+#social-window .soc-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The tabs, a strip along the top of the list. */
+.soc-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 10px 24px 0;
+}
+.soc-tab {
+  flex: 1;
+  padding: 7px 8px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--w-dim, #a48f6a);
+  text-shadow: 1px 1px 0 #000;
+  background: linear-gradient(#17120d, #0f0c09);
+  border: 2px solid var(--w-edge, #0b0806);
+  box-shadow: inset 2px 2px 0 0 var(--w-bronze-lo, #4f360f), inset -2px -2px 0 0 var(--w-bronze-lo, #4f360f);
+}
+.soc-tab i {
+  font-style: normal;
+  color: var(--w-gold, #f0bc4c);
+}
+.soc-tab:hover {
+  color: var(--w-gold-hi, #ffe49a);
+}
+.soc-tab.on {
+  color: var(--w-gold-hi, #ffe49a);
+  background: linear-gradient(#3a2d1a, #1f170d);
+  box-shadow: inset 2px 2px 0 0 var(--w-bronze-hi, #d0a24c), inset -2px -2px 0 0 var(--w-bronze-lo, #4f360f);
+}
+
+/* The list. */
+.soc-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 24px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #8a6424 #0e0b08;
+}
+.soc-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 2px solid;
+  border-color: #000 #3d2c12 #3d2c12 #000;
+  box-shadow: inset 3px 3px 0 rgba(0, 0, 0, 0.45);
+}
+.soc-row.off {
+  opacity: 0.6;
+}
+.soc-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  background: #5a5448;
+  border: 2px solid #0b0806;
+  border-radius: 50%;
+}
+.soc-dot.on {
+  background: #5fe05f;
+  box-shadow: 0 0 5px rgba(95, 224, 95, 0.8);
+}
+.soc-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--w-gold-hi, #ffe49a);
+  text-shadow: 1px 1px 0 #000;
+}
+.soc-class {
+  flex: none;
+  font-size: 12px;
+  text-shadow: 1px 1px 0 #000;
+}
+.soc-class.dim {
+  color: var(--w-dim, #a48f6a);
+}
+.soc-actions {
+  flex: none;
+  display: flex;
+  gap: 4px;
+}
+.soc-body .quest-btn.small {
+  padding: 3px 7px;
+  font-size: 10px;
+  letter-spacing: 0;
+}
+
+/* Add by name. */
+.soc-add {
+  display: flex;
+  gap: 8px;
+  padding: 0 24px 10px;
+}
+.soc-add input {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--w-text, #f1e4c8);
+  background: rgba(0, 0, 0, 0.45);
+  border: 2px solid;
+  border-color: #000 #6b4f1e #6b4f1e #000;
+  border-radius: 0;
+  box-shadow: inset 2px 2px 0 rgba(0, 0, 0, 0.45);
+  outline: none;
+}
+.soc-add input:focus {
+  border-color: #000 var(--w-gold, #f0bc4c) var(--w-gold, #f0bc4c) #000;
+}
+.soc-add input::placeholder {
+  color: var(--w-dim, #a48f6a);
+}
+.soc-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.soc-hint {
+  font-size: 12px;
+  color: var(--w-dim, #a48f6a);
+}
+.soc-hint kbd {
+  color: var(--w-gold-hi, #ffe49a);
+}
+
+/* The look at another player: a plate over the list. */
+.soc-inspect {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 24px;
+  color: var(--w-text, #f1e4c8);
+  background: linear-gradient(#211c17, #14100c);
+}
+.soc-inspect-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-right: 36px;
+  font-size: 16px;
+  color: var(--w-gold-hi, #ffe49a);
+  text-shadow: 2px 2px 0 #000;
+}
+.soc-slots {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 18px;
+  padding: 14px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 2px solid;
+  border-color: #000 #3d2c12 #3d2c12 #000;
+  box-shadow: inset 3px 3px 0 rgba(0, 0, 0, 0.45);
+}
+.soc-slot-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--w-dim, #a48f6a);
+}
+.soc-slot-row .slot {
+  flex: none;
+  background: linear-gradient(145deg, #2a241c, #0e0c09);
+  border: 2px solid #6b4f1e;
+  box-shadow: inset 0 0 0 1px #000, inset 3px 3px 7px rgba(0, 0, 0, 0.65);
+}
+.soc-slot-row .slot:hover {
+  border-color: var(--w-gold-hi, #ffe49a);
+  box-shadow: inset 0 0 0 1px #000, 0 0 9px rgba(255, 208, 100, 0.6);
+}
+
+/* Guild tab. */
+.soc-body .soc-add {
+  padding: 8px 0 4px;
+}
+.soc-tag-input {
+  flex: none !important;
+  width: 64px;
+  text-align: center;
+  text-transform: uppercase;
+}
+.soc-guild-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 2px 2px;
+  color: #6bff8a;
+  text-shadow: 1px 1px 0 #000;
+}
+.soc-motd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 2px 0 8px;
+  font-size: 12px;
+  color: var(--w-dim, #a48f6a);
+}
+.soc-guild-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 6px;
+}
+.soc-invite {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 24px 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: #6bff8a;
+  background: rgba(40, 90, 50, 0.35);
+  border: 2px solid #1f5a2c;
+}
+.soc-invite span {
+  flex: 1;
+}
+
+.soc-name.clickable {
+  cursor: pointer;
+}
+.soc-name.clickable:hover {
+  color: var(--w-gold-hi, #ffe49a);
+  text-decoration: underline;
+}

@@ -1,0 +1,168 @@
+/* ---- enchanting ---- */
+.glint {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  mask-size: 100% 100%;
+  -webkit-mask-size: 100% 100%;
+  image-rendering: pixelated;
+  background: linear-gradient(115deg, transparent 25%, rgba(190, 120, 255, 0.85) 45%, rgba(120, 90, 255, 0.5) 55%, transparent 75%) 0 0 / 300% 100%;
+  mix-blend-mode: screen;
+  animation: glint-sweep 2.4s linear infinite;
+}
+@keyframes glint-sweep {
+  from {
+    background-position: 150% 0;
+  }
+  to {
+    background-position: -150% 0;
+  }
+}
+.ench-row {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+.ench-slots {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.ench-offers {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 300px;
+}
+.ench-offer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 52px;
+  padding: 0 10px;
+  background: #2c2640;
+  border: 2px solid #14101e;
+  border-right-color: #4a4268;
+  border-bottom-color: #4a4268;
+  color: #8f87b0;
+  font: inherit;
+  cursor: default;
+}
+.ench-offer .clue {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-align: left;
+  font-size: 14px;
+}
+.ench-offer .need {
+  color: #5a8cff;
+  font-weight: bold;
+}
+.ench-offer .cost {
+  min-width: 28px;
+  text-align: right;
+  font-size: 20px;
+  font-weight: bold;
+  color: #d25a5a;
+  text-shadow: 1px 1px #000;
+}
+.ench-offer.ok {
+  cursor: pointer;
+  color: #f2e8ff;
+  background: #4a3a78;
+}
+.ench-offer.ok:hover {
+  background: #6a52a8;
+}
+.ench-offer.ok .cost {
+  color: #7dff7d;
+}
+.ench-warning {
+  margin-top: 4px;
+  font-size: 13px;
+  color: #ff6a6a;
+  text-align: left;
+  text-shadow: 1px 1px #000;
+}
+.ench-level {
+  color: #7dff7d;
+}
+.ench-offer.none {
+  opacity: 0.5;
+}
+.anvil-name {
+  display: block;
+  width: 220px;
+  margin: 0 auto 8px;
+  padding: 4px 8px;
+  background: #1a1626;
+  color: #fff;
+  border: 2px solid #5b4e86;
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+}
+.anvil-name:focus {
+  border-color: #a58cff;
+}
+.anvil-name:disabled {
+  opacity: 0.5;
+}
+.galactic {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.galactic-gap {
+  display: inline-block;
+}
+.ench-offer .clue {
+  color: #cfc4f0;
+}
+.ench-offer.ok .clue {
+  color: #f2e8ff;
+}
+.anvil-cost.bad {
+  color: #ff6a6a;
+}
+/* Flames licking up the screen while the player is on fire. */
+#fire-overlay {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 38%;
+  pointer-events: none;
+  z-index: 20;
+  background:
+    radial-gradient(ellipse 9% 70% at 8% 110%, #ffd24a 0%, #ff8a1c 45%, transparent 75%),
+    radial-gradient(ellipse 11% 85% at 24% 110%, #ffd24a 0%, #ff7a14 45%, transparent 75%),
+    radial-gradient(ellipse 9% 60% at 40% 110%, #ffe27a 0%, #ff8a1c 45%, transparent 75%),
+    radial-gradient(ellipse 12% 90% at 57% 110%, #ffd24a 0%, #ff6a10 45%, transparent 75%),
+    radial-gradient(ellipse 9% 65% at 73% 110%, #ffe27a 0%, #ff8a1c 45%, transparent 75%),
+    radial-gradient(ellipse 11% 80% at 90% 110%, #ffd24a 0%, #ff7a14 45%, transparent 75%),
+    linear-gradient(to top, rgba(255, 110, 20, 0.55), transparent 70%);
+  opacity: 0.8;
+  transform-origin: bottom;
+  animation: fire-flicker 0.32s steps(2) infinite;
+}
+@keyframes fire-flicker {
+  0% { transform: scaleY(1); filter: brightness(1); }
+  50% { transform: scaleY(0.88); filter: brightness(1.15); }
+  100% { transform: scaleY(1.06); filter: brightness(0.95); }
+}
+
+/* Notes under a screen wrap inside the panel's width (set by the inventory grid) instead of stretching it. */
+#menu-screen .anvil-cost,
+#menu-screen [data-testid="grind-note"],
+#menu-screen .ench-warning {
+  width: 0;
+  min-width: 100%;
+  white-space: normal;
+  box-sizing: border-box;
+}
+

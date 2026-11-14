@@ -1,0 +1,30 @@
+// The pause screen over the game. Usage: node scripts/lookpause.mjs [url] [outDir] [prefix] [width] [height] [extraQuery]
+import { mkdirSync } from 'node:fs';
+import { chromium } from 'playwright';
+const url = process.argv[2] ?? 'http://localhost:3000';
+const outDir = process.argv[3] ?? 'tmp-shots';
+const prefix = process.argv[4] ?? 'pause';
+const width = Number(process.argv[5] ?? 1440);
+const height = Number(process.argv[6] ?? 900);
+const extra = process.argv[7] ?? '';
+mkdirSync(outDir, { recursive: true });
+const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl'] });
+const page = await browser.newPage({ viewport: { width, height } });
+page.on('pageerror', (e) => console.log('[pageerror]', e.message));
+page.on('console', (m) => m.type() === 'error' && console.log('[err]', m.text().slice(0, 200)));
+await page.goto(`${url}/?seed=17&debug&nomobs${extra}`, { waitUntil: 'load' });
+await page.waitForSelector('.pause-card');
+await page.waitForTimeout(1500);
+await page.screenshot({ path: `${outDir}/${prefix}-loading.png` });
+await page.waitForFunction(() => window.__solrift?.isReady?.(), undefined, { timeout: 180000 });
+await page.evaluate(() => {
+  const s = window.__solrift;
+  const site = s.nearestVillage(0, 0);
+  s.setMode('creative');
+  s.setTime(0.46);
+  s.teleport(site.x + 0.5, site.groundY + 3, site.z + 14.5, 0, -0.1);
+});
+await page.waitForTimeout(6000);
+await page.screenshot({ path: `${outDir}/${prefix}-ready.png` });
+console.log('saved');
+await browser.close();

@@ -1,0 +1,56 @@
+/* ---- online play ---- */
+#chat {
+  position: fixed;
+  left: 12px;
+  bottom: 90px;
+  width: min(520px, 60vw);
+  z-index: 30;
+  pointer-events: none;
+  font: 14px/1.35 system-ui, sans-serif;
+}
+#chat .chat-line {
+  background: rgba(0, 0, 0, 0.42);
+  color: #fff;
+  padding: 2px 8px;
+  margin-top: 2px;
+  text-shadow: 1px 1px 0 #000;
+  word-break: break-word;
+}
+#chat .chat-line.notice {
+  color: #c8d0d8;
+  font-style: italic;
+}
+#chat .chat-line.whisper {
+  color: #ff9cf0;
+}
+#chat .chat-line.guild {
+  color: #6bff8a;
+}
+#chat .chat-line.party {
+  color: #8cc4ff;
+}
+#chat .chat-line.emote {
+  color: #ffb45a;
+  font-style: italic;
+}
+#chat .chat-input {
+  pointer-events: auto;
+  margin-top: 6px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  border: 1px solid #888;
+  font: inherit;
+  outline: none;
+}
+body.online .cloud-panel,
+body.online .world-tools {
+  display: none;
+}
+body.online .only-single,
+body:not(.online) .only-online {
+  display: none;
+}
+

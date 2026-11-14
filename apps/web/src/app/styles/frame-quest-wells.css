@@ -1,0 +1,110 @@
+/* ---- Quest log and party, built like the inventory: the same studded frame, sunken wells, gold headings and an inset bottom bar ---- */
+.log-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 38px 28px 20px;
+  background-color: var(--w-stone);
+  background-image:
+    linear-gradient(var(--w-gold), var(--w-gold)), linear-gradient(var(--w-gold), var(--w-gold)),
+    linear-gradient(var(--w-gold), var(--w-gold)), linear-gradient(var(--w-gold), var(--w-gold)),
+    conic-gradient(rgba(255, 240, 210, 0.028) 25%, transparent 0 50%, rgba(255, 240, 210, 0.028) 0 75%, transparent 0),
+    linear-gradient(rgba(255, 230, 180, 0.05), rgba(0, 0, 0, 0.18));
+  background-size: 8px 8px, 8px 8px, 8px 8px, 8px 8px, 16px 16px, 100% 100%;
+  background-position: 10px 10px, calc(100% - 10px) 10px, 10px calc(100% - 10px), calc(100% - 10px) calc(100% - 10px), 0 0, 0 0;
+  background-repeat: no-repeat, no-repeat, no-repeat, no-repeat, repeat, no-repeat;
+}
+/* The tally is a gold heading with a fading rule, like BACKPACK. */
+.log-card > .log-head {
+  display: block;
+  padding: 0;
+  margin: 2px 0 0;
+}
+.log-card > .log-head::after {
+  display: none;
+}
+.log-card > .log-head .log-count {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--w-gold);
+  text-shadow: 1px 1px 0 #000;
+}
+.log-card > .log-head .log-count::after {
+  content: '';
+  flex: 1;
+  height: 2px;
+  background: linear-gradient(90deg, var(--w-bronze), transparent);
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.5);
+}
+/* The list and the page are two sunken wells side by side. */
+.log-cols {
+  flex: 1;
+  min-height: 0;
+  grid-template-columns: 188px 1fr;
+  gap: 10px;
+}
+.log-list,
+.log-detail,
+.party-body {
+  box-sizing: border-box;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 2px solid;
+  border-color: #000 #3d2c12 #3d2c12 #000;
+  box-shadow: inset 3px 3px 0 rgba(0, 0, 0, 0.45);
+}
+.log-detail {
+  padding: 14px;
+}
+.party-body {
+  flex: 1;
+  gap: 8px;
+}
+.party-invite-form {
+  margin-top: auto;
+  padding-top: 8px;
+}
+.party-row {
+  background: rgba(0, 0, 0, 0.28);
+}
+/* The party's buttons sit in an inset bar, like the money bar. */
+.party-card > .dialog-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 7px 10px;
+  background: rgba(0, 0, 0, 0.42);
+  border: 2px solid;
+  border-color: #000 #3d2c12 #3d2c12 #000;
+  box-shadow: inset 3px 3px 0 rgba(0, 0, 0, 0.4);
+}
+/* Experience and Auren are rewards with an icon of their own, in the same cell as the items. */
+.quest-reward-item .reward-icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+}
+.quest-reward-item .reward-icon svg {
+  display: block;
+  vertical-align: 0;
+}
+.quest-reward-item.quest-xp,
+.quest-reward-item.quest-coins {
+  font-size: 12px;
+}
+.quest-reward-item.quest-xp span {
+  color: #9fe08a;
+}
+.quest-reward-item.quest-coins span {
+  color: var(--w-gold-hi);
+  font-weight: 400;
+}
+

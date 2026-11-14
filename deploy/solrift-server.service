@@ -1,0 +1,30 @@
+# systemd unit for the game server. Install: cp deploy/solrift-server.service /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now solrift-server
+# Logs: journalctl -u solrift-server -f
+[Unit]
+Description=SolRift game server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=solrift
+Group=solrift
+WorkingDirectory=/opt/solrift
+EnvironmentFile=/etc/solrift.env
+Environment=NODE_ENV=production
+ExecStart=/opt/solrift/node_modules/.bin/tsx apps/server/src/index.ts
+Restart=always
+RestartSec=3
+# The world and the accounts live in /var/lib/solrift (set DATABASE_PATH=/var/lib/solrift/solrift.db): back that folder up.
+StateDirectory=solrift
+LimitNOFILE=65536
+# Hardening: the server only has to read its own code and write its database.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/solrift
+
+[Install]
+WantedBy=multi-user.target

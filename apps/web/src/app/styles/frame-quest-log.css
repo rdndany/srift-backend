@@ -1,0 +1,210 @@
+/* ---- The quest log, made over: chapters with their tally, quests as plates, a detail page with a status, objectives and rewards ---- */
+.log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.log-chapter {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.log-chapter h4 {
+  margin: 12px 0 4px;
+}
+.log-chapter:first-child h4 {
+  margin-top: 4px;
+}
+.log-chapter h4 em {
+  order: 2;
+  font-style: normal;
+  letter-spacing: 1px;
+  color: var(--w-dim);
+}
+.log-chapter h4::after {
+  order: 1;
+}
+.log-entry {
+  align-items: center;
+  gap: 9px;
+  padding: 7px 8px;
+  font-size: 12px;
+  line-height: 1.25;
+  background: rgba(0, 0, 0, 0.3);
+  border: 2px solid;
+  border-color: #000 #3d2c12 #3d2c12 #000;
+  box-shadow: inset 2px 2px 0 rgba(0, 0, 0, 0.4);
+}
+.log-entry:hover {
+  background: rgba(240, 188, 76, 0.1);
+  border-color: #000 var(--w-bronze) var(--w-bronze) #000;
+}
+.log-entry.sel {
+  color: var(--w-gold-hi);
+  background: linear-gradient(90deg, rgba(240, 188, 76, 0.22), rgba(240, 188, 76, 0.04));
+  border-color: var(--w-gold);
+  box-shadow: 0 0 8px rgba(255, 208, 100, 0.25), inset 0 0 0 1px #000;
+}
+.log-entry-name {
+  flex: 1;
+  min-width: 0;
+}
+/* The mark in front of a quest: "!" in progress, "?" ready to hand in, a tick when done. */
+.log-dot {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  line-height: 14px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--w-gold-hi);
+  background: linear-gradient(#3a2d1a, #1c150c);
+  border: 2px solid var(--w-edge);
+  box-shadow: inset 1px 1px 0 var(--w-bronze-hi);
+}
+.log-entry.ready .log-dot {
+  color: #0b0806;
+  background: linear-gradient(#b8f0a0, #5aa84a);
+  box-shadow: inset 1px 1px 0 #e6ffd8;
+}
+.log-entry.done {
+  color: #8a8070;
+  text-decoration: none;
+}
+.log-entry.done .log-dot {
+  color: #8a8070;
+  background: #14100a;
+  box-shadow: none;
+}
+
+.log-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 24px 16px 18px;
+}
+.log-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 2px;
+}
+.log-status {
+  align-self: flex-start;
+  padding: 1px 8px;
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--w-gold-hi);
+  text-shadow: 1px 1px 0 #000;
+  background: linear-gradient(#3a2d1a, #1c150c);
+  border: 2px solid var(--w-edge);
+  box-shadow: inset 1px 1px 0 var(--w-bronze-hi), inset -1px -1px 0 var(--w-bronze-lo);
+}
+.log-status.ready {
+  color: #0b0806;
+  text-shadow: none;
+  background: linear-gradient(#b8f0a0, #5aa84a);
+  box-shadow: inset 1px 1px 0 #e6ffd8, inset -1px -1px 0 #2f6a24;
+}
+.log-status.done {
+  color: var(--w-dim);
+}
+.log-detail h3 {
+  margin: 2px 0 0;
+  font-size: 18px;
+}
+.log-giver {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: var(--w-dim);
+  text-shadow: 1px 1px 0 #000;
+}
+.log-summary {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  font-style: italic;
+  color: #d8c7a4;
+  background: rgba(0, 0, 0, 0.3);
+  border-left: 3px solid var(--w-bronze);
+}
+.log-detail .wow-head {
+  margin-top: 6px;
+}
+.log-detail .quest-objectives {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+}
+.log-detail .quest-objectives li {
+  padding-left: 24px;
+  font-size: 12px;
+}
+.log-detail .quest-objectives li::before {
+  content: '';
+  left: 0;
+  top: 1px;
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+  background: #0b0806;
+  border: 2px solid var(--w-bronze);
+}
+.log-detail .quest-objectives li.done::before {
+  content: '\2713';
+  font-size: 10px;
+  line-height: 8px;
+  text-align: center;
+  color: #0b0806;
+  background: #9fe08a;
+  border-color: #5aa84a;
+}
+.log-detail .quest-rewards {
+  margin: 0;
+}
+.log-detail .quest-reward-items {
+  gap: 8px 16px;
+}
+.log-detail .quest-reward-item {
+  font-size: 12px;
+}
+.log-abandon {
+  align-self: flex-start;
+  margin-top: auto;
+}
+.log-empty {
+  margin: 0;
+  padding: 18px 8px;
+  text-align: center;
+  font-style: normal;
+  line-height: 1.5;
+}
+/* Quest log and party: the same title plate and hanging close button as the inventory. */
+.log-card > .title {
+  position: absolute;
+  z-index: 2;
+  top: -18px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 7px 34px 8px;
+  white-space: nowrap;
+  font-size: 15px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--w-gold-hi);
+  text-shadow: 2px 2px 0 #000;
+  background: linear-gradient(#3a2d1a, #1c150c);
+  border: 3px solid var(--w-edge);
+  box-shadow: inset 2px 2px 0 0 var(--w-bronze-hi), inset -2px -2px 0 0 var(--w-bronze-lo), 0 4px 0 rgba(0, 0, 0, 0.45);
+}
+.log-card > .wow-close {
+  z-index: 2;
+}
+.log-card > .log-head {
+  justify-content: center;
+  padding: 26px 24px 10px;
+}

@@ -1,0 +1,56 @@
+/* The admin bar (F2): the frame rate and what the game is carrying, top centre between the character frame and the map. */
+#admin-bar {
+  position: fixed;
+  top: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: none;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px;
+  width: max-content;
+  max-width: max(320px, calc(100vw - 590px));
+  font-size: 12px;
+  line-height: 1.2;
+  pointer-events: none;
+  z-index: 80;
+}
+#admin-bar.on {
+  display: flex;
+}
+#admin-bar .ab-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 2px 7px 3px;
+  background: rgba(0, 0, 0, 0.58);
+  border: 1px solid rgba(214, 170, 70, 0.28);
+  white-space: nowrap;
+}
+#admin-bar .ab-k {
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: #c9a24a;
+}
+#admin-bar .ab-v.good {
+  color: #7dff7d;
+}
+#admin-bar .ab-v.warn {
+  color: #ffd24a;
+}
+#admin-bar .ab-v.bad {
+  color: #ff6b6b;
+}
+#admin-bar .ab-graph {
+  width: 120px;
+  height: 26px;
+  padding: 2px 4px;
+  background: rgba(0, 0, 0, 0.58);
+  border: 1px solid rgba(214, 170, 70, 0.28);
+  image-rendering: pixelated;
+}
+/* (what else sits at the top centre moves down under it) */
+body:has(#admin-bar.on) #spectator-banner {
+  top: 84px;
+}
+

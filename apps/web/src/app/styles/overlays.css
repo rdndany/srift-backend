@@ -1,0 +1,82 @@
+#damage {
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(ellipse at center, rgba(255, 0, 0, 0.15), rgba(200, 0, 0, 0.9));
+  opacity: 0;
+  pointer-events: none;
+}
+#death-screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(120, 10, 10, 0.55);
+}
+#death-screen h2 {
+  font-size: 48px;
+  margin: 0;
+  text-shadow: 3px 3px #300;
+}
+#death-screen p {
+  margin: 0 0 12px;
+  color: #ffd0d0;
+}
+#death-screen button {
+  font-family: inherit;
+  font-size: 18px;
+  padding: 10px 36px;
+  background: #3c3c4c;
+  color: #fff;
+  border: 3px solid #14141c;
+  box-shadow: inset 0 0 0 2px #6a6a80;
+  cursor: pointer;
+}
+#death-screen button:hover {
+  background: #5a5a72;
+}
+
+#item-name {
+  position: fixed;
+  left: 50%;
+  /* Clear of the whole hotbar stack: resource bar, experience bar and the hotbar itself (and the air bubbles). */
+  bottom: 138px;
+  max-width: min(90vw, 640px);
+  text-align: center;
+  transform: translateX(-50%);
+  text-transform: capitalize;
+  text-shadow: 2px 2px #000;
+  transition: opacity 0.5s;
+  pointer-events: none;
+}
+
+#break-progress {
+  position: fixed;
+  left: 50%;
+  top: calc(50% + 24px);
+  width: 80px;
+  height: 6px;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.5);
+  display: none;
+}
+#break-progress div {
+  height: 100%;
+  background: #fff;
+}
+
+#debug {
+  position: fixed;
+  left: 8px;
+  top: 8px;
+  font-size: 13px;
+  line-height: 1.35;
+  white-space: pre;
+  background: rgba(0, 0, 0, 0.45);
+  padding: 6px 8px;
+  display: none;
+  pointer-events: none;
+}
+

@@ -1,0 +1,100 @@
+/* ---- inventory screens ---- */
+#menu-screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(ellipse at center, rgba(8, 8, 18, 0.5), rgba(0, 0, 0, 0.72));
+  backdrop-filter: blur(2px);
+}
+#menu-screen .panel {
+  background: linear-gradient(#303040, #232330);
+  border: 3px solid #14141c;
+  box-shadow: inset 0 0 0 3px #4a4a5e, inset 0 6px 0 3px rgba(255, 255, 255, 0.05), 0 14px 40px rgba(0, 0, 0, 0.6);
+  padding: 18px 20px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+#menu-screen .title {
+  align-self: flex-start;
+  font-size: 16px;
+  color: #e6e6f0;
+}
+#menu-screen .label {
+  align-self: flex-start;
+  font-size: 12px;
+  color: #9a9ab0;
+  margin-top: 6px;
+}
+.slot-grid {
+  display: grid;
+  gap: 0;
+}
+.slot-grid.hotbar-row {
+  margin-top: 8px;
+}
+#menu-screen .slot {
+  cursor: pointer;
+  background: #3c3c4c;
+  border: 2px solid #1c1c26;
+  border-right-color: #5a5a6e;
+  border-bottom-color: #5a5a6e;
+}
+#menu-screen .slot:hover {
+  background: #5a5a72;
+}
+#menu-screen .slot.result,
+#menu-screen .slot.output {
+  background: #4a4256;
+}
+.slot-grid.big .slot {
+  width: 64px;
+  height: 64px;
+  margin: 0 6px;
+}
+.craft-row,
+.furnace-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin: 6px 0 10px;
+}
+.arrow {
+  font-size: 34px;
+  color: #b8b8d0;
+}
+.furnace-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.flame {
+  width: 18px;
+  height: 22px;
+  background: #1c1c26;
+  display: flex;
+  align-items: flex-end;
+}
+.flame div {
+  width: 100%;
+  background: linear-gradient(#ffd34a, #ff6a1a);
+}
+.progress {
+  width: 60px;
+  height: 14px;
+  background: #1c1c26;
+}
+.progress div {
+  height: 100%;
+  background: #f2f2f8;
+}
+.palette:not(.slot) {
+  max-height: 260px;
+  overflow-y: auto;
+  border: 2px solid #14141c;
+  background: #20202a;
+}

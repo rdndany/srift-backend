@@ -1,0 +1,39 @@
+/*
+ * Every style that is not a component's own (those sit beside their component, in components/*.css).
+ *
+ * The order matters and must be kept: later files restyle what earlier ones set up. The first group is each
+ * part of the game as it was first drawn; the frame-* files lay the bronze and leather look of the inventory
+ * window over them, part by part, often with selectors of the same weight, which win only by coming later.
+ */
+@import './styles/page.css';              /* the page, the game canvas, the crosshair, the bottom row of the HUD */
+@import './styles/player-frame.css';      /* the character frame, top left */
+@import './styles/slots.css';             /* an item slot: icon, count, wear bar */
+@import './styles/menu.css';              /* the menu screen and its grids: crafting, furnace, palette */
+@import './styles/tooltip.css';           /* the font, the item tooltip, the item on the pointer */
+@import './styles/overlays.css';          /* hurt flash, death screen, item name, digging progress, F3 text */
+@import './styles/admin-bar.css';         /* the admin bar (F2) */
+@import './styles/pause-panels.css';      /* connection status, underwater tint, and the world, account and cloud panels of the pause screen */
+@import './styles/chat.css';              /* online play: the chat */
+@import './styles/xp-bar.css';            /* the experience bar */
+@import './styles/inventory.css';         /* the inventory screen: armor, character, 2x2 grid */
+@import './styles/hardcore-sleep.css';    /* hardcore death, the spectator banner, sleeping */
+@import './styles/book-button.css';       /* the recipe book button and the ghost of a recipe in the grid */
+@import './styles/recipe-toast.css';      /* the "New Recipes Unlocked!" card */
+@import './styles/pickup-feed.css';       /* what was just picked up, bottom right */
+@import './styles/trading.css';           /* villager trading */
+@import './styles/rarity.css';            /* gear rarity: rings, glows, the +N badge */
+@import './styles/forge.css';             /* the forge in the crafting grid and what a jewel does to a piece */
+@import './styles/enchanting.css';        /* enchanting table and anvil, the glint, and the flames while on fire */
+@import './styles/party.css';             /* the party: frame, invitation, window */
+@import './styles/minimap.css';           /* the map in the corner */
+@import './styles/quest-tracker.css';     /* the quests under the map, quest notes, the zone banner */
+@import './styles/quests.css';            /* the quest dialog and the quest log */
+@import './styles/coins.css';             /* the purse and the coin counts */
+@import './styles/frame-window.css';      /* the bronze window of the inventory and the crafting table */
+@import './styles/frame-tabs.css';        /* its tabs, the character's numbers, the hotbar under the window */
+@import './styles/frame-hud.css';         /* the HUD in the same frame: hotbar, bars, character frame, minimap, quests, party */
+@import './styles/frame-recipe-book.css'; /* the recipe book, as the other half of the crafting window */
+@import './styles/frame-dialogs.css';     /* party, quest log, quest dialog and shop as the same window */
+@import './styles/frame-quest-log.css';   /* the quest log made over: chapters, plates, the detail page */
+@import './styles/frame-quest-wells.css'; /* quest log and party with the studded frame and sunken wells */
+@import './styles/bags.css';              /* the bag bar and the bag windows */

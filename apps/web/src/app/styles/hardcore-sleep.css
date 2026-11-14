@@ -1,0 +1,69 @@
+/* ---- hardcore ---------------------------------------------------------------------------- */
+#death-screen.hardcore {
+  background: rgba(20, 0, 0, 0.82);
+}
+#death-screen .sub {
+  color: #ff9d9d;
+  font-size: 14px;
+}
+#death-screen .buttons {
+  display: flex;
+  gap: 12px;
+}
+#death-screen button.danger:hover {
+  background: #8f1a20;
+}
+#spectator-banner {
+  position: fixed;
+  left: 50%;
+  top: 12px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.6);
+  padding: 6px 14px;
+  font-size: 14px;
+  z-index: 5;
+}
+#spectator-banner button {
+  font-family: inherit;
+  font-size: 13px;
+  padding: 3px 10px;
+  background: #3c3c4c;
+  color: #fff;
+  border: 2px solid #14141c;
+  cursor: pointer;
+}
+
+/* ---- sleeping ------------------------------------------------------------------------------- */
+#sleep-overlay {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  pointer-events: none;
+  z-index: 3;
+}
+#sleep-overlay #leave-bed {
+  position: fixed;
+  left: 50%;
+  bottom: 30%;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  z-index: 40;
+  font-family: inherit;
+  font-size: 16px;
+  padding: 8px 22px;
+  background: #3c3c4c;
+  color: #fff;
+  border: 2px solid #14141c;
+  cursor: pointer;
+}
+#sleep-overlay #leave-bed:hover {
+  background: #52526a;
+}
+#sleep-overlay #leave-bed::after {
+  content: ' (Shift)';
+  opacity: 0.6;
+  font-size: 13px;
+}

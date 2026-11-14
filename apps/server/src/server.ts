@@ -1,0 +1,312 @@
+import { createServer, type IncomingMessage, type Server } from 'node:http';
+import { WebSocketServer, type WebSocket } from 'ws';
+import { PROTOCOL_VERSION, isClientMessage, parseNetClientMessage, type NetServerMessage, type ServerMessage } from '@solrift/shared';
+import { AuthService, SESSION_COOKIE, createAuthRouter, readCookie } from './auth';
+import { CloudService, createCloudRouter, type CloudServiceOptions } from './cloud';
+import { SqliteRepo, type Repo } from './db';
+import { GameRoom, STRIKES, type RoomOptions } from './room';
+
+export interface GameServer {
+  http: Server;
+  wss: WebSocketServer;
+  auth: AuthService;
+  cloud: CloudService;
+  /** The shared multiplayer world. */
+  room: GameRoom;
+  listen(port: number): Promise<number>;
+  close(): Promise<void>;
+}
+
+export interface GameServerOptions {
+  seed: number;
+  /** Browser origins allowed to sign in. Defaults to the local dev and test web servers. */
+  origins?: string[];
+  /** Account/session storage. Defaults to a throwaway in-memory SQLite database. */
+  repo?: Repo;
+  chainId?: string;
+  secureCookies?: boolean;
+  /** Domain of the session cookie (see `RouterOptions.cookieDomain`). */
+  cookieDomain?: string;
+  trustProxy?: boolean;
+  rateLimitPerMinute?: number;
+  /** Cloud save limits and clock (tests shrink the limits). */
+  cloud?: CloudServiceOptions;
+  /** Multiplayer room settings (the seed is the server's). */
+  room?: Partial<Omit<RoomOptions, 'seed'>>;
+  /** Connection limits (tests and load tests change them). */
+  limits?: Partial<ConnectionLimits>;
+}
+
+export interface ConnectionLimits {
+  /** Open sockets per client address. */
+  maxConnectionsPerIp: number;
+  /** New sockets per client address per minute. */
+  connectsPerMinutePerIp: number;
+  /** A socket that has not joined the game within this time is closed. */
+  joinTimeoutMs: number;
+  /** Ping interval; a socket that misses a whole interval is dropped (frees its account for a re-login). */
+  heartbeatMs: number;
+  /** Messages that fail validation before the socket is closed. */
+  maxInvalidMessages: number;
+}
+
+export const DEFAULT_LIMITS: ConnectionLimits = {
+  maxConnectionsPerIp: 10,
+  connectsPerMinutePerIp: 60,
+  joinTimeoutMs: 15_000,
+  heartbeatMs: 15_000,
+  maxInvalidMessages: 20,
+};
+
+/** Bytes a slow client may have queued before we stop sending it snapshots. */
+export const SOFT_BUFFER_LIMIT = 1 << 20;
+/** Bytes queued before the client is cut off (it cannot keep up, and the memory would grow without bound). */
+export const HARD_BUFFER_LIMIT = 8 << 20;
+
+/** Minimal view of a socket, so the back-pressure rule can be tested without one. */
+export interface SendTarget {
+  readonly readyState: number;
+  readonly bufferedAmount: number;
+  send(data: string): void;
+  terminate(): void;
+}
+
+/**
+ * Send a game message with back-pressure. A client that falls behind misses snapshots (the next one
+ * replaces them anyway) instead of piling them up; one that falls far behind is dropped.
+ */
+export function sendWithBackpressure(ws: SendTarget, msg: { t: string }, serialize: () => string = () => JSON.stringify(msg)): 'sent' | 'skipped' | 'dropped' {
+  if (ws.readyState !== 1) return 'skipped';
+  const queued = ws.bufferedAmount;
+  if (queued > HARD_BUFFER_LIMIT) {
+    if (process.env.LOG_CLOSE === '1') console.log(`[solrift] backpressure: dropping a client with ${queued} bytes queued`);
+    ws.terminate();
+    return 'dropped';
+  }
+  if (queued > SOFT_BUFFER_LIMIT && msg.t === 'snap') return 'skipped';
+  ws.send(serialize());
+  return 'sent';
+}
+
+/**
+ * What `JSON.stringify` gives for a snapshot whose players were serialised elsewhere: `snap.players` must be empty,
+ * and `playersJson` takes its place. (`"players":[` cannot appear earlier: the keys before it hold no such member,
+ * and a quote inside a string value is always escaped.)
+ */
+export function withPlayersJson(snap: { players: unknown[] }, playersJson: string): string {
+  const s = JSON.stringify(snap);
+  const key = '"players":[]';
+  const at = s.indexOf(key);
+  if (at < 0 || snap.players.length > 0) return JSON.stringify({ ...snap, players: JSON.parse(playersJson) });
+  return s.slice(0, at + 10) + playersJson + s.slice(at + key.length);
+}
+
+export const DEV_ORIGINS = ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:3100', 'http://127.0.0.1:3100'];
+
+export function createGameServer(opts: GameServerOptions): GameServer {
+  const repo = opts.repo ?? new SqliteRepo(':memory:');
+  const auth = new AuthService(repo, { origins: opts.origins ?? DEV_ORIGINS, chainId: opts.chainId });
+  const authRoutes = createAuthRouter(auth, {
+    secureCookies: opts.secureCookies ?? false,
+    cookieDomain: opts.cookieDomain,
+    trustProxy: opts.trustProxy ?? false,
+    rateLimitPerMinute: opts.rateLimitPerMinute ?? 30,
+    isPlaying: (accountId) => room.hasAccount(accountId),
+  });
+
+  const cloud = new CloudService(repo.cloud, opts.cloud);
+  const cloudRoutes = createCloudRouter(auth, cloud);
+
+  const room = new GameRoom({ seed: opts.seed, store: repo.room, ...opts.room });
+
+  const http = createServer((req, res) => {
+    if (req.url === '/health') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, players: room.playerCount, maxPlayers: room.capacity, connections: wss.clients.size, protocol: PROTOCOL_VERSION, room: room.stats(), memoryMb: Math.round(process.memoryUsage().rss / 1e6) }));
+      return;
+    }
+    void authRoutes(req, res)
+      .then((handled) => handled || cloudRoutes(req, res))
+      .then((handled) => {
+        if (!handled) res.writeHead(404).end();
+      });
+  });
+
+  const limits: ConnectionLimits = { ...DEFAULT_LIMITS, ...opts.limits };
+  // Snapshots are repetitive JSON, so compressing them cuts the bandwidth per player roughly ten-fold.
+  // No context takeover and a small window keep the memory per connection low, and small messages are
+  // sent as they are. Incoming messages are limited after decompression, so this is not a zip-bomb door.
+  const wss = new WebSocketServer({
+    server: http,
+    maxPayload: 16 * 1024,
+    perMessageDeflate: {
+      threshold: 256,
+      zlibDeflateOptions: { level: 1, memLevel: 8 },
+      serverNoContextTakeover: true,
+      clientNoContextTakeover: true,
+      serverMaxWindowBits: 13,
+      concurrencyLimit: 8,
+    },
+  });
+  const openByIp = new Map<string, number>();
+  const recentByIp = new Map<string, number[]>();
+  const clientIp = (req: IncomingMessage): string => {
+    const fwd = opts.trustProxy ? req.headers['x-forwarded-for'] : undefined;
+    const first = typeof fwd === 'string' ? fwd.split(',')[0].trim() : '';
+    return first || req.socket.remoteAddress || 'unknown';
+  };
+  const purge = setInterval(() => auth.purgeExpired(), 60 * 60 * 1000);
+  purge.unref();
+
+  const send = (ws: WebSocket, msg: ServerMessage | NetServerMessage): void => {
+    if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
+  };
+
+  wss.on('connection', (ws, req) => {
+    const ip = clientIp(req);
+    const now0 = Date.now();
+    const recent = (recentByIp.get(ip) ?? []).filter((t) => now0 - t < 60_000);
+    recent.push(now0);
+    recentByIp.set(ip, recent);
+    if ((openByIp.get(ip) ?? 0) >= limits.maxConnectionsPerIp || recent.length > limits.connectsPerMinutePerIp) {
+      ws.close(1013, 'too many connections');
+      return;
+    }
+    openByIp.set(ip, (openByIp.get(ip) ?? 0) + 1);
+    let invalid = 0;
+    let memberId: number | null = null;
+    const bad = (message: string): void => {
+      send(ws, { t: 'error', message });
+      invalid++;
+      if (memberId !== null) room.strike(memberId, STRIKES.invalidMessage, message);
+      if (invalid > limits.maxInvalidMessages) ws.close(1008, 'too many invalid messages');
+    };
+    // Dead connections (a crashed browser, a cut cable) must not hold an account's single seat.
+    let alive = true;
+    ws.on('pong', () => (alive = true));
+    const heartbeat = setInterval(() => {
+      if (!alive) {
+        if (process.env.LOG_CLOSE === '1') console.log(`[solrift] heartbeat: no pong from member ${memberId}`);
+        ws.terminate();
+        return;
+      }
+      alive = false;
+      ws.ping();
+    }, limits.heartbeatMs);
+    heartbeat.unref();
+    // Sockets that never join are not allowed to sit there.
+    const joinTimer = setTimeout(() => {
+      if (memberId === null) ws.close(1008, 'join timeout');
+    }, limits.joinTimeoutMs);
+    joinTimer.unref();
+    // Per-connection rate limit: 100 messages per second (inputs arrive in batches of a few frames).
+    let windowStart = Date.now();
+    let count = 0;
+
+    // A session cookie identifies the player, but only when the page that opened the socket is ours.
+    const origin = req.headers.origin;
+    const trusted = origin === undefined || auth.isAllowedOrigin(origin);
+    const account = trusted ? auth.resolve(readCookie(req.headers.cookie, SESSION_COOKIE)) : null;
+
+    send(ws, {
+      t: 'welcome',
+      v: PROTOCOL_VERSION,
+      seed: room.seed,
+      kind: room.kind,
+      serverTime: Date.now(),
+      players: room.playerCount,
+      max: room.capacity,
+      user: account?.displayName ?? null,
+    });
+
+    ws.on('message', (data) => {
+      // Anything the client sends proves it is there. A browser whose page is busy (or in a background tab) can be
+      // slow to answer a ping, but it keeps sending its inputs, and it must not be dropped for that.
+      alive = true;
+      const now = Date.now();
+      if (now - windowStart > 1000) {
+        windowStart = now;
+        count = 0;
+      }
+      if (++count > 100) {
+        ws.close(1008, 'rate limit');
+        return;
+      }
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(data.toString());
+      } catch {
+        bad('invalid json');
+        return;
+      }
+      if (isClientMessage(parsed)) {
+        if (parsed.t === 'ping') send(ws, { t: 'pong', ts: parsed.ts, serverTime: Date.now() });
+        return;
+      }
+      const msg = parseNetClientMessage(parsed);
+      if (!msg) {
+        bad('invalid message');
+        return;
+      }
+      if (msg.t === 'join') {
+        if (memberId !== null) return;
+        // A signed-in account plays under its own name; guests choose one.
+        memberId = room.join(
+          {
+            send: (m) => void sendWithBackpressure(ws, m),
+            sendSnapshot: (snap, playersJson) => void sendWithBackpressure(ws, snap, () => withPlayersJson(snap, playersJson)),
+            close: (reason) => ws.close(1000, reason),
+          },
+          account?.displayName ?? msg.name,
+          account?.id ?? null,
+          // An account's saved character wins; a guest (or an account that never made one) brings its own.
+          account?.look ?? msg.look ?? null,
+          // An account's class was chosen when its character was made and never changes; only a guest picks one here.
+          account ? (account.class ?? null) : (msg.class ?? null),
+        );
+        return;
+      }
+      if (memberId !== null) room.receive(memberId, msg);
+    });
+
+    ws.on('close', (code, reason) => {
+      if (process.env.LOG_CLOSE === '1') console.log(`[solrift] socket closed: member ${memberId} code ${code} ${reason.toString()} (buffered ${ws.bufferedAmount}, alive ${alive})`);
+      clearInterval(heartbeat);
+      clearTimeout(joinTimer);
+      const open = (openByIp.get(ip) ?? 1) - 1;
+      if (open <= 0) openByIp.delete(ip);
+      else openByIp.set(ip, open);
+      if (memberId !== null) room.leave(memberId);
+      memberId = null;
+    });
+  });
+
+  return {
+    http,
+    wss,
+    auth,
+    cloud,
+    room,
+    listen: (port) =>
+      new Promise((resolve) => {
+        http.listen(port, () => {
+          room.start();
+          const addr = http.address();
+          resolve(typeof addr === 'object' && addr ? addr.port : port);
+        });
+      }),
+    close: () =>
+      new Promise((resolve) => {
+        clearInterval(purge);
+        room.stop();
+        for (const c of wss.clients) c.terminate();
+        wss.close(() =>
+          http.close(() => {
+            repo.close();
+            resolve();
+          }),
+        );
+      }),
+  };
+}

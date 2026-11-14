@@ -1,0 +1,267 @@
+#quest-dialog,
+#quest-log {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 7vh;
+  background: radial-gradient(ellipse at center, rgba(8, 6, 2, 0.15), rgba(0, 0, 0, 0.55));
+}
+#quest-log {
+  align-items: center;
+  padding-bottom: 0;
+  background: radial-gradient(ellipse at center, rgba(8, 6, 2, 0.4), rgba(0, 0, 0, 0.75));
+}
+.dialog-card,
+.log-card {
+  color: #2b1d0b;
+  background: linear-gradient(#e7d6a8, #d4bd86);
+  border: 3px solid #4a3010;
+  box-shadow: inset 0 0 0 2px #b89a58, 0 14px 40px rgba(0, 0, 0, 0.65);
+  border-radius: 3px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.dialog-card {
+  width: min(640px, 92vw);
+  max-height: 72vh;
+  display: flex;
+  flex-direction: column;
+}
+.dialog-head,
+.log-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px 8px;
+  border-bottom: 2px solid rgba(74, 48, 16, 0.4);
+}
+.dialog-head h2,
+.log-head h2 {
+  margin: 0;
+  font-size: 20px;
+  color: #5b1e0a;
+}
+.dialog-title,
+.log-count {
+  font-size: 12px;
+  color: #6b5326;
+}
+.dialog-x {
+  font-family: inherit;
+  font-size: 22px;
+  line-height: 1;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  color: #5b1e0a;
+  background: transparent;
+  border: 2px solid #8a6a30;
+  border-radius: 2px;
+}
+.dialog-x:hover {
+  background: rgba(91, 30, 10, 0.15);
+}
+.dialog-body {
+  padding: 12px 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.dialog-quest h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  color: #3a2208;
+}
+.dialog-quest p,
+.dialog-greeting {
+  margin: 0 0 8px;
+}
+.dialog-greeting {
+  font-style: italic;
+}
+.mark {
+  display: inline-block;
+  width: 16px;
+  text-align: center;
+  font-weight: bold;
+  color: #c98a00;
+}
+.mark.grey {
+  color: #7d7d7d;
+}
+.quest-objectives {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+.quest-objectives li {
+  padding-left: 14px;
+  position: relative;
+}
+.quest-objectives li::before {
+  content: '\2022';
+  position: absolute;
+  left: 2px;
+}
+.quest-objectives li.done {
+  color: #1f6a14;
+}
+.quest-objectives li.done::before {
+  content: '\2713';
+}
+.quest-rewards {
+  margin: 0 0 10px;
+}
+.quest-rewards-label {
+  display: block;
+  font-size: 12px;
+  color: #6b5326;
+  margin-bottom: 3px;
+}
+.quest-reward-items {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+}
+.quest-reward-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.quest-reward-item .reward-icon {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  background: rgba(60, 40, 10, 0.25);
+  border: 2px solid #8a6a30;
+}
+.quest-reward-item .reward-icon .item-icon {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+}
+.quest-reward-item .reward-icon .count {
+  position: absolute;
+  right: 1px;
+  bottom: 0;
+  font-size: 11px;
+  color: #fff;
+  text-shadow: 1px 1px 0 #000;
+}
+.quest-xp {
+  font-size: 12px;
+  color: #3a6a10;
+}
+.quest-btn {
+  font-family: inherit;
+  font-size: 14px;
+  padding: 6px 18px;
+  cursor: pointer;
+  color: #fff3c9;
+  background: linear-gradient(#8a2c12, #5b1a08);
+  border: 2px solid #2b1204;
+  box-shadow: inset 0 0 0 1px #c9803a;
+  border-radius: 2px;
+}
+.quest-btn:hover {
+  background: linear-gradient(#a53a1a, #701f0a);
+}
+.quest-btn.secondary {
+  background: linear-gradient(#6a5a38, #4a3d22);
+  box-shadow: inset 0 0 0 1px #a8935c;
+}
+.quest-btn.danger {
+  background: linear-gradient(#5a2a2a, #3a1414);
+  box-shadow: inset 0 0 0 1px #a85c5c;
+}
+.dialog-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 16px 12px;
+  border-top: 2px solid rgba(74, 48, 16, 0.3);
+}
+.log-card {
+  width: min(820px, 94vw);
+  height: min(520px, 82vh);
+  display: flex;
+  flex-direction: column;
+}
+.log-cols {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 280px 1fr;
+}
+.log-list {
+  overflow-y: auto;
+  padding: 8px 8px 10px 12px;
+  border-right: 2px solid rgba(74, 48, 16, 0.35);
+}
+.log-chapter h4 {
+  margin: 8px 0 4px;
+  font-size: 13px;
+  color: #6b5326;
+}
+.log-entry {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  font-size: 13px;
+  padding: 3px 6px;
+  cursor: pointer;
+  color: #2b1d0b;
+  background: transparent;
+  border: 1px solid transparent;
+}
+.log-entry:hover {
+  background: rgba(91, 30, 10, 0.1);
+}
+.log-entry.sel {
+  background: rgba(91, 30, 10, 0.18);
+  border-color: #8a6a30;
+}
+.log-entry.done {
+  color: #6b6b52;
+  text-decoration: line-through;
+}
+.log-entry.ready {
+  color: #1f6a14;
+}
+.log-dot {
+  width: 12px;
+  flex: none;
+  text-align: center;
+}
+.log-detail {
+  overflow-y: auto;
+  padding: 12px 16px;
+}
+.log-detail h3 {
+  margin: 0;
+  font-size: 18px;
+  color: #5b1e0a;
+}
+.log-giver {
+  font-size: 12px;
+  color: #6b5326;
+  margin-bottom: 8px;
+}
+.log-summary {
+  margin: 0 0 10px;
+}
+.log-empty {
+  color: #6b5326;
+  font-style: italic;
+}
+

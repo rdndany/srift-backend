@@ -1,0 +1,271 @@
+/* ================================================================================================
+   The inventory screen (E), remade in the manner of World of Warcraft's character and bag windows,
+   but built of blocks: a bronze frame with a light top left and a dark bottom right edge and rivets
+   in the corners, a title plate that sits on the top rim, a sunken well for the paperdoll, bronze-
+   rimmed item slots that light up gold, gold headings, and a money bar at the bottom.
+   Only `.panel.wow` (the inventory and the crafting table) uses it; the other screens are unchanged.
+   ================================================================================================ */
+#menu-screen .panel.wow {
+  --w-gold: #f0bc4c;
+  --w-gold-hi: #ffe49a;
+  --w-bronze-hi: #d0a24c;
+  --w-bronze: #8a6424;
+  --w-bronze-lo: #4f360f;
+  --w-edge: #0b0806;
+  --w-stone: #211c17;
+  --w-text: #f1e4c8;
+  --w-dim: #a48f6a;
+  position: relative;
+  align-items: stretch;
+  gap: 10px;
+  padding: 38px 28px 20px;
+  color: var(--w-text);
+  background-color: var(--w-stone);
+  background-image:
+    linear-gradient(var(--w-gold), var(--w-gold)), linear-gradient(var(--w-gold), var(--w-gold)),
+    linear-gradient(var(--w-gold), var(--w-gold)), linear-gradient(var(--w-gold), var(--w-gold)),
+    conic-gradient(rgba(255, 240, 210, 0.028) 25%, transparent 0 50%, rgba(255, 240, 210, 0.028) 0 75%, transparent 0),
+    linear-gradient(rgba(255, 230, 180, 0.05), rgba(0, 0, 0, 0.18));
+  background-size: 8px 8px, 8px 8px, 8px 8px, 8px 8px, 16px 16px, 100% 100%;
+  background-position: 10px 10px, calc(100% - 10px) 10px, 10px calc(100% - 10px), calc(100% - 10px) calc(100% - 10px), 0 0, 0 0;
+  background-repeat: no-repeat, no-repeat, no-repeat, no-repeat, repeat, no-repeat;
+  border: 4px solid var(--w-edge);
+  box-shadow:
+    inset 4px 4px 0 0 var(--w-bronze-hi),
+    inset -4px -4px 0 0 var(--w-bronze-lo),
+    inset 6px 6px 0 0 var(--w-edge),
+    inset -6px -6px 0 0 var(--w-edge),
+    inset 0 0 50px rgba(0, 0, 0, 0.55),
+    0 0 0 4px rgba(0, 0, 0, 0.4),
+    0 24px 60px rgba(0, 0, 0, 0.7);
+}
+#menu-screen .panel.wow.with-book {
+  border-left-width: 0;
+  box-shadow:
+    inset 0 4px 0 0 var(--w-bronze-hi),
+    inset -4px -4px 0 0 var(--w-bronze-lo),
+    inset 0 6px 0 0 var(--w-edge),
+    inset -6px -6px 0 0 var(--w-edge),
+    inset 0 0 50px rgba(0, 0, 0, 0.55),
+    0 24px 60px rgba(0, 0, 0, 0.7);
+}
+
+/* The title is a plate on the top rim. */
+#menu-screen .wow .title {
+  position: absolute;
+  top: -18px;
+  left: 50%;
+  transform: translateX(-50%);
+  align-self: auto;
+  padding: 7px 34px 8px;
+  white-space: nowrap;
+  font-size: 15px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--w-gold-hi);
+  text-shadow: 2px 2px 0 #000;
+  background: linear-gradient(#3a2d1a, #1c150c);
+  border: 3px solid var(--w-edge);
+  box-shadow: inset 2px 2px 0 0 var(--w-bronze-hi), inset -2px -2px 0 0 var(--w-bronze-lo), 0 4px 0 rgba(0, 0, 0, 0.45);
+}
+/* ...and the close button hangs on the top right corner, a plate like the title with a pixel cross that turns red under the pointer. */
+.wow-close {
+  position: absolute;
+  top: -16px;
+  right: -16px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  cursor: pointer;
+  font-size: 0;
+  color: transparent;
+  background: linear-gradient(#3a2d1a, #1c150c);
+  border: 3px solid var(--w-edge, #0b0806);
+  box-shadow:
+    inset 2px 2px 0 0 var(--w-bronze-hi, #d0a24c),
+    inset -2px -2px 0 0 var(--w-bronze-lo, #4f360f),
+    0 4px 0 rgba(0, 0, 0, 0.45);
+}
+.wow-close::before,
+.wow-close::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 18px;
+  height: 4px;
+  margin: -2px 0 0 -9px;
+  background: var(--w-gold-hi, #ffe49a);
+  box-shadow: 0 2px 0 #000;
+  transform: rotate(45deg);
+}
+.wow-close::after {
+  transform: rotate(-45deg);
+}
+.wow-close:hover {
+  background: linear-gradient(#b02a1c, #6a140c);
+  box-shadow:
+    inset 2px 2px 0 0 #e0806a,
+    inset -2px -2px 0 0 #3a0804,
+    0 4px 0 rgba(0, 0, 0, 0.45);
+}
+.wow-close:hover::before,
+.wow-close:hover::after {
+  background: #fff;
+}
+.wow-close:active {
+  transform: translateY(1px);
+}
+
+/* Headings: small gold capitals and a rule that fades out. */
+.wow-head,
+#menu-screen .wow .craft-col::before {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+  font-size: 12px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--w-gold);
+  text-shadow: 1px 1px 0 #000;
+}
+.wow-head::after {
+  content: '';
+  flex: 1;
+  height: 2px;
+  background: linear-gradient(90deg, var(--w-bronze), transparent);
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.5);
+}
+/* The Organize button sits at the far right of the Backpack heading, after the rule. */
+.wow-head .organize-btn {
+  order: 2;
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--w-gold);
+  text-shadow: 1px 1px 0 #000;
+  cursor: pointer;
+  background: linear-gradient(145deg, #2a241c, #0e0c09);
+  border: 2px solid #6b4f1e;
+  box-shadow: inset 0 0 0 1px #000, inset 2px 2px 4px rgba(0, 0, 0, 0.6);
+}
+.wow-head .organize-btn:hover {
+  color: var(--w-gold-hi, #ffe49a);
+  border-color: var(--w-gold-hi, #ffe49a);
+  box-shadow: inset 0 0 0 1px #000, 0 0 8px rgba(255, 208, 100, 0.5);
+}
+.wow-head .organize-btn:active {
+  transform: translateY(1px);
+}
+#menu-screen .wow .craft-col::before {
+  content: 'Crafting';
+  margin: 0 0 8px;
+}
+
+/* The paperdoll sits in a sunken well. */
+#menu-screen .wow .inv-top {
+  align-items: stretch;
+  gap: 14px;
+  margin: 2px 0 0;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 2px solid;
+  border-color: #000 #3d2c12 #3d2c12 #000;
+  box-shadow: inset 3px 3px 0 rgba(0, 0, 0, 0.45);
+}
+#menu-screen .wow .armor-col {
+  gap: 4px;
+}
+#menu-screen .wow .craft-col {
+  justify-content: center;
+  padding-top: 0;
+}
+#menu-screen .wow .char-box {
+  width: 136px;
+  background:
+    radial-gradient(ellipse 70% 38% at 50% 90%, rgba(240, 188, 76, 0.22), transparent 70%),
+    radial-gradient(ellipse 90% 70% at 50% 28%, #403426 0%, #1f1810 55%, #0c0905 100%);
+  border: 3px solid;
+  border-color: var(--w-bronze-hi) var(--w-bronze-lo) var(--w-bronze-lo) var(--w-bronze-hi);
+  box-shadow: inset 0 0 0 2px var(--w-edge), inset 0 0 26px rgba(0, 0, 0, 0.8);
+}
+#menu-screen .wow .off-slot {
+  bottom: 30px;
+}
+.char-plate {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 14px 0 5px;
+  text-align: center;
+  font-size: 12px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--w-gold-hi, #ffe49a);
+  text-shadow: 1px 1px 0 #000;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.88) 60%);
+  pointer-events: none;
+}
+
+/* Item slots: a bronze rim round a dark cell, lit gold under the pointer. */
+#menu-screen .wow .slot,
+#menu-screen .wow .book-btn {
+  background: linear-gradient(145deg, #2a241c, #0e0c09);
+  border: 2px solid #6b4f1e;
+  box-shadow: inset 0 0 0 1px #000, inset 3px 3px 7px rgba(0, 0, 0, 0.65);
+}
+#menu-screen .wow .slot:hover,
+#menu-screen .wow .book-btn:hover,
+#menu-screen .wow .book-btn.on {
+  background: linear-gradient(145deg, #4a3d28, #1e1810);
+  border-color: var(--w-gold-hi);
+  box-shadow: inset 0 0 0 1px #000, 0 0 9px rgba(255, 208, 100, 0.6);
+  z-index: 1;
+}
+#menu-screen .wow .slot.result,
+#menu-screen .wow .slot.output {
+  background: linear-gradient(145deg, #3a2d12, #17110a);
+  border-color: var(--w-gold);
+}
+#menu-screen .wow .slot-grid {
+  gap: 2px;
+  align-self: center;
+}
+#menu-screen .wow .slot-grid.hotbar-row {
+  margin-top: 0;
+}
+#menu-screen .wow .arrow {
+  color: var(--w-gold);
+  text-shadow: 2px 2px 0 #000;
+}
+
+/* The money bar. */
+.wow-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  margin-top: 6px;
+  padding: 7px 12px;
+  background: rgba(0, 0, 0, 0.42);
+  border: 2px solid;
+  border-color: #000 #3d2c12 #3d2c12 #000;
+  box-shadow: inset 3px 3px 0 rgba(0, 0, 0, 0.4);
+}
+.wow-foot-label {
+  font-size: 12px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--w-dim, #a48f6a);
+}
+#menu-screen .wow-foot #coin-purse {
+  gap: 8px;
+  font-size: 15px;
+  color: #ffe49a;
+  text-shadow: 2px 2px 0 #000;
+}
+
+

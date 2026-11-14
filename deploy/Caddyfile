@@ -1,0 +1,7 @@
+# Caddy (https://caddyserver.com) in front of the game server: it gets a free Let's Encrypt certificate for the
+# name by itself and speaks wss:// (the browser will not open a plain ws:// socket from an https page).
+# Copy to /etc/caddy/Caddyfile, put your own api name in place of api.example.com, then: systemctl reload caddy
+api.example.com {
+	# The game server (REST /auth, /cloud, /health and the WebSocket on one port). Caddy passes WebSockets through by itself.
+	reverse_proxy 127.0.0.1:8787
+}

@@ -1,0 +1,382 @@
+/* ---- The recipe book: the other half of the crafting window, in the same bronze and leather ---- */
+#menu-screen .recipe-book {
+  --w-gold: #f0bc4c;
+  --w-gold-hi: #ffe49a;
+  --w-bronze-hi: #d0a24c;
+  --w-bronze: #8a6424;
+  --w-bronze-lo: #4f360f;
+  --w-edge: #0b0806;
+  --w-text: #f1e4c8;
+  --w-dim: #a48f6a;
+  position: relative;
+  width: 316px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 38px 24px 20px;
+  color: var(--w-text);
+  background-color: #211c17;
+  background-image:
+    conic-gradient(rgba(255, 240, 210, 0.028) 25%, transparent 0 50%, rgba(255, 240, 210, 0.028) 0 75%, transparent 0),
+    linear-gradient(rgba(255, 230, 180, 0.05), rgba(0, 0, 0, 0.18));
+  background-size: 16px 16px, 100% 100%;
+  border: 4px solid var(--w-edge);
+  border-right-width: 0;
+  box-shadow:
+    inset 4px 4px 0 0 var(--w-bronze-hi),
+    inset 0 -4px 0 0 var(--w-bronze-lo),
+    inset 6px 6px 0 0 var(--w-edge),
+    inset 0 -6px 0 0 var(--w-edge),
+    inset 0 0 50px rgba(0, 0, 0, 0.55),
+    0 24px 60px rgba(0, 0, 0, 0.7);
+}
+/* The window beside it loses its left edge, so the two read as one. */
+#menu-screen .panel.wow.with-book {
+  border-left-width: 0;
+}
+
+/* Tabs hang off the left edge; the chosen one is lit and reaches into the book. A gold dot says there is something to make. */
+#menu-screen .rb-tabs {
+  position: absolute;
+  left: -50px;
+  top: 38px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+#menu-screen .rb-tab {
+  position: relative;
+  width: 46px;
+  height: 48px;
+  padding: 0;
+  cursor: pointer;
+  background: linear-gradient(#17120d, #0f0c09);
+  border: 3px solid var(--w-edge);
+  border-right: 0;
+  box-shadow: inset 2px 2px 0 0 var(--w-bronze-lo), inset 0 -2px 0 0 var(--w-bronze-lo);
+}
+#menu-screen .rb-tab:hover {
+  background: linear-gradient(#26200f, #14100a);
+}
+#menu-screen .rb-tab.on {
+  width: 54px;
+  margin-left: -4px;
+  z-index: 1;
+  background: linear-gradient(#3a2d1a, #211c17);
+  box-shadow: inset 2px 2px 0 0 var(--w-bronze-hi), inset 0 -2px 0 0 var(--w-bronze-lo);
+}
+#menu-screen .rb-tab .item-icon {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 30px;
+  height: 30px;
+  transform: translate(-50%, -50%);
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+#menu-screen .rb-tab:not(.on) .item-icon {
+  opacity: 0.7;
+}
+#menu-screen .rb-dot {
+  position: absolute;
+  top: 4px;
+  right: 5px;
+  width: 8px;
+  height: 8px;
+  background: var(--w-gold);
+  border: 2px solid var(--w-edge);
+  border-radius: 50%;
+  box-shadow: 0 0 6px rgba(255, 208, 100, 0.9);
+}
+
+/* The heading: the tab's name, a rule, and how much of it can be made now. */
+#menu-screen .rb-head {
+  margin-top: 0;
+}
+#menu-screen .rb-head::after {
+  order: 1;
+}
+#menu-screen .rb-count {
+  order: 2;
+  font-style: normal;
+  letter-spacing: 1px;
+  color: var(--w-gold-hi);
+}
+
+/* The search box is a sunken well; "Can make" is a switch beside it. */
+#menu-screen .rb-top {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+#menu-screen .rb-searchbox {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 8px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 2px solid;
+  border-color: #000 #6b4f1e #6b4f1e #000;
+  box-shadow: inset 2px 2px 0 rgba(0, 0, 0, 0.45);
+}
+#menu-screen .rb-searchbox:focus-within {
+  border-color: #000 var(--w-gold) var(--w-gold) #000;
+}
+#menu-screen .rb-mag {
+  flex: none;
+  position: relative;
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--w-bronze-hi);
+  border-radius: 50%;
+}
+#menu-screen .rb-mag::after {
+  content: '';
+  position: absolute;
+  right: -6px;
+  bottom: -7px;
+  width: 3px;
+  height: 7px;
+  background: var(--w-bronze-hi);
+  transform: rotate(-45deg);
+}
+#menu-screen .rb-search {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 12px;
+  padding: 7px 4px 7px 2px;
+  color: var(--w-text);
+  background: transparent;
+  border: 0;
+  outline: none;
+}
+#menu-screen .rb-search::placeholder {
+  color: var(--w-dim);
+}
+#menu-screen .rb-clear {
+  flex: none;
+  width: 22px;
+  align-self: stretch;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--w-dim);
+  background: transparent;
+  border: 0;
+}
+#menu-screen .rb-clear:hover {
+  color: var(--w-gold-hi);
+}
+#menu-screen .rb-only {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px 0 8px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--w-dim);
+  text-shadow: 1px 1px 0 #000;
+  background: linear-gradient(145deg, #2a241c, #0e0c09);
+  border: 2px solid #6b4f1e;
+  box-shadow: inset 0 0 0 1px #000;
+}
+#menu-screen .rb-only:hover {
+  color: var(--w-gold-hi);
+  border-color: var(--w-gold-hi);
+}
+#menu-screen .rb-only.on {
+  color: var(--w-gold-hi);
+  border-color: var(--w-gold);
+  background: linear-gradient(145deg, #4a3d28, #1e1810);
+}
+#menu-screen .rb-check {
+  position: relative;
+  width: 12px;
+  height: 12px;
+  background: #0b0806;
+  border: 2px solid var(--w-bronze);
+}
+#menu-screen .rb-only.on .rb-check::after {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  background: var(--w-gold);
+  box-shadow: 0 0 5px rgba(255, 208, 100, 0.8);
+}
+
+/* The list: the backpack's cells. Lit bronze for what can be made, dim and reddish for what lacks something. */
+#menu-screen .rb-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(5, 52px);
+  grid-auto-rows: 52px;
+  justify-content: center;
+  align-content: start;
+}
+#menu-screen .rb-item {
+  position: relative;
+  box-sizing: border-box;
+  width: 52px;
+  height: 52px;
+  cursor: pointer;
+  background: linear-gradient(145deg, #2a241c, #0e0c09);
+  border: 2px solid #b88a2e;
+  box-shadow: inset 0 0 0 1px #000, inset 3px 3px 7px rgba(0, 0, 0, 0.65);
+}
+#menu-screen .rb-item.can:hover {
+  background: linear-gradient(145deg, #4a3d28, #1e1810);
+  border-color: var(--w-gold-hi);
+  box-shadow: inset 0 0 0 1px #000, 0 0 9px rgba(255, 208, 100, 0.6);
+  z-index: 1;
+}
+#menu-screen .rb-item.cannot {
+  border-color: #5a2a22;
+  cursor: not-allowed;
+}
+#menu-screen .rb-item.cannot .item-icon {
+  opacity: 0.45;
+  filter: saturate(0.5);
+}
+#menu-screen .rb-item.cannot:hover {
+  border-color: #a8483a;
+}
+#menu-screen .rb-item .item-icon {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+#menu-screen .rb-item .count {
+  position: absolute;
+  right: 3px;
+  bottom: 1px;
+  font-size: 12px;
+  font-weight: bold;
+  text-shadow: 2px 2px #000;
+  pointer-events: none;
+}
+#menu-screen .rb-empty {
+  grid-column: 1 / -1;
+  padding: 26px 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+  color: var(--w-dim);
+}
+
+#menu-screen .rb-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+}
+#menu-screen .rb-page {
+  min-width: 40px;
+  text-align: center;
+  font-size: 12px;
+  letter-spacing: 2px;
+  color: var(--w-gold-hi);
+  text-shadow: 1px 1px 0 #000;
+}
+#menu-screen .rb-arrow {
+  width: 32px;
+  height: 22px;
+  padding: 0;
+  cursor: pointer;
+  font-size: 10px;
+  color: var(--w-gold);
+  background: linear-gradient(145deg, #2a241c, #0e0c09);
+  border: 2px solid #6b4f1e;
+  box-shadow: inset 0 0 0 1px #000;
+}
+#menu-screen .rb-arrow:hover:not(:disabled) {
+  color: var(--w-gold-hi);
+  border-color: var(--w-gold-hi);
+}
+#menu-screen .rb-arrow:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* What the pointed-at recipe needs: each ingredient with how much of it you have. */
+#menu-screen .rb-detail {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  box-sizing: border-box;
+  height: 104px;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 2px solid;
+  border-color: #000 #3d2c12 #3d2c12 #000;
+  box-shadow: inset 3px 3px 0 rgba(0, 0, 0, 0.45);
+}
+#menu-screen .rb-d-name {
+  font-size: 13px;
+  text-transform: capitalize;
+  color: var(--w-gold-hi);
+  text-shadow: 1px 1px 0 #000;
+}
+#menu-screen .rb-d-name small {
+  font-size: 11px;
+  color: var(--w-dim);
+}
+#menu-screen .rb-d-needs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+#menu-screen .rb-need {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  text-shadow: 1px 1px 0 #000;
+}
+#menu-screen .rb-need.ok {
+  color: #9fe08a;
+}
+#menu-screen .rb-need.lack {
+  color: #f08070;
+}
+#menu-screen .rb-need-icon {
+  position: relative;
+  display: block;
+  width: 24px;
+  height: 24px;
+}
+#menu-screen .rb-need-icon .item-icon {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+}
+#menu-screen .rb-d-hint {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--w-dim);
+  text-shadow: 1px 1px 0 #000;
+}
+#menu-screen .rb-d-hint.ok {
+  color: var(--w-text);
+}
+#menu-screen .rb-d-hint.lack {
+  color: #f08070;
+  text-transform: capitalize;
+}
+
