@@ -73,7 +73,7 @@ const sell = (e: number, item: number, n = 1, max = 12): Row => ({ a: [E, e], r:
 /** The offers of each profession, one list per level. */
 const TABLE: Table = {
   farmer: [
-    [buy(I.WHEAT, 20), sell(1, I.BREAD, 6)],
+    [buy(I.WHEAT, 20), sell(1, I.BREAD, 6), buy(I.POTATO, 26), buy(I.CARROT, 22), buy(I.BEETROOT, 18)],
     [buy(I.WHEAT_SEEDS, 24), sell(1, I.APPLE, 4)],
     [sell(1, I.COOKED_CHICKEN, 4), buy(I.APPLE, 12, 1, 12)],
     [sell(2, I.COOKED_MUTTON, 5)],

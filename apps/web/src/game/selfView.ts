@@ -113,6 +113,8 @@ export interface SelfState {
   vy: number;
   airborne: boolean;
   sneaking: boolean;
+  /** In the water with the feet off the bottom: the figure swims (or treads water when still). */
+  afloat?: boolean;
   /** Item ids worn: helmet, chestplate, leggings, boots (0 = none). */
   armor: readonly number[];
   /** Item id in hand (0 = empty). */
@@ -304,6 +306,7 @@ export class SelfView {
     c.bashAge = mounted ? 9 : this.bashAge;
     c.aimDraw = mounted ? 0 : (s.bowDraw ?? 0);
     c.aimPitch = s.pitch;
+    c.afloat = !mounted && !!s.afloat;
     c.animate(dt, s.speed, this.turn, this.attack, load.hand !== 0, s.blocking && !mounted, s.vy, s.airborne, !!s.eating && !mounted);
     c.setArmor(s.armor);
     c.setHeld(load.hand, this.models);

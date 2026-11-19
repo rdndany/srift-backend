@@ -53,12 +53,15 @@
   border: 2px solid var(--cls, #d6aa46);
   box-shadow: 0 0 0 2px #0b0803, 0 2px 6px rgba(0, 0, 0, 0.6);
 }
+#player-frame .pf-side {
+  position: relative;
+  width: 206px;
+  margin-left: -20px;
+}
 #player-frame .pf-plate {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  width: 206px;
-  margin-left: -20px;
   padding: 6px 10px 7px 28px;
   box-sizing: border-box;
   background: linear-gradient(rgba(34, 25, 12, 0.88), rgba(12, 9, 4, 0.88));
@@ -156,6 +159,45 @@
 }
 #player-frame .pf-bar.armor i {
   background: linear-gradient(#e6ebf7, #aab4d0 50%, #6c7799);
+}
+/* Status effects, under the bars and outside the plate, lined up with the bars. The mount icon sits in the same row.
+   Drawn on the page itself so a window that has the mouse cannot cover them. */
+.pf-buffs {
+  position: fixed;
+  z-index: 95;
+  display: flex;
+  gap: 3px;
+  pointer-events: none;
+  font-family: 'Monocraft', 'Courier New', monospace;
+}
+.pf-buffs.live {
+  pointer-events: auto;
+}
+.pf-buffs.live .pf-buff {
+  cursor: default;
+}
+.pf-buff {
+  position: relative;
+  width: 26px;
+  height: 26px;
+}
+.pf-buff canvas {
+  display: block;
+  width: 26px;
+  height: 26px;
+  image-rendering: pixelated;
+}
+.pf-buff b {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 1px;
+  font-weight: 400;
+  font-size: 10px;
+  line-height: 10px;
+  text-align: center;
+  color: #fff;
+  text-shadow: 1px 1px #000, -1px -1px #000, 1px -1px #000, -1px 1px #000, 0 1px #000, 1px 0 #000, 0 -1px #000, -1px 0 #000;
 }
 @keyframes pf-throb {
   0%,

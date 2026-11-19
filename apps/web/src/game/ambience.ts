@@ -18,6 +18,18 @@ const SCALE = [0, 2, 4, 7, 9]; // major pentatonic: nothing ever sounds wrong
 const midi = (n: number): number => 440 * Math.pow(2, (n - 69) / 12);
 const rnd = (a: number, b: number): number => a + Math.random() * (b - a);
 
+/** A synthetic hall: exponentially decaying noise, one array per ear. Built while the world loads. */
+export function hallImpulse(rate: number): [Float32Array, Float32Array] {
+  const len = Math.floor(rate * 2.8);
+  const left = new Float32Array(len);
+  const right = new Float32Array(len);
+  for (let c = 0; c < 2; c++) {
+    const d = c === 0 ? left : right;
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3.2);
+  }
+  return [left, right];
+}
+
 export class Ambience {
   private readonly music: GainNode;
   private readonly wet: GainNode;
@@ -33,27 +45,27 @@ export class Ambience {
     private readonly ctx: AudioContext,
     private readonly dest: AudioNode,
     private readonly noise: AudioBuffer,
+    impulse?: AudioBuffer,
+    /** Where the music goes (the birds and drones go to `dest`): they have a volume each. */
+    musicDest: AudioNode = dest,
   ) {
     this.music = ctx.createGain();
     this.music.gain.value = 0.3;
     this.wet = ctx.createGain();
     this.wet.gain.value = 0.55;
     this.conv = ctx.createConvolver();
-    this.conv.buffer = this.impulse(2.8);
-    this.music.connect(dest);
+    this.conv.buffer = impulse ?? this.impulse();
+    this.music.connect(musicDest);
     this.music.connect(this.conv);
-    this.conv.connect(this.wet).connect(dest);
+    this.conv.connect(this.wet).connect(musicDest);
   }
 
-  /** A synthetic hall: exponentially decaying noise. */
-  private impulse(seconds: number): AudioBuffer {
-    const rate = this.ctx.sampleRate;
-    const len = Math.floor(rate * seconds);
-    const buf = this.ctx.createBuffer(2, len, rate);
-    for (let c = 0; c < 2; c++) {
-      const d = buf.getChannelData(c);
-      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3.2);
-    }
+  /** A synthetic hall, when one was not prepared while the world was loading. */
+  private impulse(): AudioBuffer {
+    const [left, right] = hallImpulse(this.ctx.sampleRate);
+    const buf = this.ctx.createBuffer(2, left.length, this.ctx.sampleRate);
+    buf.getChannelData(0).set(left);
+    buf.getChannelData(1).set(right);
     return buf;
   }
 

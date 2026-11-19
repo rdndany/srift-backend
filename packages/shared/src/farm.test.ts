@@ -13,6 +13,8 @@ import {
   WorldGenerator,
   blockDrop,
   breakTime,
+  cakeId,
+  cocoaId,
   findRecipe,
   getItem,
   makeStack,
@@ -203,6 +205,406 @@ describe('bone meal', () => {
     expect(s.held?.count).toBe(before);
   });
 
+  it('plants a potato while hungry instead of eating it', () => {
+    const { s, world } = make();
+    world.setBlock(CX, FLOOR, CZ, B.FARMLAND);
+    s.teleport(CX + 0.5, FLOOR + 1, CZ + 1.5, 0, -1);
+    s.vitals.hunger = 10;
+    hold(s, I.POTATO, 4);
+    s.tick(idle({ right: true, yaw: 0, pitch: -1 }));
+    expect(world.getBlock(CX, FLOOR + 1, CZ)).toBe(B.POTATO_0);
+    expect(s.held?.count).toBe(3);
+    expect(s.vitals.hunger).toBe(10);
+  });
+
+  it('plants a potato, ripens it, and time grows one the same way', () => {
+    const { s, world } = make();
+    world.setBlock(CX + 3, FLOOR, CZ, B.FARMLAND);
+    hold(s, I.POTATO, 4);
+    expect(s.useHeldOn({ x: CX + 3, y: FLOOR, z: CZ, id: B.FARMLAND, nx: 0, ny: 1, nz: 0 })).toBe(true);
+    expect(world.getBlock(CX + 3, FLOOR + 1, CZ)).toBe(B.POTATO_0);
+    expect(s.held?.count).toBe(3);
+    const t = { x: CX + 3, y: FLOOR + 1, z: CZ, id: B.POTATO_0, nx: 0, ny: 1, nz: 0 };
+    hold(s, BONE_MEAL, 8);
+    for (let i = 0; i < 4; i++) {
+      const id = world.getBlock(CX + 3, FLOOR + 1, CZ);
+      if (id === B.POTATO_3) break;
+      expect(s.useHeldOn({ ...t, id })).toBe(true);
+    }
+    expect(world.getBlock(CX + 3, FLOOR + 1, CZ)).toBe(B.POTATO_3);
+    expect(s.useHeldOn({ ...t, id: B.POTATO_3 })).toBe(false);
+
+    world.setBlock(CX + 5, FLOOR, CZ, B.FARMLAND);
+    world.setBlock(CX + 5, FLOOR + 1, CZ, B.POTATO_0);
+    for (let i = 0; i < 4 && world.getBlock(CX + 5, FLOOR + 1, CZ) < B.POTATO_3; i++) world.growCrops(10_000, () => 0);
+    expect(world.getBlock(CX + 5, FLOOR + 1, CZ)).toBe(B.POTATO_3);
+  });
+
+  it('plants a carrot while hungry, ripens it, and time grows one the same way', () => {
+    const { s, world } = make();
+    world.setBlock(CX, FLOOR, CZ, B.FARMLAND);
+    s.teleport(CX + 0.5, FLOOR + 1, CZ + 1.5, 0, -1);
+    s.vitals.hunger = 10;
+    hold(s, I.CARROT, 4);
+    s.tick(idle({ right: true, yaw: 0, pitch: -1 }));
+    expect(world.getBlock(CX, FLOOR + 1, CZ)).toBe(B.CARROT_0);
+    expect(s.held?.count).toBe(3);
+    expect(s.vitals.hunger).toBe(10);
+
+    world.setBlock(CX + 7, FLOOR, CZ, B.FARMLAND);
+    hold(s, I.CARROT, 4);
+    expect(s.useHeldOn({ x: CX + 7, y: FLOOR, z: CZ, id: B.FARMLAND, nx: 0, ny: 1, nz: 0 })).toBe(true);
+    const t = { x: CX + 7, y: FLOOR + 1, z: CZ, id: B.CARROT_0, nx: 0, ny: 1, nz: 0 };
+    hold(s, BONE_MEAL, 8);
+    for (let i = 0; i < 4; i++) {
+      const id = world.getBlock(CX + 7, FLOOR + 1, CZ);
+      if (id === B.CARROT_3) break;
+      expect(s.useHeldOn({ ...t, id })).toBe(true);
+    }
+    expect(world.getBlock(CX + 7, FLOOR + 1, CZ)).toBe(B.CARROT_3);
+    expect(s.useHeldOn({ ...t, id: B.CARROT_3 })).toBe(false);
+
+    world.setBlock(CX + 9, FLOOR, CZ, B.FARMLAND);
+    world.setBlock(CX + 9, FLOOR + 1, CZ, B.CARROT_0);
+    for (let i = 0; i < 4 && world.getBlock(CX + 9, FLOOR + 1, CZ) < B.CARROT_3; i++) world.growCrops(10_000, () => 0);
+    expect(world.getBlock(CX + 9, FLOOR + 1, CZ)).toBe(B.CARROT_3);
+  });
+
+  it('a melon stem and a pumpkin stem grow their fruit beside them', () => {
+    const { s, world } = make();
+    const sides = [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ] as const;
+    const plant = (x: number, seed: number, young: number, ripe: number, fruit: number) => {
+      world.setBlock(x, FLOOR, CZ, B.FARMLAND);
+      for (const [dx, dz] of sides) world.setBlock(x + dx, FLOOR, CZ + dz, B.FARMLAND);
+      hold(s, seed, 2);
+      expect(s.useHeldOn({ x, y: FLOOR, z: CZ, id: B.FARMLAND, nx: 0, ny: 1, nz: 0 })).toBe(true);
+      expect(world.getBlock(x, FLOOR + 1, CZ)).toBe(young);
+      const t = { x, y: FLOOR + 1, z: CZ, id: young, nx: 0, ny: 1, nz: 0 };
+      hold(s, BONE_MEAL, 16);
+      for (let i = 0; i < 6 && world.getBlock(x, FLOOR + 1, CZ) !== ripe; i++) {
+        const id = world.getBlock(x, FLOOR + 1, CZ);
+        expect(s.useHeldOn({ ...t, id })).toBe(true);
+      }
+      expect(world.getBlock(x, FLOOR + 1, CZ)).toBe(ripe);
+      expect(s.useHeldOn({ ...t, id: ripe })).toBe(true);
+      expect(sides.filter(([dx, dz]) => world.getBlock(x + dx, FLOOR + 1, CZ + dz) === fruit)).toHaveLength(1);
+    };
+    plant(CX, I.MELON_SEEDS, B.MELON_STEM_0, B.MELON_STEM_3, B.MELON);
+    plant(CX + 8, I.PUMPKIN_SEEDS, B.PUMPKIN_STEM_0, B.PUMPKIN_STEM_3, B.PUMPKIN);
+
+    world.setBlock(CX + 16, FLOOR, CZ, B.FARMLAND);
+    world.setBlock(CX + 17, FLOOR, CZ, B.FARMLAND);
+    world.setBlock(CX + 16, FLOOR + 1, CZ, B.MELON_STEM_0);
+    for (let i = 0; i < 3; i++) world.growCrops(10_000, () => 0);
+    expect(world.getBlock(CX + 16, FLOOR + 1, CZ)).toBe(B.MELON_STEM_3);
+    world.growCrops(10_000, () => 0);
+    expect(world.getBlock(CX + 17, FLOOR + 1, CZ)).toBe(B.MELON);
+  });
+
+  it('plants beetroot from seed, and soup leaves the bowl', () => {
+    const { s, world } = make();
+    world.setBlock(CX, FLOOR, CZ, B.FARMLAND);
+    hold(s, I.BEETROOT_SEEDS, 4);
+    expect(s.useHeldOn({ x: CX, y: FLOOR, z: CZ, id: B.FARMLAND, nx: 0, ny: 1, nz: 0 })).toBe(true);
+    expect(world.getBlock(CX, FLOOR + 1, CZ)).toBe(B.BEETROOT_0);
+    expect(s.held?.count).toBe(3);
+    const t = { x: CX, y: FLOOR + 1, z: CZ, id: B.BEETROOT_0, nx: 0, ny: 1, nz: 0 };
+    hold(s, BONE_MEAL, 8);
+    for (let i = 0; i < 4 && world.getBlock(CX, FLOOR + 1, CZ) !== B.BEETROOT_3; i++) {
+      const id = world.getBlock(CX, FLOOR + 1, CZ);
+      expect(s.useHeldOn({ ...t, id })).toBe(true);
+    }
+    expect(world.getBlock(CX, FLOOR + 1, CZ)).toBe(B.BEETROOT_3);
+
+    world.setBlock(CX + 4, FLOOR, CZ, B.FARMLAND);
+    world.setBlock(CX + 4, FLOOR + 1, CZ, B.BEETROOT_0);
+    for (let i = 0; i < 4 && world.getBlock(CX + 4, FLOOR + 1, CZ) < B.BEETROOT_3; i++) world.growCrops(10_000, () => 0);
+    expect(world.getBlock(CX + 4, FLOOR + 1, CZ)).toBe(B.BEETROOT_3);
+
+    s.vitals.hunger = 2;
+    hold(s, I.BEETROOT_SOUP);
+    run(s, 2, { right: true });
+    expect(s.held?.id).toBe(I.BOWL);
+    expect(s.vitals.hunger).toBeGreaterThan(2);
+  });
+
+  it('a cocoa pod grows on a jungle log, and a cookie restores hunger', () => {
+    const { s, world } = make();
+    world.setBlock(CX, FLOOR + 1, CZ, B.JUNGLE_LOG);
+    hold(s, I.COCOA_BEANS, 4);
+    expect(s.useHeldOn({ x: CX, y: FLOOR + 1, z: CZ, id: B.JUNGLE_LOG, nx: 1, ny: 0, nz: 0 })).toBe(true);
+    expect(world.getBlock(CX + 1, FLOOR + 1, CZ)).toBe(cocoaId(1, 0));
+    expect(s.held?.count).toBe(3);
+    world.setBlock(CX + 4, FLOOR + 1, CZ, B.LOG);
+    expect(s.useHeldOn({ x: CX + 4, y: FLOOR + 1, z: CZ, id: B.LOG, nx: 1, ny: 0, nz: 0 })).toBe(false);
+
+    const t = { x: CX + 1, y: FLOOR + 1, z: CZ, id: cocoaId(1, 0), nx: 0, ny: 1, nz: 0 };
+    hold(s, BONE_MEAL, 8);
+    for (let i = 0; i < 4 && world.getBlock(CX + 1, FLOOR + 1, CZ) !== cocoaId(1, 2); i++) {
+      const id = world.getBlock(CX + 1, FLOOR + 1, CZ);
+      expect(s.useHeldOn({ ...t, id })).toBe(true);
+    }
+    expect(world.getBlock(CX + 1, FLOOR + 1, CZ)).toBe(cocoaId(1, 2));
+
+    world.setBlock(CX, FLOOR + 1, CZ + 4, B.JUNGLE_LOG);
+    world.setBlock(CX + 1, FLOOR + 1, CZ + 4, cocoaId(1, 0));
+    for (let i = 0; i < 3 && world.getBlock(CX + 1, FLOOR + 1, CZ + 4) !== cocoaId(1, 2); i++) world.growCrops(10_000, () => 0);
+    expect(world.getBlock(CX + 1, FLOOR + 1, CZ + 4)).toBe(cocoaId(1, 2));
+
+    s.breakBlock(CX, FLOOR + 1, CZ);
+    expect(world.getBlock(CX + 1, FLOOR + 1, CZ)).toBe(B.AIR);
+
+    s.vitals.hunger = 2;
+    hold(s, I.COOKIE);
+    run(s, 2, { right: true });
+    expect(s.held).toBeNull();
+    expect(s.vitals.hunger).toBeGreaterThan(2);
+  });
+
+  it('a cow fills a bucket with milk, and a cake is eaten in seven bites', () => {
+    const { s, world } = make();
+    const cow = s.mobs.spawn('cow', CX + 0.5, FLOOR + 1, CZ - 3.5);
+    s.teleport(cow.body.x, FLOOR + 1, cow.body.z + 1.5, 0, -0.3);
+    hold(s, I.BUCKET, 2);
+    expect(s.useOnMob()).toBe(true);
+    expect(cow.dead).toBe(false);
+    expect(s.held?.id).toBe(I.BUCKET);
+    expect(s.held?.count).toBe(1);
+    expect(s.inventory.countOf(I.MILK_BUCKET)).toBe(1);
+
+    const baby = s.mobs.spawn('cow', CX + 6.5, FLOOR + 1, CZ - 3.5, { baby: 30 });
+    s.teleport(baby.body.x, FLOOR + 1, baby.body.z + 1.2, 0, -1);
+    hold(s, I.BUCKET);
+    expect(s.useOnMob()).toBe(false);
+    expect(s.held?.id).toBe(I.BUCKET);
+
+    s.teleport(CX + 0.5, FLOOR + 1, CZ + 8, 0, 0);
+    s.poison = 6;
+    s.foodSick = 6;
+    hold(s, I.MILK_BUCKET);
+    run(s, 2, { right: true });
+    expect(s.poison).toBe(0);
+    expect(s.foodSick).toBe(0);
+    expect(s.held?.id).toBe(I.BUCKET);
+
+    hold(s, I.CAKE);
+    expect(s.useHeldOn({ x: CX, y: FLOOR, z: CZ, id: B.GRASS, nx: 0, ny: 1, nz: 0 })).toBe(true);
+    expect(world.getBlock(CX, FLOOR + 1, CZ)).toBe(cakeId(0));
+
+    s.teleport(CX + 0.88, FLOOR + 1, CZ + 1.4, 0, -0.9);
+    const look = { yaw: 0, pitch: -0.9 };
+    s.tick(idle(look));
+    const press = () => {
+      s.tick(idle({ ...look, right: true }));
+      s.tick(idle(look));
+    };
+    s.vitals.hunger = 2;
+    press();
+    expect(world.getBlock(CX, FLOOR + 1, CZ)).toBe(cakeId(1));
+    expect(s.vitals.hunger).toBeGreaterThan(2);
+    s.vitals.hunger = 20;
+    press();
+    expect(world.getBlock(CX, FLOOR + 1, CZ)).toBe(cakeId(1));
+    for (let i = 0; i < 6; i++) {
+      s.vitals.hunger = 2;
+      press();
+    }
+    expect(world.getBlock(CX, FLOOR + 1, CZ)).toBe(B.AIR);
+
+    hold(s, I.CAKE);
+    expect(s.useHeldOn({ x: CX + 2, y: FLOOR, z: CZ, id: B.GRASS, nx: 0, ny: 1, nz: 0 })).toBe(true);
+    s.realm.drops.drops.length = 0;
+    s.breakBlock(CX + 2, FLOOR + 1, CZ);
+    expect(world.getBlock(CX + 2, FLOOR + 1, CZ)).toBe(B.AIR);
+    expect(s.realm.drops.drops.length).toBe(0);
+  });
+
+  it('plants sweet berries on grass, a ripe bush is picked, and walking through it scratches', () => {
+    const { s, world } = make();
+    hold(s, I.SWEET_BERRIES, 4);
+    expect(s.useHeldOn({ x: CX, y: FLOOR, z: CZ, id: B.GRASS, nx: 0, ny: 1, nz: 0 })).toBe(true);
+    expect(world.getBlock(CX, FLOOR + 1, CZ)).toBe(B.SWEET_BERRY_0);
+    expect(s.held?.count).toBe(3);
+    world.setBlock(CX + 2, FLOOR, CZ, B.DIRT);
+    expect(s.useHeldOn({ x: CX + 2, y: FLOOR, z: CZ, id: B.DIRT, nx: 0, ny: 1, nz: 0 })).toBe(true);
+    expect(world.getBlock(CX + 2, FLOOR + 1, CZ)).toBe(B.SWEET_BERRY_0);
+    world.setBlock(CX + 4, FLOOR, CZ, B.STONE);
+    expect(s.useHeldOn({ x: CX + 4, y: FLOOR, z: CZ, id: B.STONE, nx: 0, ny: 1, nz: 0 })).toBe(false);
+
+    const t = { x: CX, y: FLOOR + 1, z: CZ, id: B.SWEET_BERRY_0, nx: 0, ny: 1, nz: 0 };
+    hold(s, BONE_MEAL, 8);
+    for (let i = 0; i < 4 && world.getBlock(CX, FLOOR + 1, CZ) !== B.SWEET_BERRY_3; i++) {
+      const id = world.getBlock(CX, FLOOR + 1, CZ);
+      expect(s.useHeldOn({ ...t, id })).toBe(true);
+    }
+    expect(world.getBlock(CX, FLOOR + 1, CZ)).toBe(B.SWEET_BERRY_3);
+
+    world.setBlock(CX + 6, FLOOR + 1, CZ, B.SWEET_BERRY_0);
+    for (let i = 0; i < 4 && world.getBlock(CX + 6, FLOOR + 1, CZ) < B.SWEET_BERRY_3; i++) world.growCrops(10_000, () => 0);
+    expect(world.getBlock(CX + 6, FLOOR + 1, CZ)).toBe(B.SWEET_BERRY_3);
+
+    const look = { yaw: 0, pitch: -0.9 };
+    s.teleport(CX + 0.5, FLOOR + 1, CZ + 1.4, 0, -0.9);
+    s.tick(idle(look));
+    s.realm.drops.drops.length = 0;
+    s.tick(idle({ ...look, right: true }));
+    expect(world.getBlock(CX, FLOOR + 1, CZ)).toBe(B.SWEET_BERRY_1);
+    const picked = s.realm.drops.drops.filter((d) => d.stack.id === I.SWEET_BERRIES).reduce((n, d) => n + d.stack.count, 0);
+    expect(picked).toBeGreaterThanOrEqual(2);
+
+    s.vitals.health = 20;
+    s.teleport(CX + 0.5, FLOOR + 1, CZ + 0.5, 0, 0);
+    s.tick(idle());
+    expect(s.vitals.health).toBe(20);
+    s.tick(idle({ forward: 1 }));
+    expect(s.vitals.health).toBe(20);
+
+    world.setBlock(CX, FLOOR + 1, CZ, B.SWEET_BERRY_3);
+    s.vitals.health = 20;
+    s.teleport(CX + 0.5, FLOOR + 1, CZ + 0.5, 0, 0);
+    s.tick(idle());
+    expect(s.vitals.health).toBe(20);
+    s.tick(idle({ forward: 1 }));
+    expect(s.vitals.health).toBeLessThan(20);
+
+    s.teleport(CX + 0.5, FLOOR + 1, CZ + 8, 0, 0);
+    s.vitals.hunger = 2;
+    hold(s, I.SWEET_BERRIES);
+    run(s, 2, { right: true });
+    expect(s.held).toBeNull();
+    expect(s.vitals.hunger).toBeGreaterThan(2);
+  });
+
+  it('picks glow berries off a cave vine, and a planted one hangs from the ceiling', () => {
+    const { s, world } = make();
+    world.setBlock(CX, FLOOR + 4, CZ, B.STONE);
+    world.setBlock(CX, FLOOR + 3, CZ, B.CAVE_VINES_BERRIES);
+    s.teleport(CX + 0.5, FLOOR + 1, CZ + 0.5, 0, 1.2);
+    s.tick(idle({ pitch: 1.2 }));
+    s.realm.drops.drops.length = 0;
+    s.tick(idle({ pitch: 1.2, right: true }));
+    expect(world.getBlock(CX, FLOOR + 3, CZ)).toBe(B.CAVE_VINES);
+    const picked = s.realm.drops.drops.filter((d) => d.stack.id === I.GLOW_BERRIES).reduce((n, d) => n + d.stack.count, 0);
+    expect(picked).toBe(1);
+
+    world.setBlock(CX + 4, FLOOR + 3, CZ, B.STONE);
+    world.setBlock(CX + 4, FLOOR + 1, CZ, B.STONE);
+    world.setBlock(CX + 4, FLOOR + 2, CZ, B.CAVE_VINES);
+    world.growCrops(10_000, () => 0);
+    expect(world.getBlock(CX + 4, FLOOR + 2, CZ)).toBe(B.CAVE_VINES_BERRIES);
+
+    world.setBlock(CX + 6, FLOOR + 4, CZ, B.STONE);
+    world.setBlock(CX + 6, FLOOR + 3, CZ, B.CAVE_VINES);
+    world.growCrops(10_000, () => 0);
+    expect(world.getBlock(CX + 6, FLOOR + 3, CZ)).toBe(B.CAVE_VINES);
+    expect(world.getBlock(CX + 6, FLOOR + 2, CZ)).toBe(B.CAVE_VINES_BERRIES);
+
+    hold(s, BONE_MEAL, 4);
+    world.setBlock(CX + 8, FLOOR + 3, CZ, B.STONE);
+    world.setBlock(CX + 8, FLOOR + 1, CZ, B.STONE);
+    world.setBlock(CX + 8, FLOOR + 2, CZ, B.CAVE_VINES);
+    expect(s.useHeldOn({ x: CX + 8, y: FLOOR + 2, z: CZ, id: B.CAVE_VINES, nx: 0, ny: -1, nz: 0 })).toBe(true);
+    expect(world.getBlock(CX + 8, FLOOR + 2, CZ)).toBe(B.CAVE_VINES_BERRIES);
+
+    hold(s, I.GLOW_BERRIES, 2);
+    world.setBlock(CX + 10, FLOOR + 4, CZ, B.STONE);
+    expect(s.useHeldOn({ x: CX + 10, y: FLOOR + 4, z: CZ, id: B.STONE, nx: 0, ny: -1, nz: 0 })).toBe(true);
+    expect(world.getBlock(CX + 10, FLOOR + 3, CZ)).toBe(B.CAVE_VINES);
+    expect(s.useHeldOn({ x: CX + 10, y: FLOOR + 4, z: CZ, id: B.STONE, nx: 0, ny: 1, nz: 0 })).toBe(false);
+
+    s.teleport(CX + 0.5, FLOOR + 1, CZ + 8, 0, 0);
+    s.vitals.hunger = 2;
+    hold(s, I.GLOW_BERRIES);
+    run(s, 2, { right: true });
+    expect(s.held).toBeNull();
+    expect(s.vitals.hunger).toBeGreaterThan(2);
+  });
+
+  it('mushroom stew restores hunger and leaves the bowl', () => {
+    const { s } = make();
+    s.vitals.hunger = 2;
+    hold(s, I.MUSHROOM_STEW);
+    run(s, 2, { right: true });
+    expect(s.held?.id).toBe(I.BOWL);
+    expect(s.vitals.hunger).toBeGreaterThan(2);
+  });
+
+  it('rabbit stew restores more hunger and leaves the bowl', () => {
+    const { s } = make();
+    s.vitals.hunger = 2;
+    hold(s, I.RABBIT_STEW);
+    run(s, 2, { right: true });
+    expect(s.held?.id).toBe(I.BOWL);
+    expect(s.vitals.hunger).toBe(12);
+  });
+
+  it('a poisonous potato can be eaten on a full stomach', () => {
+    const { s } = make();
+    expect(s.vitals.canEat()).toBe(false);
+    hold(s, I.APPLE);
+    run(s, 2, { right: true });
+    expect(s.held?.id).toBe(I.APPLE);
+    hold(s, I.POISONOUS_POTATO);
+    run(s, 2, { right: true });
+    expect(s.held).toBeNull();
+  });
+
+  it('rotten flesh and raw chicken drain hunger, and a spider eye poisons', () => {
+    const sick = (id: number) => {
+      const { s } = make();
+      s.vitals.hunger = 2;
+      hold(s, id, 20);
+      for (let i = 0; i < 24 && s.foodSick <= 0; i++) {
+        s.vitals.hunger = 2;
+        run(s, 1.6, { right: true });
+      }
+      return s.foodSick;
+    };
+    expect(sick(I.ROTTEN_FLESH)).toBeGreaterThan(0);
+    expect(sick(I.CHICKEN)).toBeGreaterThan(0);
+    const { s } = make();
+    s.vitals.hunger = 2;
+    hold(s, I.SPIDER_EYE);
+    run(s, 1.6, { right: true });
+    expect(s.poison).toBeGreaterThan(0);
+    expect(s.held).toBeNull();
+  });
+
+  it('a cactus and a sugar cane grow upward, and bone meal does it at once', () => {
+    const { s, world } = make();
+    world.setBlock(CX + 6, FLOOR, CZ, B.SAND);
+    world.setBlock(CX + 6, FLOOR + 1, CZ, B.CACTUS);
+    world.setBlock(CX + 8, FLOOR, CZ, B.SAND);
+    world.setBlock(CX + 8, FLOOR, CZ + 1, B.WATER);
+    world.setBlock(CX + 8, FLOOR + 1, CZ, B.SUGAR_CANE);
+    for (let i = 0; i < 3; i++) world.growCrops(10_000, () => 0);
+    expect(world.getBlock(CX + 6, FLOOR + 3, CZ)).toBe(B.CACTUS);
+    expect(world.getBlock(CX + 6, FLOOR + 4, CZ)).toBe(B.AIR);
+    expect(world.getBlock(CX + 8, FLOOR + 3, CZ)).toBe(B.SUGAR_CANE);
+    expect(world.getBlock(CX + 8, FLOOR + 4, CZ)).toBe(B.AIR);
+
+    world.setBlock(CX + 4, FLOOR, CZ, B.SAND);
+    world.setBlock(CX + 4, FLOOR + 1, CZ, B.CACTUS);
+    hold(s, BONE_MEAL, 2);
+    expect(s.useHeldOn({ x: CX + 4, y: FLOOR + 1, z: CZ, id: B.CACTUS, nx: 0, ny: 1, nz: 0 })).toBe(true);
+    expect(world.getBlock(CX + 4, FLOOR + 2, CZ)).toBe(B.CACTUS);
+  });
+
+  it('a chicken lays an egg', () => {
+    const { s } = make();
+    const hen = s.mobs.spawn('chicken', CX + 0.5, FLOOR + 1, CZ + 0.5);
+    hen.eggTimer = 0.05;
+    hen.growTimer = 0;
+    run(s, 0.3);
+    s.tickDrops(0);
+    expect(s.realm.drops.drops.some((d) => d.stack.id === I.EGG)).toBe(true);
+  });
+
   it('grows a sapling into a tree now and then, and spreads grass', () => {
     const { s, world } = make('creative');
     world.setBlock(CX + 2, FLOOR + 1, CZ, B.SAPLING);
@@ -244,6 +646,17 @@ describe('breeding', () => {
     expect(a.love).toBe(0);
     expect(feed(s, a)).toBe(true);
     expect(a.love).toBeGreaterThan(0);
+    const pig = s.mobs.spawn('pig', CX + 6.5, FLOOR + 1, CZ - 4.5);
+    expect(feed(s, pig, I.WHEAT)).toBe(false);
+    expect(feed(s, pig, I.CARROT)).toBe(true);
+    expect(pig.love).toBeGreaterThan(0);
+    const rabbit = s.mobs.spawn('rabbit', CX + 10.5, FLOOR + 1, CZ - 4.5);
+    s.teleport(rabbit.body.x, FLOOR + 1, rabbit.body.z + 1.2, 0, -1);
+    hold(s, I.WHEAT_SEEDS, 5);
+    expect(s.useOnMob()).toBe(false);
+    hold(s, I.CARROT, 5);
+    expect(s.useOnMob()).toBe(true);
+    expect(rabbit.love).toBeGreaterThan(0);
     expect(s.held?.count).toBe(4);
     // Already in love: the second wheat is kept.
     expect(feed(s, a)).toBe(false);

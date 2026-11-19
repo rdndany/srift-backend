@@ -1,4 +1,9 @@
 import { ARMOR_MATERIALS, ARMOR_SLOTS, OUTFIT_CLASSES } from './armor';
+import { layoutMasonry, MASONRY_SPECS, MASONRY_TILE_RGB, type MasonryRow } from './masonry';
+import { IRON_KIND, JOINERY_TILE_RGB, layoutJoinery, type JoineryLayout } from './joinery';
+import { GROVE_TILE_RGB, layoutGrove, type GroveLayout, type GroveWood } from './grove';
+import { DRESS_TILE_RGB, DYE_ORDER, EXTRA_TERRACOTTA, POT_COUNT, layoutDressing, type DressingLayout } from './dressing';
+import { BEYOND_CUBES, BEYOND_PLANTS, BEYOND_SHAPES, beyondFaceTile, beyondTiles, layoutBeyond, type BeyondLayout } from './beyondBlocks';
 /**
  * Block registry. Data-driven so the client (mesher, UI, audio) and the server
  * (validation, drops) share one source of truth.
@@ -35,6 +40,13 @@ export type BedPart = (typeof BED_PARTS)[number];
 export function bedTileName(part: BedPart, color: number): string {
   return color === BED_RED ? `bed_${part}` : `bed_${part}_${DYE_NAMES[color]}`;
 }
+
+/** Faces for the blocks added after the dressing set: nether bricks, quartz, and the quartz pillar. */
+export const CONNECT_TILE_RGB: Record<string, readonly [number, number, number]> = {
+  nether_bricks: [48, 20, 24],
+  quartz_block: [236, 230, 224],
+  quartz_pillar: [232, 226, 218],
+};
 
 export const BLOCK_TILES = [
   'stone',
@@ -73,6 +85,36 @@ export const BLOCK_TILES = [
   'wheat_1',
   'wheat_2',
   'wheat_3',
+  'potato_0',
+  'potato_1',
+  'potato_2',
+  'potato_3',
+  'carrot_0',
+  'carrot_1',
+  'carrot_2',
+  'carrot_3',
+  'melon_stem_0',
+  'melon_stem_1',
+  'melon_stem_2',
+  'melon_stem_3',
+  'pumpkin_stem_0',
+  'pumpkin_stem_1',
+  'pumpkin_stem_2',
+  'pumpkin_stem_3',
+  'beetroot_0',
+  'beetroot_1',
+  'beetroot_2',
+  'beetroot_3',
+  'cocoa_0',
+  'cocoa_1',
+  'cocoa_2',
+  'cake_top',
+  'cake_side',
+  'cake_bottom',
+  'sweet_berry_0',
+  'sweet_berry_1',
+  'sweet_berry_2',
+  'sweet_berry_3',
   'sapling',
   'lava',
   'mossy_cobble',
@@ -126,6 +168,11 @@ export const BLOCK_TILES = [
   'fire_1',
   'fire_2',
   'fire_3',
+  // Four frames of the flame on a torch. They must stay next to each other: the chunk shader cycles through them.
+  'torch_flame_0',
+  'torch_flame_1',
+  'torch_flame_2',
+  'torch_flame_3',
   'anvil_side_chipped',
   'anvil_side_damaged',
   'grindstone_top',
@@ -229,7 +276,14 @@ export const BLOCK_TILES = [
   'calcite',
   'smooth_basalt',
   'sculk',
-] as const;
+  'campfire',
+  ...Object.keys(MASONRY_TILE_RGB),
+  ...Object.keys(JOINERY_TILE_RGB),
+  ...Object.keys(GROVE_TILE_RGB),
+  ...Object.keys(DRESS_TILE_RGB),
+  ...Object.keys(CONNECT_TILE_RGB),
+  ...Object.keys(beyondTiles()),
+];
 
 /** The compass sprite has one picture per needle position (the first is plain `compass`); the needle turns clockwise. */
 export const COMPASS_FRAMES = 32;
@@ -251,6 +305,28 @@ export const ITEM_TILES = [
   'gold_ingot',
   'diamond',
   'apple',
+  'potato',
+  'baked_potato',
+  'poisonous_potato',
+  'melon_slice',
+  'sugar',
+  'egg',
+  'pumpkin_pie',
+  'carrot',
+  'melon_seeds',
+  'pumpkin_seeds',
+  'beetroot_seeds',
+  'beetroot',
+  'bowl',
+  'beetroot_soup',
+  'cocoa_beans',
+  'cookie',
+  'milk_bucket',
+  'cake',
+  'sweet_berries',
+  'glow_berries',
+  'mushroom_stew',
+  'rabbit_stew',
   'raw_meat',
   'cooked_meat',
   ...TOOL_MATERIALS.flatMap((m) => TOOL_KINDS.map((k) => `${m}_${k}`)),
@@ -341,6 +417,16 @@ export const ITEM_TILES = [
   'lantern_item',
   'soul_lantern_item',
   'chain_item',
+  'flower_pot_item',
+  'armor_stand',
+  'fishing_rod',
+  'fishing_rod_cast',
+  'raw_cod',
+  'cooked_cod',
+  'raw_salmon',
+  'cooked_salmon',
+  'tropical_fish',
+  'pufferfish',
 ] as const;
 
 /** All atlas tiles: block textures first (stable indices), then item sprites. */
@@ -348,9 +434,13 @@ export const TILE_NAMES: readonly string[] = [...BLOCK_TILES, ...ITEM_TILES];
 
 export type SoundKind = 'none' | 'stone' | 'dirt' | 'grass' | 'sand' | 'gravel' | 'wood' | 'glass' | 'leaves' | 'snow';
 
-/** Texture atlas layout (tiles are square). */
+/**
+ * Texture atlas layout (tiles are square). 16 by 64 is 1024 tiles, twice the old 512.
+ * The count stays a power of two: the world mesh packs a tile index into that many bits.
+ */
 export const ATLAS_COLS = 16;
-export const ATLAS_ROWS = 32;
+export const ATLAS_ROWS = 64;
+export const ATLAS_TILES = ATLAS_COLS * ATLAS_ROWS;
 export const TILE_PX = 16;
 
 export function tileIndex(name: string): number {
@@ -363,7 +453,7 @@ export function tileIndex(name: string): number {
  * Room for block ids. The first 256 are the original ids; ids 1000 and up are newer blocks (item id === block id, and
  * items sit between 256 and 999), so a world can hold more kinds than a byte allows.
  */
-export const BLOCK_COUNT = 2048;
+export const BLOCK_COUNT = 4096;
 
 export const B = {
   AIR: 0,
@@ -613,6 +703,42 @@ export const B = {
   SOUL_LANTERN: 1192,
   SOUL_LANTERN_HANG: 1193,
   CHAIN: 1194,
+  /** Potato crop, youngest to ripe. The item that plants it is `I.POTATO`, not these blocks. */
+  POTATO_0: 1195,
+  POTATO_1: 1196,
+  POTATO_2: 1197,
+  POTATO_3: 1198,
+  /** Carrot crop, youngest to ripe. The item that plants it is `I.CARROT`, not these blocks. */
+  CARROT_0: 1199,
+  CARROT_1: 1200,
+  CARROT_2: 1201,
+  CARROT_3: 1202,
+  /** Melon stem, youngest to ripe. A ripe one grows a melon beside it. The item is `I.MELON_SEEDS`. */
+  MELON_STEM_0: 1203,
+  MELON_STEM_1: 1204,
+  MELON_STEM_2: 1205,
+  MELON_STEM_3: 1206,
+  /** Pumpkin stem, youngest to ripe. A ripe one grows a pumpkin beside it. The item is `I.PUMPKIN_SEEDS`. */
+  PUMPKIN_STEM_0: 1207,
+  PUMPKIN_STEM_1: 1208,
+  PUMPKIN_STEM_2: 1209,
+  PUMPKIN_STEM_3: 1210,
+  /** Beetroot crop, youngest to ripe. The item that plants it is `I.BEETROOT_SEEDS`, not these blocks. */
+  BEETROOT_0: 1211,
+  BEETROOT_1: 1212,
+  BEETROOT_2: 1213,
+  BEETROOT_3: 1214,
+  /** First cocoa pod. Four facings, three ages each: `cocoaId(facing, stage)`. The item is `I.COCOA_BEANS`. */
+  COCOA_BASE: 1215,
+  /** A cake with no bites taken. The next six ids are the same cake with more bites gone. The item is `I.CAKE`. */
+  CAKE_BASE: 1227,
+  /** Sweet berry bush, youngest to ripe. The item that plants it is `I.SWEET_BERRIES`. */
+  SWEET_BERRY_0: 1234,
+  SWEET_BERRY_1: 1235,
+  SWEET_BERRY_2: 1236,
+  SWEET_BERRY_3: 1237,
+  /** First campfire state. Four facings, each lit or out: `campfireId(facing, lit)`. The item is the lit one facing +x. */
+  CAMPFIRE_BASE: 1238,
 } as const;
 
 /** The item id of redstone dust (items.ts I.REDSTONE; here so block drops can name it). */
@@ -626,7 +752,7 @@ function bedFootBase(color: number): number {
 export type RenderClass = 'opaque' | 'cutout' | 'translucent';
 
 /** How a block is meshed. Everything except 'cube' is non-opaque and drawn with alpha testing. */
-export type BlockShape = 'cube' | 'cross' | 'crop' | 'torch' | 'flat' | 'bed' | 'slab' | 'stair' | 'door' | 'trapdoor' | 'ladder' | 'fence' | 'gate' | 'pane' | 'table' | 'lever' | 'button' | 'plate' | 'lantern' | 'chain';
+export type BlockShape = 'cube' | 'cross' | 'crop' | 'torch' | 'flat' | 'bed' | 'slab' | 'stair' | 'door' | 'trapdoor' | 'ladder' | 'fence' | 'gate' | 'pane' | 'table' | 'lever' | 'button' | 'plate' | 'lantern' | 'chain' | 'cocoa' | 'cake' | 'campfire' | 'wall' | 'candle' | 'banner' | 'sign' | 'pot' | 'chest';
 
 export const MAX_LIGHT = 15;
 
@@ -654,6 +780,11 @@ export interface BlockDef {
   light: number;
   sound: SoundKind;
   tiles: { top: number; bottom: number; side: number };
+  /**
+   * Which way a log or pillar lies. 0 puts the end texture on the east and west faces, 2 on the
+   * north and south faces. Absent means the ordinary upright block.
+   */
+  axis?: 0 | 2;
 }
 
 interface DefOpts {
@@ -717,52 +848,227 @@ export const BUILD_MATERIALS = [
   { name: 'stone_brick', block: B.STONE_BRICKS, top: 'stone_bricks', bottom: 'stone_bricks', side: 'stone_bricks', sound: 'stone' as SoundKind, hardness: 1.5, tool: 'pickaxe' as ToolKind | undefined, harvest: 1 },
 ] as const;
 
-export const slabId = (mat: number, top: boolean): number => B.SLAB_BASE + mat * 2 + (top ? 1 : 0);
-export const stairId = (mat: number, top: boolean, dir: number): number => B.STAIR_BASE + mat * 8 + (top ? 4 : 0) + dir;
-export const doorId = (upper: boolean, open: boolean, facing: number): number => B.DOOR_BASE + (upper ? 8 : 0) + (open ? 4 : 0) + facing;
-export const trapdoorId = (top: boolean, open: boolean, facing: number): number => B.TRAPDOOR_BASE + (top ? 8 : 0) + (open ? 4 : 0) + facing;
+const laidMasonry = layoutMasonry(MASONRY_SPECS);
+/** Slabs, stairs and walls past the original five materials, in id order. */
+export const MASONRY: readonly MasonryRow[] = laidMasonry.rows;
+/** First block id still free after the masonry. The wood set starts here. */
+export const MASONRY_NEXT = laidMasonry.next;
+const laidJoinery = layoutJoinery(MASONRY_NEXT);
+/** Doors, fences, stripped logs and the rest of each wood. */
+export const JOINERY: JoineryLayout = laidJoinery;
+/** The first block id after the wood set. */
+export const JOINERY_NEXT = laidJoinery.next;
+const laidGrove = layoutGrove(JOINERY_NEXT);
+/** Bamboo, mangrove, pale oak, and the plants that grow with them. */
+export const GROVE: GroveLayout = laidGrove;
+/** The first block id after that set. */
+export const GROVE_NEXT = laidGrove.next;
+const laidDress = layoutDressing(GROVE_NEXT);
+/** Coloured glass, carpets, concrete, candles, banners, pots, bars, dressed stone and signs. */
+export const DRESS: DressingLayout = laidDress;
+/** The first block id after the dressing. */
+export const DRESS_NEXT = laidDress.next;
+
+const SLAB_EXTRA = new Map<number, { mat: number; top: boolean }>();
+const STAIR_EXTRA = new Map<number, { mat: number; top: boolean; dir: number }>();
+const WALL_EXTRA = new Map<number, number>();
+/** Slabs and stairs that are not part of the masonry table (mud bricks, bamboo, mangrove, pale oak). */
+const SHAPE_FULL = new Map<number, number>();
+const SHAPE_SLAB = new Map<number, number>();
+const SHAPE_STAIR = new Map<number, number>();
+let shapeMat = BUILD_MATERIALS.length + MASONRY.length;
+for (const row of MASONRY) {
+  const mat = BUILD_MATERIALS.length + row.index;
+  if (row.slabBase >= 0) {
+    SLAB_EXTRA.set(row.slabBase, { mat, top: false });
+    SLAB_EXTRA.set(row.slabBase + 1, { mat, top: true });
+  }
+  if (row.stairBase >= 0) {
+    for (let k = 0; k < 8; k++) STAIR_EXTRA.set(row.stairBase + k, { mat, top: (k & 4) !== 0, dir: k & 3 });
+  }
+  if (row.wallId) WALL_EXTRA.set(row.wallId, mat);
+}
+
+export const slabId = (mat: number, top: boolean): number => {
+  if (mat < BUILD_MATERIALS.length) return B.SLAB_BASE + mat * 2 + (top ? 1 : 0);
+  const row = MASONRY[mat - BUILD_MATERIALS.length];
+  if (row) return row.slabBase + (top ? 1 : 0);
+  const base = SHAPE_SLAB.get(mat);
+  return base === undefined ? 0 : base + (top ? 1 : 0);
+};
+export const stairId = (mat: number, top: boolean, dir: number): number => {
+  if (mat < BUILD_MATERIALS.length) return B.STAIR_BASE + mat * 8 + (top ? 4 : 0) + (dir & 3);
+  const row = MASONRY[mat - BUILD_MATERIALS.length];
+  if (row) return row.stairBase + (top ? 4 : 0) + (dir & 3);
+  const base = SHAPE_STAIR.get(mat);
+  return base === undefined ? 0 : base + (top ? 4 : 0) + (dir & 3);
+};
+/** Extra doors, trapdoors and gates. Kind 0 is the original oak set and is not stored here. */
+const DOOR_KIND = new Map<number, number>();
+const DOOR_BASE_OF = new Map<number, number>();
+const TRAP_KIND = new Map<number, number>();
+const TRAP_BASE_OF = new Map<number, number>();
+const GATE_KIND = new Map<number, number>();
+const GATE_BASE_OF = new Map<number, number>();
+const FENCE_IDS = new Set<number>();
+const BUTTON_OF = new Map<number, number>();
+const PLATE_OF = new Map<number, { wood: boolean; on: boolean; off: number; onId: number }>();
+const NO_HAND_DOOR = new Set<number>();
+const NO_HAND_TRAP = new Set<number>();
+const JOINERY_FUEL: number[] = [];
+const JOINERY_DOORS: { id: number; fuel: number }[] = [];
+const JOINERY_ICONS: { id: number; tile: string }[] = [];
+const JOINERY_BURN_PLANKS: number[] = [];
+const JOINERY_BURN_LOGS: number[] = [];
+const JOINERY_LOGS: number[] = [];
+const GROVE_LEAVES: number[] = [];
+const LEAF_OF = new Map<number, number>();
+const STRIP = new Map<number, number>();
+
+export const doorId = (upper: boolean, open: boolean, facing: number, kind = 0): number => {
+  const base = kind === 0 ? B.DOOR_BASE : (DOOR_BASE_OF.get(kind) ?? B.DOOR_BASE);
+  return base + (upper ? 8 : 0) + (open ? 4 : 0) + (facing & 3);
+};
+export const trapdoorId = (top: boolean, open: boolean, facing: number, kind = 0): number => {
+  const base = kind === 0 ? B.TRAPDOOR_BASE : (TRAP_BASE_OF.get(kind) ?? B.TRAPDOOR_BASE);
+  return base + (top ? 8 : 0) + (open ? 4 : 0) + (facing & 3);
+};
 export const ladderId = (facing: number): number => B.LADDER_BASE + facing;
 /**
  * A gate only remembers the axis it blocks (facing 0/1 = along x, 2/3 = along z) and whether it is open; its
- * open leaves always swing out the same way.
+ * open leaves always swing out the same way. Kind 0 is the oak gate.
  */
-export const gateId = (open: boolean, facing: number): number => B.GATE_BASE + (open ? 2 : 0) + (facing >> 1);
+export const gateId = (open: boolean, facing: number, kind = 0): number => {
+  const base = kind === 0 ? B.GATE_BASE : (GATE_BASE_OF.get(kind) ?? B.GATE_BASE);
+  return base + (open ? 2 : 0) + (facing >> 1);
+};
 
 const SLAB_COUNT = BUILD_MATERIALS.length * 2;
 const STAIR_COUNT = BUILD_MATERIALS.length * 8;
 
 export function slabInfo(id: number): { mat: number; top: boolean } | null {
   const i = id - B.SLAB_BASE;
-  return i >= 0 && i < SLAB_COUNT ? { mat: i >> 1, top: (i & 1) === 1 } : null;
+  if (i >= 0 && i < SLAB_COUNT) return { mat: i >> 1, top: (i & 1) === 1 };
+  return SLAB_EXTRA.get(id) ?? null;
 }
 /** `dir` is the way the high side of the stairs faces (away from the player who placed them). */
 export function stairInfo(id: number): { mat: number; top: boolean; dir: number } | null {
   const i = id - B.STAIR_BASE;
-  return i >= 0 && i < STAIR_COUNT ? { mat: i >> 3, top: (i & 4) !== 0, dir: i & 3 } : null;
+  if (i >= 0 && i < STAIR_COUNT) return { mat: i >> 3, top: (i & 4) !== 0, dir: i & 3 };
+  return STAIR_EXTRA.get(id) ?? null;
+}
+/** A cobblestone-style wall. The post and the arms are worked out from the neighbours. */
+export function wallInfo(id: number): { mat: number } | null {
+  const mat = WALL_EXTRA.get(id);
+  return mat === undefined ? null : { mat };
+}
+/** The full block two slabs of this material join into, or 0 when they do not join. */
+export function materialBlock(mat: number): number {
+  if (mat < BUILD_MATERIALS.length) return BUILD_MATERIALS[mat].block;
+  const row = MASONRY[mat - BUILD_MATERIALS.length];
+  if (row) return row.blockId;
+  return SHAPE_FULL.get(mat) ?? 0;
+}
+function packedDoor(id: number, oakBase: number, kinds: Map<number, number>, bases: Map<number, number>): number {
+  if (id >= oakBase && id < oakBase + 16) return id - oakBase;
+  const kind = kinds.get(id);
+  if (kind === undefined) return -1;
+  const base = bases.get(kind);
+  if (base === undefined) return -1;
+  const i = id - base;
+  return i >= 0 && i < 16 ? i : -1;
 }
 /** `facing` is the edge of the cell the closed door stands on. */
 export function doorInfo(id: number): { upper: boolean; open: boolean; facing: number } | null {
-  const i = id - B.DOOR_BASE;
-  return i >= 0 && i < 16 ? { upper: (i & 8) !== 0, open: (i & 4) !== 0, facing: i & 3 } : null;
+  const i = packedDoor(id, B.DOOR_BASE, DOOR_KIND, DOOR_BASE_OF);
+  return i < 0 ? null : { upper: (i & 8) !== 0, open: (i & 4) !== 0, facing: i & 3 };
+}
+/** Which door set this block belongs to. 0 is the original oak door, including the wooden door item. */
+export function doorKind(id: number): number {
+  if (id >= B.DOOR_BASE && id < B.DOOR_BASE + 16) return 0;
+  return DOOR_KIND.get(id) ?? 0;
 }
 /** `facing` is the edge the open trapdoor stands against (its hinge side). */
 export function trapdoorInfo(id: number): { top: boolean; open: boolean; facing: number } | null {
-  const i = id - B.TRAPDOOR_BASE;
-  return i >= 0 && i < 16 ? { top: (i & 8) !== 0, open: (i & 4) !== 0, facing: i & 3 } : null;
+  const i = packedDoor(id, B.TRAPDOOR_BASE, TRAP_KIND, TRAP_BASE_OF);
+  return i < 0 ? null : { top: (i & 8) !== 0, open: (i & 4) !== 0, facing: i & 3 };
+}
+/** 0 is the original oak trapdoor. */
+export function trapdoorKind(id: number): number {
+  if (id >= B.TRAPDOOR_BASE && id < B.TRAPDOOR_BASE + 16) return 0;
+  return TRAP_KIND.get(id) ?? 0;
 }
 /** `facing` is the edge the ladder is fixed to: the wall it hangs on is on that side. */
 export function ladderInfo(id: number): { facing: number } | null {
   const i = id - B.LADDER_BASE;
   return i >= 0 && i < 4 ? { facing: i } : null;
 }
+/** Ages of a cocoa pod. Stage 2 is ripe. */
+export const COCOA_STAGES = 3;
+/** Four facings times three ages. */
+export const COCOA_KINDS = 12;
+/** A cocoa pod on the side `facing` points at (BED_DIRS), of the given age. */
+export function cocoaId(facing: number, stage: number): number {
+  return B.COCOA_BASE + facing * COCOA_STAGES + stage;
+}
+/** Facing and age of a cocoa pod, or null. */
+export function cocoaInfo(id: number): { facing: number; stage: number } | null {
+  const i = id - B.COCOA_BASE;
+  if (i < 0 || i >= COCOA_KINDS) return null;
+  return { facing: Math.floor(i / COCOA_STAGES), stage: i % COCOA_STAGES };
+}
+/** How many bites a cake has left to give. Seven bites, then it is gone. */
+export const CAKE_BITES = 7;
+/** A cake that has already been bitten `bites` times (0 is whole). */
+export function cakeId(bites: number): number {
+  return B.CAKE_BASE + bites;
+}
+/** How many bites have been taken, or null when this block is not a cake. */
+export function cakeInfo(id: number): { bites: number } | null {
+  const i = id - B.CAKE_BASE;
+  if (i < 0 || i >= CAKE_BITES) return null;
+  return { bites: i };
+}
+/** A campfire facing one of BED_DIRS, burning or put out. Eight states. */
+export function campfireId(facing: number, lit: boolean): number {
+  return B.CAMPFIRE_BASE + (facing & 3) * 2 + (lit ? 1 : 0);
+}
+/** Facing and whether the fire is burning, or null. */
+export function campfireInfo(id: number): { facing: number; lit: boolean } | null {
+  const i = id - B.CAMPFIRE_BASE;
+  if (i < 0 || i >= 8) return null;
+  return { facing: i >> 1, lit: (i & 1) === 1 };
+}
 /**
  * `facing` is 0 (the gate blocks walking along x) or 2 (along z), open or not; an open gate's leaves
  * swing out the positive side of the other axis.
  */
 export function gateInfo(id: number): { open: boolean; facing: number } | null {
-  const i = id - B.GATE_BASE;
+  let i = id - B.GATE_BASE;
+  if (i < 0 || i >= 4) {
+    const kind = GATE_KIND.get(id);
+    const base = kind === undefined ? undefined : GATE_BASE_OF.get(kind);
+    i = base === undefined ? -1 : id - base;
+  }
   if (i < 0 || i >= 4) return null;
   return { open: i >= 2, facing: (i & 1) * 2 };
+}
+/** 0 is the original oak fence gate. */
+export function gateKind(id: number): number {
+  if (id >= B.GATE_BASE && id < B.GATE_BASE + 4) return 0;
+  return GATE_KIND.get(id) ?? 0;
+}
+/** A fence post. Oak is the original fence; the other woods are registered beside it. */
+export function isFence(id: number): boolean {
+  return id === B.FENCE || FENCE_IDS.has(id);
+}
+/** Iron doors and iron trapdoors stay shut until redstone opens them. */
+export function opensByHand(id: number): boolean {
+  const door = DOOR_KIND.get(id);
+  if (door !== undefined && NO_HAND_DOOR.has(door)) return false;
+  const trap = TRAP_KIND.get(id);
+  if (trap !== undefined && NO_HAND_TRAP.has(trap)) return false;
+  return true;
 }
 
 /** The item a building block drops and is placed from (0 = it is its own item or drops nothing special). */
@@ -777,6 +1083,19 @@ for (let mi = 0; mi < BUILD_MATERIALS.length; mi++) {
     for (let d = 0; d < 4; d++) {
       BUILDING_ITEM[stairId(mi, top, d)] = stairId(mi, false, 0);
       if (stairId(mi, top, d) !== stairId(mi, false, 0)) NO_ITEM_BLOCKS.add(stairId(mi, top, d));
+    }
+  }
+}
+for (const row of MASONRY) {
+  if (row.slabBase >= 0) {
+    BUILDING_ITEM[row.slabBase] = row.slabBase;
+    BUILDING_ITEM[row.slabBase + 1] = row.slabBase;
+    NO_ITEM_BLOCKS.add(row.slabBase + 1);
+  }
+  if (row.stairBase >= 0) {
+    for (let k = 0; k < 8; k++) {
+      BUILDING_ITEM[row.stairBase + k] = row.stairBase;
+      if (k !== 0) NO_ITEM_BLOCKS.add(row.stairBase + k);
     }
   }
 }
@@ -822,7 +1141,15 @@ function mountedInfo(base: number, id: number): MountedInfo | null {
 }
 export const mountedId = (base: number, face: number, on: boolean): number => base + face * 2 + (on ? 1 : 0);
 export const leverInfo = (id: number): MountedInfo | null => mountedInfo(B.LEVER_BASE, id);
-export const buttonInfo = (id: number): MountedInfo | null => mountedInfo(B.BUTTON_BASE, id);
+/** The off, floor-mounted state of this button, or -1. Stone uses BUTTON_BASE. */
+export function buttonBase(id: number): number {
+  if (id >= B.BUTTON_BASE && id < B.BUTTON_BASE + 10) return B.BUTTON_BASE;
+  return BUTTON_OF.get(id) ?? -1;
+}
+export const buttonInfo = (id: number): MountedInfo | null => {
+  const base = buttonBase(id);
+  return base < 0 ? null : mountedInfo(base, id);
+};
 /** on means lit (a torch is lit unless something powers the block it hangs on). */
 export const rtorchInfo = (id: number): MountedInfo | null => mountedInfo(B.RTORCH_BASE, id);
 /** The way from a mounted block to the block holding it up: dx, dy, dz. */
@@ -831,8 +1158,54 @@ export function mountSupport(face: number): [number, number, number] {
   return [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]][face - 1] as [number, number, number];
 }
 export function plateInfo(id: number): { wood: boolean; on: boolean } | null {
+  const extra = PLATE_OF.get(id);
+  if (extra) return { wood: extra.wood, on: extra.on };
   if (id < B.PLATE_STONE || id > B.PLATE_WOOD_ON) return null;
   return { wood: id >= B.PLATE_WOOD, on: ((id - B.PLATE_STONE) & 1) === 1 };
+}
+/** The resting and the pressed block of a plate. */
+export function platePair(id: number): { off: number; on: number } | null {
+  const extra = PLATE_OF.get(id);
+  if (extra) return { off: extra.off, on: extra.onId };
+  if (id === B.PLATE_STONE || id === B.PLATE_STONE_ON) return { off: B.PLATE_STONE, on: B.PLATE_STONE_ON };
+  if (id === B.PLATE_WOOD || id === B.PLATE_WOOD_ON) return { off: B.PLATE_WOOD, on: B.PLATE_WOOD_ON };
+  return null;
+}
+/** What an axe turns this block into, or 0. */
+export function strippedOf(id: number): number {
+  return STRIP.get(id) ?? 0;
+}
+/** Log to stripped log, wood to stripped wood, stem to stripped stem. */
+export function axeStripPairs(): readonly (readonly [number, number])[] {
+  return [...STRIP];
+}
+/** Wooden blocks from the wood set that burn in a furnace. */
+export function joineryFuel15(): readonly number[] {
+  return JOINERY_FUEL;
+}
+/** Doors whose item opens as a door. Fuel is 10 for wood and 0 for iron. */
+export function joineryDoorItems(): readonly { id: number; fuel: number }[] {
+  return JOINERY_DOORS;
+}
+/** Item icons that should not look like a full plank. */
+export function joineryIcons(): readonly { id: number; tile: string }[] {
+  return JOINERY_ICONS;
+}
+/** Fences, doors and the other worked wood. Burns like planks. */
+export function joineryBurnPlanks(): readonly number[] {
+  return JOINERY_BURN_PLANKS;
+}
+/** Stripped logs, the poplar log, and the wood blocks. Burns like logs. */
+export function joineryBurnLogs(): readonly number[] {
+  return JOINERY_BURN_LOGS;
+}
+/** Leaves that drop a sapling and burn, and need shears to be picked up whole. */
+export function groveLeaves(): readonly number[] {
+  return GROVE_LEAVES;
+}
+/** The sapling a leaf block drops, or 0. */
+export function leafSapling(id: number): number {
+  return LEAF_OF.get(id) ?? 0;
 }
 export const isLamp = (id: number): boolean => id === B.LAMP || id === B.LAMP_ON;
 // Every state drops the one item that places it; the powered / pressed / unlit ones are never items themselves.
@@ -881,6 +1254,14 @@ for (const soul of [false, true]) {
   BUILDING_ITEM[lanternId(soul, true)] = lanternId(soul, false);
   NO_ITEM_BLOCKS.add(lanternId(soul, true));
 }
+// Every facing of a campfire, lit or out, is the one campfire item (the lit block facing +x).
+for (let f = 0; f < 4; f++) {
+  for (const lit of [false, true]) {
+    const id = campfireId(f, lit);
+    BUILDING_ITEM[id] = campfireId(0, true);
+    if (id !== campfireId(0, true)) NO_ITEM_BLOCKS.add(id);
+  }
+}
 
 const DEFS: BlockDef[] = [
   def(B.AIR, 'air', null, null, null, { solid: false, opaque: false, hardness: 0, sound: 'none' }),
@@ -921,7 +1302,7 @@ const DEFS: BlockDef[] = [
   def(B.GRAVEL, 'gravel', 'gravel', 'gravel', 'gravel', { hardness: 0.6, tool: 'shovel', sound: 'gravel' }),
   def(B.GLASS, 'glass', 'glass', 'glass', 'glass', {
     opaque: false,
-    render: 'cutout',
+    render: 'translucent',
     hardness: 0.3,
     cullSame: true,
     sound: 'glass',
@@ -943,7 +1324,7 @@ const DEFS: BlockDef[] = [
     harvest: 1,
     sound: 'stone',
   }),
-  def(B.CHEST, 'chest', 'chest_top', 'chest_top', 'chest_side', { hardness: 2.5, tool: 'axe', sound: 'wood' }),
+  def(B.CHEST, 'chest', 'chest_top', 'chest_top', 'chest_side', { opaque: false, render: 'cutout', shape: 'chest', hardness: 2.5, tool: 'axe', sound: 'wood' }),
   ...[B.TORCH, B.TORCH_PX, B.TORCH_NX, B.TORCH_PZ, B.TORCH_NZ].map((id) =>
     def(id, 'torch', 'torch', 'torch', 'torch', {
       solid: false,
@@ -1067,7 +1448,7 @@ const DEFS: BlockDef[] = [
   ...[0, 1, 2, 3].map((i) => def(B.GATE_BASE + i, 'fence_gate', 'planks', 'planks', 'planks', { opaque: false, render: 'cutout', shape: 'gate', hardness: 2, tool: 'axe', sound: 'wood' })),
   // Fire is drawn as crossed flames (four animation frames, see the `fire` tiles) and gives as much light as lava.
   def(B.FIRE, 'fire', 'fire_0', 'fire_0', 'fire_0', { solid: false, opaque: false, render: 'cutout', shape: 'cross', replaceable: true, hardness: 0, light: MAX_LIGHT, sound: 'none' }),
-  def(B.PANE, 'glass_pane', 'glass', 'glass', 'glass', { opaque: false, render: 'cutout', shape: 'pane', hardness: 0.3, sound: 'glass' }),
+  def(B.PANE, 'glass_pane', 'glass', 'glass', 'glass', { opaque: false, render: 'translucent', shape: 'pane', hardness: 0.3, sound: 'glass' }),
   def(B.STONE_BRICKS, 'stone_bricks', 'stone_bricks', 'stone_bricks', 'stone_bricks', { hardness: 1.5, tool: 'pickaxe', harvest: 1, sound: 'stone' }),
   def(B.EMERALD_ORE, 'emerald_ore', 'emerald_ore', 'emerald_ore', 'emerald_ore', { hardness: 3, tool: 'pickaxe', harvest: 3, sound: 'stone' }),
   // A table is three quarters of a block tall (the book floats above it).
@@ -1206,13 +1587,680 @@ const DEFS: BlockDef[] = [
     });
   }),
   def(B.CHAIN, 'chain', 'chain', 'chain', 'chain', { solid: false, opaque: false, render: 'cutout', shape: 'chain', hardness: 5, tool: 'pickaxe', sound: 'stone' }),
+  ...[B.POTATO_0, B.POTATO_1, B.POTATO_2, B.POTATO_3].map((id, i) =>
+    def(id, 'potato', `potato_${i}`, `potato_${i}`, `potato_${i}`, { ...plant('grass'), shape: 'crop' }),
+  ),
+  ...[B.CARROT_0, B.CARROT_1, B.CARROT_2, B.CARROT_3].map((id, i) =>
+    def(id, 'carrot', `carrot_${i}`, `carrot_${i}`, `carrot_${i}`, { ...plant('grass'), shape: 'crop' }),
+  ),
+  ...[B.MELON_STEM_0, B.MELON_STEM_1, B.MELON_STEM_2, B.MELON_STEM_3].map((id, i) =>
+    def(id, 'melon_stem', `melon_stem_${i}`, `melon_stem_${i}`, `melon_stem_${i}`, { ...plant('grass'), shape: 'crop' }),
+  ),
+  ...[B.PUMPKIN_STEM_0, B.PUMPKIN_STEM_1, B.PUMPKIN_STEM_2, B.PUMPKIN_STEM_3].map((id, i) =>
+    def(id, 'pumpkin_stem', `pumpkin_stem_${i}`, `pumpkin_stem_${i}`, `pumpkin_stem_${i}`, { ...plant('grass'), shape: 'crop' }),
+  ),
+  ...[B.BEETROOT_0, B.BEETROOT_1, B.BEETROOT_2, B.BEETROOT_3].map((id, i) =>
+    def(id, 'beetroot', `beetroot_${i}`, `beetroot_${i}`, `beetroot_${i}`, { ...plant('grass'), shape: 'crop' }),
+  ),
+  ...[0, 1, 2, 3].flatMap((facing) =>
+    [0, 1, 2].map((stage) =>
+      def(cocoaId(facing, stage), 'cocoa', `cocoa_${stage}`, `cocoa_${stage}`, `cocoa_${stage}`, {
+        solid: false,
+        opaque: false,
+        render: 'cutout',
+        shape: 'cocoa',
+        hardness: 0,
+        sound: 'wood',
+      }),
+    ),
+  ),
+  ...[0, 1, 2, 3, 4, 5, 6].map((bites) =>
+    def(cakeId(bites), 'cake', 'cake_top', 'cake_side', 'cake_bottom', {
+      solid: true,
+      opaque: false,
+      render: 'cutout',
+      shape: 'cake',
+      hardness: 0.5,
+      sound: 'grass',
+    }),
+  ),
+  ...[B.SWEET_BERRY_0, B.SWEET_BERRY_1, B.SWEET_BERRY_2, B.SWEET_BERRY_3].map((id, i) =>
+    def(id, 'sweet_berry_bush', `sweet_berry_${i}`, `sweet_berry_${i}`, `sweet_berry_${i}`, { ...plant('grass'), shape: 'crop' }),
+  ),
+  // A campfire is knee-high. Lit ones shine like fire; a shovel or a bucket of water puts them out.
+  ...[0, 1, 2, 3].flatMap((f) =>
+    [false, true].map((lit) =>
+      def(campfireId(f, lit), 'campfire', 'campfire', 'campfire', 'campfire', {
+        solid: true,
+        opaque: false,
+        render: 'cutout',
+        shape: 'campfire',
+        hardness: 2,
+        tool: 'axe',
+        sound: 'wood',
+        light: lit ? MAX_LIGHT : 0,
+      }),
+    ),
+  ),
 ];
+
+for (const row of MASONRY) {
+  if (!row.spec.from) continue;
+  const src = DEFS.find((d) => d.id !== 0 && d.name === row.spec.from);
+  if (!src) throw new Error(`masonry source ${row.spec.from} is not a block`);
+  row.blockId = src.id;
+}
+for (const row of MASONRY) {
+  const s = row.spec;
+  const top = s.top ?? s.tile;
+  const bottom = s.bottom ?? top;
+  const side = s.side ?? s.tile;
+  const opts = { hardness: s.hardness, tool: s.tool ?? undefined, harvest: s.harvest, sound: s.sound };
+  if (row.cubeId) DEFS.push(def(row.cubeId, s.block!, top, bottom, side, opts));
+  if (row.slabBase >= 0) {
+    for (const up of [false, true]) {
+      DEFS.push(def(row.slabBase + (up ? 1 : 0), `${s.name}_slab`, top, bottom, side, { ...opts, opaque: false, render: 'cutout', shape: 'slab' }));
+    }
+  }
+  if (row.stairBase >= 0) {
+    for (const up of [false, true]) {
+      for (let dir = 0; dir < 4; dir++) {
+        DEFS.push(def(row.stairBase + (up ? 4 : 0) + dir, `${s.name}_stairs`, top, bottom, side, { ...opts, opaque: false, render: 'cutout', shape: 'stair' }));
+      }
+    }
+  }
+  if (row.wallId) DEFS.push(def(row.wallId, `${s.name}_wall`, top, bottom, side, { ...opts, opaque: false, render: 'cutout', shape: 'wall' }));
+}
+
+/** A full block: a log, a wood block, or a stem. */
+function joineryCube(id: number, name: string, top: string, side: string, sound: SoundKind = 'wood'): void {
+  DEFS.push(def(id, name, top, top, side, { hardness: 2, tool: 'axe', sound }));
+}
+function joineryDoor(base: number, name: string, lower: string, upper: string, kind: number, hand: boolean, sound: SoundKind, tool: 'axe' | 'pickaxe', hardness: number): void {
+  DOOR_BASE_OF.set(kind, base);
+  if (!hand) NO_HAND_DOOR.add(kind);
+  for (const up of [false, true]) {
+    for (const open of [false, true]) {
+      for (let f = 0; f < 4; f++) {
+        const id = base + (up ? 8 : 0) + (open ? 4 : 0) + f;
+        DEFS.push(def(id, name, null, null, up ? upper : lower, { opaque: false, render: 'cutout', shape: 'door', hardness, tool, sound }));
+        DOOR_KIND.set(id, kind);
+        if (up || id !== base) NO_ITEM_BLOCKS.add(id);
+        if (!up && id !== base) BUILDING_ITEM[id] = base;
+        if (hand) JOINERY_BURN_PLANKS.push(id);
+      }
+    }
+  }
+  JOINERY_DOORS.push({ id: base, fuel: hand ? 10 : 0 });
+}
+function joineryTrap(base: number, name: string, tile: string, kind: number, hand: boolean, sound: SoundKind, tool: 'axe' | 'pickaxe', hardness: number): void {
+  TRAP_BASE_OF.set(kind, base);
+  if (!hand) NO_HAND_TRAP.add(kind);
+  for (let i = 0; i < 16; i++) {
+    const id = base + i;
+    DEFS.push(def(id, name, tile, tile, tile, { opaque: false, render: 'cutout', shape: 'trapdoor', hardness, tool, sound }));
+    TRAP_KIND.set(id, kind);
+    BUILDING_ITEM[id] = base;
+    if (id !== base) NO_ITEM_BLOCKS.add(id);
+    if (hand) JOINERY_BURN_PLANKS.push(id);
+  }
+  if (hand) JOINERY_FUEL.push(base);
+}
+function joineryGate(base: number, name: string, tile: string, kind: number): void {
+  GATE_BASE_OF.set(kind, base);
+  for (let i = 0; i < 4; i++) {
+    const id = base + i;
+    DEFS.push(def(id, name, tile, tile, tile, { opaque: false, render: 'cutout', shape: 'gate', hardness: 2, tool: 'axe', sound: 'wood' }));
+    GATE_KIND.set(id, kind);
+    BUILDING_ITEM[id] = base;
+    if (id !== base) NO_ITEM_BLOCKS.add(id);
+    JOINERY_BURN_PLANKS.push(id);
+  }
+  JOINERY_FUEL.push(base);
+}
+function joineryButton(base: number, name: string, tile: string, sound: SoundKind): void {
+  for (let i = 0; i < 10; i++) {
+    DEFS.push(def(base + i, name, tile, tile, tile, { solid: false, opaque: false, render: 'cutout', shape: 'button', hardness: 0.5, sound }));
+    BUTTON_OF.set(base + i, base);
+    BUILDING_ITEM[base + i] = base;
+    if (i !== 0) NO_ITEM_BLOCKS.add(base + i);
+    if (sound === 'wood') JOINERY_BURN_PLANKS.push(base + i);
+  }
+  if (sound === 'wood') JOINERY_FUEL.push(base);
+}
+function joineryPlate(off: number, name: string, tile: string, wood: boolean, sound: SoundKind, tool: 'axe' | 'pickaxe'): void {
+  const opts = { solid: false, opaque: false, render: 'cutout' as const, shape: 'plate' as const, hardness: 0.5, tool, sound };
+  DEFS.push(def(off, name, tile, tile, tile, opts));
+  DEFS.push(def(off + 1, name, tile, tile, tile, opts));
+  PLATE_OF.set(off, { wood, on: false, off, onId: off + 1 });
+  PLATE_OF.set(off + 1, { wood, on: true, off, onId: off + 1 });
+  BUILDING_ITEM[off + 1] = off;
+  NO_ITEM_BLOCKS.add(off + 1);
+  if (wood) {
+    JOINERY_FUEL.push(off);
+    JOINERY_BURN_PLANKS.push(off, off + 1);
+  }
+}
+
+joineryCube(JOINERY.poplarLog, 'poplar_log', 'poplar_log_top', 'poplar_bark');
+JOINERY_FUEL.push(JOINERY.poplarLog);
+JOINERY_BURN_LOGS.push(JOINERY.poplarLog);
+JOINERY_LOGS.push(JOINERY.poplarLog);
+for (const n of JOINERY.nether) {
+  const side = `${n.name}_stem_side`;
+  const top = `${n.name}_stem_top`;
+  const bare = `stripped_${n.name}`;
+  joineryCube(n.stem, `${n.name}_stem`, top, side);
+  joineryCube(n.hyphae, `${n.name}_hyphae`, side, side);
+  joineryCube(n.strippedStem, `stripped_${n.name}_stem`, top, bare);
+  joineryCube(n.strippedHyphae, `stripped_${n.name}_hyphae`, bare, bare);
+  JOINERY_FUEL.push(n.stem, n.hyphae, n.strippedStem, n.strippedHyphae);
+  JOINERY_LOGS.push(n.stem);
+}
+for (const w of JOINERY.woods) {
+  const s = w.spec;
+  const bare = `${s.name}_stripped`;
+  joineryCube(w.wood, `${s.name}_wood`, s.barkTile, s.barkTile);
+  joineryCube(w.strippedLog, `stripped_${s.name}_log`, s.topTile, bare);
+  joineryCube(w.strippedWood, `stripped_${s.name}_wood`, bare, bare);
+  JOINERY_FUEL.push(w.wood, w.strippedLog, w.strippedWood);
+  JOINERY_BURN_LOGS.push(w.wood, w.strippedLog, w.strippedWood);
+  JOINERY_LOGS.push(w.strippedLog);
+  joineryButton(w.button, `${s.name}_button`, s.planksTile, 'wood');
+  JOINERY_ICONS.push({ id: w.button, tile: `${s.name}_button` });
+  if (!s.full || !w.door) continue;
+  joineryDoor(w.door, `${s.name}_door`, `${s.name}_door_lower`, `${s.name}_door_upper`, w.kind, true, 'wood', 'axe', 3);
+  joineryTrap(w.trapdoor, `${s.name}_trapdoor`, `${s.name}_trapdoor`, w.kind, true, 'wood', 'axe', 3);
+  DEFS.push(def(w.fence, `${s.name}_fence`, s.planksTile, s.planksTile, s.planksTile, { opaque: false, render: 'cutout', shape: 'fence', hardness: 2, tool: 'axe', sound: 'wood' }));
+  FENCE_IDS.add(w.fence);
+  JOINERY_FUEL.push(w.fence);
+  JOINERY_BURN_PLANKS.push(w.fence);
+  joineryGate(w.gate, `${s.name}_fence_gate`, s.planksTile, w.kind);
+  joineryPlate(w.plate, `${s.name}_pressure_plate`, s.planksTile, true, 'wood', 'axe');
+  JOINERY_ICONS.push({ id: w.fence, tile: `${s.name}_fence` }, { id: w.gate, tile: `${s.name}_gate` }, { id: w.plate, tile: `${s.name}_plate` });
+}
+joineryDoor(JOINERY.ironDoor, 'iron_door', 'iron_door_lower', 'iron_door_upper', IRON_KIND, false, 'stone', 'pickaxe', 5);
+joineryTrap(JOINERY.ironTrapdoor, 'iron_trapdoor', 'iron_trapdoor', IRON_KIND, false, 'stone', 'pickaxe', 5);
+joineryPlate(JOINERY.heavyPlate, 'heavy_weighted_pressure_plate', 'heavy_plate', false, 'stone', 'pickaxe');
+joineryPlate(JOINERY.lightPlate, 'light_weighted_pressure_plate', 'light_plate', false, 'stone', 'pickaxe');
+
+function grovePlant(id: number, name: string, tile: string, sound: SoundKind = 'grass'): void {
+  DEFS.push(def(id, name, tile, tile, tile, { solid: false, opaque: false, render: 'cutout', shape: 'cross', hardness: 0, sound }));
+}
+function groveCube(id: number, name: string, tile: string, sound: SoundKind, tool: 'axe' | 'pickaxe' | 'shovel', hardness: number): void {
+  DEFS.push(def(id, name, tile, tile, tile, { hardness, tool, sound }));
+}
+function groveLeaf(id: number, name: string, tile: string, sapling: number): void {
+  DEFS.push(def(id, name, tile, tile, tile, { opaque: false, render: 'cutout', hardness: 0.2, cullSame: true, sound: 'leaves' }));
+  GROVE_LEAVES.push(id);
+  LEAF_OF.set(id, sapling);
+}
+/** A slab, eight stairs and an optional wall, joined back into `full` when two slabs meet. */
+function groveShapes(full: number, slabName: string, stairName: string, wallName: string, wall: number, tile: string, slab: number, stair: number, sound: SoundKind, tool: 'axe' | 'pickaxe', hardness: number, burn: boolean, harvest = 0): void {
+  const mat = shapeMat++;
+  SHAPE_FULL.set(mat, full);
+  SHAPE_SLAB.set(mat, slab);
+  SHAPE_STAIR.set(mat, stair);
+  const opts = { hardness, tool, sound, harvest, opaque: false as const, render: 'cutout' as const };
+  for (const up of [false, true]) {
+    const id = slab + (up ? 1 : 0);
+    DEFS.push(def(id, slabName, tile, tile, tile, { ...opts, shape: 'slab' }));
+    SLAB_EXTRA.set(id, { mat, top: up });
+    if (burn) JOINERY_BURN_PLANKS.push(id);
+  }
+  BUILDING_ITEM[slab + 1] = slab;
+  NO_ITEM_BLOCKS.add(slab + 1);
+  for (let k = 0; k < 8; k++) {
+    const id = stair + k;
+    DEFS.push(def(id, stairName, tile, tile, tile, { ...opts, shape: 'stair' }));
+    STAIR_EXTRA.set(id, { mat, top: (k & 4) !== 0, dir: k & 3 });
+    BUILDING_ITEM[id] = stair;
+    if (k !== 0) NO_ITEM_BLOCKS.add(id);
+    if (burn) JOINERY_BURN_PLANKS.push(id);
+  }
+  if (wall) {
+    DEFS.push(def(wall, wallName, tile, tile, tile, { ...opts, shape: 'wall' }));
+    WALL_EXTRA.set(wall, mat);
+  }
+  if (burn) JOINERY_FUEL.push(slab, stair);
+}
+function groveWood(w: GroveWood, logName: string, logTop: string, logSide: string): void {
+  const planks = `${w.name}_planks`;
+  joineryCube(w.log, logName, logTop, logSide);
+  JOINERY_FUEL.push(w.log, w.strippedLog);
+  JOINERY_BURN_LOGS.push(w.log, w.strippedLog);
+  JOINERY_LOGS.push(w.log, w.strippedLog);
+  if (w.wood) {
+    joineryCube(w.wood, `${w.name}_wood`, logSide, logSide);
+    joineryCube(w.strippedWood, `stripped_${w.name}_wood`, `${w.name}_stripped`, `${w.name}_stripped`);
+    JOINERY_FUEL.push(w.wood, w.strippedWood);
+    JOINERY_BURN_LOGS.push(w.wood, w.strippedWood);
+  }
+  joineryCube(w.strippedLog, `stripped_${logName}`, logTop, `${w.name}_stripped`);
+  joineryCube(w.planks, planks, planks, planks);
+  JOINERY_FUEL.push(w.planks);
+  JOINERY_BURN_PLANKS.push(w.planks);
+  groveShapes(w.planks, `${w.name}_slab`, `${w.name}_stairs`, '', 0, planks, w.slab, w.stair, 'wood', 'axe', 2, true);
+  joineryDoor(w.door, `${w.name}_door`, `${w.name}_door_lower`, `${w.name}_door_upper`, w.kind, true, 'wood', 'axe', 3);
+  joineryTrap(w.trapdoor, `${w.name}_trapdoor`, `${w.name}_trapdoor`, w.kind, true, 'wood', 'axe', 3);
+  DEFS.push(def(w.fence, `${w.name}_fence`, planks, planks, planks, { opaque: false, render: 'cutout', shape: 'fence', hardness: 2, tool: 'axe', sound: 'wood' }));
+  FENCE_IDS.add(w.fence);
+  JOINERY_FUEL.push(w.fence);
+  JOINERY_BURN_PLANKS.push(w.fence);
+  joineryGate(w.gate, `${w.name}_fence_gate`, planks, w.kind);
+  joineryButton(w.button, `${w.name}_button`, planks, 'wood');
+  joineryPlate(w.plate, `${w.name}_pressure_plate`, planks, true, 'wood', 'axe');
+  JOINERY_ICONS.push({ id: w.fence, tile: `${w.name}_fence` }, { id: w.gate, tile: `${w.name}_gate` }, { id: w.button, tile: `${w.name}_button` }, { id: w.plate, tile: `${w.name}_plate` });
+  if (w.leaves) groveLeaf(w.leaves, `${w.name}_leaves`, `${w.name}_leaves`, w.sapling);
+  if (w.sapling) grovePlant(w.sapling, w.name === 'mangrove' ? 'mangrove_propagule' : `${w.name}_sapling`, w.name === 'mangrove' ? 'mangrove_propagule' : `${w.name}_sapling`);
+}
+
+grovePlant(GROVE.azalea, 'azalea', 'azalea');
+groveLeaf(GROVE.azaleaLeaves, 'azalea_leaves', 'azalea_leaves', GROVE.azalea);
+groveLeaf(GROVE.floweringAzaleaLeaves, 'flowering_azalea_leaves', 'flowering_azalea_leaves', B.FLOWERING_AZALEA);
+grovePlant(GROVE.hangingRoots, 'hanging_roots', 'hanging_roots');
+DEFS.push(def(GROVE.mossCarpet, 'moss_carpet', 'moss_carpet', 'moss_carpet', 'moss_carpet', { solid: false, opaque: false, render: 'cutout', shape: 'flat', hardness: 0.1, tool: 'shovel', sound: 'grass' }));
+groveCube(GROVE.rootedDirt, 'rooted_dirt', 'rooted_dirt', 'dirt', 'shovel', 0.5);
+groveCube(GROVE.packedMud, 'packed_mud', 'packed_mud', 'dirt', 'shovel', 0.5);
+groveCube(GROVE.mudBricks, 'mud_bricks', 'mud_bricks', 'stone', 'pickaxe', 1.5);
+groveShapes(GROVE.mudBricks, 'mud_brick_slab', 'mud_brick_stairs', 'mud_brick_wall', GROVE.mudBrickWall, 'mud_bricks', GROVE.mudBrickSlab, GROVE.mudBrickStair, 'stone', 'pickaxe', 1.5, false);
+groveCube(GROVE.mangroveRoots, 'mangrove_roots', 'mangrove_roots', 'wood', 'axe', 0.7);
+groveCube(GROVE.muddyMangroveRoots, 'muddy_mangrove_roots', 'muddy_mangrove_roots', 'dirt', 'shovel', 0.7);
+groveCube(GROVE.paleMoss, 'pale_moss_block', 'pale_moss_block', 'grass', 'shovel', 0.1);
+DEFS.push(def(GROVE.paleMossCarpet, 'pale_moss_carpet', 'pale_moss_carpet', 'pale_moss_carpet', 'pale_moss_carpet', { solid: false, opaque: false, render: 'cutout', shape: 'flat', hardness: 0.1, tool: 'shovel', sound: 'grass' }));
+grovePlant(GROVE.paleHangingMoss, 'pale_hanging_moss', 'pale_hanging_moss');
+groveWood(GROVE.mangrove, 'mangrove_log', 'mangrove_log_top', 'mangrove_bark');
+groveWood(GROVE.paleOak, 'pale_oak_log', 'pale_oak_log_top', 'pale_oak_bark');
+grovePlant(GROVE.bamboo, 'bamboo', 'bamboo');
+JOINERY_FUEL.push(GROVE.bamboo, GROVE.mangroveRoots);
+JOINERY_BURN_PLANKS.push(GROVE.bamboo, GROVE.mangroveRoots);
+groveWood(GROVE.bambooWood, 'bamboo_block', 'bamboo_block', 'bamboo_block');
+groveCube(GROVE.mosaic, 'bamboo_mosaic', 'bamboo_mosaic', 'wood', 'axe', 2);
+JOINERY_FUEL.push(GROVE.mosaic);
+JOINERY_BURN_PLANKS.push(GROVE.mosaic);
+groveShapes(GROVE.mosaic, 'bamboo_mosaic_slab', 'bamboo_mosaic_stairs', '', 0, 'bamboo_mosaic', GROVE.mosaicSlab, GROVE.mosaicStair, 'wood', 'axe', 2, true);
+
+const woolTile = (color: number): string => (color === 0 ? 'wool' : `wool_${DYE_NAMES[color]}`);
+const candleTile = (color: number): string => (color < 0 ? 'candle' : `candle_${DYE_NAMES[color]}`);
+const dressCube = (id: number, name: string, tile: string, opts: DefOpts = {}): void => {
+  DEFS.push(def(id, name, tile, tile, tile, opts));
+};
+groveShapes(DRESS.crackedStone, 'cracked_stone_brick_slab', 'cracked_stone_brick_stairs', 'cracked_stone_brick_wall', DRESS.crackedStoneWall, 'cracked_stone_bricks', DRESS.crackedStoneSlab, DRESS.crackedStoneStair, 'stone', 'pickaxe', 1.5, false);
+dressCube(DRESS.crackedStone, 'cracked_stone_bricks', 'cracked_stone_bricks', { hardness: 1.5, tool: 'pickaxe', harvest: 1, sound: 'stone' });
+dressCube(DRESS.chiseledStone, 'chiseled_stone_bricks', 'chiseled_stone_bricks', { hardness: 1.5, tool: 'pickaxe', harvest: 1, sound: 'stone' });
+groveShapes(DRESS.crackedDeepslate, 'cracked_deepslate_brick_slab', 'cracked_deepslate_brick_stairs', 'cracked_deepslate_brick_wall', DRESS.crackedDeepslateWall, 'cracked_deepslate_bricks', DRESS.crackedDeepslateSlab, DRESS.crackedDeepslateStair, 'stone', 'pickaxe', 3.5, false);
+dressCube(DRESS.crackedDeepslate, 'cracked_deepslate_bricks', 'cracked_deepslate_bricks', { hardness: 3.5, tool: 'pickaxe', harvest: 1, sound: 'stone' });
+dressCube(DRESS.chiseledDeepslate, 'chiseled_deepslate', 'chiseled_deepslate', { hardness: 3.5, tool: 'pickaxe', harvest: 1, sound: 'stone' });
+DEFS.push(def(DRESS.ironBars, 'iron_bars', 'iron_bars', 'iron_bars', 'iron_bars', { opaque: false, render: 'cutout', shape: 'pane', hardness: 5, tool: 'pickaxe', harvest: 1, sound: 'stone' }));
+for (let c = 0; c < DYE_ORDER.length; c++) {
+  const n = DYE_ORDER[c];
+  dressCube(DRESS.glass + c, `${n}_stained_glass`, `stained_${n}`, { opaque: false, render: 'translucent', cullSame: true, hardness: 0.3, sound: 'glass' });
+  DEFS.push(def(DRESS.pane + c, `${n}_stained_glass_pane`, `stained_${n}`, `stained_${n}`, `stained_${n}`, { opaque: false, render: 'translucent', shape: 'pane', hardness: 0.3, sound: 'glass' }));
+  DEFS.push(def(DRESS.carpet + c, `${n}_carpet`, woolTile(c), woolTile(c), woolTile(c), { solid: false, opaque: false, render: 'cutout', shape: 'flat', hardness: 0.1, sound: 'grass' }));
+  dressCube(DRESS.concrete + c, `${n}_concrete`, `concrete_${n}`, { hardness: 1.8, tool: 'pickaxe', harvest: 1, sound: 'stone' });
+  dressCube(DRESS.glazed + c, `${n}_glazed_terracotta`, `glazed_${n}`, { hardness: 1.4, tool: 'pickaxe', harvest: 1, sound: 'stone' });
+}
+for (let i = 0; i < EXTRA_TERRACOTTA.length; i++) {
+  const n = EXTRA_TERRACOTTA[i];
+  dressCube(DRESS.terracotta + i, `${n}_terracotta`, `terracotta_${n}`, { hardness: 1.25, tool: 'pickaxe', harvest: 1, sound: 'stone' });
+}
+const addCandle = (base: number, color: number, name: string): void => {
+  const tile = candleTile(color);
+  for (let k = 0; k < 4; k++) {
+    const id = base + k;
+    DEFS.push(def(id, name, tile, tile, tile, { solid: false, opaque: false, render: 'cutout', shape: 'candle', hardness: 0.1, light: (k + 1) * 3, sound: 'wood' }));
+    if (k > 0) {
+      NO_ITEM_BLOCKS.add(id);
+      BUILDING_ITEM[id] = base;
+    }
+  }
+};
+addCandle(DRESS.plainCandle, -1, 'candle');
+for (let c = 0; c < DYE_ORDER.length; c++) addCandle(DRESS.dyeCandle + c * 4, c, `${DYE_ORDER[c]}_candle`);
+for (let c = 0; c < DYE_ORDER.length; c++) {
+  const tile = `banner_${DYE_ORDER[c]}`;
+  const name = `${DYE_ORDER[c]}_banner`;
+  for (let f = 0; f < 4; f++) {
+    const floor = DRESS.bannerFloor + c * 4 + f;
+    const wall = DRESS.bannerWall + c * 4 + f;
+    DEFS.push(def(floor, name, tile, tile, tile, { solid: false, opaque: false, render: 'cutout', shape: 'banner', hardness: 1, tool: 'axe', sound: 'wood' }));
+    DEFS.push(def(wall, name, tile, tile, tile, { solid: false, opaque: false, render: 'cutout', shape: 'banner', hardness: 1, tool: 'axe', sound: 'wood' }));
+    if (f > 0) {
+      NO_ITEM_BLOCKS.add(floor);
+      BUILDING_ITEM[floor] = DRESS.bannerFloor + c * 4;
+    }
+    NO_ITEM_BLOCKS.add(wall);
+    BUILDING_ITEM[wall] = DRESS.bannerFloor + c * 4;
+  }
+}
+for (const s of DRESS.signs) {
+  const tile = `${s.name}_sign`;
+  const name = `${s.name}_sign`;
+  for (let f = 0; f < 4; f++) {
+    const stand = s.standing + f;
+    const wall = s.wall + f;
+    DEFS.push(def(stand, name, tile, tile, tile, { solid: false, opaque: false, render: 'cutout', shape: 'sign', hardness: 1, tool: 'axe', sound: 'wood' }));
+    DEFS.push(def(wall, name, tile, tile, tile, { solid: false, opaque: false, render: 'cutout', shape: 'sign', hardness: 1, tool: 'axe', sound: 'wood' }));
+    if (f > 0) {
+      NO_ITEM_BLOCKS.add(stand);
+      BUILDING_ITEM[stand] = s.standing;
+    }
+    NO_ITEM_BLOCKS.add(wall);
+    BUILDING_ITEM[wall] = s.standing;
+  }
+  JOINERY_FUEL.push(s.standing);
+  JOINERY_BURN_PLANKS.push(s.standing, s.standing + 1, s.standing + 2, s.standing + 3, s.wall, s.wall + 1, s.wall + 2, s.wall + 3);
+}
+DEFS.push(def(DRESS.pot, 'flower_pot', 'flower_pot', 'flower_pot', 'flower_pot', { opaque: false, render: 'cutout', shape: 'pot', hardness: 0, sound: 'stone' }));
+const POT_PLANTS: readonly { name: string; tile: string; plant: number }[] = [
+  { name: 'dandelion', tile: 'dandelion', plant: B.DANDELION },
+  { name: 'rose', tile: 'rose', plant: B.ROSE },
+  { name: 'tulip_red', tile: 'tulip_red', plant: B.TULIP_RED },
+  { name: 'tulip_orange', tile: 'tulip_orange', plant: B.TULIP_ORANGE },
+  { name: 'tulip_white', tile: 'tulip_white', plant: B.TULIP_WHITE },
+  { name: 'tulip_pink', tile: 'tulip_pink', plant: B.TULIP_PINK },
+  { name: 'oxeye_daisy', tile: 'oxeye_daisy', plant: B.OXEYE_DAISY },
+  { name: 'cornflower', tile: 'cornflower', plant: B.CORNFLOWER },
+  { name: 'allium', tile: 'allium', plant: B.ALLIUM },
+  { name: 'azure_bluet', tile: 'azure_bluet', plant: B.AZURE_BLUET },
+  { name: 'blue_orchid', tile: 'blue_orchid', plant: B.BLUE_ORCHID },
+  { name: 'fern', tile: 'fern', plant: B.FERN },
+  { name: 'red_mushroom', tile: 'red_mushroom', plant: B.RED_MUSHROOM },
+  { name: 'brown_mushroom', tile: 'brown_mushroom', plant: B.BROWN_MUSHROOM },
+  { name: 'sapling', tile: 'sapling', plant: B.SAPLING },
+  { name: 'birch_sapling', tile: 'birch_sapling', plant: B.BIRCH_SAPLING },
+  { name: 'spruce_sapling', tile: 'spruce_sapling', plant: B.SPRUCE_SAPLING },
+  { name: 'jungle_sapling', tile: 'jungle_sapling', plant: B.JUNGLE_SAPLING },
+  { name: 'acacia_sapling', tile: 'acacia_sapling', plant: B.ACACIA_SAPLING },
+  { name: 'dark_oak_sapling', tile: 'dark_oak_sapling', plant: B.DARK_OAK_SAPLING },
+  { name: 'cherry_sapling', tile: 'cherry_sapling', plant: B.CHERRY_SAPLING },
+  { name: 'pale_oak_sapling', tile: 'pale_oak_sapling', plant: GROVE.paleOak.sapling },
+  { name: 'mangrove_propagule', tile: 'mangrove_propagule', plant: GROVE.mangrove.sapling },
+  { name: 'azalea', tile: 'azalea', plant: GROVE.azalea },
+  { name: 'flowering_azalea', tile: 'flowering_azalea', plant: B.FLOWERING_AZALEA },
+  { name: 'bamboo', tile: 'bamboo', plant: GROVE.bamboo },
+];
+if (POT_PLANTS.length !== POT_COUNT) throw new Error('flower pot count does not match the plants');
+const POTTED_OF = new Map<number, number>();
+POT_PLANTS.forEach((p, i) => {
+  const id = DRESS.potted + i;
+  DEFS.push(def(id, `potted_${p.name}`, p.tile, 'flower_pot', 'flower_pot', { opaque: false, render: 'cutout', shape: 'pot', hardness: 0, sound: 'stone' }));
+  NO_ITEM_BLOCKS.add(id);
+  POTTED_OF.set(p.plant, id);
+});
+
+/**
+ * Logs and pillars keep their upright id. Clicking an east or west face places the east-west block,
+ * and a north or south face places the north-south block. The new ids sit after the dressing set.
+ */
+const PILLAR_X = new Map<number, number>();
+const PILLAR_Z = new Map<number, number>();
+const PILLAR_BASE = new Map<number, number>();
+let connectId = DRESS_NEXT;
+
+function layAxis(base: number): void {
+  const src = DEFS.find((d) => d.id === base);
+  if (!src || src.shape !== 'cube' || src.tiles.top === src.tiles.side || PILLAR_X.has(base)) return;
+  const x = connectId++;
+  const z = connectId++;
+  DEFS.push({ ...src, id: x, axis: 0 });
+  DEFS.push({ ...src, id: z, axis: 2 });
+  PILLAR_X.set(base, x);
+  PILLAR_Z.set(base, z);
+  PILLAR_BASE.set(x, base);
+  PILLAR_BASE.set(z, base);
+  NO_ITEM_BLOCKS.add(x);
+  NO_ITEM_BLOCKS.add(z);
+  BUILDING_ITEM[x] = base;
+  BUILDING_ITEM[z] = base;
+}
+
+for (const id of [B.LOG, B.BIRCH_LOG, B.SPRUCE_LOG, B.ACACIA_LOG, B.JUNGLE_LOG, B.DARK_OAK_LOG, B.CHERRY_LOG]) layAxis(id);
+for (const id of JOINERY_LOGS) layAxis(id);
+for (const n of JOINERY.nether) layAxis(n.strippedStem);
+
+const netherBricks = connectId++;
+DEFS.push(def(netherBricks, 'nether_bricks', 'nether_bricks', 'nether_bricks', 'nether_bricks', { hardness: 2, tool: 'pickaxe', harvest: 1, sound: 'stone' }));
+const netherSlab = connectId;
+connectId += 2;
+const netherStair = connectId;
+connectId += 8;
+const netherWall = connectId++;
+groveShapes(netherBricks, 'nether_brick_slab', 'nether_brick_stairs', 'nether_brick_wall', netherWall, 'nether_bricks', netherSlab, netherStair, 'stone', 'pickaxe', 2, false, 1);
+
+const quartz = connectId++;
+DEFS.push(def(quartz, 'quartz_block', 'quartz_block', 'quartz_block', 'quartz_block', { hardness: 0.8, tool: 'pickaxe', harvest: 1, sound: 'stone' }));
+const quartzSlab = connectId;
+connectId += 2;
+const quartzStair = connectId;
+connectId += 8;
+groveShapes(quartz, 'quartz_slab', 'quartz_stairs', '', 0, 'quartz_block', quartzSlab, quartzStair, 'stone', 'pickaxe', 0.8, false, 1);
+const quartzPillar = connectId++;
+DEFS.push(def(quartzPillar, 'quartz_pillar', 'quartz_block', 'quartz_pillar', 'quartz_pillar', { hardness: 0.8, tool: 'pickaxe', harvest: 1, sound: 'stone' }));
+layAxis(quartzPillar);
+if (connectId >= BLOCK_COUNT) throw new Error('connected blocks ran past the block id limit');
+
+/** Nether bricks, quartz, and the quartz pillar. Their stairs, slabs and walls use the same rules as the older ones. */
+export const CONNECT = {
+  netherBricks,
+  netherSlab,
+  netherStair,
+  netherWall,
+  quartz,
+  quartzSlab,
+  quartzStair,
+  quartzPillar,
+  next: connectId + 12,
+};
+
+/**
+ * A chest's front and which half of a double chest it is.
+ * `dir` follows BED_DIRS (the latch faces that way). `half` is 0 single, 1 the left half, 2 the right half,
+ * seen by someone looking at the latch. B.CHEST is the single chest facing +x, which is also the item.
+ */
+const CHEST_SPAN = 12;
+export const CHEST_BASE = connectId;
+connectId += CHEST_SPAN;
+/** Clockwise from above: +x, +z, -x, -z. */
+export const CHEST_CW = [2, 3, 1, 0];
+/** Counter-clockwise from above: +x, -z, -x, +z. */
+export const CHEST_CCW = [3, 2, 0, 1];
+
+for (let i = 0; i < CHEST_SPAN; i++) {
+  const id = CHEST_BASE + i;
+  DEFS.push(def(id, 'chest', 'chest_top', 'chest_top', 'chest_side', { opaque: false, render: 'cutout', shape: 'chest', hardness: 2.5, tool: 'axe', sound: 'wood' }));
+  NO_ITEM_BLOCKS.add(id);
+  BUILDING_ITEM[id] = B.CHEST;
+}
+
+// ---- The World Beyond: stones, soils, woods, crystals, corals and glowing plants (see beyondBlocks.ts) ----------------
+// Laid out in one fixed run right after the chests, so no older id moves. The sideways forms of its logs come after the run.
+const laidBeyond = layoutBeyond(connectId);
+connectId = laidBeyond.next;
+export const BEYOND: BeyondLayout = laidBeyond;
+/** Block ids of The World Beyond by key (`BB.limestone`). */
+export const BB: Readonly<Record<string, number>> = laidBeyond.id;
+const BEYOND_SOUND: Record<string, SoundKind> = { stone: 'stone', wood: 'wood', grass: 'grass', dirt: 'dirt', sand: 'sand', glass: 'glass', gravel: 'gravel', snow: 'snow', leaves: 'leaves' };
+const BEYOND_LOGS: number[] = [];
+for (const cube of BEYOND_CUBES) {
+  const id = laidBeyond.id[cube.key];
+  const tiles = cube.faces === 'one' ? [cube.key, cube.key, cube.key] : cube.faces === 'log' ? [`${cube.key}_top`, `${cube.key}_top`, `${cube.key}_side`] : [`${cube.key}_top`, 'dirt', `${cube.key}_side`];
+  const opts: DefOpts = { hardness: cube.hardness, tool: cube.tool, harvest: cube.harvest, sound: BEYOND_SOUND[cube.sound], light: cube.light ?? 0 };
+  if (cube.leaf) Object.assign(opts, { opaque: false, render: 'cutout' as RenderClass, cullSame: true });
+  if (cube.translucent) Object.assign(opts, { opaque: false, render: 'translucent' as RenderClass, cullSame: true });
+  DEFS.push(def(id, cube.key, tiles[0], tiles[1], tiles[2], opts));
+  if (cube.leaf) GROVE_LEAVES.push(id);
+  if (cube.log) {
+    BEYOND_LOGS.push(id);
+    JOINERY_LOGS.push(id);
+  }
+  if (cube.wood) {
+    JOINERY_FUEL.push(id);
+    if (cube.log) JOINERY_BURN_LOGS.push(id);
+    else if (!cube.leaf) JOINERY_BURN_PLANKS.push(id);
+  }
+}
+for (const leafy of BEYOND_PLANTS) {
+  const id = laidBeyond.id[leafy.key];
+  DEFS.push(def(id, leafy.key, leafy.key, leafy.key, leafy.key, { ...plant(BEYOND_SOUND[leafy.sound ?? 'grass']), light: leafy.light ?? 0 }));
+}
+for (const s of BEYOND_SHAPES) {
+  const at = laidBeyond.shape[s.key];
+  const cube = BEYOND_CUBES.find((b) => b.key === s.key)!;
+  const tile = beyondFaceTile(s.key);
+  groveShapes(laidBeyond.id[s.key], `${s.key}_slab`, `${s.key}_stairs`, `${s.key}_wall`, s.wall ? at.wall : 0, tile, at.slab, at.stair, BEYOND_SOUND[cube.sound], cube.tool === 'axe' ? 'axe' : 'pickaxe', cube.hardness, s.wood, cube.harvest);
+}
+for (const id of BEYOND_LOGS) layAxis(id);
+if (connectId >= BLOCK_COUNT) throw new Error('The World Beyond ran past the block id limit');
+
+export function chestId(dir: number, half: number): number {
+  const d = dir & 3;
+  const h = half <= 0 ? 0 : half >= 2 ? 2 : 1;
+  if (h === 0 && d === 0) return B.CHEST;
+  return CHEST_BASE + h * 4 + d;
+}
+
+export function chestInfo(id: number): { dir: number; half: number } | null {
+  if (id === B.CHEST) return { dir: 0, half: 0 };
+  if (id < CHEST_BASE || id >= CHEST_BASE + CHEST_SPAN) return null;
+  const k = id - CHEST_BASE;
+  return { dir: k & 3, half: k >> 2 };
+}
+
+export function isChest(id: number): boolean {
+  return chestInfo(id) !== null;
+}
+
+/** Where the other half of a double chest sits, or null when this one is single. */
+export function chestPartnerPos(id: number, x: number, y: number, z: number): [number, number, number] | null {
+  const info = chestInfo(id);
+  if (!info || info.half === 0) return null;
+  const d = info.half === 1 ? CHEST_CCW[info.dir] : CHEST_CW[info.dir];
+  const [dx, dz] = BED_DIRS[d];
+  return [x + dx, y, z + dz];
+}
+
+/**
+ * A single chest just placed at x,y,z joins one neighbouring single chest.
+ * Sides of the way it faces come first, then the front and the back. Nothing above, below or diagonal joins.
+ * The pair turns so the latch is perpendicular to the seam and, when it can, still faces the player.
+ */
+export function chestMerge(
+  get: (x: number, y: number, z: number) => number,
+  x: number,
+  y: number,
+  z: number,
+): { facing: number; left: [number, number, number]; right: [number, number, number] } | null {
+  const placed = chestInfo(get(x, y, z));
+  if (!placed || placed.half !== 0) return null;
+  let px = 0;
+  let py = 0;
+  let pz = 0;
+  let found = false;
+  for (const d of [CHEST_CCW[placed.dir], CHEST_CW[placed.dir], placed.dir, placed.dir ^ 1]) {
+    const [dx, dz] = BED_DIRS[d];
+    const info = chestInfo(get(x + dx, y, z + dz));
+    if (info && info.half === 0) {
+      px = x + dx;
+      py = y;
+      pz = z + dz;
+      found = true;
+      break;
+    }
+  }
+  if (!found) return null;
+  const conn = px !== x ? (px > x ? 0 : 1) : pz > z ? 2 : 3;
+  const sideA = CHEST_CW[conn];
+  const sideB = CHEST_CCW[conn];
+  const facing = placed.dir === sideA || placed.dir === sideB ? placed.dir : sideA;
+  const [lx, lz] = BED_DIRS[CHEST_CW[facing]];
+  const partnerIsLeft = px === x + lx && pz === z + lz;
+  const left: [number, number, number] = partnerIsLeft ? [px, py, pz] : [x, y, z];
+  const right: [number, number, number] = partnerIsLeft ? [x, y, z] : [px, py, pz];
+  return { facing, left, right };
+}
+
+/** The sideways form of a log or pillar for the face that was clicked, or 0 when this block always stands upright. */
+export function pillarFor(block: number, nx: number, ny: number, nz: number): number {
+  if (!PILLAR_X.has(block)) return 0;
+  if (ny !== 0) return block;
+  if (nx !== 0) return PILLAR_X.get(block)!;
+  return PILLAR_Z.get(block) ?? block;
+}
 
 const AIR_DEF = DEFS[0];
 
 /** Dense lookup by id (unknown ids resolve to air). */
 export const BLOCKS: BlockDef[] = Array.from({ length: BLOCK_COUNT }, () => AIR_DEF);
 for (const d of DEFS) BLOCKS[d.id] = d;
+
+/** The block id of a registered name, or 0. The first id wins when a top slab shares its name with the item. */
+export function idByName(name: string): number {
+  for (let id = 1; id < BLOCK_COUNT; id++) if (BLOCKS[id].id === id && BLOCKS[id].name === name) return id;
+  return 0;
+}
+
+for (const w of JOINERY.woods) {
+  if (w.spec.log) {
+    const log = idByName(w.spec.log);
+    if (!log) throw new Error(`joinery log ${w.spec.log} is missing`);
+    STRIP.set(log, w.strippedLog);
+  }
+  STRIP.set(w.wood, w.strippedWood);
+}
+const poplarWood = JOINERY.woods.find((w) => w.spec.name === 'poplar');
+if (poplarWood) STRIP.set(JOINERY.poplarLog, poplarWood.strippedLog);
+for (const n of JOINERY.nether) {
+  STRIP.set(n.stem, n.strippedStem);
+  STRIP.set(n.hyphae, n.strippedHyphae);
+}
+for (const w of [GROVE.mangrove, GROVE.paleOak, GROVE.bambooWood]) {
+  STRIP.set(w.log, w.strippedLog);
+  if (w.wood) STRIP.set(w.wood, w.strippedWood);
+}
+for (const [from, to] of [...STRIP]) {
+  const fx = PILLAR_X.get(from);
+  const fz = PILLAR_Z.get(from);
+  const tx = PILLAR_X.get(to);
+  const tz = PILLAR_Z.get(to);
+  if (fx !== undefined && tx !== undefined) STRIP.set(fx, tx);
+  if (fz !== undefined && tz !== undefined) STRIP.set(fz, tz);
+}
+
+/** Every wooden plank, slab and stair added with the masonry, including the states that are not items. */
+export function masonryWoodBlocks(): number[] {
+  const ids: number[] = [];
+  for (const row of MASONRY) {
+    if (!row.spec.wood) continue;
+    if (row.cubeId) ids.push(row.cubeId);
+    if (row.slabBase >= 0) ids.push(row.slabBase, row.slabBase + 1);
+    if (row.stairBase >= 0) for (let k = 0; k < 8; k++) ids.push(row.stairBase + k);
+  }
+  return ids;
+}
+
+/** Wool slabs and stairs, including the states that are not items. Wool burns. */
+export function masonryWoolBlocks(): number[] {
+  const ids: number[] = [];
+  for (const row of MASONRY) {
+    if (row.spec.sound !== 'grass') continue;
+    if (row.slabBase >= 0) ids.push(row.slabBase, row.slabBase + 1);
+    if (row.stairBase >= 0) for (let k = 0; k < 8; k++) ids.push(row.stairBase + k);
+  }
+  return ids;
+}
+
+/** The wooden masonry blocks a player can hold: planks, one slab and one stair. */
+export function masonryWoodItems(): number[] {
+  const ids: number[] = [];
+  for (const row of MASONRY) {
+    if (!row.spec.wood) continue;
+    if (row.cubeId) ids.push(row.cubeId);
+    if (row.slabBase >= 0) ids.push(row.slabBase);
+    if (row.stairBase >= 0) ids.push(row.stairBase);
+  }
+  return ids;
+}
 
 export const IS_OPAQUE = new Uint8Array(BLOCK_COUNT);
 export const IS_SOLID = new Uint8Array(BLOCK_COUNT);
@@ -1231,8 +2279,11 @@ export const LEAF_BLOCKS: readonly number[] = [B.LEAVES, B.BIRCH_LEAVES, B.SPRUC
 export const LOG_BLOCKS: readonly number[] = [B.LOG, B.BIRCH_LOG, B.SPRUCE_LOG, B.ACACIA_LOG, B.JUNGLE_LOG, B.DARK_OAK_LOG, B.CHERRY_LOG];
 export const IS_LEAVES = new Uint8Array(BLOCK_COUNT);
 for (const id of LEAF_BLOCKS) IS_LEAVES[id] = 1;
+for (const id of GROVE_LEAVES) IS_LEAVES[id] = 1;
 export const IS_LOG = new Uint8Array(BLOCK_COUNT);
 for (const id of LOG_BLOCKS) IS_LOG[id] = 1;
+for (const id of JOINERY_LOGS) IS_LOG[id] = 1;
+for (const [id, base] of PILLAR_BASE) if (IS_LOG[base]) IS_LOG[id] = 1;
 /** Leaves that take the colour of the biome (the others, birch, spruce and cherry, keep their own). */
 export const IS_TINTED_LEAVES = new Uint8Array(BLOCK_COUNT);
 for (const id of [B.LEAVES, B.ACACIA_LEAVES, B.JUNGLE_LEAVES, B.DARK_OAK_LEAVES]) IS_TINTED_LEAVES[id] = 1;
@@ -1264,12 +2315,93 @@ export function woolColor(id: number): number {
   return i >= 0 && i < DYE_COUNT - 1 ? i + 1 : -1;
 }
 
+/** A candle. `color` is -1 for the plain one, otherwise a dye index. `count` is 1..4. */
+export function candleInfo(id: number): { color: number; count: number } | null {
+  if (id >= DRESS.plainCandle && id < DRESS.plainCandle + 4) return { color: -1, count: id - DRESS.plainCandle + 1 };
+  const i = id - DRESS.dyeCandle;
+  if (i >= 0 && i < 64) return { color: Math.floor(i / 4), count: (i % 4) + 1 };
+  return null;
+}
+
+/** The candle block with this many wicks (1..4). */
+export function candleId(color: number, count: number): number {
+  const n = Math.min(4, Math.max(1, count)) - 1;
+  return color < 0 ? DRESS.plainCandle + n : DRESS.dyeCandle + color * 4 + n;
+}
+
+/** The item a candle breaks into: the single candle of its colour. */
+export function candleItem(color: number): number {
+  return candleId(color, 1);
+}
+
+/** A banner standing on the floor or hung on a wall. `facing` is a BED_DIRS index. */
+export function bannerInfo(id: number): { color: number; facing: number; wall: boolean } | null {
+  const floor = id - DRESS.bannerFloor;
+  if (floor >= 0 && floor < 64) return { color: Math.floor(floor / 4), facing: floor % 4, wall: false };
+  const wall = id - DRESS.bannerWall;
+  if (wall >= 0 && wall < 64) return { color: Math.floor(wall / 4), facing: wall % 4, wall: true };
+  return null;
+}
+
+export function bannerId(color: number, facing: number, wall: boolean): number {
+  return (wall ? DRESS.bannerWall : DRESS.bannerFloor) + color * 4 + (facing & 3);
+}
+
+/** A wooden sign. `wood` is an index into DRESS.signs. */
+export function signInfo(id: number): { wood: number; facing: number; wall: boolean } | null {
+  for (let i = 0; i < DRESS.signs.length; i++) {
+    const s = DRESS.signs[i];
+    if (id >= s.standing && id < s.standing + 4) return { wood: i, facing: id - s.standing, wall: false };
+    if (id >= s.wall && id < s.wall + 4) return { wood: i, facing: id - s.wall, wall: true };
+  }
+  return null;
+}
+
+export function signId(wood: number, facing: number, wall: boolean): number {
+  const s = DRESS.signs[wood];
+  return (wall ? s.wall : s.standing) + (facing & 3);
+}
+
+/** A flower pot. `plant` is 0 when the pot is empty. */
+export function potInfo(id: number): { plant: number } | null {
+  if (id === DRESS.pot) return { plant: 0 };
+  const i = id - DRESS.potted;
+  if (i < 0 || i >= POT_COUNT) return null;
+  for (const [plant, pot] of POTTED_OF) if (pot === id) return { plant };
+  return { plant: 0 };
+}
+
+/** The potted form of a plant block, or 0 when that plant does not fit in a pot. */
+export function pottedOf(plant: number): number {
+  return POTTED_OF.get(plant) ?? 0;
+}
+
+/** The terracotta block of a dye colour, including the ten colours added with the dressing. */
+export function terracottaOf(color: number): number {
+  if (color === 0) return B.TERRACOTTA_WHITE;
+  if (color === 1) return B.TERRACOTTA_ORANGE;
+  if (color === 4) return B.TERRACOTTA_YELLOW;
+  if (color === 8) return B.TERRACOTTA_LIGHT_GRAY;
+  if (color === 12) return B.TERRACOTTA_BROWN;
+  if (color === 14) return B.TERRACOTTA_RED;
+  const extra = EXTRA_TERRACOTTA.indexOf(DYE_ORDER[color] as (typeof EXTRA_TERRACOTTA)[number]);
+  return extra < 0 ? 0 : DRESS.terracotta + extra;
+}
+
+/** Carpets and banners. Fire treats them like wool. */
+export function dressBurnWool(): number[] {
+  const ids: number[] = [];
+  for (let c = 0; c < 16; c++) ids.push(DRESS.carpet + c);
+  for (let i = 0; i < 64; i++) ids.push(DRESS.bannerFloor + i, DRESS.bannerWall + i);
+  return ids;
+}
+
 /** The anvil in any of its three states of wear. */
 export const isAnvil = (id: number): boolean => id === B.ANVIL || id === B.ANVIL_CHIPPED || id === B.ANVIL_DAMAGED;
 
 /** Blocks with a right-click interface (GUI) rather than placing a block against them. */
 export function isInteractive(id: number): boolean {
-  return id === B.CRAFTING_TABLE || id === B.FURNACE || id === B.CHEST || id === B.ENCHANTING_TABLE || isAnvil(id) || id === B.GRINDSTONE || isBed(id) || isSwitchable(id) || leverInfo(id) !== null || buttonInfo(id) !== null;
+  return id === B.CRAFTING_TABLE || id === B.FURNACE || isChest(id) || id === B.ENCHANTING_TABLE || isAnvil(id) || id === B.GRINDSTONE || isBed(id) || isSwitchable(id) || leverInfo(id) !== null || buttonInfo(id) !== null;
 }
 
 /** Doors, trapdoors and fence gates open and close when used. */

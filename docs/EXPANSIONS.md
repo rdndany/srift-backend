@@ -12,7 +12,7 @@ The single source of truth is `packages/shared/src/expansions.ts` (`EXPANSIONS`)
 | Order | Id | Name | Status | Theme |
 |---|---|---|---|---|
 | 0 | `core` | SolRift | live | The open world, caves, villages, dungeons, crafting, multiplayer |
-| 1 | `hollow-king` | Embers of the Hollow King | in development | Deep underground: first instances (the Cinderdeep, Gloomhold Catacombs), the bosses Ashmaw and the Hollow King, party finder and lockouts |
+| 1 | `hollow-king` | Embers of the Hollow King | live (the expansion at launch) | Deep underground: first instances (the Cinderdeep, Gloomhold Catacombs), the bosses Ashmaw and the Hollow King, party finder and lockouts |
 | 2 | `drowned-throne` | Tides of the Drowned Throne | announced | The sea: the Sunken Reach, Marrowtide Caverns, the first raid and Thalassa, the Drowned Queen |
 | 3 | `sky-titans` | Crown of the Sky Titans | announced | Floating isles, the Citadel of Storms and the Storm Titan |
 
@@ -21,7 +21,7 @@ Everything under an expansion that is not `live` is a plan. The UI labels it "No
 
 ## Statuses
 
-- `live`: playable now. Only `core` is live.
+- `live`: playable now. `core` and `hollow-king` (the first expansion, the one the game launches with) are live.
 - `in-development`: being built. At most one at a time; the title screen's hero shows it as the next arrival.
 - `announced`: planned, with a name and a theme.
 
@@ -75,4 +75,4 @@ Adventure is the **multiplayer** game: the online server runs it, and it is the 
 - **Servers.** The game server runs the Adventure world by default (`WORLD_KIND=overworld` runs the plain generated one, which the core-game tests use). Adventure is not offered in single player: the client refuses it offline unless the address has `?debug`, which developers and the e2e suite use. Storage is kept apart from an overworld with the same seed.
 - **Tests.** `packages/shared/src/{adventure,quests,adventureSession,adventureProtection,dungeonInstances}.test.ts`, `apps/server/src/adventureRoom.test.ts` and `scripts/adventure.mjs` (with screenshots).
 
-It is listed under *Embers of the Hollow King* as not yet playable on purpose: the expansion is in development, and the registry only allows `playable` content in a `live` expansion. The realm is open as a preview from the title screen. Next in the plan: a boss for the cellar, more chapters (smithing, enchanting, trading, the Nether-like zones) so the chain ends with every system of the game taught.
+It is listed under *Embers of the Hollow King*, the first expansion, which is marked `live` (the one the game launches with); the registry only allows `playable` content in a `live` expansion, so every piece of it is marked playable. Note that the Cinderdeep, Gloomhold Catacombs and the two bosses are not built yet: they are listed because the launch expansion is meant to ship with them. Next in the plan: a boss for the cellar, more chapters (smithing, enchanting, trading, the Nether-like zones) so the chain ends with every system of the game taught.

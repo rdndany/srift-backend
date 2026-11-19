@@ -29,6 +29,8 @@ export class ItemModels {
   readonly tint = new THREE.Color(1, 1, 1);
   private readonly pixels: Uint8ClampedArray;
   private materials: THREE.MeshBasicMaterial[] = [];
+  /** Flame materials: full bright, not tinted with the hand. */
+  private readonly bright: THREE.Material[] = [];
 
   constructor(
     atlasCanvas: HTMLCanvasElement,
@@ -89,7 +91,8 @@ export class ItemModels {
       for (let k = 0; k < 4; k++) colors.set([FACE_SHADE[f], FACE_SHADE[f], FACE_SHADE[f]], (o + k) * 3);
     }
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    const mat = this.track(new THREE.MeshBasicMaterial({ map: this.atlasTexture, vertexColors: true, alphaTest: 0.5, transparent: false }));
+    const clear = def.render === 'translucent';
+    const mat = this.track(new THREE.MeshBasicMaterial({ map: this.atlasTexture, vertexColors: true, alphaTest: clear ? 0.04 : 0.5, transparent: clear, depthWrite: !clear }));
     mat.color.copy(this.tint);
     return new THREE.Mesh(geo, mat);
   }
@@ -284,7 +287,57 @@ export class ItemModels {
     return new THREE.Mesh(geo, this.flat());
   }
 
+  /**
+   * The fire on a carried torch: two crossed planes of the torch flame, at the tip of its picture.
+   * The planes share one picture and step through its four frames, so every torch in every hand flickers together.
+   */
+  torchFlame(): THREE.Group {
+    const w = 0.26;
+    const h = 0.5;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute([-w, 0, 0, w, 0, 0, w, h, 0, -w, h, 0], 3));
+    const uv = new THREE.Float32BufferAttribute(new Float32Array(8), 2);
+    geo.setAttribute('uv', uv);
+    geo.setIndex([0, 1, 2, 0, 2, 3]);
+    const base = tileIndex('torch_flame_0');
+    const paint = (frame: number): void => {
+      const tile = base + frame;
+      const col = tile % ATLAS_COLS;
+      const row = Math.floor(tile / ATLAS_COLS);
+      const u0 = col / ATLAS_COLS;
+      const u1 = (col + 1) / ATLAS_COLS;
+      const v0 = 1 - (row + 1) / ATLAS_ROWS;
+      const v1 = 1 - row / ATLAS_ROWS;
+      uv.setXY(0, u0, v0);
+      uv.setXY(1, u1, v0);
+      uv.setXY(2, u1, v1);
+      uv.setXY(3, u0, v1);
+      uv.needsUpdate = true;
+    };
+    paint(0);
+    const mat = new THREE.MeshBasicMaterial({ map: this.atlasTexture, alphaTest: 0.45, side: THREE.DoubleSide, transparent: false });
+    this.bright.push(mat);
+    const group = new THREE.Group();
+    let shown = 0;
+    const tick = (): void => {
+      const frame = Math.floor(performance.now() / 110) % 4;
+      if (frame === shown) return;
+      shown = frame;
+      paint(frame);
+    };
+    for (const rot of [Math.PI / 4, -Math.PI / 4]) {
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.rotation.y = rot;
+      mesh.onBeforeRender = tick;
+      group.add(mesh);
+    }
+    // The stick of the torch picture is columns 7 and 8; the wood ends at the middle of the tile and the flame rises from there.
+    group.position.set(7.5 / TILE_PX - 0.5, 0.02, 0);
+    return group;
+  }
+
   dispose(): void {
     for (const m of this.materials) m.dispose();
+    for (const m of this.bright) m.dispose();
   }
 }

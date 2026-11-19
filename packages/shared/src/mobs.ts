@@ -1,8 +1,9 @@
-import { B, IS_LEAVES, IS_LIQUID, IS_SOLID, LIGHT_EMIT, doorInfo, woolId } from './blocks';
+import { B, GROVE, IS_LEAVES, IS_LIQUID, IS_SOLID, LIGHT_EMIT, campfireInfo, doorInfo, woolId } from './blocks';
 import { CHUNK_SIZE, SEA_LEVEL, WORLD_HEIGHT } from './chunk';
 import { coinsForKill } from './economy';
 import { isLavaId } from './fluids';
-import { I, type Drop } from './items';
+import { makeStack, type ItemStack } from './inventory';
+import { I, ITEMS, type Drop } from './items';
 import { findPath, type PathNode } from './pathfinding';
 import { createBody, stepPlayer, type BlockReader, type Body, type MoveInput } from './physics';
 import { raycast } from './raycast';
@@ -16,6 +17,35 @@ export type MobKind =
   | 'rabbit'
   | 'squid'
   | 'bat'
+  | 'wolf'
+  | 'fox'
+  | 'cat'
+  | 'ocelot'
+  | 'horse'
+  | 'donkey'
+  | 'mule'
+  | 'llama'
+  | 'trader_llama'
+  | 'camel'
+  | 'goat'
+  | 'panda'
+  | 'polar_bear'
+  | 'mooshroom'
+  | 'armadillo'
+  | 'sniffer'
+  | 'turtle'
+  | 'frog'
+  | 'parrot'
+  | 'bee'
+  | 'allay'
+  | 'axolotl'
+  | 'dolphin'
+  | 'glow_squid'
+  | 'cod'
+  | 'salmon'
+  | 'pufferfish'
+  | 'tropical_fish'
+  | 'tadpole'
   | 'zombie'
   | 'skeleton'
   | 'creeper'
@@ -30,7 +60,9 @@ export type MobKind =
   /** A quest giver of the Adventure mode: it stands where it was put, cannot be hurt, and its variant says which person it is (see `NPCS`). */
   | 'npc'
   /** A training dummy: stands where it was put, takes any hit without dying, and mends itself. Never saved. */
-  | 'dummy';
+  | 'dummy'
+  /** A placed stand. It wears armor, holds one item, and stays where it was put. */
+  | 'armor_stand';
 
 /** A mob's extra bits that a client needs to draw it: slime size, rabbit coat. */
 export interface MobTraits {
@@ -86,6 +118,48 @@ export interface MobDef {
 
 const between = (rand: () => number, lo: number, hi: number) => lo + Math.floor(rand() * (hi - lo + 1));
 
+/** A passive animal. Extra fields (drops, aquatic, hopper) override the defaults. */
+function beast(
+  kind: MobKind,
+  name: string,
+  width: number,
+  height: number,
+  health: number,
+  speed: number,
+  runSpeed: number,
+  extra: Partial<MobDef> = {},
+): MobDef {
+  return {
+    kind,
+    name,
+    width,
+    height,
+    health,
+    speed,
+    runSpeed,
+    hostile: false,
+    burnsInDaylight: false,
+    detect: 0,
+    melee: null,
+    drops: () => [],
+    xp: (r) => between(r, 1, 3),
+    ...extra,
+  };
+}
+
+const leatherDrop = (r: () => number): Drop[] => {
+  const n = between(r, 0, 2);
+  return n > 0 ? [{ id: I.LEATHER, count: n }] : [];
+};
+/** A fish gives itself, and now and then a bone. */
+const fishDrop = (r: () => number, fish: number): Drop[] => (r() < 0.25 ? [{ id: fish, count: 1 }, { id: I.BONE, count: 1 }] : [{ id: fish, count: 1 }]);
+const beefDrop = (r: () => number): Drop[] => {
+  const out: Drop[] = [{ id: I.RAW_MEAT, count: between(r, 1, 3) }];
+  const hide = between(r, 0, 2);
+  if (hide > 0) out.push({ id: I.LEATHER, count: hide });
+  return out;
+};
+
 export const MOBS: Record<MobKind, MobDef> = {
   pig: {
     kind: 'pig',
@@ -140,6 +214,9 @@ export const MOBS: Record<MobKind, MobDef> = {
       if (n > 0) out.push({ id: I.ROTTEN_FLESH, count: n });
       // Spiders are the real source of string; zombies still give a little.
       if (r() < 0.15) out.push({ id: I.STRING, count: 1 });
+      // The same rare potato or carrot a zombie sometimes drops in Minecraft.
+      if (r() < 0.025) out.push({ id: I.POTATO, count: 1 });
+      if (r() < 0.025) out.push({ id: I.CARROT, count: 1 });
       return out;
     },
     xp: () => 5,
@@ -470,6 +547,52 @@ export const MOBS: Record<MobKind, MobDef> = {
     drops: () => [],
     xp: () => 0,
   },
+  armor_stand: {
+    kind: 'armor_stand',
+    name: 'armor stand',
+    width: 0.5,
+    height: 1.975,
+    health: 2,
+    speed: 0,
+    runSpeed: 0,
+    hostile: false,
+    burnsInDaylight: false,
+    detect: 0,
+    melee: null,
+    ambient: true,
+    persistent: true,
+    drops: () => [],
+    xp: () => 0,
+  },
+  wolf: beast('wolf', 'wolf', 0.6, 0.85, 8, 1.7, 4.2),
+  fox: beast('fox', 'fox', 0.6, 0.7, 10, 1.8, 4.6),
+  cat: beast('cat', 'cat', 0.6, 0.7, 10, 1.4, 3.4, { drops: (r) => (r() < 0.3 ? [{ id: I.STRING, count: 1 }] : []) }),
+  ocelot: beast('ocelot', 'ocelot', 0.6, 0.7, 10, 1.6, 4.0),
+  horse: beast('horse', 'horse', 1.4, 1.6, 15, 1.7, 4.6, { drops: leatherDrop }),
+  donkey: beast('donkey', 'donkey', 1.2, 1.4, 15, 1.4, 3.6, { drops: leatherDrop }),
+  mule: beast('mule', 'mule', 1.3, 1.5, 15, 1.4, 3.4, { drops: leatherDrop }),
+  llama: beast('llama', 'llama', 0.9, 1.87, 15, 1.3, 3.2, { drops: leatherDrop }),
+  trader_llama: beast('trader_llama', 'trader llama', 0.9, 1.87, 15, 1.3, 3.2, { drops: leatherDrop }),
+  camel: beast('camel', 'camel', 1.4, 2.1, 32, 1.5, 3.6),
+  goat: beast('goat', 'goat', 0.9, 1.3, 10, 1.5, 3.8, { jumpSpeed: 10 }),
+  panda: beast('panda', 'panda', 1.3, 1.25, 20, 1.0, 2.4, { drops: (r) => (r() < 0.15 ? [{ id: GROVE.bamboo, count: 1 }] : []) }),
+  polar_bear: beast('polar_bear', 'polar bear', 1.4, 1.4, 30, 1.2, 3.6),
+  mooshroom: beast('mooshroom', 'mooshroom', 0.9, 1.4, 10, 1.3, 3.0, { drops: beefDrop }),
+  armadillo: beast('armadillo', 'armadillo', 0.7, 0.65, 12, 1.2, 2.8),
+  sniffer: beast('sniffer', 'sniffer', 1.6, 1.5, 14, 0.8, 2.2),
+  turtle: beast('turtle', 'turtle', 1.2, 0.4, 30, 0.6, 1.6),
+  frog: beast('frog', 'frog', 0.5, 0.5, 10, 1.6, 3.4, { hopper: true, jumpSpeed: 7.2 }),
+  parrot: beast('parrot', 'parrot', 0.5, 0.9, 6, 1.3, 3.2, { glides: true, drops: (r) => [{ id: I.FEATHER, count: between(r, 1, 2) }] }),
+  bee: beast('bee', 'bee', 0.5, 0.5, 10, 1.4, 3.0, { glides: true, ambient: true }),
+  allay: beast('allay', 'allay', 0.4, 0.6, 10, 1.5, 3.2, { glides: true, ambient: true, xp: () => 0 }),
+  axolotl: beast('axolotl', 'axolotl', 0.75, 0.42, 14, 1.1, 2.4, { ambient: true, aquatic: true }),
+  dolphin: beast('dolphin', 'dolphin', 0.9, 0.6, 10, 1.8, 4.0, { ambient: true, aquatic: true }),
+  glow_squid: beast('glow_squid', 'glow squid', 0.8, 0.8, 10, 1.0, 3.4, { ambient: true, aquatic: true, drops: (r) => [{ id: I.INK_SAC, count: between(r, 1, 3) }] }),
+  cod: beast('cod', 'cod', 0.5, 0.3, 3, 1.2, 2.6, { ambient: true, aquatic: true, drops: (r) => fishDrop(r, I.RAW_COD) }),
+  salmon: beast('salmon', 'salmon', 0.7, 0.4, 3, 1.3, 2.8, { ambient: true, aquatic: true, drops: (r) => fishDrop(r, I.RAW_SALMON) }),
+  pufferfish: beast('pufferfish', 'pufferfish', 0.5, 0.5, 3, 0.8, 1.8, { ambient: true, aquatic: true, drops: (r) => fishDrop(r, I.PUFFERFISH) }),
+  tropical_fish: beast('tropical_fish', 'tropical fish', 0.5, 0.4, 3, 1.2, 2.4, { ambient: true, aquatic: true, drops: () => [{ id: I.TROPICAL_FISH, count: 1 }] }),
+  tadpole: beast('tadpole', 'tadpole', 0.4, 0.3, 3, 1.0, 2.0, { ambient: true, aquatic: true }),
 };
 
 /** Slime sizes, as in the original: tiny, small and big. */
@@ -492,7 +615,7 @@ const ARROW_DAMAGE = 3;
 const DEATH_ANIM = 0.7;
 /** A mob that dies within this many seconds of a player's hit counts as that player's kill. */
 /** What raw meat becomes when its animal burns to death. */
-const COOKED: Record<number, number> = { [I.RAW_MEAT]: I.COOKED_MEAT, [I.MUTTON]: I.COOKED_MUTTON, [I.CHICKEN]: I.COOKED_CHICKEN, [I.RABBIT]: I.COOKED_RABBIT };
+const COOKED: Record<number, number> = { [I.RAW_MEAT]: I.COOKED_MEAT, [I.MUTTON]: I.COOKED_MUTTON, [I.CHICKEN]: I.COOKED_CHICKEN, [I.RABBIT]: I.COOKED_RABBIT, [I.RAW_COD]: I.COOKED_COD, [I.RAW_SALMON]: I.COOKED_SALMON };
 
 const PLAYER_KILL_WINDOW = 5;
 const MAX_STEP = 0.05;
@@ -591,6 +714,10 @@ export const HIT_BOXES: Partial<Record<MobKind, HitBox[]>> = {
     [0, 1.1, 0.01, 0.62, 0.62, 0.34], // the straw body
     [0, 1.25, 0.02, 1.24, 0.3, 0.2], // the crossbar and its hands
     [0, 1.72, 0, 0.5, 0.64, 0.5], // the head and its hat
+  ],
+  armor_stand: [
+    [0, 0.15, 0, 0.7, 0.2, 0.7], // the stone base
+    [0, 1.05, 0, 0.55, 1.7, 0.4], // the post, the arms and the head
   ],
 };
 
@@ -736,15 +863,34 @@ export interface MobSave {
   /** Seconds left as a young animal. */
   baby?: number;
   sheared?: boolean;
+  /** An armor stand's worn pieces and the item in its hand. `i` is 0..3 for the armor slots and 4 for the hand. */
+  gear?: { i: number; id: number; d?: number; e?: [number, number][]; n?: string }[];
 }
 
 /** What each farm animal is bred with (a right-click with it puts the animal in love). */
 export const BREED_FOOD: Partial<Record<MobKind, number>> = {
   cow: I.WHEAT,
   sheep: I.WHEAT,
-  pig: I.APPLE,
+  pig: I.CARROT,
   chicken: I.WHEAT_SEEDS,
-  rabbit: I.WHEAT_SEEDS,
+  rabbit: I.CARROT,
+  wolf: I.BONE,
+  fox: I.SWEET_BERRIES,
+  cat: I.RAW_MEAT,
+  ocelot: I.RAW_MEAT,
+  horse: I.WHEAT,
+  donkey: I.WHEAT,
+  mule: I.WHEAT,
+  llama: I.WHEAT,
+  trader_llama: I.WHEAT,
+  camel: B.CACTUS,
+  goat: I.WHEAT,
+  panda: GROVE.bamboo,
+  mooshroom: I.WHEAT,
+  armadillo: I.SPIDER_EYE,
+  sniffer: I.WHEAT_SEEDS,
+  frog: I.SLIMEBALL,
+  parrot: I.WHEAT_SEEDS,
 };
 /** Seconds an animal stays in love, how long it rests before breeding again, and how long a baby takes to grow up. */
 export const LOVE_SECONDS = 30;
@@ -752,6 +898,9 @@ export const BREED_COOLDOWN = 300;
 export const BABY_SECONDS = 1200;
 /** Seconds until a shorn sheep has its wool back. */
 export const WOOL_REGROW = 180;
+/** How long a grown chicken waits between eggs, in seconds. */
+export const EGG_LAY_MIN = 300;
+export const EGG_LAY_MAX = 600;
 /** Mates this close to each other have a baby. */
 const MATE_REACH = 1.6;
 
@@ -773,7 +922,40 @@ function savedVariant(kind: MobKind, v: unknown): number {
   if (typeof v !== 'number' || !Number.isInteger(v)) return 0;
   if (kind === 'sheep') return v >= 0 && v < 16 ? v : 0;
   if (kind === 'villager') return v >= 0 && v < 256 ? v : 0;
+  if (kind === 'armor_stand') return v >= 0 && v <= 3 ? v : 0;
   return v === 1 || v === 2 ? v : 0;
+}
+
+/** How many ways an armor stand can stand. Sneak and right-click steps through them. */
+export const ARMOR_STAND_POSES = 4;
+
+/** The pieces on an armor stand, read back from a save. Empty slots stay empty; unknown items are dropped. */
+function savedGear(raw: unknown): (ItemStack | null)[] {
+  const slots: (ItemStack | null)[] = [null, null, null, null, null];
+  if (!Array.isArray(raw)) return slots;
+  for (const piece of raw) {
+    if (!piece || typeof piece !== 'object') continue;
+    const p = piece as { i?: unknown; id?: unknown; d?: unknown; e?: unknown; n?: unknown };
+    if (typeof p.i !== 'number' || p.i < 0 || p.i > 4 || typeof p.id !== 'number' || !ITEMS.has(p.id)) continue;
+    const stack = makeStack(p.id, 1, typeof p.d === 'number' && p.d > 0 ? p.d : 0);
+    if (Array.isArray(p.e)) {
+      const ench = p.e.filter((pair): pair is [number, number] => Array.isArray(pair) && pair.length === 2 && typeof pair[0] === 'number' && typeof pair[1] === 'number');
+      if (ench.length > 0) stack.ench = ench;
+    }
+    if (typeof p.n === 'string' && p.n) stack.name = p.n;
+    slots[p.i] = stack;
+  }
+  return slots;
+}
+
+/** An armor stand's filled slots, for a save. */
+function packedGear(slots: readonly (ItemStack | null)[]): NonNullable<MobSave['gear']> {
+  const out: NonNullable<MobSave['gear']> = [];
+  slots.forEach((s, i) => {
+    if (!s) return;
+    out.push({ i, id: s.id, ...(s.damage > 0 ? { d: s.damage } : {}), ...(s.ench && s.ench.length > 0 ? { e: s.ench.map((pair) => [pair[0], pair[1]] as [number, number]) } : {}), ...(s.name ? { n: s.name } : {}) });
+  });
+  return out;
 }
 
 export class Mob {
@@ -783,8 +965,10 @@ export class Mob {
   maxHealth: number;
   /** Slime size (1, 2 or 4); 1 for everything else. */
   size = 1;
-  /** Rabbit coat: 0 brown, 1 white, 2 sandy. A sheep's is its wool colour (0..15, see `DYE_NAMES`). */
+  /** Rabbit coat 0..2, fox 1 is white, and a few coats for horse, cat, llama, parrot and tropical fish. A sheep's is its wool colour. */
   variant = 0;
+  /** An armor stand's four armor slots and the item in its hand. Null for every other mob. */
+  standGear: (ItemStack | null)[] | null = null;
   width: number;
   height: number;
   /** Hunting because it was hurt, or (enderman) looked at. */
@@ -846,6 +1030,8 @@ export class Mob {
   exposedTimer = 0;
   fireTimer = 0;
   lavaTimer = 0;
+  /** Seconds since a lit campfire last hurt this mob. */
+  campfireTimer = 0.5;
   knockTime = 0;
   kbx = 0;
   kbz = 0;
@@ -864,6 +1050,8 @@ export class Mob {
   /** Sheep: wool taken with shears, and seconds until it grows back. */
   sheared = false;
   woolTimer = 0;
+  /** Chicken: seconds until the next egg. */
+  eggTimer = 0;
   /** Seconds left as a young animal (0 = grown up). A baby is half size and drops nothing. */
   growTimer = 0;
   /** Seconds left in love (looking for a mate), and the rest before it may breed again. */
@@ -881,6 +1069,7 @@ export class Mob {
     traits: Partial<MobTraits> = {},
   ) {
     this.def = MOBS[kind];
+    if (kind === 'armor_stand') this.standGear = [null, null, null, null, null];
     this.size = kind === 'slime' ? traits.size ?? 1 : 1;
     this.variant = traits.variant ?? 0;
     this.sheared = traits.sheared === true && kind === 'sheep';
@@ -896,16 +1085,24 @@ export class Mob {
     this.body.height = this.height;
     this.health = this.maxHealth;
     this.yaw = rand() * Math.PI * 2;
+    if (kind === 'armor_stand') this.homeYaw = this.yaw;
     this.wanderYaw = this.yaw;
     this.lastX = x;
     this.lastZ = z;
     this.sayTimer = 3 + rand() * 8;
+    if (kind === 'chicken') this.eggTimer = EGG_LAY_MIN + rand() * (EGG_LAY_MAX - EGG_LAY_MIN);
     this.shootCooldown = 1 + rand();
     this.wanderTimer = rand() * 3;
   }
 
   get kind(): MobKind {
     return this.def.kind;
+  }
+
+  /** Item ids on an armor stand (helmet, chest, legs, boots, hand), for the client to draw. */
+  get gear(): readonly number[] | undefined {
+    if (!this.standGear) return undefined;
+    return this.standGear.map((s) => s?.id ?? 0);
   }
 
   get eyeY(): number {
@@ -1024,6 +1221,7 @@ export class MobManager {
         ...(m.variant !== 0 ? { variant: m.variant } : {}),
         ...(m.growTimer > 0 ? { baby: round2(m.growTimer) } : {}),
         ...(m.sheared ? { sheared: true } : {}),
+        ...(m.standGear ? { gear: packedGear(m.standGear) } : {}),
       });
     }
     return out;
@@ -1043,6 +1241,10 @@ export class MobManager {
         sheared: e.sheared === true,
       });
       if (Number.isFinite(e.yaw)) m.yaw = e.yaw!;
+      if (m.kind === 'armor_stand') {
+        m.homeYaw = m.yaw;
+        m.standGear = savedGear(e.gear);
+      }
       if (Number.isFinite(e.health)) m.health = Math.max(1, Math.min(m.maxHealth, e.health!));
       n++;
     }
@@ -1128,7 +1330,8 @@ export class MobManager {
     // A hit enderman turns on whoever hit it and stands its ground. (It only blinks away from damage that
     // has no one to fight: water, and arrows, which are dodged in `stepArrow`.)
     if (mob.kind === 'enderman') mob.aggro = true;
-    if (knock) {
+    // An armor stand stays where it was set. A hit does not send it sliding off its block.
+    if (knock && mob.kind !== 'armor_stand') {
       const len = Math.hypot(kx, kz) || 1;
       const k = 5.5 * (hit?.knock ?? 1);
       mob.kbx = (kx / len) * k;
@@ -1139,7 +1342,7 @@ export class MobManager {
       if (lift > 0) mob.body.vy = lift;
       else if (mob.body.onGround) mob.body.vy = 4.2;
     }
-    if (!mob.def.hostile && mob.kind !== 'dummy') {
+    if (!mob.def.hostile && mob.kind !== 'dummy' && mob.kind !== 'armor_stand') {
       mob.fleeTimer = 5;
       mob.fleeX = mob.body.x - kx;
       mob.fleeZ = mob.body.z - kz;
@@ -1167,6 +1370,10 @@ export class MobManager {
         // Looting adds up to its level in extra items to each kind of drop.
         const more = looting > 0 ? Math.floor(this.rand() * (looting + 1)) : 0;
         events.drop(more > 0 ? { ...d, count: d.count + more } : d, mob.body.x, mob.body.y + 0.3, mob.body.z);
+      }
+      if (mob.standGear) {
+        events.drop({ id: I.ARMOR_STAND, count: 1 }, mob.body.x, mob.body.y + 0.3, mob.body.z);
+        for (const piece of mob.standGear) if (piece) events.drop(piece, mob.body.x, mob.body.y + 0.5, mob.body.z);
       }
       if (mob.sincePlayerHit < PLAYER_KILL_WINDOW) {
         events.xp?.(mob.def.xp(this.rand, mob.traits), mob.body.x, mob.body.y + 0.3, mob.body.z);
@@ -1246,6 +1453,14 @@ export class MobManager {
       }
       this.think(m, env, events, dt, dist);
       this.growAndRest(m, dt);
+      // A grown chicken lays an egg every few minutes. A chick does not.
+      if (m.kind === 'chicken' && m.growTimer <= 0) {
+        m.eggTimer -= dt;
+        if (m.eggTimer <= 0) {
+          m.eggTimer = EGG_LAY_MIN + env.rand() * (EGG_LAY_MAX - EGG_LAY_MIN);
+          events.drop({ id: I.EGG, count: 1 }, m.body.x, m.body.y + 0.2, m.body.z);
+        }
+      }
       if (m.def.hopper) this.hop(m, dt, env.rand);
       this.physics(m, env, dt, true);
       if (m.teleported) {
@@ -1474,6 +1689,15 @@ export class MobManager {
       const fz = Math.floor(m.body.z);
       if (env.world.getBlock(fx, Math.floor(m.body.y + 0.2), fz) === B.FIRE || env.world.getBlock(fx, Math.floor(m.body.y + m.height * 0.6), fz) === B.FIRE) m.onFire = Math.max(m.onFire, 8);
     }
+    const feet = env.world.getBlock(Math.floor(m.body.x), Math.floor(m.body.y + 0.2), Math.floor(m.body.z));
+    if (campfireInfo(feet)?.lit) {
+      m.campfireTimer += dt;
+      if (m.campfireTimer >= 0.5) {
+        m.campfireTimer = 0;
+        this.damage(m, 1, 0, 0, events, true, false);
+        if (m.dead) return;
+      }
+    }
     if (m.body.inWater) m.onFire = 0;
     else if (m.onFire > 0) m.onFire = Math.max(0, m.onFire - dt);
     m.burning = (m.def.burnsInDaylight && env.daylight > 0.75 && m.exposed && !m.body.inWater) || m.body.inLava === true || m.onFire > 0;
@@ -1488,7 +1712,7 @@ export class MobManager {
     }
 
     m.sayTimer -= dt;
-    if (m.sayTimer <= 0 && !m.dead) {
+    if (m.sayTimer <= 0 && !m.dead && m.kind !== 'armor_stand') {
       m.sayTimer = 6 + env.rand() * 10;
       const near = Math.hypot(m.body.x - env.player.x, m.body.z - env.player.z) < 24;
       if (near) events.sound('say', m);
@@ -1524,6 +1748,10 @@ export class MobManager {
     }
     if (m.kind === 'dummy') {
       this.thinkDummy(m, dt);
+      return;
+    }
+    if (m.kind === 'armor_stand') {
+      m.yaw = m.homeYaw;
       return;
     }
 
@@ -2258,11 +2486,14 @@ export interface SpawnEnv {
   quiet?: (player: { x: number; y: number; z: number }) => boolean;
   /** No monster is born at this spot (a village and the ground around it). */
   noMonsters?: (x: number, z: number, y?: number) => boolean;
+  /** The animals of the land here, most common first (the World Beyond's biomes each have their own); null leaves it to the ground. */
+  wildlife?: (x: number, z: number) => readonly MobKind[] | null;
 }
 
 export const PASSIVE_CAP = 10;
 export const HOSTILE_CAP = 16;
 const SQUID_CAP = 5;
+const WATER_CAP = 8;
 const BAT_CAP = 4;
 const DROWNED_CAP = 3;
 
@@ -2279,7 +2510,19 @@ function draw(rand: () => number, pool: Pool): MobKind {
 }
 
 /** What spawns where: the ground under a mob says which biome it is in. */
-const PASSIVE_GRASS: Pool = [['pig', 2], ['cow', 2], ['sheep', 3], ['chicken', 2], ['rabbit', 1]];
+const PASSIVE_GRASS: Pool = [
+  ['pig', 2], ['cow', 2], ['sheep', 3], ['chicken', 2], ['rabbit', 1.4],
+  ['horse', 0.55], ['donkey', 0.3], ['llama', 0.3], ['trader_llama', 0.1],
+  ['wolf', 0.3], ['fox', 0.4], ['cat', 0.25], ['ocelot', 0.18],
+  ['parrot', 0.22], ['panda', 0.12], ['frog', 0.28],
+  ['bee', 0.35], ['allay', 0.1],
+  ['turtle', 0.12], ['sniffer', 0.06], ['armadillo', 0.12],
+];
+const PASSIVE_SNOW: Pool = [['rabbit', 5], ['fox', 2], ['goat', 2], ['polar_bear', 0.6]];
+const PASSIVE_SAND: Pool = [['rabbit', 4], ['camel', 1.5], ['armadillo', 2]];
+const WATER_SURFACE: Pool = [['squid', 3], ['glow_squid', 1], ['cod', 3], ['salmon', 2], ['tropical_fish', 1], ['pufferfish', 1], ['dolphin', 1], ['tadpole', 1]];
+const WATER_CAVE: Pool = [['axolotl', 3], ['glow_squid', 2], ['cod', 1]];
+const WATER_KINDS: readonly MobKind[] = ['squid', 'glow_squid', 'cod', 'salmon', 'tropical_fish', 'pufferfish', 'dolphin', 'tadpole', 'axolotl'];
 const HOSTILE_CAVE: Pool = [['zombie', 3], ['skeleton', 3], ['creeper', 2], ['spider', 3], ['enderman', 0.4]];
 const HOSTILE_DESERT: Pool = [['husk', 4], ['skeleton', 1], ['creeper', 2], ['spider', 2], ['enderman', 0.5]];
 const HOSTILE_SNOW: Pool = [['stray', 4], ['zombie', 1], ['creeper', 2], ['spider', 2], ['enderman', 0.5]];
@@ -2371,23 +2614,33 @@ export class MobSpawner {
 
     if (!exposed) return [];
     let kind: MobKind;
-    let variant = 0;
-    if (below === B.MYCELIUM) {
-      // Mushroom fields are the one place monsters never come to, and nothing much grazes there either.
-      return [];
+    const snow = isSnowGround(below);
+    const sand = isSandGround(below);
+    const local = env.wildlife?.(x, z) ?? null;
+    if (local) {
+      // A biome with its own animals: none on a beach of mud or under water, and fewer where it is bare.
+      const land = local.filter((k) => !WATER_KINDS.includes(k));
+      if (land.length === 0 || rand() > 0.6) return [];
+      kind = draw(rand, land.map((k, i) => [k, land.length - i + 1] as const));
+    } else if (below === B.MYCELIUM) {
+      kind = 'mooshroom';
     } else if (isGrassGround(below)) {
       kind = draw(rand, PASSIVE_GRASS);
-    } else if (isSnowGround(below)) {
-      kind = 'rabbit';
-      variant = 1;
-    } else if (isSandGround(below) && rand() < 0.3) {
-      kind = 'rabbit';
-      variant = 2;
+    } else if (snow) {
+      kind = draw(rand, PASSIVE_SNOW);
+    } else if (sand && rand() < 0.45) {
+      kind = draw(rand, PASSIVE_SAND);
     } else {
       return [];
     }
+    const variant =
+      kind === 'rabbit' ? (snow ? 1 : sand ? 2 : 0)
+      : kind === 'fox' && snow ? 1
+      : kind === 'parrot' || kind === 'cat' || kind === 'horse' || kind === 'llama' ? Math.floor(rand() * 3)
+      : 0;
     const room = PASSIVE_CAP - manager.countNear(player.x, player.z, 64, false);
-    const group = Math.min(room, kind === 'rabbit' ? 1 + Math.floor(rand() * 2) : 1 + Math.floor(rand() * 3));
+    const alone = kind === 'sniffer' || kind === 'polar_bear' || kind === 'camel' || kind === 'panda' || kind === 'mooshroom';
+    const group = Math.min(room, kind === 'rabbit' ? 1 + Math.floor(rand() * 2) : alone ? 1 : 1 + Math.floor(rand() * 3));
     const out: Mob[] = [];
     for (let i = 0; i < group; i++) {
       const gx = x + Math.floor(rand() * 5) - 2;
@@ -2416,7 +2669,7 @@ export class MobSpawner {
     return null;
   }
 
-  /** Squid in any deep water by day or night, drowned in it after dark. */
+  /** Squid, fish and dolphins in deep water, drowned in it after dark. Axolotls prefer a cave pool. */
   private trySpawnWater(manager: MobManager, env: SpawnEnv): Mob[] {
     const { world, player, rand } = env;
     const ang = rand() * Math.PI * 2;
@@ -2425,16 +2678,22 @@ export class MobSpawner {
     const z = Math.floor(player.z + Math.sin(ang) * r);
     const water = this.findWater(world, x, z, player.y);
     if (!water || water.depth < 3) return [];
-    if (rand() < 0.65 && env.daylight < 0.45 && manager.countKind('drowned', player.x, player.z, 64) < DROWNED_CAP) {
+    const exposed = isExposedToSky(world, x + 0.5, water.surface, z + 0.5);
+    if (exposed && rand() < 0.65 && env.daylight < 0.45 && manager.countKind('drowned', player.x, player.z, 64) < DROWNED_CAP) {
       if (nearLight(world, x, water.surface, z, 4) || env.noMonsters?.(x, z)) return [];
       return [manager.spawn('drowned', x + 0.5, water.surface - 1, z + 0.5)];
     }
-    if (manager.countKind('squid', player.x, player.z, 64) >= SQUID_CAP) return [];
+    const swimming = WATER_KINDS.reduce((n, k) => n + manager.countKind(k, player.x, player.z, 64), 0);
+    if (swimming >= WATER_CAP) return [];
+    const local = exposed ? (env.wildlife?.(x, z) ?? null)?.filter((k) => WATER_KINDS.includes(k)) : undefined;
+    let kind = local && local.length > 0 ? draw(rand, local.map((k, i) => [k, local.length - i + 1] as const)) : draw(rand, exposed ? WATER_SURFACE : WATER_CAVE);
+    if (kind === 'squid' && manager.countKind('squid', player.x, player.z, 64) >= SQUID_CAP) kind = 'cod';
+    const variant = kind === 'tropical_fish' ? Math.floor(rand() * 3) : 0;
     const out: Mob[] = [];
-    const n = 1 + Math.floor(rand() * 3);
+    const n = kind === 'dolphin' || kind === 'squid' || kind === 'glow_squid' || kind === 'axolotl' ? 1 + Math.floor(rand() * 2) : 2 + Math.floor(rand() * 2);
     for (let i = 0; i < n; i++) {
       const sy = water.surface - 1 - Math.floor(rand() * Math.min(water.depth - 2, 5));
-      if (IS_LIQUID[world.getBlock(x, sy, z)] === 1 && IS_LIQUID[world.getBlock(x, sy + 1, z)] === 1) out.push(manager.spawn('squid', x + 0.5, sy - 0.2, z + 0.5));
+      if (IS_LIQUID[world.getBlock(x, sy, z)] === 1 && IS_LIQUID[world.getBlock(x, sy + 1, z)] === 1) out.push(manager.spawn(kind, x + 0.5, sy - 0.2, z + 0.5, { variant }));
     }
     return out;
   }

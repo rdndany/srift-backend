@@ -48,6 +48,8 @@ export class World implements WorldAccess {
   readonly group = new THREE.Group();
   readonly stats: WorldStats = { loaded: 0, meshed: 0, triangles: 0, quads: 0, pendingGen: 0, lastMeshMs: 0 };
   renderDistance = 8;
+  /** How many chunks in view are not yet drawn (the land has all arrived when it is 0). */
+  waiting = 0;
   readonly materials: ChunkMaterials;
   /** Counts every time a chunk mesh was replaced. */
   meshVersion = 0;
@@ -248,11 +250,13 @@ export class World implements WorldAccess {
     }
 
     // 2) Generate then mesh, nearest first.
+    let waiting = 0;
     for (const o of this.offsets) {
       const cx = pcx + o.dx;
       const cz = pcz + o.dz;
       const key = chunkKey(cx, cz);
       const c = this.chunks.get(key);
+      if (o.d <= R + 0.5 && (!c || !c.meshed || c.dirty || c.meshing)) waiting++;
       if (!c) {
         if (this.pendingGen.has(key)) continue;
         const saved = this.modifiedChunks.get(key);
@@ -270,6 +274,7 @@ export class World implements WorldAccess {
       if (o.d <= R + 0.5 && (!c.meshed || c.dirty) && !c.meshing) this.dispatchMesh(c, false);
     }
     this.stats.pendingGen = this.pendingGen.size;
+    this.waiting = waiting;
 
     // 3) Unload far chunks occasionally.
     if (this.frame % 30 === 0) this.unloadFar(pcx, pcz, R + 3);

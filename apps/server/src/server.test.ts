@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
-import type { NetServerMessage, ServerMessage } from '@solrift/shared';
+import { I, makeStack, type NetServerMessage, type ServerMessage } from '@solrift/shared';
 import { createGameServer, type GameServer } from './server';
 
 let server: GameServer;
@@ -42,6 +42,23 @@ describe('game server', () => {
     const res = await fetch(`http://127.0.0.1:${port}/health`);
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true });
+  });
+
+  it('serves the Auction House for the website at /market, made safe whatever is asked', async () => {
+    const house = server.room.realm.auctions;
+    const seller = house.post({ seller: 'acct-x', sellerName: 'Mira', item: makeStack(I.DIAMOND, 3), bid: 40, buyout: 90, hours: 24, deposit: 5 });
+    expect(seller.ok).toBe(true);
+    const res = await fetch(`http://127.0.0.1:${port}/market?q=diam&cat=nonsense&sort=whatever&page=-4`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.view.member).toBe(false);
+    expect(body.view.mine).toEqual([]);
+    expect(body.view.mail).toEqual([]);
+    expect(body.view.query).toMatchObject({ q: 'diam', cat: 'all', sort: 'ending', page: 0 });
+    expect(body.view.rows.map((r: { seller: string }) => r.seller)).toEqual(['Mira']);
+    expect(typeof body.players).toBe('number');
+    const none = await (await fetch(`http://127.0.0.1:${port}/market?q=zzzz`)).json();
+    expect(none.view.rows).toEqual([]);
   });
 
   it('sends welcome with the world seed and answers pings', async () => {

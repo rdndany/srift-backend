@@ -17,11 +17,14 @@ describe('what the item table says about each item', () => {
     expect(withUse('xp_bottle')).toEqual([I.EXPERIENCE_BOTTLE]);
     expect(withUse('pearl')).toEqual([I.ENDER_PEARL]);
     expect(withUse('vehicle')).toEqual([I.MINECART, I.BOAT].sort((a, b) => a - b));
+    expect(withUse('armor_stand')).toEqual([I.ARMOR_STAND]);
     expect(withUse('emberstone')).toEqual([I.EMBERSTONE]);
     expect(withUse('bow')).toEqual([I.BOW]);
     expect(withUse('crossbow')).toEqual([I.CROSSBOW]);
     expect(withUse('flint')).toEqual([I.FLINT_AND_STEEL]);
-    expect(withUse('door')).toEqual([I.DOOR]);
+    // Every wooden, iron and nether door is used the way the oak one is.
+    expect(withUse('door')).toContain(I.DOOR);
+    for (const id of withUse('door')) expect(getItem(id).name).toMatch(/door$/);
     expect(withUse('bone_meal')).toEqual([BONE_MEAL]);
     for (const item of allItems()) {
       expect(item.use === 'skill_book', item.name).toBe(skillBookAbility(item.id) !== null);
@@ -35,7 +38,7 @@ describe('what the item table says about each item', () => {
 
   it('knows what is used on the block the crosshair is on', () => {
     for (const item of allItems()) {
-      const onBlock = item.tool?.kind === 'hoe' || item.block != null || bedItemColor(item.id) >= 0 || item.id === I.DOOR || item.id === I.FLINT_AND_STEEL || item.id === BONE_MEAL;
+      const onBlock = item.tool?.kind === 'hoe' || item.block != null || bedItemColor(item.id) >= 0 || item.use === 'door' || item.id === I.FLINT_AND_STEEL || item.id === BONE_MEAL;
       expect(usedOnBlock(item), item.name).toBe(onBlock);
     }
     expect(usedOnBlock(getItem(I.BREAD))).toBe(false);

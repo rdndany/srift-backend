@@ -1,10 +1,8 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { MOUNTS, MOUNT_BITE, MOUNT_HOWL, mountDef, mountItemId, mountOfItem, mountSpeedText } from '@solrift/shared';
+import { MOUNTS, MOUNT_BITE, MOUNT_HOWL } from '@solrift/shared';
 import { useUi } from '../ui/store';
-import { ItemSprite } from './ItemSprite';
-import { ItemView } from './ItemView';
 import './classHud.css';
 
 const N = 16;
@@ -155,27 +153,3 @@ export function MountBar() {
   );
 }
 
-/**
- * The mount slot, top left of the screen under the character frame (small, no key shown): the horn of the mount that H calls (put one there from the inventory window, which
- * has the same slot, or with a right-click on a horn). It lights up while the mount is ridden. It is shown, not clicked: the
- * pointer is locked to the game.
- */
-export function MountSlot() {
-  const api = useUi((s) => s.api);
-  const mount = useUi((s) => s.mount);
-  const screen = useUi((s) => s.screen);
-  const spectating = useUi((s) => s.spectating);
-  const creative = useUi((s) => s.mode === 'creative');
-  useUi((s) => s.version);
-  if (!api || spectating || (screen !== 'none' && screen !== 'dead')) return null;
-  const stack = api.mountSlot.get(0);
-  const def = mountDef(stack ? mountOfItem(stack.id) : null);
-  const title = def ? `${def.name}: ${mountSpeedText(def)}. H calls it, H again gets off.` : creative ? 'Mount slot: H calls a mount' : 'Mount slot: put a mount horn here, then press H';
-  return (
-    <div id="mount-slot" className={mount.mount > 0 ? 'riding' : ''} data-testid="mount-slot" title={title}>
-      <div className="slot">
-        {stack ? <ItemView stack={stack} /> : <ItemSprite id={mountItemId(MOUNTS[0].id)} size={24} />}
-      </div>
-    </div>
-  );
-}

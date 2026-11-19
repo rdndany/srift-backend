@@ -15,7 +15,10 @@ import {
   WorldGenerator,
   bagId,
   blockDrops,
-  doorId,
+  axeStripPairs,
+  groveLeaves,
+  cakeId,
+  doorInfo,
   getItem,
   harvestHint,
   makeStack,
@@ -58,8 +61,11 @@ describe('what every block drops', () => {
   // A bed drops one item in all, from its foot half, which carries the colour; the head half drops nothing.
   const nothing = new Set<number>([B.WATER, B.LAVA, B.SPAWNER, B.BEDROCK, B.PORTAL, B.WAYSTONE, B.GLASS, B.ICE, B.PACKED_ICE, B.BED_HEAD_PX, B.BED_HEAD_NX, B.BED_HEAD_PZ, B.BED_HEAD_NZ, B.FIRE]);
   for (let id = 0; id < 256; id++) if (isFluid(id)) nothing.add(id);
+  // A cake drops nothing when broken, whole or eaten (as in the original).
+  for (let bites = 0; bites < 7; bites++) nothing.add(cakeId(bites));
   // A door drops one item, from its lower half.
-  for (const upper of [true]) for (const open of [false, true]) for (let f = 0; f < 4; f++) nothing.add(doorId(upper, open, f));
+  // Every kind of door has one: oak, the other woods, iron and the nether ones.
+  for (const b of BLOCKS) if (doorInfo(b.id)?.upper) nothing.add(b.id);
 
   it('gives something that exists as an item, with the right tool', () => {
     for (const b of blocks) {
@@ -113,6 +119,10 @@ describe('every item can be obtained', () => {
     for (const b of BLOCKS) for (const r of rolls) for (const d of blockDrops(b, bestTool(b.tool), seq(r))) have.add(d.id);
     // Dropped by mobs.
     for (const m of Object.values(MOBS)) for (const r of rolls) for (const d of m.drops(seq(r))) have.add(d.id);
+    // A chicken lays an egg while it lives (see mobs.ts). Killing one does not drop an egg.
+    have.add(I.EGG);
+    // A cow is milked with an empty bucket (see player.ts). Killing one does not drop milk.
+    have.add(I.MILK_BUCKET);
     // Crafted and smelted from what is already in hand, until nothing new turns up.
     for (let changed = true; changed; ) {
       changed = false;
@@ -129,6 +139,12 @@ describe('every item can be obtained', () => {
           changed = true;
         }
       }
+      for (const [from, to] of axeStripPairs()) {
+        if (have.has(from) && !have.has(to)) {
+          have.add(to);
+          changed = true;
+        }
+      }
     }
     // Blocks that break into something else (as in the original, only a special tool keeps them whole).
     // Cobwebs, ice and the other tree's leaves need shears or silk touch (an enchantment, so not a plain drop);
@@ -136,7 +152,7 @@ describe('every item can be obtained', () => {
     // from the enchanting table, chest loot and the anvil (see enchant.test.ts); a bottle o' enchanting from
     // dungeon chests and the cleric; a skill book from the kills of a player of its class, quests and the merchants of
     // Dawnwatch (see skillBooks.test.ts); the biggest bag from monsters and quests (see bags.test.ts); the jewels from monsters, chests and the arcanist (see jewels.test.ts); the mount horns from the ranger quartermaster (see mounts.test.ts); the clothes of the classes are put on every new character of the class (see outfit.test.ts).
-    const wholeOnlyInCreative = new Set<number>([...OUTFIT_CLASSES.flatMap((c) => outfitItems(c)), ...SKILL_BOOKS.map((_, i) => I.SKILL_BOOK_BASE + i), ...MOUNTS.map((m) => mountItemId(m.id)), bagId(5), I.EMBERSTONE, I.COMPASS, I.JEWEL_DAWN, I.JEWEL_RIFT, I.JEWEL_BLOOM, B.GRASS, B.LEAVES, B.BIRCH_LEAVES, B.SPRUCE_LEAVES, B.COBWEB, B.ICE, B.PACKED_ICE, B.DEEPSLATE, B.MYCELIUM, B.ACACIA_LEAVES, B.JUNGLE_LEAVES, B.DARK_OAK_LEAVES, B.CHERRY_LEAVES, B.FERN, B.COAL_ORE, B.LAPIS_ORE, B.IRON_ORE, B.GOLD_ORE, B.DIAMOND_ORE, B.EMERALD_ORE, B.REDSTONE_ORE, I.WATER_BUCKET, I.LAVA_BUCKET, I.ENCHANTED_BOOK, I.EXPERIENCE_BOTTLE]);
+    const wholeOnlyInCreative = new Set<number>([...OUTFIT_CLASSES.flatMap((c) => outfitItems(c)), ...SKILL_BOOKS.map((_, i) => I.SKILL_BOOK_BASE + i), ...MOUNTS.map((m) => mountItemId(m.id)), bagId(5), I.EMBERSTONE, I.COMPASS, I.JEWEL_DAWN, I.JEWEL_RIFT, I.JEWEL_BLOOM, B.GRASS, B.LEAVES, B.BIRCH_LEAVES, B.SPRUCE_LEAVES, B.COBWEB, B.ICE, B.PACKED_ICE, B.DEEPSLATE, B.MYCELIUM, B.ACACIA_LEAVES, B.JUNGLE_LEAVES, B.DARK_OAK_LEAVES, B.CHERRY_LEAVES, ...groveLeaves(), B.FERN, B.COAL_ORE, B.LAPIS_ORE, B.IRON_ORE, B.GOLD_ORE, B.DIAMOND_ORE, B.EMERALD_ORE, B.REDSTONE_ORE, I.WATER_BUCKET, I.LAVA_BUCKET, I.ENCHANTED_BOOK, I.EXPERIENCE_BOTTLE]);
     const missing = [...ITEMS.values()].filter((i) => !have.has(i.id) && !wholeOnlyInCreative.has(i.id)).map((i) => `${i.name} (${i.id})`);
     expect(missing).toEqual([]);
   });
@@ -209,11 +225,12 @@ describe('mining in the game', () => {
       if (skip.has(b.id)) continue;
       const tool = b.tool ? toolId(b.tool, 'diamond') : toolId('pickaxe', 'diamond');
       const { s } = mine(tool, b.id);
+      // Walk the slots once (asking `countOf` for every item in the game is quadratic in the amount of content).
       let total = 0;
-      for (const item of ITEMS.values()) if (item.id !== tool) total += s.inventory.countOf(item.id);
+      for (const stack of s.inventory.slots) if (stack && stack.id !== tool && ITEMS.has(stack.id)) total += stack.count;
       // Chance drops (leaves, tall grass) may roll nothing with this seed, so only demand the sure ones.
       const sure = blockDrops(b, getItem(tool).tool, () => 0.5).length > 0;
       if (sure) expect(total, `${b.name} gave nothing`).toBeGreaterThan(0);
     }
-  }, 180_000);
+  }, 420_000); // one session per kind of block: the time grows with the amount of content
 });

@@ -1,5 +1,6 @@
 import {
   B,
+  GROVE,
   BED_DIRS,
   BLOCKS,
   IS_LIQUID,
@@ -8,9 +9,19 @@ import {
   IS_SOLID,
   bedId,
   bedInfo,
+  buttonBase,
   buttonInfo,
+  cakeInfo,
+  campfireId,
+  campfireInfo,
+  chestId,
+  isChest,
+  cocoaId,
+  cocoaInfo,
   doorInfo,
   gateId,
+  gateInfo,
+  gateKind,
   ladderId,
   ladderInfo,
   lanternId,
@@ -25,6 +36,15 @@ import {
   stairId,
   stairInfo,
   trapdoorId,
+  trapdoorInfo,
+  trapdoorKind,
+  bannerId,
+  bannerInfo,
+  candleInfo,
+  potInfo,
+  signId,
+  signInfo,
+  pillarFor,
 } from './blocks';
 import { canFireStay } from './fire';
 import type { BlockReader } from './physics';
@@ -40,7 +60,42 @@ export function isTorch(id: number): boolean {
 }
 
 export function isCrop(id: number): boolean {
-  return id >= B.WHEAT_0 && id <= B.WHEAT_3;
+  return (id >= B.WHEAT_0 && id <= B.WHEAT_3) || (id >= B.POTATO_0 && id <= B.POTATO_3) || (id >= B.CARROT_0 && id <= B.CARROT_3) || (id >= B.MELON_STEM_0 && id <= B.PUMPKIN_STEM_3) || (id >= B.BEETROOT_0 && id <= B.BEETROOT_3);
+}
+
+/** A crop that still has a stage left to grow into. */
+export function isYoungCrop(id: number): boolean {
+  const pod = cocoaInfo(id);
+  if (pod) return pod.stage < 2;
+  return (
+    (id >= B.WHEAT_0 && id < B.WHEAT_3) ||
+    (id >= B.POTATO_0 && id < B.POTATO_3) ||
+    (id >= B.CARROT_0 && id < B.CARROT_3) ||
+    (id >= B.MELON_STEM_0 && id < B.MELON_STEM_3) ||
+    (id >= B.PUMPKIN_STEM_0 && id < B.PUMPKIN_STEM_3) ||
+    (id >= B.BEETROOT_0 && id < B.BEETROOT_3) ||
+    (id >= B.SWEET_BERRY_0 && id < B.SWEET_BERRY_3)
+  );
+}
+
+/** The fully grown stage of this crop. */
+export function ripeCrop(id: number): number {
+  const pod = cocoaInfo(id);
+  if (pod) return cocoaId(pod.facing, 2);
+  if (id >= B.POTATO_0 && id <= B.POTATO_3) return B.POTATO_3;
+  if (id >= B.CARROT_0 && id <= B.CARROT_3) return B.CARROT_3;
+  if (id >= B.MELON_STEM_0 && id <= B.MELON_STEM_3) return B.MELON_STEM_3;
+  if (id >= B.PUMPKIN_STEM_0 && id <= B.PUMPKIN_STEM_3) return B.PUMPKIN_STEM_3;
+  if (id >= B.BEETROOT_0 && id <= B.BEETROOT_3) return B.BEETROOT_3;
+  if (id >= B.SWEET_BERRY_0 && id <= B.SWEET_BERRY_3) return B.SWEET_BERRY_3;
+  return B.WHEAT_3;
+}
+
+/** The fruit a melon or pumpkin stem grows, or 0 when this block is not one. */
+export function stemFruit(id: number): number {
+  if (id >= B.MELON_STEM_0 && id <= B.MELON_STEM_3) return B.MELON;
+  if (id >= B.PUMPKIN_STEM_0 && id <= B.PUMPKIN_STEM_3) return B.PUMPKIN;
+  return 0;
 }
 
 /** Offset from a wall torch to the block it is attached to. */
@@ -61,9 +116,9 @@ export function torchSupport(id: number): [number, number, number] {
   }
 }
 
-const SOIL = new Set<number>([B.GRASS, B.DIRT, B.SNOW, B.FARMLAND, B.PODZOL, B.COARSE_DIRT, B.MYCELIUM, B.MUD, B.MOSS_BLOCK]);
+const SOIL = new Set<number>([B.GRASS, B.DIRT, B.SNOW, B.FARMLAND, B.PODZOL, B.COARSE_DIRT, B.MYCELIUM, B.MUD, B.MOSS_BLOCK, GROVE.mangroveRoots, GROVE.paleMoss, GROVE.rootedDirt]);
 /** Cave growths that hang from the roof instead of standing on the floor. */
-const HANGING = new Set<number>([B.CAVE_VINES, B.CAVE_VINES_BERRIES, B.SPORE_BLOSSOM, B.STALACTITE_BASE, B.STALACTITE_TIP]);
+const HANGING = new Set<number>([B.CAVE_VINES, B.CAVE_VINES_BERRIES, B.SPORE_BLOSSOM, B.STALACTITE_BASE, B.STALACTITE_TIP, GROVE.hangingRoots, GROVE.paleHangingMoss]);
 const DESERT_SOIL = new Set<number>([B.SAND, B.DIRT, B.RED_SAND, B.COARSE_DIRT, B.TERRACOTTA, B.TERRACOTTA_ORANGE, B.TERRACOTTA_YELLOW, B.TERRACOTTA_RED, B.TERRACOTTA_WHITE, B.TERRACOTTA_BROWN, B.TERRACOTTA_LIGHT_GRAY]);
 /** What reeds grow from (next to water). */
 const REED_SOIL = new Set<number>([B.GRASS, B.DIRT, B.SAND, B.RED_SAND, B.PODZOL, B.COARSE_DIRT, B.MUD, B.CLAY]);
@@ -104,6 +159,19 @@ export function canStayAt(id: number, world: BlockReader, x: number, y: number, 
     }
     return other === bedId(true, bed.dir);
   }
+  const pod = cocoaInfo(id);
+  if (pod) {
+    const [dx, dz] = BED_DIRS[pod.facing];
+    return world.getBlock(x + dx, y, z + dz) === B.JUNGLE_LOG;
+  }
+  if (cakeInfo(id)) {
+    const below = world.getBlock(x, y - 1, z);
+    return IS_SOLID[below] === 1 && cakeInfo(below) === null;
+  }
+  if (campfireInfo(id)) {
+    const below = world.getBlock(x, y - 1, z);
+    return IS_SOLID[below] === 1 && campfireInfo(below) === null;
+  }
   const ladder = ladderInfo(id);
   if (ladder) {
     // A ladder hangs on the side of a solid block: the wall is on the side it faces.
@@ -121,6 +189,10 @@ export function canStayAt(id: number, world: BlockReader, x: number, y: number, 
     return IS_SOLID[world.getBlock(x, y - 1, z)] === 1 && !!above && above.upper && above.facing === door.facing;
   }
   if (id === B.FIRE) return canFireStay((a, b, c) => world.getBlock(a, b, c), x, y, z);
+  if (id >= B.SWEET_BERRY_0 && id <= B.SWEET_BERRY_3) {
+    const below = world.getBlock(x, y - 1, z);
+    return below === B.GRASS || below === B.DIRT || below === B.FARMLAND;
+  }
   if (isCrop(id)) return world.getBlock(x, y - 1, z) === B.FARMLAND;
   if (id === B.DEAD_BUSH) return DESERT_SOIL.has(world.getBlock(x, y - 1, z));
   if (id === B.CACTUS) {
@@ -130,6 +202,11 @@ export function canStayAt(id: number, world: BlockReader, x: number, y: number, 
     return !(IS_SOLID[world.getBlock(x + 1, y, z)] || IS_SOLID[world.getBlock(x - 1, y, z)] || IS_SOLID[world.getBlock(x, y, z + 1)] || IS_SOLID[world.getBlock(x, y, z - 1)]);
   }
   if (id === B.COBWEB) return true;
+  if (id === GROVE.bamboo) {
+    const below = world.getBlock(x, y - 1, z);
+    if (below === GROVE.bamboo) return true;
+    return below === B.GRASS || below === B.DIRT || below === B.SAND || below === B.RED_SAND || below === B.PODZOL || below === B.COARSE_DIRT || below === B.MUD || below === B.GRAVEL || below === B.MOSS_BLOCK || below === GROVE.rootedDirt;
+  }
   if (id === B.SUGAR_CANE) {
     // Reeds stand on soil with water at its foot (or on another reed).
     const below = world.getBlock(x, y - 1, z);
@@ -154,16 +231,31 @@ export function canStayAt(id: number, world: BlockReader, x: number, y: number, 
     const below = world.getBlock(x, y - 1, z);
     return IS_SOLID[below] === 1 || (id !== B.AMETHYST_CLUSTER && below === B.STALAGMITE_BASE);
   }
+  if (candleInfo(id) || potInfo(id)) return IS_SOLID[world.getBlock(x, y - 1, z)] === 1;
+  const hung = bannerInfo(id) ?? signInfo(id);
+  if (hung) {
+    if (!hung.wall) return IS_SOLID[world.getBlock(x, y - 1, z)] === 1;
+    const [dx, dz] = BED_DIRS[hung.facing];
+    return IS_SOLID[world.getBlock(x + dx, y, z + dz)] === 1;
+  }
   if (BLOCKS[id].shape === 'flat') return IS_SOLID[world.getBlock(x, y - 1, z)] === 1;
   if (BLOCKS[id].shape === 'cross') return SOIL.has(world.getBlock(x, y - 1, z));
   return true;
 }
 
 /**
+ * The top half of a stair, slab or trapdoor. The underside of a block is always the top half. A side is the top
+ * half when the cursor is above the middle of the block you see. `drop` is how far that block hangs below its cell.
+ */
+export function placesUpper(ny: number, fy = 0.5, drop = 0): boolean {
+  return ny < 0 || (ny === 0 && fy + drop > 0.5);
+}
+
+/**
  * The block that actually gets placed when the player uses `block` on the face
  * of another block with the given normal (null = cannot be placed there).
  */
-export function placementFor(block: number, nx: number, ny: number, nz: number, yaw = 0, fy = 0.5): number | null {
+export function placementFor(block: number, nx: number, ny: number, nz: number, yaw = 0, fy = 0.5, drop = 0): number | null {
   if (block === B.RAIL_X || block === B.RAIL_Z) {
     // Rails lie on a block's top; clicking the side of a block puts one beside it (it needs a floor
     // there, which `canStayAt` checks). Never on a ceiling.
@@ -177,9 +269,17 @@ export function placementFor(block: number, nx: number, ny: number, nz: number, 
   if (rtorchInfo(block) || leverInfo(block) || buttonInfo(block)) {
     // Stuck to the floor or to the side of a block; never to a ceiling.
     if (ny < 0) return null;
-    const base = rtorchInfo(block) ? B.RTORCH_BASE : leverInfo(block) ? B.LEVER_BASE : B.BUTTON_BASE;
+    const base = rtorchInfo(block) ? B.RTORCH_BASE : leverInfo(block) ? B.LEVER_BASE : buttonBase(block);
     const lit = !!rtorchInfo(block);
     return mountedId(base, ny > 0 ? 0 : dirOf(-nx, -nz) + 1, lit);
+  }
+  if (block === B.CAVE_VINES) {
+    if (ny >= 0) return null;
+    return B.CAVE_VINES;
+  }
+  if (block === cocoaId(0, 0)) {
+    if (ny !== 0) return null;
+    return cocoaId(dirOf(-nx, -nz), 0);
   }
   if (isTorch(block)) {
     if (ny > 0) return B.TORCH;
@@ -198,14 +298,30 @@ export function placementFor(block: number, nx: number, ny: number, nz: number, 
   }
   // Building blocks take their orientation from where you click and which way you look.
   const look = lookDir(yaw);
-  const upper = ny < 0 || (ny === 0 && fy > 0.5);
+  if (isChest(block)) return chestId(look ^ 1, 0);
+  const upper = placesUpper(ny, fy, drop);
   const slab = slabInfo(block);
   if (slab) return slabId(slab.mat, upper);
   const stair = stairInfo(block);
   if (stair) return stairId(stair.mat, upper, look);
-  if (trapdoorInfoOf(block)) return trapdoorId(upper, false, ny === 0 ? dirOf(-nx, -nz) : look);
+  if (trapdoorInfoOf(block)) return trapdoorId(upper, false, ny === 0 ? dirOf(-nx, -nz) : look, trapdoorKind(block));
   if (ladderInfo(block)) return ny === 0 ? ladderId(dirOf(-nx, -nz)) : null;
-  if (block === gateId(false, 0)) return gateId(false, look);
+  const gate = gateInfo(block);
+  if (gate && !gate.open && gate.facing === 0) return gateId(false, look, gateKind(block));
+  if (campfireInfo(block)) return campfireId(look, true);
+  const banner = bannerInfo(block);
+  if (banner && !banner.wall && banner.facing === 0) {
+    if (ny < 0) return null;
+    return bannerId(banner.color, ny === 0 ? dirOf(-nx, -nz) : look, ny === 0);
+  }
+  const sign = signInfo(block);
+  if (sign && !sign.wall && sign.facing === 0) {
+    if (ny < 0) return null;
+    return signId(sign.wood, ny === 0 ? dirOf(-nx, -nz) : look, ny === 0);
+  }
+  // Logs and pillars take the axis of the face they were placed on. The top and the bottom leave them upright.
+  const turned = pillarFor(block, nx, ny, nz);
+  if (turned) return turned;
   return block;
 }
 
@@ -220,7 +336,39 @@ export function lookDir(yaw: number): number {
 }
 
 function trapdoorInfoOf(block: number): boolean {
-  return block === trapdoorId(false, false, 0);
+  const t = trapdoorInfo(block);
+  return !!t && !t.top && !t.open && t.facing === 0;
+}
+
+const FRUIT_SOIL = new Set<number>([B.FARMLAND, B.DIRT, B.GRASS]);
+const FRUIT_DIRS: readonly [number, number][] = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+];
+
+/**
+ * A cave vine grows. The free tip lengthens by one block. A bare vine with nowhere to grow gains berries.
+ * Returns whether anything changed.
+ */
+export function growVine(world: BlockReader & { setBlock(x: number, y: number, z: number, id: number): boolean }, x: number, y: number, z: number, id: number): boolean {
+  if (id !== B.CAVE_VINES && id !== B.CAVE_VINES_BERRIES) return false;
+  if (y > 1 && world.getBlock(x, y - 1, z) === B.AIR) return world.setBlock(x, y - 1, z, id === B.CAVE_VINES ? B.CAVE_VINES_BERRIES : B.CAVE_VINES);
+  if (id === B.CAVE_VINES) return world.setBlock(x, y, z, B.CAVE_VINES_BERRIES);
+  return false;
+}
+
+/** A ripe stem grows one fruit on a random neighbouring dirt, grass or farmland. */
+export function growFruit(world: BlockReader & { setBlock(x: number, y: number, z: number, id: number): boolean }, x: number, y: number, z: number, stem: number, rand: () => number): boolean {
+  const fruit = stemFruit(stem);
+  if (!fruit) return false;
+  const [dx, dz] = FRUIT_DIRS[Math.floor(rand() * 4)]!;
+  const nx = x + dx;
+  const nz = z + dz;
+  if (world.getBlock(nx, y, nz) !== B.AIR) return false;
+  if (!FRUIT_SOIL.has(world.getBlock(nx, y - 1, nz))) return false;
+  return world.setBlock(nx, y, nz, fruit);
 }
 
 /** Soil a hoe can till. */
@@ -230,3 +378,22 @@ export function isTillable(id: number): boolean {
 
 /** Mean seconds for a crop to advance one growth stage. */
 export const CROP_STAGE_SECONDS = 45;
+/** Mean seconds for a cactus or a sugar cane to grow one block taller. */
+export const COLUMN_GROW_SECONDS = 80;
+/** How tall a cactus or a sugar cane grows, counting the block already there. */
+export const COLUMN_MAX = 3;
+
+/** Grow a cactus or sugar cane one block up, when there is room and it is not already full height. */
+export function growColumn(world: BlockReader & { setBlock(x: number, y: number, z: number, id: number): boolean }, x: number, y: number, z: number, id: number): boolean {
+  if (id !== B.CACTUS && id !== B.SUGAR_CANE && id !== GROVE.bamboo) return false;
+  if (world.getBlock(x, y + 1, z) !== B.AIR) return false;
+  const max = id === GROVE.bamboo ? 12 : COLUMN_MAX;
+  let height = 1;
+  for (let dy = 1; dy < max; dy++) {
+    if (world.getBlock(x, y - dy, z) !== id) break;
+    height++;
+  }
+  if (height >= max) return false;
+  if (!canStayAt(id, world, x, y + 1, z)) return false;
+  return world.setBlock(x, y + 1, z, id);
+}

@@ -13,8 +13,8 @@ const WHITE = new THREE.Color(1, 1, 1);
  * stands still while it does (on a busy card for seconds): a body in a new kind of gear, the mount, or the outline of the block
  * under the crosshair would each freeze the game the first time they appeared. Once built, `ShaderKeeper` keeps the shaders.
  *
- * What the world already has but keeps hidden (the outline, the cracks, the rain, your own body in first person) is not built
- * again: `show` switches it on for the frames of the warm-up and `hide` puts it back (see `main.ts`).
+ * What the world already has but keeps hidden (the outline, the cracks, the rain, water and glass, your own body in first
+ * person) is not built again: `show` switches it on for the frames of the warm-up and `hide` puts it back (see `main.ts`).
  */
 export interface FigureWarmParts {
   /** Makes the model of a held item or a shield (see `HeldItem.figureModel`). */
@@ -23,6 +23,10 @@ export interface FigureWarmParts {
   mobs: () => { group: THREE.Group; free: () => void };
   /** Builds the shaders of the inventory figure (see `warmPreview`). */
   inventory: () => void;
+  /** Puts up one window of the interface for the loading screen (steps 0 to 2: the tabs of the inventory; 3: the log, codex, social and party windows), and takes them down (-1). */
+  windows: (step: number) => void;
+  /** A fishing line with all its parts (see BobberRenderer.warm). */
+  bobber: () => { group: THREE.Group; free: () => void };
   /** Draws the entity shadows once (see `SunShadows.warmEntities`). */
   shadows: () => void;
 }
@@ -47,6 +51,7 @@ export class FigureWarm {
   private fenrir: Fenrir | null = null;
   private readonly hidden: { o: THREE.Object3D; visible: boolean; culled: boolean; count: number }[] = [];
   private free: (() => void) | null = null;
+  private freeLine: (() => void) | null = null;
   private bits: THREE.InstancedMesh | null = null;
   private readonly stages: Stage[];
   private index = -1;
@@ -57,6 +62,12 @@ export class FigureWarm {
     this.stages = [
       { name: 'characters', frames: 1, run: () => this.buildCharacters() },
       { name: 'the inventory', frames: 1, run: () => this.parts.inventory() },
+      // The browser paints each window the first time it is on the screen, and stands still while it does (a tenth of a second or more).
+      { name: 'the windows', frames: 3, run: () => this.parts.windows(0) },
+      { name: 'the windows', frames: 3, run: () => this.parts.windows(1) },
+      { name: 'the windows', frames: 3, run: () => this.parts.windows(2) },
+      { name: 'the windows', frames: 3, run: () => this.parts.windows(3) },
+      { name: 'the windows', frames: 1, run: () => this.parts.windows(-1) },
       { name: 'the mount', frames: 1, run: () => this.buildMount() },
       { name: 'creatures', frames: 1, run: () => this.buildCreatures() },
       { name: 'effects', frames: 3, world: true, run: () => this.parts.shadows() },
@@ -108,6 +119,11 @@ export class FigureWarm {
     mobs.group.position.z = 12;
     this.open(mobs.group);
     this.free = mobs.free;
+    // A fishing line, with the rings and bubbles of a bite.
+    const line = this.parts.bobber();
+    line.group.position.set(-8, 0, 4);
+    this.open(line.group);
+    this.freeLine = line.free;
     // The cubes a dying figure falls apart into (DeathFx): their shader is a different one, they are the first of their kind.
     const bits = new THREE.InstancedMesh(new THREE.BoxGeometry(0.01, 0.01, 0.01), new THREE.MeshBasicMaterial({ vertexColors: true }), 1);
     bits.setColorAt(0, WHITE);
@@ -175,6 +191,8 @@ export class FigureWarm {
     this.fenrir = null;
     this.free?.();
     this.free = null;
+    this.freeLine?.();
+    this.freeLine = null;
     if (this.bits) {
       this.bits.geometry.dispose();
       (this.bits.material as THREE.Material).dispose();

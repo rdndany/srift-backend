@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ATLAS_COLS, ATLAS_ROWS, GRASS_BASE, WATER_BASE, paletteColor, TINT_WATER_BASE, WATER_DEPTH_FLAG, WATER_DEPTH_STRIDE, tileIndex } from '@solrift/shared';
+import { ATLAS_COLS, ATLAS_ROWS, DYE_NAMES, GRASS_BASE, WATER_BASE, paletteColor, TINT_WATER_BASE, WATER_DEPTH_FLAG, WATER_DEPTH_STRIDE, tileIndex } from '@solrift/shared';
 import type { Atlas } from './atlas';
 
 /**
@@ -17,7 +17,7 @@ import type { Atlas } from './atlas';
 const tiles = (...names: string[]): string => names.map((n) => `t == ${tileIndex(n)}.0`).join(' || ');
 const LEAF_TEST = tiles('leaves', 'birch_leaves', 'spruce_leaves', 'acacia_leaves', 'jungle_leaves', 'dark_oak_leaves', 'cherry_leaves');
 const LEAF_TEST_FRAG = LEAF_TEST.replaceAll('t ==', 'tile ==');
-const PLANT_TEST = tiles('tall_grass', 'rose', 'dandelion', 'sapling', 'birch_sapling', 'spruce_sapling', 'acacia_sapling', 'jungle_sapling', 'dark_oak_sapling', 'cherry_sapling', 'fern', 'tulip_red', 'tulip_orange', 'tulip_white', 'tulip_pink', 'oxeye_daisy', 'cornflower', 'allium', 'azure_bluet', 'blue_orchid', 'sugar_cane', 'wheat_0', 'wheat_1', 'wheat_2', 'wheat_3');
+const PLANT_TEST = tiles('tall_grass', 'rose', 'dandelion', 'sapling', 'birch_sapling', 'spruce_sapling', 'acacia_sapling', 'jungle_sapling', 'dark_oak_sapling', 'cherry_sapling', 'pale_oak_sapling', 'mangrove_propagule', 'azalea', 'flowering_azalea', 'fern', 'tulip_red', 'tulip_orange', 'tulip_white', 'tulip_pink', 'oxeye_daisy', 'cornflower', 'allium', 'azure_bluet', 'blue_orchid', 'sugar_cane', 'wheat_0', 'wheat_1', 'wheat_2', 'wheat_3', 'candle', ...DYE_NAMES.map((n) => `candle_${n}`), ...DYE_NAMES.map((n) => `banner_${n}`));
 
 /**
  * The air: the sky's colour in a direction, and how much of it a thing at a distance is lost in.
@@ -39,6 +39,15 @@ vec3 skyAt(vec3 d) {
   return col + uGlow * (pow(s, 5.0) * 0.45 * (0.35 + 0.65 * low) + pow(s, 48.0) * 0.55);
 }
 
+/** The sky for a mirror of rippled water: without the tight glow round the sun, which the ripples would break into flickering dashes. */
+vec3 skyAtSoft(vec3 d) {
+  float h = max(d.y, 0.0);
+  vec3 col = mix(uFogColor, uFogZenith, pow(h, 0.5));
+  float s = max(dot(d, uSunDir), 0.0);
+  float low = 1.0 - smoothstep(0.0, 0.55, h);
+  return col + uGlow * pow(s, 3.0) * 0.3 * (0.35 + 0.65 * low);
+}
+
 /** 0 clear .. 1 lost in the sky. */
 float fogAmount(float d, float y) {
   return smoothstep(uFogNear, uFogFar, d);
@@ -56,13 +65,18 @@ varying float vShell;
 varying vec4 vLight;
 varying float vDepth;
 varying vec3 vWorld;
+varying float vExtra;
 
 void main() {
   vUv = uv;
-  // Tiles of the leaves' outer fuzz are numbered 1024 up (see the mesher).
-  float fuzz = step(1000.0, aTile);
+  // The tile number also carries flags (see the mesher): water's shore sides, or how deep the water over a floor is (every 4096),
+  // and the leaves' outer fuzz (1024).
+  float ex = floor(aTile / 4096.0 + 0.001);
+  float at = aTile - ex * 4096.0;
+  vExtra = ex;
+  float fuzz = step(1000.0, at);
   vShell = fuzz;
-  vTile = aTile - 1024.0 * fuzz;
+  vTile = at - 1024.0 * fuzz;
   vLight = aLight;
   vec3 wp = (modelMatrix * vec4(position, 1.0)).xyz;
   vWorld = wp;
@@ -138,11 +152,13 @@ varying float vShell;
 varying vec4 vLight;
 varying float vDepth;
 varying vec3 vWorld;
+varying float vExtra;
 
 const float COLS = ${ATLAS_COLS}.0;
 const float ROWS = ${ATLAS_ROWS}.0;
 // Fire is four tiles in a row; every flame shows the same frame, a few times a second.
 const float FIRE0 = ${tileIndex('fire_0')}.0;
+const float FLAME0 = ${tileIndex('torch_flame_0')}.0;
 const float LAVA = ${tileIndex('lava')}.0;
 
 float hash12(vec2 p) {
@@ -157,6 +173,22 @@ float vnoise3(vec3 p) {
   float z1 = z0 + 17.0;
   float a = mix(mix(hash12(i.xy + z0), hash12(i.xy + vec2(1.0, 0.0) + z0), u.x), mix(hash12(i.xy + vec2(0.0, 1.0) + z0), hash12(i.xy + vec2(1.0, 1.0) + z0), u.x), u.y);
   float b = mix(mix(hash12(i.xy + z1), hash12(i.xy + vec2(1.0, 0.0) + z1), u.x), mix(hash12(i.xy + vec2(0.0, 1.0) + z1), hash12(i.xy + vec2(1.0, 1.0) + z1), u.x), u.y);
+  return mix(a, b, u.z);
+}
+/** A hash that stays clean far from the origin (the sin hash above bands into stripes at a few hundred blocks): for the water. */
+float whash(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+/** Smooth noise like vnoise3, on the clean hash. */
+float wnoise3(vec3 p) {
+  vec3 i = floor(p);
+  vec3 u = smoothstep(0.0, 1.0, fract(p));
+  vec2 zo = vec2(37.0, 17.0) * i.z;
+  float a = mix(mix(whash(i.xy + zo), whash(i.xy + vec2(1.0, 0.0) + zo), u.x), mix(whash(i.xy + vec2(0.0, 1.0) + zo), whash(i.xy + vec2(1.0, 1.0) + zo), u.x), u.y);
+  vec2 zp = zo + vec2(37.0, 17.0);
+  float b = mix(mix(whash(i.xy + zp), whash(i.xy + vec2(1.0, 0.0) + zp), u.x), mix(whash(i.xy + vec2(0.0, 1.0) + zp), whash(i.xy + vec2(1.0, 1.0) + zp), u.x), u.y);
   return mix(a, b, u.z);
 }
 /** The share of a w x w texel square (in texels of the map) that the sun reaches: exact coverage, so a shadow's edge is smooth and steady. */
@@ -241,9 +273,45 @@ float sunShadow(vec3 wp, vec3 n, float ndl) {
   return min(ent, mix(mix(1.0, l2, cover2), l1, cover1));
 }
 
+/** One swell of the water: its direction, how tight and how fast it runs, how high it stands; adds to the slope and the height. */
+void swell(vec2 p, vec2 d, float f, float s, float a, float t, inout vec2 g, inout float h) {
+  float ph = dot(p, d) * f + t * s;
+  g += d * (cos(ph) * a * f);
+  h += sin(ph) * a;
+}
+
+/** The slope of the water's surface at a point (and its height in h): five swells, bent by slower drifts. */
+vec2 waterSlope(vec2 p, float t, out float h) {
+  p += vec2(sin(p.y * 0.35 + t * 0.4), cos(p.x * 0.31 - t * 0.35)) * 0.9;
+  vec2 g = vec2(0.0);
+  h = 0.0;
+  swell(p, vec2(0.80, 0.60), 1.3, 1.1, 0.50, t, g, h);
+  swell(p, vec2(-0.60, 0.80), 2.1, 1.5, 0.35, t, g, h);
+  swell(p, vec2(0.30, -0.95), 3.7, 2.0, 0.14, t, g, h);
+  swell(p, vec2(-0.90, -0.40), 5.9, 2.7, 0.06, t, g, h);
+  swell(p, vec2(0.95, 0.30), 9.0, 3.4, 0.02, t, g, h);
+  return g;
+}
+
+/** The net of bright lines that sunlight makes on the bottom through rippling water (tiles every 1 / 0.12 blocks). */
+float caustic(vec2 uv, float time) {
+  vec2 p = mod(uv * 6.28318530718, 6.28318530718) - 250.0;
+  vec2 i = p;
+  float c = 1.0;
+  for (int n = 0; n < 4; n++) {
+    float t = time * (1.0 - (3.5 / float(n + 1)));
+    i = p + vec2(cos(t - i.x) + sin(t + i.y), sin(t - i.y) + cos(t + i.x));
+    c += 1.0 / length(vec2(p.x / (sin(i.x + t) / 0.005), p.y / (cos(i.y + t) / 0.005)));
+  }
+  c /= 4.0;
+  c = 1.17 - pow(c, 1.4);
+  return pow(abs(c), 8.0);
+}
+
 void main() {
   float tile = floor(vTile + 0.5);
   if (tile >= FIRE0 && tile < FIRE0 + 4.0) tile = FIRE0 + mod(floor(uTime * 9.0), 4.0);
+  if (tile >= FLAME0 && tile < FLAME0 + 4.0) tile = FLAME0 + mod(floor(uTime * 9.0), 4.0);
   float col = mod(tile, COLS);
   float row = floor(tile / COLS);
   vec2 f = clamp(fract(vUv), 0.0005, 0.9995);
@@ -320,41 +388,77 @@ void main() {
   vec3 V = normalize(toCam);
 
   if (water) {
-    // Waves, snapped to the texel grid so they read as pixels: three swells cross at different angles and speeds, each
-    // bending the one before, so the surface rolls instead of repeating.
     float top = step(0.5, n.y);
-    vec2 q = floor(vWorld.xz * 16.0) / 16.0;
     float tm = uTime;
-    float w1 = sin(dot(q, vec2(1.7, 0.6)) + tm * 1.3 + sin(q.y * 1.1 + tm * 0.7) * 1.6);
-    float w2 = sin(dot(q, vec2(-0.5, 2.3)) - tm * 1.7 + sin(q.x * 1.9 - tm * 0.9) * 1.4);
-    float w3 = sin(dot(q, vec2(3.1, -2.2)) + tm * 2.6 + sin(q.x * 0.7 + q.y * 0.9 + tm * 0.5) * 2.0);
-    float swell = (w1 + w2) * 0.5 + w3 * 0.25;
+    vec2 wp2 = vWorld.xz;
+    // The pixels of the water texture are not wanted: the body of the water is one smooth colour (the biome's), so no square shows.
+    vec3 palW = texture2D(uPalette, vec2((ti + 0.5) / 256.0, 0.5)).rgb;
+    palW = mix(palW, vec3(dot(palW, vec3(0.3, 0.59, 0.11))), 0.28);
+    tex.rgb = mix(tex.rgb, palW, 0.9);
+    // Slow, wide patches of lighter and darker water, so a big sea is not one flat sheet.
+    float blotch = wnoise3(vec3(wp2 * 0.045, tm * 0.04)) * 0.6 + wnoise3(vec3(wp2 * 0.13 + 7.0, tm * 0.07)) * 0.4;
+    tex.rgb *= 0.9 + 0.2 * blotch;
 
-    // Depth colour: pale and see-through in the shallows, deep blue and nearly opaque in the deeps.
-    float deep = smoothstep(0.0, 1.0, wdepth / 3.0);
-    tex.rgb *= mix(vec3(1.2, 1.26, 1.04), vec3(0.5, 0.66, 0.9), deep);
-    tex.rgb *= 1.0 + swell * 0.05 * top;
-    tex.rgb += 0.07 * smoothstep(0.85, 1.2, swell) * top;
-
-    vec3 nw = normalize(vec3((w1 * 0.06 + w3 * 0.03) * top, 1.0, (w2 * 0.06 - w3 * 0.03) * top));
+    // Swells: a handful run different ways at different speeds, bent by slow drifts, so the surface rolls instead of repeating.
+    // They are smooth (never cut along the blocks). Far away the small swells fade, so the sea does not shimmer.
+    float wh;
+    vec2 wg = waterSlope(wp2, tm, wh);
+    float nearF = 1.0 - smoothstep(40.0, 190.0, vDepth);
+    wg *= 0.3 + 0.7 * nearF;
+    vec3 nw = normalize(vec3(-wg.x * 0.038, 1.0, -wg.y * 0.038));
     nw = mix(n, nw, top);
-    float fres = pow(1.0 - clamp(dot(V, nw), 0.0, 1.0), 3.0);
-    tex.rgb = mix(tex.rgb, uSkyReflect, fres * 0.6);
-    alpha = mix(alpha * mix(0.62, 0.95, sqrt(deep)), 0.98, fres);
 
-    // Soft shores: where the water is one block deep, frothy flecks drift in and out over the sand.
-    float shallow = (1.0 - step(0.5, wdepth)) * top;
-    float fp = sin(q.x * 3.1 + tm * 0.9 + sin(q.y * 2.3 + tm * 0.6) * 1.5) * sin(q.y * 2.7 - tm * 0.7 + sin(q.x * 1.7 - tm * 0.4) * 1.2);
-    float foam = smoothstep(0.38, 0.8, fp) * shallow;
-    tex.rgb = mix(tex.rgb, vec3(1.0), foam * 0.6);
-    alpha = mix(alpha, 0.95, foam);
+    // Where is the shore? The mesher says which sides of this block of water meet land (bits of vExtra).
+    float edgeD = 9.0;
+    if (top > 0.5) {
+      vec2 cp = fract(vWorld.xz);
+      float m = vExtra;
+      if (mod(m, 2.0) > 0.5) edgeD = min(edgeD, cp.x);
+      if (mod(floor(m / 2.0), 2.0) > 0.5) edgeD = min(edgeD, 1.0 - cp.x);
+      if (mod(floor(m / 4.0), 2.0) > 0.5) edgeD = min(edgeD, cp.y);
+      if (mod(floor(m / 8.0), 2.0) > 0.5) edgeD = min(edgeD, 1.0 - cp.y);
+      // The line of the shore wanders, so it is not a ruler along the edge of the blocks.
+      edgeD += (wnoise3(vec3(wp2 * 1.2, 0.0)) - 0.5) * 0.2;
+    }
 
-    // Glints: a hard shine where the waves mirror the sun, and pixel flecks that twinkle in its path.
+    // Depth colour: lighter and greener where it is shallow or by a shore, deep dark blue where it is deep. The steps between the
+    // depth classes are kept small, so the blocks of the sea floor do not show through as squares.
+    float deep = mix(0.9, 1.0, wdepth / 3.0);
+    deep *= mix(0.7, 1.0, smoothstep(0.0, 0.6, edgeD));
+    tex.rgb *= mix(vec3(0.46, 0.64, 0.68), vec3(0.15, 0.24, 0.4), deep);
+    // The light sinks into the swells: troughs a little darker, crests a little brighter.
+    tex.rgb *= 1.0 + wh * 0.03 * top;
+    tex.rgb += vec3(0.0, 0.035, 0.03) * smoothstep(0.7, 1.4, wh) * top * (0.4 + 0.6 * deep);
+
+    // The sky in the mirror: a flat surface shows the sky only at a grazing look, a rippled one a little sooner.
+    float cosT = clamp(dot(V, nw), 0.0, 1.0);
+    float fres = clamp(0.04 + 0.96 * pow(1.0 - cosT, 4.0), 0.0, 1.0);
     vec3 R = reflect(-V, nw);
+    R.y = abs(R.y);
+    vec3 mirror = mix(uSkyReflect, skyAtSoft(normalize(R)), 0.75);
+    tex.rgb = mix(tex.rgb, mirror * 0.8, fres * 0.7);
+    // Nearly solid: the bottom only hints through, more where it is shallow.
+    // (Not less near the shore: the sand under the shallows would show through as pale grains and streaks along the edge.)
+    alpha = mix(0.99, 0.998, deep);
+    alpha = mix(alpha, 1.0, fres);
+
+    // (No foam line along the shore: any bright band there flickers and shows the edges of the blocks. The shore is only a lighter, greener shallow, see edgeD above.)
+
+    // Glints: a hard shine where the swells mirror the sun and a broad soft glow around it.
     float sp = max(dot(R, uLightDir), 0.0);
-    tex.rgb += uSun * pow(sp, 140.0) * 6.0 * uGlint * top;
-    float tw = hash12(q * 7.0 + floor(tm * 4.0 + q.x));
-    tex.rgb += uSun * step(0.94, tw) * pow(sp, 6.0) * 1.5 * uGlint * top;
+    tex.rgb += uSun * (pow(sp, 40.0) * 1.0 + pow(sp, 14.0) * 0.1) * uGlint * top;
+
+    // From underneath, the surface is a mirror of the bottom except in a round window straight up that shows the sky.
+    if (cameraPosition.y < vWorld.y && top > 0.5) {
+      float up = clamp(-V.y, 0.0, 1.0);
+      vec2 dxz = -V.xz * 1.33;
+      float w = smoothstep(0.6, 0.72, up);
+      vec3 win = uSkyReflect * (0.85 + 0.08 * wh) + uSun * pow(max(dot(normalize(vec3(dxz.x, sqrt(max(1.0 - dot(dxz, dxz), 0.0)), dxz.y)), uLightDir), 0.0), 40.0) * uGlint;
+      tex.rgb = mix(uFogColor * 0.9, win, w);
+      alpha = 0.97;
+    }
+    // (The material's own opacity is for glass and ice: the water's is what is set above.)
+    alpha = min(alpha / max(uOpacity, 0.01), 1.0);
   }
 
   if (tile == LAVA) {
@@ -368,7 +472,8 @@ void main() {
   float sunTerm = 0.0;
   if (open > 0.01 && ndl > 0.0 && uSun.r > 0.001) {
     float sh = 1.0;
-    if (uShadowOn > 0.5) sh = sunShadow(vWorld, n, ndl);
+    // (Not on water: its surface lies a hair above the shore's blocks, so the map's depth tests flicker there in stripes.)
+    if (uShadowOn > 0.5 && !water) sh = sunShadow(vWorld, n, ndl);
     // A low sun still floods the ground (golden hour), it only fades right at grazing angles.
     sunTerm = open * smoothstep(0.0, 0.3, ndl) * sh;
   }
@@ -402,6 +507,19 @@ void main() {
 
   // Foliage keeps more of its baked shade: the creases between clumps and the underside of a crown are deep.
   vec3 rgb = tex.rgb * (leaf ? pow(vLight.r, 1.3) : vLight.r) * L;
+  // The bottom of a lake or the sea: sunlight through the ripples lays a moving net of bright lines on it, fading with depth
+  // (vExtra is 1 + the depth class of the water over this face, see the mesher).
+  if (!water && vExtra > 0.5 && vExtra < 4.5) {
+    // What is under water is darker and bluer than it looks on land, more so the deeper it lies: the water above it is dark,
+    // so a bright bottom must not shine through it and draw the blocks of the sea floor.
+    rgb *= mix(vec3(0.62, 0.78, 0.9), vec3(0.2, 0.32, 0.5), clamp((vExtra - 1.0) / 2.0 + 0.35, 0.0, 1.0));
+  }
+  // Glass stays clear face-on and picks up a cool reflection where you look along it.
+  if (aux.b > 0.5) {
+    float fres = pow(1.0 - clamp(abs(dot(V, n)), 0.0, 1.0), 1.7);
+    rgb += vec3(0.42, 0.58, 0.72) * fres * L;
+    alpha = mix(alpha, min(0.82, alpha + 0.38), fres);
+  }
   // Lit ground glows: sunlit colour is pushed towards richer saturation while the shade stays cool and calm.
   float lum = dot(rgb, vec3(0.299, 0.587, 0.114));
   rgb = mix(vec3(lum), rgb, 1.0 + 0.3 * sunTerm * smoothstep(0.0, 0.12, uSun.r));
@@ -423,8 +541,9 @@ varying vec2 vUv;
 varying float vTile;
 void main() {
   vUv = uv;
-  float fuzz = step(1000.0, aTile);
-  vTile = aTile - 1024.0 * fuzz;
+  float at = aTile - floor(aTile / 4096.0 + 0.001) * 4096.0;
+  float fuzz = step(1000.0, at);
+  vTile = at - 1024.0 * fuzz;
   gl_Position = fuzz > 0.5 ? vec4(2.0, 2.0, 2.0, 1.0) : projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }
 `;
@@ -578,7 +697,9 @@ export function createChunkMaterials(atlas: Atlas): ChunkMaterials {
     vertexShader,
     fragmentShader,
     transparent: true,
-    depthWrite: false,
+    // Writes depth (the mesher puts the water first in each chunk): what lies under the surface of the sea, a crystal or a block of ice,
+    // then fails the depth test behind it instead of being drawn over it, whatever order the faces came in.
+    depthWrite: true,
     uniforms: { ...shared, uAlphaTest: { value: 0.02 }, uOpacity: { value: 0.95 } },
   });
 

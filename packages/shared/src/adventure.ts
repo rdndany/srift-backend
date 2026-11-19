@@ -4,9 +4,10 @@ import type { LootTableName } from './loot';
 import type { MobKind } from './mobs';
 import { hash2 } from './noise';
 import { NPCS, type DummyStation, type NpcStation } from './quests';
-import { Lot, farm, house, lampPost, stall, styleFor, tower, waystone, well } from './villageBuilders';
+import { Lot, auctionHouse, farm, house, lampPost, stall, stashHouse, styleFor, tower, waystone, well } from './villageBuilders';
 import { banner, bench, cart, crates, fencedRing, flowerGarden, fountain, hayBale, obelisk, shelter, tree } from './villageDecor';
 import { buildWall } from './villageWall';
+import { GREYKEEP, buildCastle } from './castle';
 import { WorldGenerator, type Column, type InstanceRequirement } from './worldgen';
 
 /**
@@ -16,6 +17,7 @@ import { WorldGenerator, type Column, type InstanceRequirement } from './worldge
  *  - Dawnwatch, a small village on a levelled square around the origin, where the quest givers stand (the paved
  *    Landing is where you come back to after a death), and under it the Undercroft, a cave where every new
  *    character wakes, with a stair up to the village;
+ *  - Greykeep, a castle on the flat ground north of the village, gate toward the road;
  *  - the Hollow Cellar, a dungeon a little way east along a gravel road: a ruined chapel on the surface with a
  *    portal in it. The dungeon itself is not under the chapel but in a separate map, far from the land: three
  *    rooms, each with a monster cage, and a vault of treasure at the back. Every player gets a copy of their own
@@ -28,11 +30,11 @@ import { WorldGenerator, type Column, type InstanceRequirement } from './worldge
 /** The seed of the Adventure world: a fixed one, so that everybody finds the same village and the same dungeon. */
 export const ADVENTURE_SEED = 2026;
 /**
- * Which version of the made places (the village, the Undercroft, the chapel) the generator makes. A saved world keeps the
+ * Which version of the made places (the village, the Undercroft, the chapel, Greykeep) the generator makes. A saved world keeps the
  * chunks that were ever changed, as they were; a server that finds it saved an older version puts the protected places
  * back (see `WorldGenerator.mendProtected`). Raise it whenever those places are rebuilt.
  */
-export const ADVENTURE_LAYOUT = 6;
+export const ADVENTURE_LAYOUT = 11;
 /** How far the land is slid under the made places (found by a search for good ground; see the generator). */
 export const ADVENTURE_OFFSET_X = -1536;
 export const ADVENTURE_OFFSET_Z = -832;
@@ -123,6 +125,8 @@ interface Plot {
   half: number;
   skirt: number;
   g: number;
+  /** How much air to clear above the levelled ground. The castle needs more than a house. */
+  air?: number;
 }
 
 /** `set` writes everywhere, `solid` only over solid blocks, `fill` only over blocks that are not solid (air, water: it walls a cut in with rock). */
@@ -166,6 +170,8 @@ export class AdventureWorldGenerator extends WorldGenerator {
   private readonly paint = new Map<string, number>();
   private readonly voxels = new Map<string, number[]>();
   private readonly ops: Op[] = [];
+  /** Greykeep's ops, kept in order and by chunk: the castle is thousands of boxes, and most chunks touch none of them. */
+  private readonly castleOps = new Map<string, Op[]>();
   /** What the dungeon is made of (for the first copy). */
   private readonly instanceOps: Op[] = [];
   /** Where `box` writes: the land, or the dungeon while it is being planned. */
@@ -200,6 +206,8 @@ export class AdventureWorldGenerator extends WorldGenerator {
     this.plots = [
       { cx: 0, cz: 0, half: HUB_HALF, skirt: HUB_SKIRT, g: this.hubY },
       { cx: DUNGEON_X, cz: DUNGEON_Z, half: RUIN_HALF + 3, skirt: RUIN_SKIRT, g: this.ruinY },
+      // North of Dawnwatch. The flat ground stops at z=-47, short of the village, and the towers need the extra air.
+      { cx: 0, cz: -78, half: 32, skirt: 8, g: this.hubY, air: 48 },
     ];
 
     this.cages = [
@@ -209,6 +217,7 @@ export class AdventureWorldGenerator extends WorldGenerator {
     ];
 
     this.buildVillage();
+    this.buildGreykeep();
     this.buildCellarHouse();
     this.buildUndercroft();
     this.scatterGreens();
@@ -248,6 +257,8 @@ export class AdventureWorldGenerator extends WorldGenerator {
     }
     this.road(blocks, ox, oz);
     for (const op of this.ops) this.write(blocks, op, ox, oz);
+    const castle = this.castleOps.get(`${cx},${cz}`);
+    if (castle) for (const op of castle) this.write(blocks, op, ox, oz);
     return blocks;
   }
 
@@ -290,6 +301,7 @@ export class AdventureWorldGenerator extends WorldGenerator {
     if (inVillage && y < this.hubY + 0.75) return 'undercroft';
     if (bx >= YARD.x0 && bx <= YARD.x1 && bz >= YARD.z0 && bz <= YARD.z1) return 'training_yard';
     if (inVillage) return 'dawnwatch';
+    if (bx >= GREYKEEP.x0 && bx <= GREYKEEP.x1 && bz >= GREYKEEP.z0 && bz <= GREYKEEP.z1) return 'greykeep';
     return null;
   }
 
@@ -313,10 +325,11 @@ export class AdventureWorldGenerator extends WorldGenerator {
     return { x0: INSTANCE_X0, y0: 1, z0, x1: INSTANCE_X0 + INSTANCE_LENGTH - 1, y1: WORLD_HEIGHT - 1, z1: z0 + INSTANCE_STRIDE - 1 };
   }
 
-  /** Dawnwatch is safe: no monster is born in it or within `SAFE_BUFFER` blocks of it, and none that wanders in stays. */
+  /** Dawnwatch and Greykeep are safe: no monster is born in them or within `SAFE_BUFFER` blocks, and none that wanders in stays. */
   override safeFromMonsters(x: number, z: number, margin = 0): boolean {
     const h = HUB_HALF + margin;
-    return x >= -h && x < h && z >= -h && z < h;
+    if (x >= -h && x < h && z >= -h && z < h) return true;
+    return x >= GREYKEEP.x0 - margin && x <= GREYKEEP.x1 + margin && z >= GREYKEEP.z0 - margin && z <= GREYKEEP.z1 + margin;
   }
 
   /** The Hollow Cellar is not for beginners. */
@@ -368,6 +381,8 @@ export class AdventureWorldGenerator extends WorldGenerator {
     const by = Math.floor(y);
     const bz = Math.floor(z);
     if (bx >= -HUB_HALF && bx < HUB_HALF && bz >= -HUB_HALF && bz < HUB_HALF) return true;
+    // Greykeep, from bedrock to sky, so a saved world grows the castle when the layout version rises.
+    if (bx >= GREYKEEP.x0 && bx <= GREYKEEP.x1 && bz >= GREYKEEP.z0 && bz <= GREYKEEP.z1) return true;
     // The chapel: its ring and the portal in it, from bedrock to sky.
     if (Math.abs(bx - DUNGEON_X) <= RUIN_HALF && Math.abs(bz - DUNGEON_Z) <= RUIN_HALF) return true;
     // Every copy of the dungeon, whole.
@@ -403,7 +418,7 @@ export class AdventureWorldGenerator extends WorldGenerator {
         if (d > 0 && g <= SEA_LEVEL) continue;
         for (let y = Math.max(1, Math.min(natural, g - 3) + 1); y < g; y++) blocks[blockIndex(lx, y, lz)] = B.DIRT;
         blocks[blockIndex(lx, g, lz)] = (d === 0 ? this.paint.get(key(wx, wz)) : undefined) ?? B.GRASS;
-        const top = Math.min(WORLD_HEIGHT - 1, Math.max(natural, g) + 14);
+        const top = Math.min(WORLD_HEIGHT - 1, Math.max(natural, g) + (plot.air ?? 14));
         for (let y = g + 1; y <= top; y++) blocks[blockIndex(lx, y, lz)] = B.AIR;
       }
     }
@@ -468,6 +483,25 @@ export class AdventureWorldGenerator extends WorldGenerator {
   private chest(x: number, y: number, z: number, table: LootTableName): void {
     this.box(x, y, z, x, y, z, B.CHEST);
     this.chests.set(`${x},${y},${z}`, table);
+  }
+
+  /** The castle: every box goes to the chunks it touches, in the order it was drawn, so later boxes cut into earlier ones. */
+  private buildGreykeep(): void {
+    const put = (x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, id: number): void => {
+      const op: Op = { x0: Math.min(x0, x1), y0: Math.min(y0, y1), z0: Math.min(z0, z1), x1: Math.max(x0, x1), y1: Math.max(y0, y1), z1: Math.max(z0, z1), id, mode: 'set' };
+      for (let cz = Math.floor(op.z0 / CHUNK_SIZE); cz <= Math.floor(op.z1 / CHUNK_SIZE); cz++) {
+        for (let cx = Math.floor(op.x0 / CHUNK_SIZE); cx <= Math.floor(op.x1 / CHUNK_SIZE); cx++) {
+          const k = `${cx},${cz}`;
+          let list = this.castleOps.get(k);
+          if (!list) this.castleOps.set(k, (list = []));
+          list.push(op);
+        }
+      }
+    };
+    buildCastle(this.hubY, put, (x, y, z, id, table) => {
+      put(x, y, z, x, y, z, id);
+      this.chests.set(`${x},${y},${z}`, table);
+    });
   }
 
   private vox(base: number): (x: number, dy: number, z: number, id: number) => void {
@@ -637,12 +671,13 @@ export class AdventureWorldGenerator extends WorldGenerator {
     stall(this.lot(11, 11, 15, 13, 2, put), rand(41));
     stall(this.lot(26, 11, 30, 13, 2, put), rand(42));
     stall(this.lot(11, 17, 15, 19, 3, put), rand(43));
-    stall(this.lot(26, 17, 30, 19, 3, put), rand(44));
+    // The Auction House: the south-east stall, wider than the others (its Auctioneer is in NPCS).
+    auctionHouse(this.lot(24, 17, 30, 19, 3, put), rand(44));
+    // The Stash: the stall in the middle of the north side (its Stashkeeper is in NPCS).
+    stashHouse(this.lot(17, 11, 21, 13, 2, put), rand(45));
     cart(put, 23, 15, true);
     crates(put, 17, 17, 2);
     crates(put, 16, 17, 1);
-    hayBale(put, 24, 18, 2);
-    hayBale(put, 25, 18);
     banner(put, 10, 15, 14);
     banner(put, 31, 15, 11);
     for (const [x, z] of [[17, 14], [23, 18], [17, 18]]) lampPost(put, x, z);

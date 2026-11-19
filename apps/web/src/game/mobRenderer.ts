@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ATTACK_ANIM, DYE_RGB, MOBS, NPCS, variantLevel, variantProfession, type MobKind, type Profession } from '@solrift/shared';
+import { ATTACK_ANIM, DYE_RGB, MOBS, NPCS, getItem, variantLevel, variantProfession, type MobKind, type Profession } from '@solrift/shared';
 import type { ArrowLike, MobLike } from './clientSession';
 import type { EntityLight } from './entityLight';
 import { ArcaneBoltView, FireballView, type FireParticles, type SpellView } from './fireFx';
@@ -300,11 +300,11 @@ const rabbitRig = (coat: string): Part[] => [
   { size: [0.1, 0.1, 0.08], at: [0, 0.35, 0.34], skin: 'rabbit_tail' },
 ];
 
-const squidRig = (): Part[] => {
-  const parts: Part[] = [{ size: [0.6, 0.75, 0.6], at: [0, 0.5, 0], skin: 'squid_body', front: 'squid_face', isHead: true }];
+const squidRig = (body = 'squid_body', face = 'squid_face', tent = 'squid_tent'): Part[] => {
+  const parts: Part[] = [{ size: [0.6, 0.75, 0.6], at: [0, 0.5, 0], skin: body, front: face, isHead: true }];
   for (let i = 0; i < 8; i++) {
     const a = (i / 8) * Math.PI * 2;
-    parts.push({ size: [0.1, 0.5, 0.1], at: [Math.cos(a) * 0.22, 0.12, Math.sin(a) * 0.22], skin: 'squid_tent', hang: true, swing: i % 2 === 0 ? 0.6 : -0.6 });
+    parts.push({ size: [0.1, 0.5, 0.1], at: [Math.cos(a) * 0.22, 0.12, Math.sin(a) * 0.22], skin: tent, hang: true, swing: i % 2 === 0 ? 0.6 : -0.6 });
   }
   return parts;
 };
@@ -383,6 +383,69 @@ SKINS.dummy_face = withFeatures(plain([192, 160, 110], 12, 144), [
   [11, 12, 11, 12, [48, 34, 22]],
 ]);
 
+SKINS.stand_wood = (x, y) => (y % 4 === 0 ? jit([104, 72, 40], 6, x, y, 200) : jit([148, 106, 62], 10, x, y, 201));
+SKINS.stand_leather = plain([140, 88, 52], 10, 202);
+SKINS.stand_iron = plain([188, 188, 196], 8, 203);
+SKINS.stand_gold = plain([232, 196, 72], 8, 204);
+SKINS.stand_diamond = plain([92, 214, 196], 8, 205);
+SKINS.stand_held = plain([168, 92, 48], 8, 206);
+
+/** Which painted shell a piece on an armor stand uses. A class outfit uses that class's colour; anything that is not armor is the thing in its hand. */
+function standShell(id: number): string {
+  if (!id) return '';
+  const worn = getItem(id).armor;
+  if (!worn) return 'stand_held';
+  if (worn.outfit === 'warrior') return 'stand_iron';
+  if (worn.outfit === 'mage') return 'stand_diamond';
+  if (worn.outfit === 'ranger' || worn.material === 'leather') return 'stand_leather';
+  if (worn.material === 'gold') return 'stand_gold';
+  if (worn.material === 'diamond') return 'stand_diamond';
+  return 'stand_iron';
+}
+
+/** A wooden figure. `pose` is 0..3 (sneak and right-click). Armor is a shell a little larger than the wood, in the colour of its material. */
+function standRig(pose: number, gear: readonly number[] = []): Part[] {
+  const arm = [0.25, 0.7, -1.35, -0.4][pose] ?? 0.25;
+  const armL = [0.25, 0.2, 0.45, -0.15][pose] ?? 0.25;
+  const leg = [0, 0.35, 0.12, -0.2][pose] ?? 0;
+  const parts: Part[] = [
+    { size: [0.62, 0.08, 0.62], at: [0, 0.04, 0], skin: 'stand_wood' },
+    { size: [0.1, 0.7, 0.1], at: [0, 0.44, 0], skin: 'stand_wood' },
+    { size: [0.72, 0.08, 0.1], at: [0, 1.22, 0], skin: 'stand_wood' },
+    { size: [0.26, 0.4, 0.14], at: [0, 1.02, 0], skin: 'stand_wood' },
+    { size: [0.28, 0.28, 0.28], at: [0, 1.5, 0], skin: 'stand_wood' },
+    { size: [0.08, 0.64, 0.08], at: [-0.34, 1.18, 0], skin: 'stand_wood', hang: true, rotX: armL },
+    { size: [0.08, 0.64, 0.08], at: [0.34, 1.18, 0], skin: 'stand_wood', hang: true, rotX: arm },
+    { size: [0.08, 0.46, 0.08], at: [-0.1, 0.5, 0], skin: 'stand_wood', hang: true, rotX: -leg },
+    { size: [0.08, 0.46, 0.08], at: [0.1, 0.5, 0], skin: 'stand_wood', hang: true, rotX: leg },
+  ];
+  const shell = (slot: number): string => standShell(gear[slot] ?? 0);
+  const helm = shell(0);
+  const chest = shell(1);
+  const legs = shell(2);
+  const boots = shell(3);
+  const hand = shell(4);
+  if (helm) parts.push({ size: [0.36, 0.18, 0.36], at: [0, 1.6, 0], skin: helm });
+  if (chest) parts.push({ size: [0.36, 0.46, 0.22], at: [0, 1.02, 0], skin: chest });
+  if (legs) {
+    parts.push({ size: [0.14, 0.42, 0.14], at: [-0.1, 0.5, 0], skin: legs, hang: true, rotX: -leg });
+    parts.push({ size: [0.14, 0.42, 0.14], at: [0.1, 0.5, 0], skin: legs, hang: true, rotX: leg });
+  }
+  if (boots) {
+    const foot = (side: number, rx: number): Part => ({
+      size: [0.14, 0.1, 0.16],
+      at: [side * 0.1, 0.5 - 0.46 * Math.cos(rx), -0.46 * Math.sin(rx)],
+      skin: boots,
+    });
+    parts.push(foot(-1, -leg), foot(1, leg));
+  }
+  if (hand) {
+    const L = 0.68;
+    parts.push({ size: [0.16, 0.16, 0.16], at: [0.34, 1.18 - L * Math.cos(arm), -L * Math.sin(arm)], skin: hand });
+  }
+  return parts;
+}
+
 const dummyRig = (): Part[] => [
   { size: [0.9, 0.12, 0.9], at: [0, 0.06, 0], skin: 'dummy_wood' },
   { size: [0.2, 1.2, 0.2], at: [0, 0.7, 0], skin: 'dummy_wood' },
@@ -397,8 +460,97 @@ const dummyRig = (): Part[] => [
   { size: [0.3, 0.1, 0.3], at: [0, 1.96, 0], skin: 'dummy_wood' },
 ];
 
+function paintBeast(name: string, body: RGB, seed: number, extras: Feature[] = [], eye: RGB = [24, 18, 16]): void {
+  SKINS[name] = plain(body, 10, seed);
+  SKINS[`${name}_face`] = withFeatures(plain(body, 10, seed), [...eyes(5, 7, eye, 3, 4), ...extras]);
+}
+const muzzle = (c: RGB): Feature[] => [[5, 9, 10, 12, c]];
+paintBeast('wolf', [142, 144, 150], 150, muzzle([224, 224, 220]));
+paintBeast('fox', [214, 118, 52], 151, muzzle([240, 220, 196]));
+paintBeast('fox_white', [236, 236, 232], 152, muzzle([250, 220, 210]));
+paintBeast('cat', [120, 120, 128], 153, muzzle([210, 170, 150]));
+paintBeast('cat_black', [36, 36, 40], 154, muzzle([70, 60, 60]), [220, 190, 40]);
+paintBeast('cat_white', [236, 236, 238], 155, muzzle([250, 210, 200]), [40, 140, 80]);
+paintBeast('ocelot', [214, 168, 72], 156, [[4, 4, 6, 8, [60, 40, 20]], [9, 4, 11, 8, [60, 40, 20]], ...muzzle([236, 200, 140])]);
+paintBeast('horse', [120, 78, 48], 157, muzzle([196, 150, 120]));
+paintBeast('horse_dark', [54, 40, 32], 158, muzzle([90, 70, 60]));
+paintBeast('horse_white', [230, 228, 220], 159, muzzle([210, 180, 170]));
+paintBeast('donkey', [150, 140, 130], 160, muzzle([120, 100, 90]));
+paintBeast('mule', [110, 78, 52], 161, muzzle([160, 120, 90]));
+paintBeast('llama', [214, 186, 140], 162, muzzle([180, 140, 110]));
+paintBeast('llama_brown', [140, 96, 64], 163, muzzle([110, 78, 56]));
+paintBeast('llama_gray', [170, 170, 166], 164, muzzle([120, 110, 100]));
+paintBeast('trader_llama', [214, 186, 140], 165, muzzle([180, 140, 110]));
+paintBeast('camel', [196, 156, 96], 166, muzzle([160, 110, 70]));
+paintBeast('goat', [228, 226, 220], 167, muzzle([200, 180, 170]));
+paintBeast('polar_bear', [236, 240, 244], 168, muzzle([40, 40, 44]), [20, 20, 24]);
+paintBeast('sniffer', [72, 140, 72], 169, muzzle([48, 90, 48]));
+paintBeast('turtle', [62, 130, 72], 170, muzzle([210, 190, 80]));
+paintBeast('frog', [70, 150, 64], 171, [[6, 10, 9, 13, [240, 120, 150]]], [20, 20, 20]);
+paintBeast('parrot_red', [196, 48, 48], 172, muzzle([240, 200, 60]), [20, 20, 20]);
+paintBeast('parrot_blue', [48, 96, 196], 173, muzzle([240, 200, 60]), [20, 20, 20]);
+paintBeast('parrot_green', [48, 160, 72], 174, muzzle([240, 200, 60]), [20, 20, 20]);
+paintBeast('allay', [120, 196, 230], 175, [], [40, 80, 160]);
+paintBeast('axolotl', [236, 150, 176], 176, muzzle([250, 200, 210]));
+paintBeast('dolphin', [120, 140, 160], 177, muzzle([200, 210, 220]), [20, 30, 50]);
+paintBeast('cod', [170, 160, 130], 178, [], [20, 20, 20]);
+paintBeast('salmon', [196, 110, 90], 179, [], [20, 20, 20]);
+paintBeast('pufferfish', [220, 180, 60], 180, [[3, 3, 4, 4, [40, 30, 20]], [11, 3, 12, 4, [40, 30, 20]], [7, 12, 8, 13, [40, 30, 20]]]);
+paintBeast('tropical', [240, 120, 40], 181, [[2, 4, 4, 12, [240, 220, 60]], [11, 4, 13, 12, [240, 220, 60]]]);
+paintBeast('tropical_yellow', [240, 210, 60], 182, [[2, 4, 4, 12, [40, 80, 180]]]);
+paintBeast('tropical_blue', [60, 140, 210], 183, [[2, 4, 4, 12, [240, 80, 80]]]);
+paintBeast('tadpole', [40, 48, 36], 184, [], [20, 20, 16]);
+SKINS.bee = (x, y) => (Math.floor((x + y) / 4) % 2 === 0 ? jit([36, 32, 28], 6, x, y, 185) : jit([240, 196, 40], 8, x, y, 185));
+SKINS.bee_face = withFeatures(SKINS.bee, [...eyes(5, 7, [20, 16, 16], 3, 4)]);
+SKINS.bee_wing = plain([214, 228, 214], 4, 186);
+SKINS.panda = (x, y) => (x < 3 || x > 12 || (y > 8 && x > 5 && x < 10) ? [28, 28, 30] : jit([236, 236, 232], 6, x, y, 187));
+SKINS.panda_face = withFeatures(SKINS.panda, [...eyes(5, 7, [20, 20, 24], 2, 5), [6, 10, 9, 12, [28, 28, 30]]]);
+SKINS.armadillo = (x, y) => (x % 4 === 0 ? jit([96, 64, 40], 6, x, y, 188) : jit([168, 116, 72], 8, x, y, 188));
+SKINS.armadillo_face = withFeatures(SKINS.armadillo, [...eyes(5, 7, [20, 16, 12], 3, 4)]);
+SKINS.mooshroom = (x, y) => (hash(x >> 2, y >> 2, 9) > 0.72 ? [236, 228, 220] : jit([168, 42, 42], 10, x, y, 189));
+SKINS.mooshroom_face = withFeatures(SKINS.mooshroom, [...eyes(5, 7, [20, 16, 16], 3, 4), [5, 10, 10, 13, [210, 170, 160]]]);
+SKINS.goat_horn = plain([230, 224, 200], 6, 190);
+SKINS.trader_rug = plain([48, 86, 176], 8, 191);
+SKINS.axolotl_gill = plain([214, 84, 120], 8, 192);
+SKINS.parrot_beak = plain([236, 176, 48], 6, 193);
+SKINS.glow_squid_body = plain([40, 180, 210], 12, 194);
+SKINS.glow_squid_face = withFeatures(plain([40, 180, 210], 12, 194), [...eyes(6, 9, [230, 255, 255], 2, 5)]);
+SKINS.glow_tent = plain([30, 140, 180], 8, 195);
+
+const quad = (skin: string, s = 1): Part[] => scaleRig([
+  { size: [0.5, 0.5, 0.5], at: [0, 0.68, -0.55], skin, front: `${skin}_face`, isHead: true },
+  { size: [0.62, 0.48, 0.9], at: [0, 0.58, 0.05], skin },
+  { size: [0.18, 0.36, 0.18], at: [-0.18, 0.36, -0.28], skin, hang: true, swing: 1 },
+  { size: [0.18, 0.36, 0.18], at: [0.18, 0.36, -0.28], skin, hang: true, swing: -1 },
+  { size: [0.18, 0.36, 0.18], at: [-0.18, 0.36, 0.36], skin, hang: true, swing: -1 },
+  { size: [0.18, 0.36, 0.18], at: [0.18, 0.36, 0.36], skin, hang: true, swing: 1 },
+], s);
+const tall = (skin: string, s = 1): Part[] => scaleRig([
+  { size: [0.42, 0.5, 0.55], at: [0, 1.25, -0.75], skin, front: `${skin}_face`, isHead: true },
+  { size: [0.62, 0.58, 1.2], at: [0, 1.0, 0.05], skin },
+  { size: [0.18, 0.72, 0.18], at: [-0.18, 0.72, -0.4], skin, hang: true, swing: 1 },
+  { size: [0.18, 0.72, 0.18], at: [0.18, 0.72, -0.4], skin, hang: true, swing: -1 },
+  { size: [0.18, 0.72, 0.18], at: [-0.18, 0.72, 0.48], skin, hang: true, swing: -1 },
+  { size: [0.18, 0.72, 0.18], at: [0.18, 0.72, 0.48], skin, hang: true, swing: 1 },
+], s);
+const fishRig = (skin: string, s = 1): Part[] => scaleRig([
+  { size: [0.2, 0.28, 0.55], at: [0, 0.24, 0], skin, front: `${skin}_face`, isHead: true },
+  { size: [0.04, 0.24, 0.16], at: [0, 0.28, 0.34], skin },
+  { size: [0.28, 0.04, 0.18], at: [0, 0.2, -0.02], skin },
+], s);
+const bird = (skin: string): Part[] => [
+  { size: [0.22, 0.26, 0.22], at: [0, 0.72, -0.26], skin, front: `${skin}_face`, isHead: true },
+  { size: [0.1, 0.08, 0.1], at: [0, 0.68, -0.4], skin: 'parrot_beak' },
+  { size: [0.32, 0.3, 0.4], at: [0, 0.48, 0.02], skin },
+  { size: [0.05, 0.26, 0.34], at: [-0.2, 0.52, 0.02], skin, flap: 0.45 },
+  { size: [0.05, 0.26, 0.34], at: [0.2, 0.52, 0.02], skin, flap: -0.45 },
+  { size: [0.06, 0.2, 0.06], at: [-0.08, 0.24, 0], skin: 'parrot_beak', hang: true, swing: 1 },
+  { size: [0.06, 0.2, 0.06], at: [0.08, 0.24, 0], skin: 'parrot_beak', hang: true, swing: -1 },
+];
+
 const RIGS: Record<MobKind, Part[]> = {
   dummy: dummyRig(),
+  armor_stand: standRig(0),
   npc: [], // built by npcRig(variant)
   villager: villagerRig('unemployed', 1),
   sheep: [
@@ -475,6 +627,61 @@ const RIGS: Record<MobKind, Part[]> = {
     { size: [0.24, 0.66, 0.24], at: [-0.22, 0.66, 0.5], skin: 'cow_body', hang: true, swing: -1 },
     { size: [0.24, 0.66, 0.24], at: [0.22, 0.66, 0.5], skin: 'cow_body', hang: true, swing: 1 },
   ],
+  wolf: quad('wolf', 0.9),
+  fox: quad('fox', 0.75),
+  cat: quad('cat', 0.7),
+  ocelot: quad('ocelot', 0.75),
+  horse: tall('horse', 1.15),
+  donkey: tall('donkey', 1),
+  mule: tall('mule', 1.05),
+  llama: tall('llama', 1.05),
+  trader_llama: [...tall('trader_llama', 1.05), { size: [0.55, 0.14, 0.7], at: [0, 1.2, 0.05], skin: 'trader_rug' }],
+  camel: [...tall('camel', 1.2), { size: [0.35, 0.22, 0.4], at: [0, 1.55, -0.15], skin: 'camel' }],
+  goat: [...tall('goat', 0.85), { size: [0.06, 0.22, 0.06], at: [-0.12, 1.2, -0.7], skin: 'goat_horn' }, { size: [0.06, 0.22, 0.06], at: [0.12, 1.2, -0.7], skin: 'goat_horn' }],
+  panda: quad('panda', 1.35),
+  polar_bear: quad('polar_bear', 1.45),
+  mooshroom: tall('mooshroom', 0.95),
+  armadillo: quad('armadillo', 0.8),
+  sniffer: tall('sniffer', 1.35),
+  turtle: [
+    { size: [0.28, 0.2, 0.28], at: [0, 0.26, -0.42], skin: 'turtle', front: 'turtle_face', isHead: true },
+    { size: [0.72, 0.26, 0.85], at: [0, 0.3, 0.05], skin: 'turtle' },
+    { size: [0.16, 0.08, 0.18], at: [-0.28, 0.08, -0.18], skin: 'turtle', swing: 1 },
+    { size: [0.16, 0.08, 0.18], at: [0.28, 0.08, -0.18], skin: 'turtle', swing: -1 },
+    { size: [0.16, 0.08, 0.18], at: [-0.28, 0.08, 0.28], skin: 'turtle', swing: -1 },
+    { size: [0.16, 0.08, 0.18], at: [0.28, 0.08, 0.28], skin: 'turtle', swing: 1 },
+  ],
+  frog: [
+    { size: [0.32, 0.2, 0.3], at: [0, 0.34, -0.2], skin: 'frog', front: 'frog_face', isHead: true },
+    { size: [0.06, 0.12, 0.06], at: [-0.1, 0.5, -0.18], skin: 'frog' },
+    { size: [0.06, 0.12, 0.06], at: [0.1, 0.5, -0.18], skin: 'frog' },
+    { size: [0.4, 0.2, 0.38], at: [0, 0.22, 0.08], skin: 'frog' },
+    { size: [0.12, 0.14, 0.16], at: [-0.14, 0.14, -0.02], skin: 'frog', hang: true, swing: 1 },
+    { size: [0.12, 0.14, 0.16], at: [0.14, 0.14, -0.02], skin: 'frog', hang: true, swing: -1 },
+    { size: [0.14, 0.16, 0.2], at: [-0.12, 0.16, 0.22], skin: 'frog', hang: true, swing: -1 },
+    { size: [0.14, 0.16, 0.2], at: [0.12, 0.16, 0.22], skin: 'frog', hang: true, swing: 1 },
+  ],
+  parrot: bird('parrot_red'),
+  bee: [
+    { size: [0.26, 0.26, 0.26], at: [0, 0.4, -0.16], skin: 'bee', front: 'bee_face', isHead: true },
+    { size: [0.34, 0.3, 0.46], at: [0, 0.34, 0.08], skin: 'bee' },
+    { size: [0.26, 0.16, 0.06], at: [-0.22, 0.48, 0.04], skin: 'bee_wing', flap: 0.9 },
+    { size: [0.26, 0.16, 0.06], at: [0.22, 0.48, 0.04], skin: 'bee_wing', flap: -0.9 },
+  ],
+  allay: [
+    { size: [0.28, 0.28, 0.28], at: [0, 0.62, 0], skin: 'allay', front: 'allay_face', isHead: true },
+    { size: [0.26, 0.3, 0.16], at: [0, 0.34, 0], skin: 'allay' },
+    { size: [0.3, 0.18, 0.05], at: [-0.26, 0.46, 0], skin: 'allay', flap: 0.8 },
+    { size: [0.3, 0.18, 0.05], at: [0.26, 0.46, 0], skin: 'allay', flap: -0.8 },
+  ],
+  axolotl: [...fishRig('axolotl', 1.35), { size: [0.06, 0.16, 0.1], at: [-0.16, 0.36, -0.12], skin: 'axolotl_gill' }, { size: [0.06, 0.16, 0.1], at: [0.16, 0.36, -0.12], skin: 'axolotl_gill' }],
+  dolphin: fishRig('dolphin', 1.7),
+  glow_squid: squidRig('glow_squid_body', 'glow_squid_face', 'glow_tent'),
+  cod: fishRig('cod', 0.9),
+  salmon: fishRig('salmon', 1.15),
+  pufferfish: fishRig('pufferfish', 1),
+  tropical_fish: fishRig('tropical', 0.95),
+  tadpole: fishRig('tadpole', 0.55),
 };
 
 const geoCache = new Map<string, THREE.BoxGeometry>();
@@ -498,6 +705,8 @@ const MARKS: readonly QuestMark[] = ['offer', 'ready', 'waiting'];
 
 interface View {
   variant: number;
+  /** What an armor stand is wearing, so a new piece rebuilds the figure. */
+  gearKey?: string;
   /** Floats over an animal that is in love. */
   heart: THREE.Mesh;
   group: THREE.Group;
@@ -567,16 +776,31 @@ function plateTexture(index: number): THREE.CanvasTexture {
 }
 
 const RABBIT_COATS = ['brown', 'white', 'sandy'];
+/** Extra coats. The rig is painted in the first; the others replace that skin. */
+const COAT: Partial<Record<MobKind, readonly string[]>> = {
+  fox: ['fox', 'fox_white'],
+  cat: ['cat', 'cat_black', 'cat_white'],
+  horse: ['horse', 'horse_dark', 'horse_white'],
+  llama: ['llama', 'llama_brown', 'llama_gray'],
+  parrot: ['parrot_red', 'parrot_blue', 'parrot_green'],
+  tropical_fish: ['tropical', 'tropical_yellow', 'tropical_blue'],
+};
+function tintRig(parts: Part[], from: string, to: string): Part[] {
+  return parts.map((p) => ({ ...p, skin: p.skin === from ? to : p.skin, front: p.front === `${from}_face` ? `${to}_face` : p.front }));
+}
 
 /** A sheep that has been shorn is drawn with the key `variant + SHORN`. */
 const SHORN = 1000;
 
-function buildView(kind: MobKind, key: number): View {
+function buildView(kind: MobKind, key: number, gear: readonly number[] = []): View {
   const shorn = kind === 'sheep' && key >= SHORN;
   const variant = key % SHORN;
   const group = new THREE.Group();
   const parts: View['parts'] = [];
-  const rig = kind === 'rabbit' ? rabbitRig(RABBIT_COATS[variant] ?? 'brown') : kind === 'villager' ? villagerRig(variantProfession(variant), variantLevel(variant)) : kind === 'npc' ? npcRig(variant) : RIGS[kind];
+  const coats = COAT[kind];
+  const coat = coats?.[variant] ?? coats?.[0];
+  const base = kind === 'armor_stand' ? standRig(variant, gear) : kind === 'rabbit' ? rabbitRig(RABBIT_COATS[variant] ?? 'brown') : kind === 'villager' ? villagerRig(variantProfession(variant), variantLevel(variant)) : kind === 'npc' ? npcRig(variant) : RIGS[kind];
+  const rig = coat && coats && coat !== coats[0] ? tintRig(base, coats[0], coat) : base;
   for (const def of rig) {
     const base = skin(kind === 'sheep' && def.skin === 'sheep_wool' ? (shorn ? 'sheep_shorn' : variant > 0 ? `sheep_wool_${variant}` : def.skin) : def.skin);
     const mk = (map: THREE.Texture) => (def.alpha ? new THREE.MeshBasicMaterial({ map, transparent: true, opacity: def.alpha, depthWrite: false }) : new THREE.MeshBasicMaterial({ map }));
@@ -594,7 +818,7 @@ function buildView(kind: MobKind, key: number): View {
   heart.position.set(0, MOBS[kind].height + 0.45, 0);
   heart.visible = false;
   group.add(heart);
-  const view: View = { variant: key, heart, group, parts };
+  const view: View = { variant: key, gearKey: kind === 'armor_stand' ? gear.join(',') : '', heart, group, parts };
   if (kind === 'npc') {
     const plate = new THREE.Sprite(new THREE.SpriteMaterial({ map: plateTexture(variant), transparent: true, toneMapped: false, fog: false }));
     plate.scale.set(1.6, 0.36, 1);
@@ -621,6 +845,27 @@ function disposeView(v: View): void {
   v.plate?.material.dispose();
 }
 
+/**
+ * A small box with each face its own shade of `rgb`, so a pile of them reads as a solid thing
+ * under a flat material. Face order is BoxGeometry's: +x, -x, +y, -y, +z, -z.
+ */
+function shadedBox(w: number, h: number, d: number, rgb: RGB): THREE.BoxGeometry {
+  const geo = new THREE.BoxGeometry(w, h, d);
+  const colors = new Float32Array(geo.getAttribute('position').count * 3);
+  const shade = [0.72, 0.52, 1.18, 0.4, 0.9, 0.62];
+  for (let face = 0; face < 6; face++) {
+    const k = shade[face]!;
+    for (let v = 0; v < 4; v++) {
+      const i = (face * 4 + v) * 3;
+      colors[i] = Math.min(1, (rgb[0] * k) / 255);
+      colors[i + 1] = Math.min(1, (rgb[1] * k) / 255);
+      colors[i + 2] = Math.min(1, (rgb[2] * k) / 255);
+    }
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  return geo;
+}
+
 /** Renders mobs as procedural box-model rigs, plus arrows in flight. */
 export class MobRenderer {
   readonly group = new THREE.Group();
@@ -637,8 +882,9 @@ export class MobRenderer {
   private arrowHeadMat = new THREE.MeshBasicMaterial({ color: 0xc9d1de });
   private arrowFletchMat = new THREE.MeshBasicMaterial({ color: 0xd8483a, side: THREE.DoubleSide });
   private arrowTrailMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.22, depthWrite: false });
-  private bottleGeo = new THREE.BoxGeometry(0.2, 0.28, 0.2);
-  private bottleMat = new THREE.MeshBasicMaterial({ color: 0x8fe8ff });
+  /** Cork, neck, shoulder, body and base of a thrown bottle, built once and shared. */
+  private bottleGeos: THREE.BoxGeometry[] = [];
+  private bottleMat = new THREE.MeshBasicMaterial({ vertexColors: true });
   private pearlGeo = new THREE.SphereGeometry(0.14, 8, 6);
   private pearlMat = new THREE.MeshBasicMaterial({ color: 0x1f8f78 });
   private fireballMat = new THREE.MeshBasicMaterial({ color: 0xff8a1f });
@@ -663,6 +909,25 @@ export class MobRenderer {
 
   private cubeMaterial(): THREE.MeshBasicMaterial {
     return (this.cubeMat ??= new THREE.MeshBasicMaterial({ vertexColors: true }));
+  }
+
+  /** A thrown bottle: a solid flask (cork, glass neck, green body) that tumbles in the air. */
+  private makeBottle(): THREE.Group {
+    if (this.bottleGeos.length === 0) {
+      const part = (w: number, h: number, d: number, y: number, rgb: RGB): void => {
+        const geo = shadedBox(w, h, d, rgb);
+        geo.translate(0, y, 0);
+        this.bottleGeos.push(geo);
+      };
+      part(0.1, 0.055, 0.1, 0.2, [150, 104, 54]);
+      part(0.07, 0.09, 0.07, 0.125, [210, 236, 242]);
+      part(0.15, 0.05, 0.15, 0.055, [168, 214, 196]);
+      part(0.22, 0.15, 0.22, -0.045, [110, 236, 86]);
+      part(0.17, 0.055, 0.17, -0.145, [72, 176, 58]);
+    }
+    const g = new THREE.Group();
+    for (const geo of this.bottleGeos) g.add(new THREE.Mesh(geo, this.bottleMat));
+    return g;
   }
 
   /** One arrow in flight: shaft, steel head, two crossed fletching vanes and a faint streak behind it. */
@@ -695,20 +960,22 @@ export class MobRenderer {
       seen.add(m.id);
       let v = this.views.get(m.id);
       const key = m.variant + (m.sheared ? SHORN : 0);
-      if (v && v.variant !== key) {
-        // Dyed (or a late-arriving variant): rebuild with the new colours, keeping the heading.
+      const worn = m.kind === 'armor_stand' ? (m.gear ?? []) : [];
+      const gearKey = worn.join(',');
+      if (v && (v.variant !== key || (v.gearKey ?? '') !== gearKey)) {
+        // Dyed, a new pose, or a new piece on an armor stand: rebuild, keeping the heading.
         const yaw = v.group.rotation.y;
         this.group.remove(v.group);
         disposeView(v);
         v = undefined;
-        const nv = buildView(m.kind, key);
+        const nv = buildView(m.kind, key, worn);
         nv.group.rotation.y = yaw;
         this.views.set(m.id, nv);
         this.group.add(nv.group);
         v = nv;
       }
       if (!v) {
-        v = buildView(m.kind, key);
+        v = buildView(m.kind, key, worn);
         v.group.rotation.y = m.yaw;
         this.views.set(m.id, v);
         this.group.add(v.group);
@@ -845,18 +1112,19 @@ export class MobRenderer {
         mesh =
           kind === 0
             ? this.makeArrow()
-            : new THREE.Mesh(
-                kind === 1 ? this.bottleGeo : kind === 2 ? this.pearlGeo : this.spellGeo,
-                kind === 1 ? this.bottleMat : kind === 2 ? this.pearlMat : kind === 3 ? this.fireballMat : this.boltMat,
-              );
+            : kind === 1
+              ? this.makeBottle()
+              : new THREE.Mesh(kind === 2 ? this.pearlGeo : this.spellGeo, kind === 2 ? this.pearlMat : kind === 3 ? this.fireballMat : this.boltMat);
         mesh.userData.kind = kind;
         this.arrowMeshes.set(a, mesh);
         this.group.add(mesh);
       }
       mesh.position.set(a.x, a.y, a.z);
       if (kind >= 3) mesh.scale.setScalar(0.9 + 0.2 * Math.sin(this.time * 24));
-      if (kind === 1) mesh.rotation.set(this.time * 9, this.time * 7, 0);
-      else if (kind === 0) {
+      if (kind === 1) {
+        mesh.lookAt(a.x + a.vx, a.y + a.vy, a.z + a.vz);
+        mesh.rotateX(this.time * 8);
+      } else if (kind === 0) {
         // It points along the way it is going, so it tips over as it falls; a streak behind it shows the speed.
         mesh.lookAt(a.x + a.vx, a.y + a.vy, a.z + a.vz);
         const trail = mesh.userData.trail as THREE.Object3D | undefined;
@@ -891,7 +1159,7 @@ export class MobRenderer {
       group.add(o);
     };
     for (const kind of Object.keys(MOBS) as MobKind[]) {
-      const keys = kind === 'sheep' ? [0, 1, SHORN] : kind === 'rabbit' ? [0, 1, 2] : [0];
+      const keys = kind === 'sheep' ? [0, 1, SHORN] : kind === 'rabbit' ? [0, 1, 2] : COAT[kind] ? COAT[kind].map((_, i) => i) : [0];
       for (const key of keys) {
         const v = buildView(kind, key);
         views.push(v);
@@ -901,7 +1169,8 @@ export class MobRenderer {
     }
     const arrow = this.makeArrow();
     place(arrow);
-    for (const [geo, mat] of [[this.bottleGeo, this.bottleMat], [this.pearlGeo, this.pearlMat], [this.spellGeo, this.fireballMat], [this.spellGeo, this.boltMat]] as const) place(new THREE.Mesh(geo, mat));
+    place(this.makeBottle());
+    for (const [geo, mat] of [[this.pearlGeo, this.pearlMat], [this.spellGeo, this.fireballMat], [this.spellGeo, this.boltMat]] as const) place(new THREE.Mesh(geo, mat));
     return { group, free: () => views.forEach(disposeView) };
   }
 
@@ -913,7 +1182,7 @@ export class MobRenderer {
     this.clear();
     for (const g of [this.arrowShaftGeo, this.arrowHeadGeo, this.arrowFletchGeo, this.arrowTrailGeo]) g.dispose();
     for (const m of [this.arrowMat, this.arrowHeadMat, this.arrowFletchMat, this.arrowTrailMat]) m.dispose();
-    this.bottleGeo.dispose();
+    for (const geo of this.bottleGeos) geo.dispose();
     this.bottleMat.dispose();
     this.pearlGeo.dispose();
     this.pearlMat.dispose();

@@ -2,15 +2,15 @@
 
 import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from 'react';
 import { CharacterPreview as Scene } from '../game/characterPreview';
-import { paletteOfLook } from '../game/lookPalette';
+import { paletteOfCode, paletteOfLook } from '../game/lookPalette';
 import { useProfile } from '../profile/store';
 
-/** The character in the inventory screen, wearing `armor` (the clothes of a class too: they are items) (item ids: helmet, chestplate, leggings, boots) and holding a shield. */
-export function CharacterPreview({ armor, shield = 0, shieldIcon = null, turntable = false }: { armor: number[]; shield?: number; shieldIcon?: string | null; turntable?: boolean }) {
+/** The character in the inventory screen, wearing `armor` (the clothes of a class too: they are items) (item ids: helmet, chestplate, leggings, boots) and holding a shield. `lookCode` draws that saved look instead of the one being edited. */
+export function CharacterPreview({ armor, shield = 0, shieldIcon = null, turntable = false, grounded = false, lookCode }: { armor: number[]; shield?: number; shieldIcon?: string | null; turntable?: boolean; grounded?: boolean; lookCode?: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<Scene | null>(null);
   const key = armor.join(',');
-  const look = useProfile((s) => s.look);
+  const profileLook = useProfile((s) => s.look);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -22,7 +22,8 @@ export function CharacterPreview({ armor, shield = 0, shieldIcon = null, turntab
       return; // no WebGL: the inventory still works without the picture
     }
     sceneRef.current = scene;
-    scene.setLook(paletteOfLook(useProfile.getState().look));
+    scene.setLook(lookCode === undefined ? paletteOfLook(useProfile.getState().look) : paletteOfCode(lookCode));
+    scene.setGrounded(grounded);
     scene.setArmor(key ? key.split(',').map(Number) : []);
     scene.setTurntable(turntable);
     scene.setShield(shield, shieldIcon);
@@ -41,12 +42,16 @@ export function CharacterPreview({ armor, shield = 0, shieldIcon = null, turntab
   }, []);
 
   useEffect(() => {
-    sceneRef.current?.setLook(paletteOfLook(look));
-  }, [look]);
+    sceneRef.current?.setLook(lookCode === undefined ? paletteOfLook(profileLook) : paletteOfCode(lookCode));
+  }, [lookCode, profileLook]);
 
   useEffect(() => {
     sceneRef.current?.setArmor(key ? key.split(',').map(Number) : []);
   }, [key]);
+
+  useEffect(() => {
+    sceneRef.current?.setTurntable(turntable);
+  }, [turntable]);
 
   useEffect(() => {
     sceneRef.current?.setShield(shield, shieldIcon);

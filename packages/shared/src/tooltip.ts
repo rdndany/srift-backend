@@ -1,4 +1,4 @@
-import { BLOCKS, SOUL_WARD_RADIUS, lanternInfo } from './blocks';
+import { BLOCKS, SOUL_WARD_RADIUS, campfireId, lanternInfo } from './blocks';
 import { enchantBaseName, enchantName } from './enchant';
 import type { ItemStack } from './inventory';
 import { ABILITY_BY_ID } from './abilities';
@@ -6,7 +6,7 @@ import { CLASSES, offhandModifier, type ClassId } from './classes';
 import { formatEmberTime, EMBER_CAST, EMBER_COOLDOWN } from './emberstone';
 import { gearSuffix, optionStat, rarityDef, resourceNameOf, rolledStats, statLine } from './gear';
 import { forgeHint, jewelDef, jewelKind } from './jewels';
-import { I, bagSlotsOf, getItem, isUndroppable, mountOfItem, skillBookAbility, type ItemKind } from './items';
+import { BOTTLE_XP_MAX, BOTTLE_XP_MIN, I, bagSlotsOf, getItem, isUndroppable, mountOfItem, skillBookAbility, type ItemKind } from './items';
 import { MOUNT_CAST, mountDef, mountSpeedText } from './mounts';
 
 /**
@@ -44,7 +44,7 @@ function isPlacedBlock(block: number): boolean {
 }
 
 /** Plants and the other things that grow or hang in the wild: flowers, saplings, leaves, mushrooms, vines, cactus, melons, dripstones. */
-const NATURE_SHAPES = new Set(['cross', 'crop']);
+const NATURE_SHAPES = new Set(['cross', 'crop', 'cocoa']);
 const NATURE_NAMES = new Set(['cactus', 'pumpkin', 'melon', 'moss_block', 'lily_pad', 'pink_petals', 'glow_lichen', 'mushroom_stem', 'red_mushroom_block', 'brown_mushroom_block']);
 function isNatureBlock(block: number): boolean {
   const def = BLOCKS[block];
@@ -97,6 +97,7 @@ export function tooltipName(stack: ItemStack): string {
   if (mount) return mount.horn;
   const taught = skillBookAbility(stack.id);
   if (taught) return `Skill Book: ${ABILITY_BY_ID.get(taught)?.name ?? title(item.name)}`;
+  if (stack.id === I.EXPERIENCE_BOTTLE) return "Bottle o' Enchanting";
   if (!item.storesEnchants) return title(item.name);
   const names = (stack.ench ?? []).map(([id]) => enchantBaseName(id)).filter(Boolean);
   if (names.length === 0) return title(item.name);
@@ -154,6 +155,10 @@ export function tooltipLines(stack: ItemStack | null, viewerClass?: ClassId | nu
     lines.push({ text: 'In the off hand it stays open to glance at, and the hand stays free', color: 'dim' });
   }
 
+  if (item.use === 'xp_bottle') {
+    lines.push({ text: `Breaks into ${BOTTLE_XP_MIN} to ${BOTTLE_XP_MAX} experience`, color: 'good' });
+    lines.push({ text: 'Right-click to throw it', color: 'dim' });
+  }
   if (item.use === 'emberstone') {
     lines.push({ text: 'Use: teleports you to your bed', color: 'good' });
     lines.push({ text: `Stand still for ${EMBER_CAST} seconds while it casts. Without a bed it takes you to the village`, color: 'dim' });
@@ -192,9 +197,29 @@ export function tooltipLines(stack: ItemStack | null, viewerClass?: ClassId | nu
     for (const t of offhandBonusLines(stack.id)) lines.push({ text: t, color: 'good' });
   }
   if (item.use === 'bow') lines.push({ text: 'Hold to draw, release to fire', color: 'dim' });
+  if (item.use === 'fishing_rod') {
+    lines.push({ text: 'Right-click to cast onto the water', color: 'good' });
+    lines.push({ text: 'Right-click again when the float dips to reel in what bit', color: 'dim' });
+  }
+  if (stack.id === I.SWEET_BERRIES) lines.push({ text: 'Plant on grass or dirt', color: 'dim' });
+  if (stack.id === I.GLOW_BERRIES) lines.push({ text: 'Hang it from a ceiling', color: 'dim' });
+  if (stack.id === campfireId(0, true)) {
+    lines.push({ text: 'Cooks food, four pieces at a time', color: 'dim' });
+    lines.push({ text: 'A shovel puts the fire out', color: 'dim' });
+  }
+  if (stack.id === I.CAKE) {
+    lines.push({ text: 'Each bite restores 2 hunger', color: 'good' });
+    lines.push({ text: 'Place it, then eat it one bite at a time', color: 'dim' });
+  }
   if (item.food) {
-    lines.push({ text: `Restores ${item.food.hunger} Hunger`, color: 'good' });
-    lines.push({ text: `${num(item.food.saturation)} Saturation`, color: 'dim' });
+    if (item.food.clears) lines.push({ text: 'Clears status effects', color: 'good' });
+    if (item.food.hunger > 0) {
+      lines.push({ text: `Restores ${item.food.hunger} Hunger`, color: 'good' });
+      lines.push({ text: `${num(item.food.saturation)} Saturation`, color: 'dim' });
+    }
+    if (item.food.poison) lines.push({ text: `${Math.round(item.food.poison.chance * 100)}% chance of the Poison status effect (${num(item.food.poison.seconds)}s)`, color: 'warn' });
+    if (item.food.sickness) lines.push({ text: `${Math.round(item.food.sickness.chance * 100)}% chance of the Hunger sickness status effect (${num(item.food.sickness.seconds)}s)`, color: 'warn' });
+    if (item.food.leaves != null) lines.push({ text: `The ${getItem(item.food.leaves).name.replace(/_/g, ' ')} stays in your hand`, color: 'dim' });
   }
   if (item.block !== null && !item.armor) {
     const def = BLOCKS[item.block];

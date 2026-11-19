@@ -287,6 +287,19 @@ describe('auth over HTTP and WebSocket', () => {
     expect(me.maxCharacters).toBe(3);
   });
 
+  it('serves the lobby its character sheet, the wallet stash and a brief of each character', async () => {
+    expect((await fetch(base + '/auth/sheet')).status).toBe(401);
+    const { cookie } = await login();
+    const made = await post('/auth/character', { displayName: 'Sheeted', class: 'mage', look: lookCode({ skin: 1, hair: 1, style: 1, eyes: 1, shirt: 1, pants: 1 }) }, { cookie });
+    expect(made.status).toBe(200);
+    const body = await (await fetch(base + '/auth/sheet', { headers: { cookie } })).json();
+    // never played in the realm: no sheet, no brief; the stash is the wallet's, and empty
+    expect(body.sheet).toBeNull();
+    expect(body.briefs).toEqual([]);
+    expect(body.stash.slots).toHaveLength(54);
+    expect(body.stash.slots.every((s: unknown) => s === null)).toBe(true);
+  });
+
   it('a wallet can have up to three characters, each with its own progress', async () => {
     const w = newWallet();
     const { cookie, res } = await login(w);

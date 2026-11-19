@@ -1,0 +1,9 @@
+/* The Stashkeeper's window: a merchant's frame with the wallet's stash in place of the wares. */
+#menu-screen .wow .stash-slot:not(.full) {
+  opacity: 0.85;
+}
+
+#menu-screen:has(.panel.wow.stash-win) {
+  padding-bottom: 24px;
+}
+

@@ -127,6 +127,10 @@ export interface SelfView {
   saturation: number;
   air: number;
   dead: boolean;
+  /** Seconds of the Poison status effect left. Left out when there is none. */
+  poison?: number;
+  /** Seconds of the Hunger sickness status effect left. Left out when there is none. */
+  foodSick?: number;
   /** Experience level, and how full the bar is (0..1). */
   level: number;
   xpProgress: number;
@@ -189,6 +193,8 @@ export interface InventoryView {
   slots: (ItemView | null)[];
   /** The bags worn, one per bag slot. */
   bags: (ItemView | null)[];
+  /** The worn armor (helmet, chestplate, leggings, boots): without it the client would only know them while the inventory is open. */
+  armor?: (ItemView | null)[];
   menu: MenuView | null;
 }
 
@@ -260,6 +266,8 @@ export interface MobView {
   baby?: 1;
   sheared?: 1;
   love?: 1;
+  /** An armor stand: helmet, chestplate, leggings, boots and the item in its hand. 0 is empty. Left out for every other mob. */
+  gear?: number[];
 }
 
 export interface ArrowView {
@@ -320,6 +328,19 @@ export interface XpOrbView {
   phase: number;
 }
 
+/** A fishing bobber near the player: where the float is, what the line is doing (a `BobberMode`), and whose it is. */
+export interface BobberView {
+  id: number;
+  /** The id of the player that cast it. */
+  o: number;
+  x: number;
+  y: number;
+  z: number;
+  m: number;
+  /** Set on the viewer's own bobber (the client does not know its own id). */
+  own?: 1;
+}
+
 export interface Snapshot {
   t: 'snap';
   tick: number;
@@ -334,8 +355,12 @@ export interface Snapshot {
   arrows: ArrowView[];
   vehicles: VehicleView[];
   drops: DropView[];
+  /** Food on campfires near you, packed `x, y, z` and four item ids (0 is an empty place). Left out when none are near. */
+  fires?: number[];
   /** Experience orbs near the player (left out when there are none). */
   orbs?: XpOrbView[];
+  /** Fishing bobbers near the player (left out when there are none). */
+  bobbers?: BobberView[];
   /** Ability effects near the player (left out when there are none). Each has an id that does not repeat, so a client plays one once. */
   fx?: Fx[];
   /** Effects that are still on, and as they were last sent (a real connection is sent an effect in full once: the client keeps it until its id is not listed). */

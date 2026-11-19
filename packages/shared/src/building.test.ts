@@ -3,6 +3,8 @@ import {
   B,
   BLOCKS,
   BUILD_MATERIALS,
+  CONNECT,
+  GROVE,
   BUILDING_ITEM,
   GameSession,
   HeadlessWorld,
@@ -28,6 +30,7 @@ import {
   ladderInfo,
   makeStack,
   meshBoxes,
+  Player,
   mulberry32,
   placementFor,
   raycast,
@@ -199,6 +202,35 @@ describe('placing', () => {
     expect(placementFor(stairs, 0, 1, 0, SOUTH)).toBe(stairId(0, false, 2));
     expect(placementFor(stairs, 0, -1, 0, EAST)).toBe(stairId(0, true, 0));
     expect(placementFor(stairs, 1, 0, 0, EAST, 0.9)).toBe(stairId(0, true, 0));
+  });
+
+  it('places pale oak stairs, and every other stair, upside down from the upper half', () => {
+    const kinds = [stairId(0, false, 0), stairId(4, false, 0), GROVE.paleOak.stair, GROVE.mangrove.stair, CONNECT.netherStair, CONNECT.quartzStair];
+    for (const item of kinds) {
+      const info = stairInfo(item);
+      expect(info).not.toBeNull();
+      const mat = info!.mat;
+      expect(stairInfo(placementFor(item, 1, 0, 0, EAST, 0.8)!)).toEqual({ mat, top: true, dir: 0 });
+      expect(stairInfo(placementFor(item, 1, 0, 0, EAST, 0.2)!)).toEqual({ mat, top: false, dir: 0 });
+      expect(stairInfo(placementFor(item, 0, -1, 0, SOUTH)!)).toEqual({ mat, top: true, dir: 2 });
+      expect(stairInfo(placementFor(item, 0, 1, 0, EAST)!)).toEqual({ mat, top: false, dir: 0 });
+    }
+
+    // The block on the slab hangs down, so the upper half of what you see is still below the middle of its cell.
+    const { s, world } = make();
+    const x = CX + 4;
+    const y = FLOOR + 1;
+    world.setBlock(x, y, CZ, slabId(4, false));
+    world.setBlock(x, y + 1, CZ, B.STONE_BRICKS);
+    s.inventory.set(0, makeStack(GROVE.paleOak.stair, 20));
+    s.teleport(CX + 0.5, FLOOR + 1, CZ + 0.5, EAST, 0);
+    const high = raycast(world, x - 2, y + 1.25, CZ + 0.5, 1, 0, 0, 6)!;
+    expect(high.fy).toBeLessThan(0.5);
+    expect(s.useOn(high.x, high.y, high.z, high.nx, high.ny, high.nz, high.fy)).toBe(true);
+    expect(stairInfo(world.getBlock(x - 1, y + 1, CZ))).toMatchObject({ top: true, dir: 0 });
+    const low = raycast(world, x + 2, y + 0.7, CZ + 0.5, -1, 0, 0, 6)!;
+    expect(s.useOn(low.x, low.y, low.z, low.nx, low.ny, low.nz, low.fy)).toBe(true);
+    expect(stairInfo(world.getBlock(x + 1, y + 1, CZ))).toMatchObject({ top: false, dir: 0 });
   });
 
   it('turns two slabs of one kind into a full block, but not different kinds', () => {
@@ -512,5 +544,42 @@ describe('shapes', () => {
     world.setBlock(CX + 2, FLOOR + 1, CZ, B.FENCE);
     expect(collides(world, CX + 2.5, FLOOR + 2.3, CZ + 0.5)).toBe(true); // 1.3 above the floor: still inside the fence
     expect(collides(world, CX + 2.5, FLOOR + 2.6, CZ + 0.5)).toBe(false);
+  });
+
+  it('puffs a broken block and a placed one, and a neighbour sees both', () => {
+    const { s, world } = make('creative');
+    const near = new Player(s.realm, { mode: 'creative', name: 'Near' });
+    const far = new Player(s.realm, { mode: 'creative', name: 'Far' });
+    near.teleport(CX + 0.5, FLOOR + 1, CZ + 0.5, 0, 0);
+    far.teleport(CX + 80, FLOOR + 1, CZ, 0, 0);
+    const x = CX + 3;
+    const y = FLOOR + 2;
+    world.setBlock(x, y, CZ, B.STONE);
+    s.drainEvents();
+    near.drainEvents();
+    far.drainEvents();
+    s.breakBlock(x, y, CZ);
+    expect(world.getBlock(x, y, CZ)).toBe(B.AIR);
+    const broke = s.drainEvents();
+    expect(broke.find((e) => e.t === 'burst')).toMatchObject({ id: B.STONE, x, y, z: CZ, count: 32 });
+    expect(broke.some((e) => e.t === 'sound' && e.action === 'break' && e.sound === 'stone')).toBe(true);
+    expect(near.drainEvents().some((e) => e.t === 'burst' && e.id === B.STONE)).toBe(true);
+    expect(far.drainEvents().some((e) => e.t === 'burst')).toBe(false);
+
+    for (const id of [B.DIRT, GROVE.paleOak.planks, B.GLASS, B.CHEST]) {
+      s.inventory.set(0, makeStack(id, 1));
+      world.setBlock(x, y - 1, CZ, B.STONE);
+      world.setBlock(x, y, CZ, B.AIR);
+      s.drainEvents();
+      near.drainEvents();
+      expect(s.useOn(x, y - 1, CZ, 0, 1, 0)).toBe(true);
+      const got = world.getBlock(x, y, CZ);
+      if (id === B.CHEST) expect(BLOCKS[got].shape).toBe('chest');
+      else expect(got).toBe(id);
+      const placed = s.drainEvents();
+      expect(placed.find((e) => e.t === 'burst')).toMatchObject({ id: got, x, y, z: CZ, count: 8, soft: true });
+      expect(placed.some((e) => e.t === 'sound' && e.action === 'place' && e.sound === BLOCKS[got].sound)).toBe(true);
+      expect(near.drainEvents().some((e) => e.t === 'burst' && e.soft === true && e.id === got)).toBe(true);
+    }
   });
 });

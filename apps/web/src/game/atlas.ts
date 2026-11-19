@@ -1,6 +1,7 @@
 import * as THREE from 'three';
-import { ATLAS_COLS, ATLAS_ROWS, BED_RED, DYE_NAMES, DYE_RGB, TILE_NAMES, TILE_PX, bedTileName, type BedPart } from '@solrift/shared';
+import { ATLAS_COLS, ATLAS_ROWS, BED_RED, DRESS_TILE_RGB, DYE_NAMES, DYE_RGB, GROVE_TILE_RGB, JOINERY_TILE_RGB, MASONRY_TILE_RGB, TILE_NAMES, TILE_PX, bedTileName, type BedPart } from '@solrift/shared';
 import { spritePainter } from './sprites';
+import { beyondBeveledTiles, beyondEmissiveTiles, beyondPainters, beyondUngradedTiles } from './beyondTiles';
 
 /**
  * Procedural texture atlas. Every tile is generated from code, so the game
@@ -24,6 +25,20 @@ const jitter = (base: RGB, amt: number, r: () => number): RGB => {
   const d = (r() - 0.5) * 2 * amt;
   return [base[0] + d, base[1] + d, base[2] + d];
 };
+
+/**
+ * A sheet of glass: clear through the middle, a quiet rim, and two short glints.
+ * Stained glass keeps the same drawing and lays its colour over it, a little less clear.
+ */
+function glassSheet(x: number, y: number, r: () => number, tone: RGB, stained = false): [number, number, number, number] {
+  const glint = (x === 3 && y >= 2 && y <= 5) || (x === 4 && y >= 3 && y <= 4) || (x === 12 && y >= 10 && y <= 13);
+  const rim = x === 0 || y === 0 || x === 15 || y === 15;
+  const edge = x === 1 || y === 1 || x === 14 || y === 14;
+  const j = (r() - 0.5) * 10;
+  const lift = glint ? 48 : rim ? 16 : edge ? 8 : 0;
+  const alpha = stained ? (glint ? 210 : rim ? 168 : edge ? 120 : 96) : glint ? 176 : rim ? 132 : edge ? 84 : 56;
+  return [Math.min(255, tone[0] + lift + j), Math.min(255, tone[1] + lift + j), Math.min(255, tone[2] + lift + j * 0.4), alpha];
+}
 
 const DIRT: RGB = [134, 96, 67];
 const STONE: RGB = [125, 125, 125];
@@ -104,12 +119,7 @@ const PAINTERS: Record<string, Painter> = {
     const v = 18 * cell + (r() - 0.5) * 22;
     return [226 + v * 0.35, 176 + v * 0.8, 84 + v * 0.5];
   },
-  glass: (x, y, r) => {
-    const border = x === 0 || y === 0 || x === TILE_PX - 1 || y === TILE_PX - 1;
-    if (border) return [200, 230, 240, 255];
-    if (x === y || x === y + 1 || (x === 3 && y < 3)) return [255, 255, 255, 190];
-    return [190, 225, 240, r() < 0.02 ? 120 : 0];
-  },
+  glass: (x, y, r) => glassSheet(x, y, r, [198, 222, 232]),
 };
 
 // ---- the underground ----
@@ -1393,12 +1403,166 @@ PAINTERS.trapdoor = (x, y, r) => {
 const GRADE_SAT = 1.18;
 const GRADE_CONTRAST = 1.06;
 /** Tiles whose colours are already tuned (or must stay neutral): glowing things, water and ice. */
-const UNGRADED_TILES = new Set(['dripstone_block', 'waystone_top', 'waystone_side', 'lava', 'glowstone', 'water', 'ice', 'snow', 'packed_ice', 'wool', 'bedrock', 'redstone_lamp_on', 'fire_0', 'fire_1', 'fire_2', 'fire_3']);
+const UNGRADED_TILES = new Set(['dripstone_block', 'waystone_top', 'waystone_side', 'lava', 'glowstone', 'water', 'ice', 'snow', 'packed_ice', 'wool', 'bedrock', 'redstone_lamp_on', 'fire_0', 'fire_1', 'fire_2', 'fire_3', 'torch_flame_0', 'torch_flame_1', 'torch_flame_2', 'torch_flame_3', 'glass']);
 /** Plain cube tiles that get a one-pixel edge highlight and shadow. */
 const BEVELED_TILES = new Set(['stone', 'cobble', 'mossy_cobble', 'dirt', 'sand', 'gravel', 'stone_bricks', 'planks', 'obsidian', 'granite', 'diorite', 'andesite', 'sandstone_top',
   'coarse_dirt', 'mud', 'clay', 'red_sand', 'red_sandstone_top', 'deepslate', 'cobbled_deepslate', 'tuff', 'terracotta', 'terracotta_orange', 'terracotta_yellow', 'terracotta_red', 'terracotta_white', 'terracotta_brown', 'terracotta_light_gray',
   'dripstone_block', 'amethyst_block', 'budding_amethyst', 'calcite', 'smooth_basalt',
   'crafting_top', 'furnace_top', 'chest_top', 'coal_ore', 'iron_ore', 'gold_ore', 'diamond_ore', 'lapis_ore', 'emerald_ore', 'redstone_ore']);
+
+for (const [name, rgb] of Object.entries(MASONRY_TILE_RGB)) {
+  PAINTERS[name] = (x, y, r) => {
+    const mortar = name.includes('brick') && (y % 4 === 3 || (Math.floor(y / 4) % 2 === 0 ? x % 8 === 7 : x % 8 === 3));
+    if (mortar) return jitter([rgb[0] * 0.55, rgb[1] * 0.55, rgb[2] * 0.55], 6, r);
+    return jitter(rgb, 8, r);
+  };
+  BEVELED_TILES.add(name);
+}
+
+for (const [name, rgb] of [...Object.entries(JOINERY_TILE_RGB), ...Object.entries(GROVE_TILE_RGB)]) {
+  const tone: RGB = [rgb[0], rgb[1], rgb[2]];
+  const scale = (k: number): RGB => [tone[0] * k, tone[1] * k, tone[2] * k];
+  const clear: [number, number, number, number] = [0, 0, 0, 0];
+  if (name === 'bamboo') {
+    PAINTERS[name] = (x, y, r) => (x >= 6 && x <= 9 ? jitter(y % 5 === 4 ? scale(0.72) : tone, 5, r) : clear);
+  } else if (name === 'hanging_roots' || name === 'pale_hanging_moss') {
+    PAINTERS[name] = (x, y, r) => ((x % 4 === 1 || x % 4 === 2) && y > 1 ? jitter(tone, 6, r) : clear);
+  } else if (name.endsWith('_leaves')) {
+    PAINTERS[name] = (x, y, r) => {
+      if (name.includes('flower') && (x + y) % 6 === 0) return [220, 140, 170];
+      return jitter((x * 3 + y * 5) % 7 === 0 ? scale(0.72) : tone, 10, r);
+    };
+  } else if (name.endsWith('_sapling') || name === 'mangrove_propagule' || name === 'azalea') {
+    PAINTERS[name] = () => clear;
+  } else if (name.includes('mosaic')) {
+    PAINTERS[name] = (x, y, r) => jitter((Math.floor(x / 4) + Math.floor(y / 4)) % 2 === 0 ? tone : scale(0.82), 5, r);
+    BEVELED_TILES.add(name);
+  } else if (name.endsWith('_door_lower') || name.endsWith('_door_upper')) {
+    const upper = name.endsWith('_door_upper');
+    const iron = name.startsWith('iron');
+    PAINTERS[name] = (x, y, r) => {
+      let c = tone;
+      if (iron) {
+        if (x % 5 === 4 || y % 5 === 4) c = scale(0.72);
+      } else if (x % 4 === 3) c = scale(0.74);
+      else if (x % 4 === 0) c = scale(1.08);
+      if (x === 0 || x === 15 || y === 0 || y === 15) return jitter(scale(0.62), 4, r);
+      if (!upper && !iron && (x === 12 || x === 13) && (y === 2 || y === 3)) return y === 2 ? [230, 190, 70] : [160, 120, 40];
+      return jitter(c, 4, r);
+    };
+  } else if (name.endsWith('_trapdoor')) {
+    const iron = name.startsWith('iron');
+    PAINTERS[name] = (x, y, r) => {
+      if (x === 0 || x === 15 || y === 0 || y === 15) return jitter(scale(0.58), 3, r);
+      if (!iron && y % 4 === 3) return jitter(scale(0.68), 3, r);
+      if (!iron && (x === 2 || x === 13)) return [150, 154, 164];
+      if (iron && (x % 4 === 0 || y % 4 === 0)) return jitter(scale(0.7), 3, r);
+      return jitter(tone, 4, r);
+    };
+  } else if (name.endsWith('_fence') || name.endsWith('_gate')) {
+    const gate = name.endsWith('_gate');
+    PAINTERS[name] = (x, y) => {
+      const post = (x >= 2 && x <= 4) || (x >= 11 && x <= 13);
+      const rail = !gate && (y === 5 || y === 6 || y === 10 || y === 11) && x >= 4 && x <= 11;
+      const leaf = gate && y >= 4 && y <= 12 && x >= 5 && x <= 10 && x !== 7 && x !== 8;
+      return post || rail || leaf ? tone : clear;
+    };
+  } else if (name.endsWith('_button')) {
+    PAINTERS[name] = (x, y) => (x >= 4 && x <= 11 && y >= 5 && y <= 10 ? tone : clear);
+  } else if (name.endsWith('_plate') && name !== 'heavy_plate' && name !== 'light_plate') {
+    PAINTERS[name] = (x, y) => (y >= 11 && y <= 13 && x >= 1 && x <= 14 ? tone : clear);
+  } else if (name.endsWith('_stem_side') || name.endsWith('_bark')) {
+    PAINTERS[name] = (x, y, r) => jitter(x % 4 === 0 ? scale(0.75) : tone, 6, r);
+    BEVELED_TILES.add(name);
+  } else if (name.endsWith('_log_top') || name.endsWith('_stem_top')) {
+    PAINTERS[name] = (x, y, r) => {
+      const ring = Math.hypot(x - 7.5, y - 7.5);
+      return jitter(Math.floor(ring) % 3 === 0 ? scale(0.82) : tone, 5, r);
+    };
+  } else {
+    PAINTERS[name] = (_x, _y, r) => jitter(tone, 8, r);
+    BEVELED_TILES.add(name);
+  }
+}
+
+for (const [name, rgb] of Object.entries(DRESS_TILE_RGB)) {
+  const tone: RGB = [rgb[0], rgb[1], rgb[2]];
+  const scale = (k: number): RGB => [tone[0] * k, tone[1] * k, tone[2] * k];
+  const clear: [number, number, number, number] = [0, 0, 0, 0];
+  if (name === 'iron_bars') {
+    PAINTERS[name] = (x, y) => {
+      const bar = x === 2 || x === 3 || x === 7 || x === 8 || x === 12 || x === 13;
+      const rail = (y === 3 || y === 4 || y === 11 || y === 12) && x > 1 && x < 14;
+      if (bar && (y === 1 || y === 14)) return [150, 154, 162];
+      return bar || rail ? [186, 190, 198] : clear;
+    };
+  } else if (name.startsWith('stained_')) {
+    PAINTERS[name] = (x, y, r) => glassSheet(x, y, r, tone, true);
+    UNGRADED_TILES.add(name);
+  } else if (name.startsWith('candle') || name.startsWith('banner_')) {
+    PAINTERS[name] = () => clear;
+  } else if (name.startsWith('glazed_')) {
+    PAINTERS[name] = (x, y, r) => {
+      const ring = Math.abs(Math.hypot(x - 7.5, y - 7.5) - 4.5) < 1.15;
+      const corner = (x < 3 && y < 3) || (x > 12 && y > 12);
+      return jitter(ring || corner ? scale(1.28) : scale(0.78), 4, r);
+    };
+    BEVELED_TILES.add(name);
+  } else if (name.startsWith('concrete_')) {
+    PAINTERS[name] = (x, y, r) => jitter((x + y) % 5 === 0 ? scale(0.9) : tone, 5, r);
+    BEVELED_TILES.add(name);
+  } else if (name.startsWith('terracotta_')) {
+    PAINTERS[name] = (x, y, r) => jitter((x * 3 + y * 5) % 7 === 0 ? scale(0.82) : tone, 8, r);
+    BEVELED_TILES.add(name);
+  } else if (name.endsWith('_sign')) {
+    PAINTERS[name] = (x, y, r) => {
+      if (x === 0 || y === 0 || x === 15 || y === 15) return jitter(scale(0.55), 3, r);
+      if (y === 5 || y === 8 || y === 11) return jitter(scale(0.72), 3, r);
+      return jitter(tone, 4, r);
+    };
+  } else if (name === 'cracked_stone_bricks' || name === 'chiseled_stone_bricks') {
+    PAINTERS[name] = (x, y, r) => {
+      const c = PAINTERS.stone_bricks(x, y, r) as RGB;
+      const crack = name.startsWith('cracked_') && Math.abs(x - (3 + ((y * 3) % 9))) <= 0 && y > 1 && y < 14;
+      const frame = name.startsWith('chiseled_') && (x < 2 || y < 2 || x > 13 || y > 13 || ((x === 5 || x === 10 || y === 5 || y === 10) && x > 4 && x < 11 && y > 4 && y < 11));
+      return crack || frame ? [c[0] * 0.45, c[1] * 0.45, c[2] * 0.45] : c;
+    };
+    BEVELED_TILES.add(name);
+  } else if (name === 'cracked_deepslate_bricks' || name === 'chiseled_deepslate') {
+    PAINTERS[name] = (x, y, r) => {
+      const c = PAINTERS.deepslate_bricks(x, y, r) as RGB;
+      const crack = name.startsWith('cracked_') && Math.abs(x + y - 15) <= 1;
+      const frame = name.startsWith('chiseled_') && (x < 2 || y < 2 || x > 13 || y > 13 || ((x === 5 || x === 10 || y === 5 || y === 10) && x > 4 && x < 11 && y > 4 && y < 11));
+      return crack || frame ? [c[0] * 0.4, c[1] * 0.4, c[2] * 0.4] : c;
+    };
+    BEVELED_TILES.add(name);
+  } else if (name === 'flower_pot') {
+    PAINTERS[name] = (x, y, r) => jitter((x + y) % 4 === 0 ? scale(0.8) : tone, 6, r);
+    BEVELED_TILES.add(name);
+  } else {
+    PAINTERS[name] = (_x, _y, r) => jitter(tone, 6, r);
+    BEVELED_TILES.add(name);
+  }
+}
+
+PAINTERS.nether_bricks = (x, y, r) => {
+  const row = y >> 2;
+  const bx = (x + (row % 2) * 4) % 8;
+  const mortar = y % 4 === 3 || bx === 7;
+  return mortar ? jitter([28, 10, 12], 4, r) : jitter([62, 24, 28], 8, r);
+};
+BEVELED_TILES.add('nether_bricks');
+PAINTERS.quartz_block = (x, y, r) => {
+  const edge = x === 0 || y === 0 || x === 15 || y === 15;
+  return jitter(edge ? [210, 204, 196] : [236, 232, 226], 4, r);
+};
+BEVELED_TILES.add('quartz_block');
+PAINTERS.quartz_pillar = (x, y, r) => jitter(x % 4 === 3 ? [198, 194, 186] : [234, 230, 222], 3, r);
+
+// The World Beyond: stones, woods, crystals, corals and glowing plants drawn from their data (beyondTiles.ts).
+Object.assign(PAINTERS, beyondPainters());
+for (const name of beyondBeveledTiles()) BEVELED_TILES.add(name);
+for (const name of beyondUngradedTiles()) UNGRADED_TILES.add(name);
 
 export function paintTile(ctx: CanvasRenderingContext2D, name: string, index: number): void {
   const col = index % ATLAS_COLS;
@@ -1458,7 +1622,8 @@ export interface Atlas {
 }
 
 /** Tiles that give off their own light: the shader draws them at full brightness whatever the sky says. */
-const EMISSIVE_TILES = new Set(['waystone_top', 'waystone_side', 'lava', 'glowstone', 'redstone_lamp_on', 'fire_0', 'fire_1', 'fire_2', 'fire_3', 'glow_lichen', 'amethyst_cluster', 'cave_vines_berries']);
+const EMISSIVE_TILES = new Set(['waystone_top', 'waystone_side', 'lava', 'glowstone', 'redstone_lamp_on', 'fire_0', 'fire_1', 'fire_2', 'fire_3', 'torch_flame_0', 'torch_flame_1', 'torch_flame_2', 'torch_flame_3', 'glow_lichen', 'amethyst_cluster', 'cave_vines_berries', 'glow_berries']);
+for (const name of beyondEmissiveTiles()) EMISSIVE_TILES.add(name);
 
 function buildChunkTextures(canvas: HTMLCanvasElement): { color: THREE.DataTexture; aux: THREE.DataTexture } {
   const w = canvas.width;
@@ -1506,6 +1671,8 @@ function buildChunkTextures(canvas: HTMLCanvasElement): { color: THREE.DataTextu
         }
         aux[d] = tinted ? 255 : 0;
         aux[d + 1] = emissive;
+        // Glass catches a reflection along the edge you look across. See the shader.
+        aux[d + 2] = name === 'glass' || name.startsWith('stained_') ? 255 : 0;
         aux[d + 3] = 255;
       }
     }

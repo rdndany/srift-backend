@@ -95,7 +95,8 @@ export function ClassAttributes() {
   const bonus = offhandModifier(api?.offhand.get(0)?.id ?? 0);
   // The gear counts as it does for the character itself: the item in hand, the off hand and the armor worn, each with its bonus stats
   // (a piece that needs a higher level or another class adds nothing).
-  const menu = api?.menu();
+  const warm = useUi((s) => s.warmMenu);
+  const menu = warm ?? api?.menu();
   const worn: (ItemStack | null)[] = [api?.inventory.get(selected) ?? null, api?.offhand.get(0) ?? null];
   if (menu instanceof CraftingMenu && menu.armor) for (let i = 0; i < menu.armor.size; i++) worn.push(menu.armor.get(i));
   const gear = gearModifiers(worn, { id: cls.id, level: cls.level });

@@ -8,6 +8,9 @@ export interface PlaceSource {
   nearestVillage(x: number, z: number): { x: number; z: number } | null;
   caveKindAt(x: number, y: number, z: number): CaveKind;
   zoneAt(x: number, y: number, z: number): string | null;
+  /** The World Beyond names its 110 biomes and its cave ecosystems; the other worlds leave these out. */
+  biomeNameAt?(x: number, z: number): string | null;
+  caveNameAt?(x: number, y: number, z: number): string | null;
 }
 
 export type CaveKind = 'plain' | 'lush' | 'dripstone' | 'deep_dark';
@@ -43,8 +46,8 @@ export function placeNameAt(gen: PlaceSource, x: number, y: number, z: number, a
   const kind = caveKindHere(gen, x, y, z, adventure);
   if (kind !== 'plain') return CAVE_NAMES[kind];
   const col = gen.columnAt(Math.floor(x), Math.floor(z));
-  if (y < col.height - CAVE_DEPTH - 8) return 'Caves';
+  if (y < col.height - CAVE_DEPTH - 8) return gen.caveNameAt?.(x, y, z) ?? 'Caves';
   const village = gen.nearestVillage(x, z);
   if (village && Math.hypot(village.x - x, village.z - z) <= VILLAGE_EXTENT + 6) return 'Village';
-  return BIOME_NAMES[col.biome] ?? 'Wilderness';
+  return gen.biomeNameAt?.(x, z) ?? BIOME_NAMES[col.biome] ?? 'Wilderness';
 }

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { BLOCKS, I, getItem, lanternInfo, type ItemDef } from '@solrift/shared';
+import { B, BLOCKS, I, getItem, lanternInfo, type ItemDef } from '@solrift/shared';
 import { aimBuilders } from './aim';
-import { cubeView, orbView, plainView, shieldView, toolView } from './basic';
+import { cubeView, orbView, plainView, rodView, shieldView, toolView, torchView } from './basic';
 import { CompassView } from './compass';
 import { lanternBuilder } from './lantern';
 import type { HeldBuilder, HeldKit, HeldView } from './view';
@@ -17,10 +17,12 @@ function builderFor(item: ItemDef, own: { lantern: HeldBuilder; aim: Record<numb
   const weapon = weaponKind(item);
   if (weapon) return (i, kit) => weaponView(i, weapon, kit);
   if (item.tool) return toolView;
+  if (item.use === 'fishing_rod') return rodView;
   if (own.aim[item.id]) return own.aim[item.id];
   if (item.id === I.ORB) return orbView;
   if (item.id === I.COMPASS) return (i, kit) => new CompassView(i, kit);
   if (item.shield) return shieldView;
+  if (item.block === B.TORCH) return torchView;
   return plainView;
 }
 

@@ -1,5 +1,5 @@
 import { Biome, type Column } from './biomes';
-import { B, IS_LEAVES, IS_LOG, IS_SOLID } from './blocks';
+import { B, GROVE, IS_LEAVES, IS_LOG, IS_SOLID } from './blocks';
 import { CHUNK_SIZE, SEA_LEVEL, WORLD_HEIGHT, blockIndex } from './chunk';
 import { Simplex, hash2, mulberry32 } from './noise';
 import { SOILS, type Ground, type SurfaceRules } from './surface';
@@ -110,7 +110,7 @@ export class Vegetation {
           kind = 'dark_oak';
           big = true;
         } else {
-          kind = u < 0.9 ? 'dark_oak' : 'oak';
+          kind = u < 0.75 ? 'dark_oak' : u < 0.9 ? 'pale_oak' : 'oak';
         }
         break;
       }
@@ -151,7 +151,7 @@ export class Vegetation {
       }
       case Biome.SWAMP:
         d = 0.034 * clump;
-        kind = 'oak';
+        kind = hash2(this.seed + 81, wx, wz) < 0.55 ? 'mangrove' : 'oak';
         break;
       case Biome.MEADOW:
         d = 0.0035;
@@ -306,7 +306,13 @@ export class Vegetation {
             else if (patch < 0.06 && r < 0.05) put(B.TULIP_ORANGE);
             break;
           case Biome.JUNGLE:
-            if (r > 0.7) put(B.TALL_GRASS);
+            if (r < 0.06 && (ground === B.GRASS || ground === B.DIRT || ground === B.PODZOL)) {
+              const n = 4 + Math.floor(r2 * 8);
+              for (let k = 1; k <= n && y + k < WORLD_HEIGHT; k++) {
+                if (blocks[blockIndex(lx, y + k, lz)] !== B.AIR) break;
+                blocks[blockIndex(lx, y + k, lz)] = GROVE.bamboo;
+              }
+            } else if (r > 0.7) put(B.TALL_GRASS);
             else if (r < 0.2) put(B.FERN);
             break;
           case Biome.SWAMP:

@@ -1,6 +1,6 @@
 import { BLOCKS, IS_LIQUID } from './blocks';
 import type { BlockReader } from './physics';
-import { meshBoxes } from './shapes';
+import { meshBoxes, seatDrop, seatedBox } from './shapes';
 
 export interface RayHit {
   x: number;
@@ -18,15 +18,11 @@ export interface RayHit {
 }
 
 /** Blocks that only fill part of their cell are hit where they actually are, so you can look through a gap. */
-const SHAPED = new Set(['slab', 'stair', 'door', 'trapdoor', 'ladder', 'fence', 'gate', 'pane', 'bed', 'lantern', 'chain']);
+const SHAPED = new Set(['slab', 'stair', 'door', 'trapdoor', 'ladder', 'fence', 'gate', 'pane', 'bed', 'lantern', 'chain', 'cake', 'campfire', 'wall', 'sign', 'pot']);
 
-/** Where a ray first meets the boxes of a shaped block, or null. `t` is distance along the ray. */
-function hitShape(
-  world: BlockReader,
-  id: number,
-  x: number,
-  y: number,
-  z: number,
+/** Where a ray first meets one of these cell-local boxes, or null. `t` is distance along the ray. */
+function hitBoxes(
+  boxes: readonly (readonly number[])[],
   ox: number,
   oy: number,
   oz: number,
@@ -34,13 +30,12 @@ function hitShape(
   dy: number,
   dz: number,
   maxDist: number,
+  cx: number,
+  cy: number,
+  cz: number,
 ): { t: number; nx: number; ny: number; nz: number } | null {
-  const boxes =
-    BLOCKS[id].shape === 'bed'
-      ? ([[0, 0, 0, 1, 9 / 16, 1]] as const)
-      : meshBoxes(id, (ax, az) => world.getBlock(x + ax, y, z + az));
   let best: { t: number; nx: number; ny: number; nz: number } | null = null;
-  const o = [ox - x, oy - y, oz - z];
+  const o = [ox - cx, oy - cy, oz - cz];
   const d = [dx, dy, dz];
   for (const q of boxes) {
     let t0 = 0;
@@ -77,6 +72,32 @@ function hitShape(
   return best;
 }
 
+/** Where a ray first meets the boxes of a shaped block, or null. `t` is distance along the ray. */
+function hitShape(
+  world: BlockReader,
+  id: number,
+  x: number,
+  y: number,
+  z: number,
+  ox: number,
+  oy: number,
+  oz: number,
+  dx: number,
+  dy: number,
+  dz: number,
+  maxDist: number,
+): { t: number; nx: number; ny: number; nz: number } | null {
+  const boxes =
+    BLOCKS[id].shape === 'bed'
+      ? ([[0, 0, 0, 1, 9 / 16, 1]] as const)
+      : meshBoxes(
+          id,
+          (ax, az) => world.getBlock(x + ax, y, z + az),
+          (dx, dy, dz) => world.getBlock(x + dx, y + dy, z + dz),
+        );
+  return hitBoxes(boxes, ox, oy, oz, dx, dy, dz, maxDist, x, y, z);
+}
+
 /** Voxel traversal (Amanatides & Woo). Skips air and liquids. */
 export function raycast(
   world: BlockReader,
@@ -111,25 +132,30 @@ export function raycast(
   let enter = 0;
 
   const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+  const aimed = (hx: number, hy: number, hz: number, hid: number, s: { t: number; nx: number; ny: number; nz: number }, fy?: number): RayHit => ({
+    x: hx,
+    y: hy,
+    z: hz,
+    nx: s.nx,
+    ny: s.ny,
+    nz: s.nz,
+    id: hid,
+    fx: clamp01(ox + dx * s.t - hx),
+    // A block on a slab hangs below its cell, so this can be negative. Placement uses that to tell the two halves apart.
+    fy: fy ?? clamp01(oy + dy * s.t - hy),
+    fz: clamp01(oz + dz * s.t - hz),
+  });
   for (let i = 0; i < 256; i++) {
     const id = world.getBlock(x, y, z);
     if (id !== 0 && (liquids || !IS_LIQUID[id])) {
-      if (SHAPED.has(BLOCKS[id].shape)) {
+      // A cube on a short block fills upward from that block's top, not from the top of the cell below.
+      const drop = seatDrop(id, (dy) => world.getBlock(x, y - dy, z));
+      if (drop > 0) {
+        const s = hitBoxes([seatedBox(drop)], ox, oy, oz, dx, dy, dz, maxDist, x, y, z);
+        if (s && s.t >= enter - 1e-4 && s.t <= maxDist) return aimed(x, y, z, id, s, oy + dy * s.t - y);
+      } else if (SHAPED.has(BLOCKS[id].shape)) {
         const s = hitShape(world, id, x, y, z, ox, oy, oz, dx, dy, dz, maxDist);
-        if (s) {
-          return {
-            x,
-            y,
-            z,
-            nx: s.nx,
-            ny: s.ny,
-            nz: s.nz,
-            id,
-            fx: clamp01(ox + dx * s.t - x),
-            fy: clamp01(oy + dy * s.t - y),
-            fz: clamp01(oz + dz * s.t - z),
-          };
-        }
+        if (s) return aimed(x, y, z, id, s);
       } else {
         return {
           x,
@@ -144,6 +170,12 @@ export function raycast(
           fz: clamp01(oz + dz * enter - z),
         };
       }
+    }
+    const above = world.getBlock(x, y + 1, z);
+    const aboveDrop = seatDrop(above, (dy) => world.getBlock(x, y + 1 - dy, z));
+    if (aboveDrop > 0) {
+      const s = hitBoxes([seatedBox(aboveDrop)], ox, oy, oz, dx, dy, dz, maxDist, x, y + 1, z);
+      if (s && s.t >= enter - 1e-4 && s.t <= maxDist) return aimed(x, y + 1, z, above, s, oy + dy * s.t - (y + 1));
     }
 
     if (tMaxX < tMaxY && tMaxX < tMaxZ) {

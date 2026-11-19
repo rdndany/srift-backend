@@ -1,0 +1,162 @@
+/* The Codex of the World Beyond (B) and the notes of what is found. It wears the social window's frame and tabs. */
+#codex-window {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  box-sizing: border-box;
+  padding-bottom: 112px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(ellipse at center, rgba(8, 6, 2, 0.4), rgba(0, 0, 0, 0.75));
+}
+#codex-window .codex-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(760px, 94vw);
+  max-height: 82vh;
+}
+.codex-where {
+  padding: 4px 24px 0;
+  font-size: 13px;
+  color: var(--w-dim, #a48f6a);
+  min-height: 18px;
+}
+.codex-body {
+  max-height: 58vh;
+}
+.codex-family {
+  margin: 10px 0 4px;
+  font-size: 12px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--w-gold, #f0bc4c);
+}
+.codex-family i {
+  font-style: normal;
+  color: var(--w-dim, #a48f6a);
+}
+.codex-row {
+  display: block;
+  cursor: default;
+}
+.codex-row[data-found='true'] {
+  cursor: pointer;
+}
+.codex-row.unknown {
+  opacity: 0.55;
+}
+.codex-row.here {
+  box-shadow: inset 0 0 0 1px var(--w-gold, #f0bc4c);
+}
+.codex-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.codex-name {
+  color: var(--w-gold-hi, #ffe49a);
+}
+.codex-rarity {
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #9aa7b4;
+}
+.codex-rarity.r-uncommon {
+  color: #7fd26a;
+}
+.codex-rarity.r-rare {
+  color: #5aa9ff;
+}
+.codex-rarity.r-very-rare {
+  color: #c78bff;
+}
+.codex-rarity.r-legendary {
+  color: #ffb340;
+}
+.codex-here {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--w-gold, #f0bc4c);
+}
+.codex-text {
+  margin-top: 2px;
+  font-size: 13px;
+  color: #cbbd9d;
+}
+.codex-detail {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 228, 154, 0.15);
+  font-size: 12px;
+  color: #bfae8a;
+}
+.codex-detail p {
+  margin: 2px 0;
+}
+.codex-row.done .codex-name::before {
+  content: '\2713  ';
+  color: #7fd26a;
+}
+
+/* Notes of finds: stacked under the top edge, fading out. */
+#beyond-notes {
+  position: fixed;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+.beyond-note {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: min(520px, 90vw);
+  padding: 8px 18px;
+  text-align: center;
+  background: rgba(10, 8, 4, 0.82);
+  border: 2px solid var(--w-bronze-lo, #4f360f);
+  box-shadow: inset 0 0 0 2px rgba(0, 0, 0, 0.6);
+  animation: beyond-note 6.5s ease both;
+}
+.beyond-note.achievement {
+  border-color: #d0a24c;
+}
+.bn-kind {
+  font-size: 11px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--w-gold, #f0bc4c);
+}
+.bn-title {
+  font-size: 20px;
+  color: #fff3c9;
+  text-shadow: 1px 1px 0 #000;
+}
+.bn-text {
+  font-size: 12px;
+  color: #cbbd9d;
+}
+@keyframes beyond-note {
+  0% {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  8% {
+    opacity: 1;
+    transform: none;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}

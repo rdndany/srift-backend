@@ -1,283 +1,482 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { B, CLASSES, CLASS_IDS, EXPANSIONS, GAME_VERSION, I, STATUS_LABEL, latestExpansion, toolId, type ClassId, type ContentKind, type Expansion, type ExpansionContent } from '@solrift/shared';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { ClassSkills } from './ClassSkills';
 import { AccountPanel } from './AccountPanel';
-import { CONTENT_LABEL, EXPANSIONS, STATUS_LABEL, expansionTitle, nextExpansion, type Expansion } from '@solrift/shared';
-import { EXPANSION_SHOT, HERO_SLIDES, MODE_SHOT, SHOT } from './homeAssets';
+import { COUNTS } from './beyondGuide';
+import { Blocks } from './BlockCube';
+import { BlurWords, ClickSparks, CountUp, Embers, Marquee, Reveal, Spot, useFrontMotion } from './fx';
+import { ItemSprite } from './ItemSprite';
+import { SCROLL_KEY, goMarket } from './frontNav';
+import { ART, SHOT } from './homeAssets';
 import { MODES, type HomeMode } from './modes';
+import { WayDialog, type Way } from './WayDialog';
+import './front.css';
 
-const FEATURES: { id?: string; title: string; kicker: string; text: string; shot: string; chips: string[] }[] = [
-  {
-    kicker: 'A living world',
-    title: 'Golden hours and moonlit nights',
-    text: 'The sun climbs, burns gold and sets. The moon takes over and torches glow against the dark. Shadows follow the light across the ground, rain rolls in and thunder follows.',
-    shot: SHOT.dusk,
-    chips: ['Day and night', 'Sun and moon shadows', 'Rain and storms'],
-  },
-  {
-    kicker: 'Explore',
-    title: 'Villages, caves and forgotten dungeons',
-    text: 'Walk from snowy peaks to sunny islands. Find villages with markets and farms, trade with the villagers, then go below ground to mineshafts, dungeons and temples full of loot.',
-    shot: SHOT.isle,
-    chips: ['Villages', 'Caves and mineshafts', 'Dungeons and temples'],
-  },
-  {
-    kicker: 'Craft and fight',
-    title: 'Forge your gear. Face the night.',
-    text: 'Mine ore, smelt it and craft tools and armor. Enchant your sword, repair it on an anvil, and hold the line against zombies, skeletons and creepers. Draw a bow, load a crossbow or raise a shield.',
-    shot: SHOT.mobs,
-    chips: ['Crafting', 'Armor and enchanting', 'Bows, crossbows and shields', 'Hostile mobs'],
-  },
-  {
-    id: 'l-adventure',
-    kicker: 'Adventure',
-    title: 'Dawnwatch needs you',
-    text: 'Every adventurer starts in the village of Dawnwatch. Talk to its people, take up quests from a proper quest log, follow them on the tracker beside the minimap, and get paid in XP, items and Auren, the coin of the realm. Spend it with the merchants.',
-    shot: SHOT.quests,
-    chips: ['Quest log and tracker', 'Nine villagers to meet', 'Merchants and Auren', 'XP rewards'],
-  },
-  {
-    kicker: 'Classes',
-    title: 'Warrior, Mage or Ranger',
-    text: 'Pick a class and the game bends around it: a Warrior fights on Stamina with a shield on the off hand, a Mage casts from Mana with an orb, a Ranger shoots on Focus. Each class has four abilities on the keys Z, X, C and G. You start knowing none: find the skill books on monsters and in quests, or buy them from the merchants, then right-click a book to learn it. All written in the spellbook.',
-    shot: SHOT.spellbook,
-    chips: ['Warrior, Mage, Ranger', 'Four abilities each', 'Learn from skill books', 'Spellbook'],
-  },
-  {
-    kicker: 'Gear',
-    title: 'A character sheet that shows your build',
-    text: 'Your character stands in the inventory with four armor slots, an off hand and a backpack. Next to it are your numbers: health, damage by kind, defense, armor, speed and critical hits, plus the coins in your purse. Hover any item for a full tooltip.',
-    shot: SHOT.inventory,
-    chips: ['Armor slots', 'Off-hand items', 'Stats and Armor', 'Item tooltips'],
-  },
-  {
-    kicker: 'Craft',
-    title: 'A recipe book that knows what you have',
-    text: 'Open the recipe book at any crafting table. Search it, sort it by kind, switch on Can make to see only what your backpack allows, and point at a recipe to see what is missing. A click fills the grid for you.',
-    shot: SHOT.recipes,
-    chips: ['Search and tabs', 'Can make filter', 'Fills the grid', 'Closes with the window'],
-  },
-  {
-    kicker: 'Navigate',
-    title: 'Never lose your way home',
-    text: 'A square minimap sits in the corner with your position and the quest givers marked on it. Hold a map to see the whole land, and press J to hide the minimap when you want a clean screen.',
-    shot: SHOT.hud,
-    chips: ['Minimap', 'Held world map', 'Quest markers', 'Class and XP bars'],
-  },
-  {
-    id: 'l-together',
-    kicker: 'Together',
-    title: 'Bring your friends. Share the world.',
-    text: 'Join the online realm and build, trade and explore side by side. Form a party of up to four, see each other\u2019s health on the party frame, and walk into the Hollow Cellar together. Sign in with a Solana wallet if you like, or just jump in as a guest.',
-    shot: SHOT.party,
-    chips: ['Online realm', 'Parties of four', 'In-game chat', 'Optional wallet sign-in'],
-  },
+/** Pictures of the World Beyond (small copies in /public/beyond/thumbs) under the two worlds, to show what is there. */
+const REEL = [
+  { file: 'realm-crystal_expanse-4', title: 'The Crystal Expanse' },
+  { file: 'place-sky_temple', title: 'A Sky Temple' },
+  { file: 'biome-ice_spikes', title: 'Ice Spikes' },
+  { file: 'biome-giant_mushroom_forest', title: 'Giant Mushroom Forest' },
+  { file: 'air-aurora', title: 'Aurora Highlands' },
+  { file: 'realm-ashen_kingdom-5', title: 'The Ashen Kingdom' },
+] as const;
+
+/** The six tiles of "what you do". `span` is how many of six columns a tile takes. */
+const FEATURES: { title: string; text: string; shot: string; span: number }[] = [
+  { title: 'Embark on quests', text: 'Dawnwatch has nine people to talk to, a quest log, and a coin of its own called Auren.', shot: SHOT.quests, span: 4 },
+  { title: 'Three ways to fight', text: 'Warrior, Mage or Ranger. Each has a resource bar and four abilities, learned from skill books.', shot: SHOT.spellbook, span: 2 },
+  { title: 'Forge your gear', text: 'Mine, smelt, craft and enchant. The recipe book shows what your bags can make.', shot: SHOT.recipes, span: 2 },
+  { title: 'A world that changes', text: 'The sun sets, rain rolls in, and torches hold the dark. Caves, villages and dungeons wait under it.', shot: SHOT.dusk, span: 4 },
+  { title: 'Bring your friends', text: 'One shared realm, a party of four, and the Hollow Cellar to walk into together.', shot: SHOT.party, span: 3 },
+  { title: 'Never lose the way', text: 'A minimap in the corner, a map you can hold, and quest markers on both.', shot: SHOT.hud, span: 3 },
 ];
 
-/** Fades its children in once they scroll into view. */
-function Reveal({ children, className = '' }: { children: React.ReactNode; className?: string }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [seen, setSeen] = useState(false);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    if (typeof IntersectionObserver === 'undefined') return setSeen(true);
-    const io = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((e) => e.isIntersecting)) {
-          setSeen(true);
-          io.disconnect();
-        }
-      },
-      { threshold: 0.15 },
-    );
-    io.observe(el);
-    return () => io.disconnect();
-  }, []);
-  return (
-    <div ref={ref} className={`reveal ${seen ? 'seen' : ''} ${className}`}>
-      {children}
-    </div>
-  );
-}
+const ROMAN = ['', 'I', 'II', 'III', 'IV'] as const;
 
-/** One chapter of the game, laid out like a boxed expansion: its name, its status and what it adds. */
-function ExpansionCard({ e }: { e: Expansion }) {
-  const live = e.status === 'live';
+const STRIP = ['Mine', 'Craft', 'Build', 'Quest', 'Fish', 'Trade', 'Raid dungeons', 'Slay bosses', 'Play with friends'] as const;
+
+/** The little picture on each mode's badge. */
+const MODE_ICON: Record<HomeMode, number> = {
+  survival: toolId('sword', 'iron'),
+  creative: toolId('pickaxe', 'diamond'),
+  hardcore: I.BONE,
+};
+
+/** The heading of a section: a small numbered label, then the title (put the word to light up in <em>). */
+function Head({ n, label, blocks, children }: { n: string; label: string; blocks: readonly number[]; children: ReactNode }) {
   return (
-    <article className={`xp-card ${e.status}`} id={`expansion-${e.id}`} style={{ '--accent': e.accent } as React.CSSProperties}>
-      <div className="xp-art" style={{ backgroundImage: `url(${EXPANSION_SHOT[e.id]})` }}>
-        <span className="xp-status">{STATUS_LABEL[e.status]}</span>
+    <Reveal className="fp-head">
+      <div>
+        <small>
+          <b>{n}</b>
+          {label}
+        </small>
+        <h2>{children}</h2>
       </div>
-      <div className="xp-body">
-        <div className="xp-logo">
-          <span className="xp-game">
-            Sol<b>Rift</b>
-          </span>
-          <span className="xp-name">{e.subtitle ?? 'The open world'}</span>
-        </div>
-        <p className="xp-tag">{e.tagline}</p>
-        <p className="xp-text">{e.blurb}</p>
-        <ul className="xp-content">
-          {e.content.map((c) => (
-            <li key={c.name} className={c.playable ? 'on' : ''}>
-              <span className="xp-kind">{CONTENT_LABEL[c.kind]}</span>
-              <span className="xp-item">
-                <b>{c.name}</b>
-                <i>{c.blurb}</i>
-              </span>
-            </li>
-          ))}
-        </ul>
-        <span className={`xp-note ${live ? 'on' : ''}`}>{live ? 'Included. Play it now.' : 'Not playable yet. This is what we are building.'}</span>
-      </div>
-    </article>
+      <Blocks ids={blocks} />
+    </Reveal>
   );
 }
 
-function PlayButton({ onClick, label = 'Play game' }: { onClick: () => void; label?: string }) {
-  return (
-    <button className="wow-play" onClick={onClick}>
-      <span>{label}</span>
-    </button>
-  );
-}
-
-/** The front page: a slideshow of the game, a big PLAY GAME button, and what the game offers. */
-export function Landing({ onPlay, onMode }: { onPlay: () => void; onMode: (mode: HomeMode) => void }) {
-  const [slide, setSlide] = useState(0);
-  useEffect(() => {
-    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
-    const t = setInterval(() => setSlide((s) => (s + 1) % HERO_SLIDES.length), 7000);
-    return () => clearInterval(t);
-  }, []);
-
-  const next = nextExpansion();
+/** The front page: key art with the logo and the way in, then the game laid out below it. */
+export function Landing({ onEnter }: { onEnter: (way: Way, mode: HomeMode | null) => void }) {
+  const root = useRef<HTMLDivElement>(null);
+  // Every PLAY button asks first: single player or multiplayer, then (single player) the mode. `false`: not asking; a mode: the badge it came from.
+  const [asking, setAsking] = useState<HomeMode | null | false>(false);
+  const onPlay = () => setAsking(null);
+  useFrontMotion(root);
+  const chapters = EXPANSIONS.filter((e) => e.order > 0);
+  const latest = latestExpansion();
+  const featured = chapters.find((e) => e.id === 'hollow-king') ?? chapters[0];
+  const later = chapters.filter((e) => e !== featured);
   const scrollTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
+  // Coming from another page (the character lobby's menu): go straight to the part of the page that was asked for.
+  useEffect(() => {
+    let id: string | null = null;
+    try {
+      id = sessionStorage.getItem(SCROLL_KEY);
+    } catch {
+      /* no storage: the page just opens at the top */
+    }
+    if (!id) return;
+    // (The key is taken once the page has scrolled: the development server runs this effect twice, and the first run is undone.)
+    const t = window.setTimeout(() => {
+      try {
+        sessionStorage.removeItem(SCROLL_KEY);
+      } catch {
+        /* nothing to remove */
+      }
+      document.getElementById(id)?.scrollIntoView({ block: 'start' });
+    }, 350);
+    return () => window.clearTimeout(t);
+  }, []);
+
   return (
-    <div className="landing">
-      <nav className="lnav" data-no-play>
-        <a className="lnav-logo" href="." onClick={(e) => e.preventDefault()}>
-          Sol<b>Rift</b>
-        </a>
-        <div className="lnav-links">
-          <button onClick={() => scrollTo('l-modes')}>Game modes</button>
-          <button onClick={() => scrollTo('l-expansions')}>Expansions</button>
-          <button onClick={() => scrollTo('l-world')}>The world</button>
-          <button onClick={() => scrollTo('l-adventure')}>Adventure</button>
-          <button onClick={() => scrollTo('l-together')}>Multiplayer</button>
-        </div>
-        <div className="lnav-account">
-          <AccountPanel />
-        </div>
-      </nav>
-
-      <header className="hero">
-        <div className="hero-slides" aria-hidden>
-          {HERO_SLIDES.map((src, i) => (
-            <div key={src} className={`hero-slide ${i === slide ? 'on' : ''}`} style={{ backgroundImage: `url(${src})` }} />
-          ))}
-        </div>
-        <div className="hero-shade" aria-hidden />
-        <div className="embers" aria-hidden>
-          {Array.from({ length: 16 }, (_, i) => (
-            <i key={i} style={{ left: `${(i * 37 + 8) % 100}%`, animationDelay: `${-(i * 1.7) % 11}s`, animationDuration: `${9 + (i % 5) * 2}s` }} />
-          ))}
-        </div>
-        <div className="hero-inner">
-          <div className="hero-emblem">A voxel sandbox adventure</div>
-          <h1 className="hero-logo">
-            Sol<b>Rift</b>
-          </h1>
-          <p className="hero-tag">Mine. Build. Survive. Together.</p>
-          <PlayButton onClick={onPlay} />
-          {next && (
-            <button className="hero-next" id="hero-next" data-no-play onClick={() => scrollTo('l-expansions')} style={{ '--accent': next.accent } as React.CSSProperties}>
-              <span>{STATUS_LABEL[next.status]}</span> {expansionTitle(next).replace('SolRift: ', '')}
+    <div className="fp" ref={root}>
+      <ClickSparks />
+      {asking !== false && <WayDialog mode={asking} onDone={onEnter} onClose={() => setAsking(false)} />}
+      <div className="fp-rail" data-no-play>
+        <header className="fp-nav fp-px">
+          <button className="fp-brand" onClick={() => scrollTo('fp-top')} aria-label="SolRift, to the top">
+            <ItemSprite id={toolId('sword', 'diamond')} size={28} />
+            <span>SolRift</span>
+          </button>
+          <nav className="site-nav fp-links" aria-label="Menu">
+            <button className="fp-link-play" onClick={onPlay}>
+              Play
             </button>
-          )}
-          <p className="hero-sub">Free in your browser. No download. Single player and multiplayer.</p>
-        </div>
-        <button className="hero-scroll" onClick={() => scrollTo('l-modes')} aria-label="Scroll down" data-no-play>
-          <span />
-        </button>
-        <div className="hero-dots" data-no-play>
-          {HERO_SLIDES.map((src, i) => (
-            <button key={src} className={i === slide ? 'on' : ''} onClick={() => setSlide(i)} aria-label={`Screenshot ${i + 1}`} />
-          ))}
-        </div>
-      </header>
+            <button onClick={() => scrollTo('site-world')}>The World</button>
+            <button onClick={() => scrollTo('site-features')}>Classes</button>
+            <button onClick={() => scrollTo('l-expansions')}>Expansions</button>
+            <button className="fp-link-market" onClick={goMarket}>Market</button>
+          </nav>
+          <div className="fp-account">
+            <AccountPanel />
+          </div>
+          <i className="fp-progress" aria-hidden="true" />
+        </header>
+      </div>
 
-      <section id="l-modes" className="lsec">
-        <Reveal>
-          <h2 className="lsec-title">Choose your path</h2>
-          <p className="lsec-lead">Three ways to play. Each one is a different adventure.</p>
-        </Reveal>
-        <div className="path-grid">
-          {MODES.map((m, i) => (
-            <Reveal key={m.id} className={`d${i}`}>
-              <button className={`path-card ${m.id}`} onClick={() => onMode(m.id)}>
-                <span className="path-img" style={{ backgroundImage: `url(${MODE_SHOT[m.id]})` }} />
-                <span className="path-body">
-                  <span className="path-name">{m.name}</span>
-                  <span className="path-tag">{m.tagline}</span>
-                  <span className="path-text">{m.blurb}</span>
-                  <span className="path-go">Play {m.name}</span>
+      <section className="fp-hero" id="fp-top">
+        <div className="fp-art" aria-hidden="true">
+          <div className="fp-art-m">
+            <div className="fp-art-kb" style={{ backgroundImage: `url(${ART.hero})` }} />
+          </div>
+        </div>
+        <div className="fp-rays" aria-hidden="true" />
+        <Embers />
+        <div className="fp-shade" aria-hidden="true" />
+
+        <div className="fp-center">
+          <div className="fp-chips">
+            <p className="fp-chip">
+              <i aria-hidden="true" />
+              Powered by Solana
+            </p>
+            <p className="fp-chip fp-ver" id="game-version" title="Game version">
+              Version {GAME_VERSION}
+            </p>
+          </div>
+          <h1 className="fp-logo hero-logo">
+            <span className="fp-logo-back" aria-hidden="true">
+              SolRift
+            </span>
+            <span className="fp-logo-face">SolRift</span>
+          </h1>
+          {latest && (
+            <p className="fp-xp" id="hero-expansion" style={{ ['--xp' as string]: latest.accent }}>
+              <span className="fp-xp-kicker">Expansion {ROMAN[latest.order]}</span>
+              <span className="fp-xp-name">{latest.subtitle}</span>
+            </p>
+          )}
+          <p className="fp-tag">
+            <BlurWords text="Mine. Craft. Conquer the rift." delay={0.55} />
+          </p>
+          <p className="fp-lead">
+            An open-world voxel MMORPG. Build and mine, take quests in the village of Dawnwatch, and battle monsters with your friends. Free in your browser, no download.
+          </p>
+          <div className="fp-actions">
+            <span className="fp-glow">
+              <button className="wow-play fp-play fp-px" onClick={onPlay}>
+                <span>
+                  <i aria-hidden="true" />
+                  Play now
                 </span>
               </button>
-            </Reveal>
-          ))}
+            </span>
+            <button className="fp-ghost fp-px" onClick={() => scrollTo('site-world')}>
+              <span>Explore</span>
+            </button>
+          </div>
+          <ul className="fp-badges">
+            {MODES.map((m) => (
+              <li key={m.id}>
+                <button className="fp-badge fp-px" onClick={() => setAsking(m.id)}>
+                  <ItemSprite id={MODE_ICON[m.id]} size={24} />
+                  <span>
+                    <small>Play</small>
+                    {m.name}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
         </div>
+
+        <button className="fp-cue" onClick={() => scrollTo('fp-strip')} aria-label="Scroll down">
+          <i />
+        </button>
       </section>
 
-      <section id="l-expansions" className="lsec">
-        <Reveal>
-          <h2 className="lsec-title">Expansions</h2>
-          <p className="lsec-lead">SolRift grows chapter by chapter. Each expansion brings new zones, bosses, instances and dungeons.</p>
-        </Reveal>
-        <div className="xp-grid">
-          {EXPANSIONS.map((e, i) => (
-            <Reveal key={e.id} className={`d${i % 3}`}>
-              <ExpansionCard e={e} />
+      <main className="fp-below">
+        <div className="fp-orbs" aria-hidden="true">
+          <i />
+          <i />
+          <i />
+        </div>
+
+        <div id="fp-strip">
+          <Marquee items={STRIP} />
+        </div>
+
+        <ul className="fp-stats">
+          {(
+            [
+              [3, 'Classes to master'],
+              [4, 'Heroes in a party'],
+              [120, 'Players per realm'],
+              [9, 'Villagers with quests'],
+            ] as const
+          ).map(([n, label], i) => (
+            <Reveal as="li" key={label} delay={i * 0.08}>
+              <b>
+                <CountUp to={n} />
+              </b>
+              <span>{label}</span>
             </Reveal>
           ))}
-        </div>
-      </section>
+        </ul>
 
-      <section id="l-world" className="lsec lsec-dark">
-        {FEATURES.map((f, i) => (
-          <Reveal key={f.title} className={`feature ${i % 2 ? 'flip' : ''}`}>
-            <div id={f.id} className="feature-shot" style={{ backgroundImage: `url(${f.shot})` }} />
-            <div className="feature-text">
-              <div className="kicker">{f.kicker}</div>
-              <h3>{f.title}</h3>
-              <p>{f.text}</p>
-              <ul className="chips">
-                {f.chips.map((c) => (
-                  <li key={c}>{c}</li>
-                ))}
-              </ul>
-            </div>
+        <section className="fp-sec" id="site-world">
+          <Head n="01" label="The world" blocks={[B.GRASS, B.CRAFTING_TABLE]}>
+            Two worlds to <em>explore</em>
+          </Head>
+          <div className="fp-worlds">
+            <Reveal className="fp-worlds-cell">
+              <Spot className="fp-tile fp-world-tile fp-px">
+                <i className="fp-tile-art" style={{ '--art': `url(${SHOT.dusk})` } as CSSProperties} />
+                <div className="fp-tile-copy">
+                  <small className="fp-world-kicker">The realm</small>
+                  <h3>Dawnwatch</h3>
+                  <p>Descend into a world of stone, caves and torchlight. Mine the hills, raise a house before the sun goes down, and hold the night against zombies, skeletons and creepers.</p>
+                  <p>Talk to the people of Dawnwatch, take their quests, and spend what you earn with the merchants.</p>
+                  <div className="fp-world-cta">
+                    <button className="fp-ghost fp-px" onClick={onPlay}>
+                      <span>Enter the realm</span>
+                    </button>
+                  </div>
+                </div>
+              </Spot>
+            </Reveal>
+            <Reveal className="fp-worlds-cell" delay={0.1}>
+              <Spot className="fp-tile fp-world-tile fp-beyond fp-px" style={{ '--ember': '#4fe0c0' } as CSSProperties}>
+                <i className="fp-tile-art" style={{ '--art': 'url(/beyond/biome-cherry_blossom_forest.webp)' } as CSSProperties} />
+                <div className="fp-tile-copy">
+                  <small className="fp-world-kicker">Past the edge of the map</small>
+                  <h3>The World Beyond</h3>
+                  <p>A second world: an endless planet made from a seed, with a layered underground, ancient places to loot and weather that is always on its way.</p>
+                  <ul className="fp-world-facts">
+                    <li>
+                      <b>{COUNTS.biomes}</b> biomes
+                    </li>
+                    <li>
+                      <b>{COUNTS.realms}</b> realms
+                    </li>
+                    <li>
+                      <b>{COUNTS.places}</b> ancient places
+                    </li>
+                  </ul>
+                  <div className="fp-world-cta">
+                    <a className="fp-more fp-world-go" href="/beyond" id="world-beyond-more" style={{ '--c': '#4fe0c0' } as CSSProperties}>
+                      See the World Beyond <span aria-hidden="true">&rarr;</span>
+                    </a>
+                  </div>
+                </div>
+                <a className="fp-tile-hit" href="/beyond" tabIndex={-1} aria-hidden="true" />
+              </Spot>
+            </Reveal>
+          </div>
+          <Reveal className="fp-reel" delay={0.15}>
+            <ul>
+              {REEL.map((r) => (
+                <li key={r.file}>
+                  <a href="/beyond" tabIndex={-1} aria-label={`${r.title}, in the World Beyond`}>
+                    <img src={`/beyond/thumbs/${r.file}.webp`} alt="" width={420} height={236} loading="lazy" decoding="async" />
+                    <span>{r.title}</span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+            <a className="fp-more" href="/beyond" style={{ '--c': '#4fe0c0' } as CSSProperties}>
+              Every land, realm and ruin, with pictures from the game <span aria-hidden="true">&rarr;</span>
+            </a>
           </Reveal>
-        ))}
-      </section>
+        </section>
+        <section className="fp-sec" id="site-features">
+          <Head n="02" label="Classes" blocks={[B.IRON_ORE, B.GOLD_ORE, B.DIAMOND_ORE]}>
+            Choose your <em>class</em>
+          </Head>
+          <ul className="fp-classes">
+            {CLASS_IDS.map((id: ClassId, i) => {
+              const c = CLASSES[id];
+              return (
+                <Reveal as="li" key={id} delay={i * 0.1}>
+                  <Spot tilt className="fp-card fp-class fp-px" style={{ '--c': c.color } as CSSProperties}>
+                    <div className="fp-medal">
+                      <ItemSprite id={c.startingWeapon} size={56} title={c.name} />
+                    </div>
+                    <h3>{c.name}</h3>
+                    <p className="fp-role">{c.role}</p>
+                    <p className="fp-text">{c.description}</p>
+                    <ClassSkills id={id} />
+                    <a className="fp-more" href={`/classes/${id}`} id={`class-more-${id}`}>
+                      Read the {c.name} guide <span aria-hidden="true">&rarr;</span>
+                    </a>
+                  </Spot>
+                </Reveal>
+              );
+            })}
+          </ul>
+        </section>
 
-      <section className="lsec cta">
-        <div className="cta-bg" style={{ backgroundImage: `url(${SHOT.night})` }} aria-hidden />
-        <Reveal className="cta-inner">
-          <h2 className="lsec-title">Your world is waiting</h2>
-          <p className="lsec-lead">Pick a seed, grab a pickaxe, and see what the night brings.</p>
-          <PlayButton onClick={onPlay} />
-        </Reveal>
-      </section>
+        <section className="fp-sec">
+          <Head n="03" label="Adventure" blocks={[B.FURNACE, B.BOOKSHELF, B.STONE_BRICKS]}>
+            What you <em>do</em>
+          </Head>
+          <ul className="fp-features">
+            {FEATURES.map((f, i) => (
+              <Reveal as="li" key={f.title} delay={(i % 2) * 0.08} style={{ gridColumn: `span ${f.span}` }}>
+                <Spot className="fp-tile fp-px">
+                  <i className="fp-tile-art" style={{ '--art': `url(${f.shot})` } as CSSProperties} />
+                  <div className="fp-tile-copy">
+                    <h3>{f.title}</h3>
+                    <p>{f.text}</p>
+                  </div>
+                </Spot>
+              </Reveal>
+            ))}
+          </ul>
+        </section>
 
-      <footer className="lfoot" data-no-play>
-        <span>
-          Sol<b>Rift</b>
-        </span>
-        <span>A voxel sandbox in your browser, powered by Solana.</span>
-      </footer>
+        {featured && (
+          <section className="fp-exp" id="l-expansions">
+            <div className="fp-exp-in">
+              <Reveal className="fp-head">
+                <div>
+                  <small>
+                    <b>04</b>Expansions
+                  </small>
+                  <h2>
+                    The first <em>expansion</em>
+                  </h2>
+                </div>
+                <Blocks ids={[B.OBSIDIAN, B.GLOWSTONE, B.TNT]} />
+              </Reveal>
+              <KingFeature e={featured} onPlay={onPlay} />
+              {later.length > 0 && (
+                <>
+                  <Reveal className="fp-road-head">
+                    <small>On the horizon</small>
+                  </Reveal>
+                  <ul className="fp-road">
+                    {later.map((e, i) => (
+                      <Reveal as="li" key={e.id} delay={i * 0.1}>
+                        <Spot className="fp-next fp-px" style={{ '--c': e.accent } as CSSProperties}>
+                          <span className="fp-lock" aria-hidden="true" />
+                          <small>
+                            Expansion {ROMAN[e.order]} &middot; {STATUS_LABEL[e.status]}
+                          </small>
+                          <h3>{e.subtitle}</h3>
+                          <p>{e.tagline}</p>
+                        </Spot>
+                      </Reveal>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </div>
+          </section>
+        )}
+
+        <section className="fp-sec fp-end">
+          <Reveal>
+            <div className="fp-pile">
+              <Blocks ids={[B.GRASS, B.DIAMOND_ORE, B.PLANKS, B.GLOWSTONE, B.STONE]} size={72} />
+            </div>
+            <h2>
+              The rift is <em>open</em>
+            </h2>
+            <p>Free in your browser. Walk in as a guest, or sign in with a wallet and keep your champion.</p>
+            <span className="fp-glow">
+              <button className="fp-play fp-px" onClick={onPlay}>
+                <span>
+                  <i aria-hidden="true" />
+                  Play now
+                </span>
+              </button>
+            </span>
+          </Reveal>
+        </section>
+
+        <footer className="fp-foot" data-no-play>
+          <b>SolRift</b>
+          <span>A voxel world in your browser, powered by Solana.</span>
+        </footer>
+      </main>
     </div>
+  );
+}
+
+/** The first expansion, in a frame of its own: obsidian with glowing cracks and ember studs, not the wood of the rest. */
+function KingFeature({ e, onPlay }: { e: Expansion; onPlay: () => void }) {
+  const boss = [...e.content].reverse().find((c) => c.kind === 'boss');
+  const count = (kind: ContentKind) => e.content.filter((c) => c.kind === kind).length;
+  const live = e.status === 'live';
+  const of = (...kinds: ContentKind[]) => e.content.filter((c) => kinds.includes(c.kind));
+  const groups: { label: string; kind: string; items: ExpansionContent[]; blurbs?: boolean }[] = [
+    { label: 'Dungeons', kind: 'dungeon', items: of('dungeon', 'instance', 'raid') },
+    { label: 'Bosses', kind: 'boss', items: of('boss'), blurbs: true },
+    { label: 'Also included', kind: 'more', items: of('zone', 'feature') },
+  ].filter((g) => g.items.length > 0);
+  const facts: [number, string][] = [
+    [count('dungeon'), 'Dungeons'],
+    [count('boss'), 'Bosses'],
+    [count('zone') + count('feature'), 'Systems'],
+  ];
+  return (
+    <Reveal as="article" className="fp-king">
+      <div className="fp-forge">
+        <Spot className="fp-lava fp-king-art fp-px">
+          <i className="fp-king-img" style={{ '--art': `url(${ART.hollowKing})` } as CSSProperties} />
+          <div className="fp-king-copy">
+            <div className="fp-king-tags">
+              <span className={`fp-live${live ? ' on' : ''}`}>
+                <i aria-hidden="true" />
+                {live ? 'Playable at launch' : STATUS_LABEL[e.status]}
+              </span>
+              <span className="fp-chip-i">Expansion {ROMAN[e.order]}</span>
+            </div>
+            <h3>{boss?.name ?? e.subtitle}</h3>
+            <p className="fp-chapter">{e.subtitle}</p>
+            <p className="fp-king-text">{e.blurb}</p>
+            <ul className="fp-king-facts">
+              {facts.map(([n, label]) => (
+                <li key={label}>
+                  <b>{n}</b>
+                  <span>{label}</span>
+                </li>
+              ))}
+            </ul>
+            {live && (
+              <span className="fp-glow">
+                <button className="fp-play fp-px" onClick={onPlay}>
+                  <span>
+                    <i aria-hidden="true" />
+                    Play the expansion
+                  </span>
+                </button>
+              </span>
+            )}
+          </div>
+        </Spot>
+      </div>
+      <div className="fp-forge">
+        <div className="fp-lava fp-slab fp-px">
+          <div className="fp-slab-art">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={ART.hollowKingFight} alt={`${boss?.name ?? 'The boss'} rising over the burning halls`} />
+          </div>
+          <div className="fp-slab-groups">
+            {groups.map((g) => (
+              <section key={g.label} className={`fp-group k-${g.kind}`}>
+                <h4>{g.label}</h4>
+                <ul>
+                  {g.items.map((c) => (
+                    <li key={c.name} title={c.blurb}>
+                      <b>{c.name}</b>
+                      {g.blurbs && <span>{c.blurb}</span>}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ))}
+          </div>
+        </div>
+      </div>
+    </Reveal>
   );
 }

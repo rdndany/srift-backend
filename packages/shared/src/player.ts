@@ -3,25 +3,40 @@ import {
   BED_DIRS,
   BED_HEIGHT,
   BLOCKS,
-  BUILD_MATERIALS,
   bedId,
   bedInfo,
   doorId,
   doorInfo,
+  doorKind,
   gateId,
   gateInfo,
+  gateKind,
+  opensByHand,
   isAnvil,
   isBed,
   isInteractive,
   leverInfo,
   buttonInfo,
   isSwitchable,
+  campfireId,
+  campfireInfo,
+  chestId,
+  chestMerge,
+  isChest,
   lanternId,
   lanternInfo,
+  materialBlock,
   slabInfo,
+  strippedOf,
   trapdoorId,
   trapdoorInfo,
+  trapdoorKind,
   woolId,
+  DRESS,
+  candleId,
+  candleInfo,
+  candleItem,
+  pottedOf,
 } from './blocks';
 import { ARMOR_SLOTS, armorWear, reduceDamage } from './armor';
 import { ENCH, MAX_SHELVES, efficiencyBonus, levelOf, protectionFactor, protectionPoints, sharpnessBonus, wearAfterUnbreaking, type ProtectionKind } from './enchant';
@@ -29,6 +44,7 @@ import { BLOCK_XP, Experience } from './experience';
 import type { BlockEntities } from './blockEntities';
 import type { DropWorld } from './dropEntities';
 import type { XpOrbWorld } from './xpOrbs';
+import { ROD_WEAR, bobberMode, catchXp, isFishingRod, pullMob, rodEnchants, rollCatch, type Bobber, type BobberDraw, type FishingWorld } from './fishing';
 import type { WorldAccess } from './headlessWorld';
 import { BAG_SLOTS, bagInventory, strandedSlots } from './bags';
 import { organizeInventory } from './organize';
@@ -37,7 +53,7 @@ import { Container, HOTBAR_SLOTS, PLAYER_SLOTS, cloneStack, makeStack, type Item
 import { I, bagSlotsOf, bedItemColor, blockDrops, breakTime, canHarvest, dyeColor, getItem, harvestHint, holdsInOffhand, isUndroppable, mountOfItem, outfitItems, silkKeeps, skillBookAbility, usedOnBlock, type ItemDef, type ItemUse, type WeaponDef } from './items';
 import { AnvilMenu, ChestMenu, CraftingMenu, EnchantMenu, CreativeMenu, FurnaceMenu, GrindstoneMenu, TradeMenu, type Menu } from './menu';
 import { tooltipName } from './tooltip';
-import { ARROW_GRAVITY, WOOL_REGROW, arrowSpeed, rayAabb, type Mob, type MobKind, type MobManager } from './mobs';
+import { ARMOR_STAND_POSES, ARROW_GRAVITY, WOOL_REGROW, arrowSpeed, rayAabb, type Mob, type MobKind, type MobManager } from './mobs';
 import { growTree, isSapling } from './trees';
 import { PLAYER_EYE, bodyOverlapsBlock, collides, createBody, stepPlayer, type Body, type MoveInput } from './physics';
 
@@ -46,9 +62,10 @@ export const SLAM_WIND = 0.2;
 export const SLAM_IMPACT = 0.4;
 /** A Shield Bash: seconds the figure takes to draw the shield back, drive it forward and come out of it (others see it from `bashAge`). */
 export const BASH_ANIM = 0.5;
-import { canStayAt, isTillable, lookDir, placementFor } from './plants';
+import { canStayAt, growColumn, growFruit, growVine, isTillable, isYoungCrop, lookDir, placementFor, placesUpper, ripeCrop, stemFruit } from './plants';
+import { seatDrop } from './shapes';
 import { FLUID_KIND, FLUID_WATER, isFluidSource } from './fluids';
-import { IS_LIQUID, IS_SOLID } from './blocks';
+import { IS_LIQUID, IS_SOLID, cakeId, cakeInfo } from './blocks';
 import { isRail, railPlaced } from './rails';
 import { type Rider, type Vehicle, type VehicleKind } from './vehicles';
 import { raycast, type RayHit } from './raycast';
@@ -57,10 +74,13 @@ import type { Realm } from './realm';
 import type { PlayerSave, SaveMode } from './save';
 import type { Weather, WeatherKind } from './weather';
 import type { WorldGenerator } from './worldgen';
+import { campfireFood } from './campfire';
 import { COOK_SECONDS } from './smelting';
 import { EXHAUSTION, Vitals } from './survival';
 import type { ClassView, Command, InputFrame, SessionEvent, SessionScreen } from './sessionProtocol';
 import { MAX_COINS, stackSellPrice, shopOf } from './economy';
+import { AUCTIONEER, DEFAULT_AUCTION_QUERY, cleanQuery, depositFor, sellBlocker, type AuctionQuery } from './auction';
+import { STASHKEEPER, stashBlocker } from './stash';
 import { FIRST_QUEST, NPCS, QuestLog, npcById, questById, rewardCoins, rewardItems, type QuestEvent, type QuestProgress } from './quests';
 import { ABILITY_BY_ID, ClassState, abilitiesOf, abilityAt, type AbilityDef, type AbilityId, type CastBlock } from './abilities';
 import type { EffectOwner, Fx } from './abilityEffects';
@@ -110,7 +130,7 @@ export const SLEEP_EYE = 0.2;
 
 /** Starting hotbar for creative mode. */
 /** Uses of the item in the main hand that keep the use button for themselves: a shield in the off hand is not raised by it. */
-const TAKES_THE_BUTTON: ReadonlySet<ItemUse> = new Set<ItemUse>(['xp_bottle', 'pearl', 'emberstone', 'skill_book', 'bucket']);
+const TAKES_THE_BUTTON: ReadonlySet<ItemUse> = new Set<ItemUse>(['xp_bottle', 'pearl', 'emberstone', 'skill_book', 'bucket', 'armor_stand', 'fishing_rod']);
 
 export const CREATIVE_HOTBAR = [B.GRASS, B.DIRT, B.STONE, B.COBBLE, B.PLANKS, B.LOG, B.GLASS, B.SAND, B.GLOWSTONE];
 
@@ -128,7 +148,9 @@ export const DEATH_TEXT: Record<string, string> = {
   explosion: 'You were blown up',
   lava: 'You tried to swim in lava',
   cactus: 'You were pricked to death',
+  berry: 'You were scratched to death',
   fire: 'You burned to death',
+  campfire: 'You walked into a campfire',
   anvil: 'You were squashed by a falling anvil',
 };
 
@@ -168,6 +190,16 @@ export interface PlayerOptions {
   name?: string;
   /** The character's class (permanent). Without one the player plays the unmodified game. */
   classId?: ClassId | null;
+  /**
+   * The account this character belongs to: what the Auction House knows them by (its mail waits for the account). A guest has none
+   * (null) and can only look at the house. Left out, it is the one account of a single-player world.
+   */
+  account?: string | null;
+  /**
+   * The wallet this character belongs to: whose Stash it opens (every character of one wallet shares one). A guest has none (null)
+   * and has no stash. Left out, it is the one wallet of a single-player world.
+   */
+  wallet?: string | null;
 }
 
 /**
@@ -191,6 +223,16 @@ export class Player implements EffectOwner {
   /** The off hand: a single slot that takes a shield. */
   readonly offhand = new Container(1);
   readonly name: string;
+  /** What the Auction House knows this player by (null: a guest). */
+  readonly account: string | null;
+  /** Whose Stash this character opens (null: a guest, who has none). */
+  readonly wallet: string | null;
+  /** The player changed the Stash (or what they carry because of it) since a server last looked: it should be written down. */
+  stashTouched = false;
+  /** What the player last searched the Auction House for (it is shown again after everything they do there). */
+  private auctionQuery: AuctionQuery = { ...DEFAULT_AUCTION_QUERY };
+  /** The player changed the Auction House (or what they carry because of it) since a server last looked: it should be written down. */
+  auctionTouched = false;
 
   mode: SaveMode;
   /**
@@ -275,6 +317,9 @@ export class Player implements EffectOwner {
   private stepAcc = 0;
   private lavaTimer = 0.5;
   private cactusTimer = 0.5;
+  /** Sweet berry bushes scratch while you walk through a ripe one. Starts full so the first step hurts. */
+  private berryTimer = 0.5;
+  private campfireTimer = 0.5;
   /** The mark that shows an Arcane Shield around this player while it holds: it follows them and ends with the shield. */
   private shieldMark: Fx | null = null;
   /** A Ground Slam in the air: the blast comes when the feet are back on the ground. */
@@ -330,6 +375,8 @@ export class Player implements EffectOwner {
     this.mode = opts.mode ?? 'survival';
     this.hardcore = opts.hardcore === true && this.mode === 'survival';
     this.name = opts.name ?? 'player';
+    this.account = opts.account === undefined ? 'local' : opts.account;
+    this.wallet = opts.wallet === undefined ? 'local' : opts.wallet;
     // A new survival character begins where the world puts newcomers (the Adventure cave); a creative one in the open.
     const spawn = this.mode === 'survival' ? realm.nextStart() : realm.nextSpawn();
     this.body = createBody(spawn.x, spawn.y, spawn.z);
@@ -347,6 +394,7 @@ export class Player implements EffectOwner {
   /** Leave the realm (disconnect). */
   leave(): void {
     this.dismount();
+    this.realm.fishing.take(this);
     this.realm.effects.dropOwner(this);
     this.realm.parties.onLeave(this);
     const i = this.realm.players.indexOf(this);
@@ -375,6 +423,18 @@ export class Player implements EffectOwner {
   }
   get xpOrbs(): XpOrbWorld {
     return this.realm.xpOrbs;
+  }
+  get fishing(): FishingWorld {
+    return this.realm.fishing;
+  }
+  /** The bobbers to draw (the line out of a hand, and where the float is): yours, and those of the other players of the realm. */
+  get bobbers(): { readonly bobbers: readonly BobberDraw[] } {
+    return {
+      bobbers: this.realm.fishing.bobbers.map((b) => {
+        const who = b.owner as Player;
+        return { id: b.id, x: b.x, y: b.y, z: b.z, mode: bobberMode(b), own: who === this, owner: who === this ? null : { x: who.body.x, y: who.body.y, z: who.body.z, yaw: who.yaw } };
+      }),
+    };
   }
   get blockEntities(): BlockEntities {
     return this.realm.blockEntities;
@@ -514,12 +574,14 @@ export class Player implements EffectOwner {
           }
           this.menu.click(c.slot, c.button);
           this.emit({ t: 'inv' });
+          this.syncChestViewers();
         }
         return;
       case 'shift':
         if (this.menu) {
           this.menu.shiftClick(c.slot);
           this.emit({ t: 'inv' });
+          this.syncChestViewers();
         }
         return;
       case 'organize':
@@ -590,6 +652,12 @@ export class Player implements EffectOwner {
         return;
       case 'shop':
         this.shopCommand(c);
+        return;
+      case 'auction':
+        this.auctionCommand(c);
+        return;
+      case 'stash':
+        this.stashCommand(c);
         return;
       case 'party': {
         const reply = this.realm.parties.run(this, c.a, c.name);
@@ -687,6 +755,10 @@ export class Player implements EffectOwner {
       return;
     }
     if (!this.menu) return;
+    if (this.chestAt) {
+      this.realm.emitNear(this.chestAt.x, this.chestAt.y, this.chestAt.z, { t: 'chest', open: false, x: this.chestAt.x, y: this.chestAt.y, z: this.chestAt.z });
+      this.chestAt = null;
+    }
     const leftovers = this.menu.close();
     if (this.menu.kind !== 'creative') for (const s of leftovers) this.giveOrDrop(s);
     this.menu = null;
@@ -719,7 +791,11 @@ export class Player implements EffectOwner {
     }
     if (hit.id === B.CRAFTING_TABLE) this.openMenu(new CraftingMenu(this.inventory, 3));
     else if (hit.id === B.FURNACE) this.openMenu(new FurnaceMenu(this.inventory, this.blockEntities.furnace(hit.x, hit.y, hit.z), (n) => this.spawnXpAtFeet(n)));
-    else if (hit.id === B.CHEST) this.openMenu(new ChestMenu(this.inventory, this.blockEntities.chest(hit.x, hit.y, hit.z)));
+    else if (isChest(hit.id)) {
+      this.chestAt = { x: hit.x, y: hit.y, z: hit.z };
+      this.openMenu(new ChestMenu(this.inventory, this.blockEntities.chest(hit.x, hit.y, hit.z)));
+      this.realm.emitNear(hit.x, hit.y, hit.z, { t: 'chest', open: true, x: hit.x, y: hit.y, z: hit.z });
+    }
     else if (hit.id === B.ENCHANTING_TABLE) this.openEnchantTable(hit);
     else if (isAnvil(hit.id)) this.openAnvil(hit);
     else if (hit.id === B.GRINDSTONE) this.openGrindstone();
@@ -934,6 +1010,39 @@ export class Player implements EffectOwner {
 
   /** Seconds until the next "you can't change this" notice (so that holding the button does not flood the chat). */
   private lockedNotice = 0;
+  /** The chest whose lid is open for this player, so closing the window can shut it. */
+  private chestAt: { x: number; y: number; z: number } | null = null;
+
+  /** Someone else with the same chest open should see a change as it happens. */
+  private syncChestViewers(): void {
+    if (!(this.menu instanceof ChestMenu)) return;
+    const chest = this.menu.chest;
+    for (const p of this.realm.players) {
+      if (p !== this && p.menu instanceof ChestMenu && p.menu.chest === chest) p.emit({ t: 'inv' });
+    }
+  }
+
+  /** Shut every window looking at this container, so a merge or a break cannot leave a stale copy. */
+  private closeChestViewers(chest: Container): void {
+    for (const p of this.realm.players) {
+      if (p.menu instanceof ChestMenu && p.menu.chest === chest) p.closeMenu();
+    }
+  }
+
+  /** A chest that was just placed joins a single neighbour, when there is one. */
+  private settleChest(x: number, y: number, z: number): void {
+    const merge = chestMerge((px, py, pz) => this.world.getBlock(px, py, pz), x, y, z);
+    if (!merge) return;
+    const [lx, ly, lz] = merge.left;
+    const [rx, ry, rz] = merge.right;
+    this.closeChestViewers(this.blockEntities.chest(lx, ly, lz));
+    this.closeChestViewers(this.blockEntities.chest(rx, ry, rz));
+    this.blockEntities.joinChests(rx, ry, rz, lx, ly, lz);
+    this.world.setBlock(lx, ly, lz, chestId(merge.facing, 1));
+    this.world.setBlock(rx, ry, rz, chestId(merge.facing, 2));
+    this.realm.blockChanged(lx, ly, lz);
+    this.realm.blockChanged(rx, ry, rz);
+  }
 
   /**
    * Is this block part of a protected place (an Adventure village or dungeon) that this player may not change?
@@ -953,6 +1062,14 @@ export class Player implements EffectOwner {
     return true;
   }
 
+  /**
+   * Chips of this block, for everyone close enough to see them. A break fills the block and falls.
+   * A placement is a short, small puff.
+   */
+  private puff(x: number, y: number, z: number, id: number, soft: boolean): void {
+    this.realm.emitNear(x, y, z, soft ? { t: 'burst', id, x, y, z, count: 8, soft: true } : { t: 'burst', id, x, y, z, count: 32 });
+  }
+
   /** Remove a block as the player: sounds, particles and (survival) drops + tool wear. */
   breakBlock(x: number, y: number, z: number): void {
     const id = this.world.getBlock(x, y, z);
@@ -965,11 +1082,11 @@ export class Player implements EffectOwner {
     // Silk Touch lifts the block whole (ice stays ice, and nothing falls out of it as experience).
     const kept = ench.silk && silkKeeps(id) && canHarvest(def, tool);
 
-    this.realm.emitNear(x, y, z, { t: 'burst', id, x, y, z, count: 32 });
+    this.puff(x, y, z, id, false);
     this.realm.emitNear(x, y, z, { t: 'sound', sound: def.sound, action: 'break', vol: 1 });
     // Ice leaves water behind (the original needs silk touch to keep it).
     this.world.setBlock(x, y, z, id === B.ICE && !kept && this.world.getBlock(x, y - 1, z) !== B.AIR ? B.WATER : B.AIR);
-    const contents = this.blockEntities.remove(id, x, y, z);
+    const contents = this.realm.takeBlock(x, y, z, id);
 
     if (this.mode === 'survival') {
       const hint = harvestHint(def, tool);
@@ -1000,6 +1117,7 @@ export class Player implements EffectOwner {
     // Nothing is built, tilled or lit in a protected place (bone meal only helps what already grows there).
     if (item.use !== 'bone_meal' && (this.placeLocked(t.x, t.y, t.z, true) || this.placeLocked(t.x + t.nx, t.y + t.ny, t.z + t.nz, true))) return false;
 
+    if (item.tool?.kind === 'axe' && this.stripBlock(t)) return true;
     if (item.tool?.kind === 'hoe') {
       if (!isTillable(t.id) || world.getBlock(t.x, t.y + 1, t.z) !== B.AIR) return false;
       if (!world.setBlock(t.x, t.y, t.z, B.FARMLAND)) return false;
@@ -1011,28 +1129,20 @@ export class Player implements EffectOwner {
     if (item.use === 'bone_meal' && this.useBoneMeal(t)) return true;
     if (item.use === 'bed') return this.placeBed(t);
     if (item.use === 'door') return this.placeDoor(t);
+    if (this.dressClick(t)) return true;
     if (item.block == null) return false;
     const slab = slabInfo(item.block);
     if (slab && this.mergeSlab(t, slab.mat)) return true;
 
-    // Plants and grass are replaced in place rather than built against.
-    const inPlace = BLOCKS[t.id].replaceable;
-    const px = inPlace ? t.x : t.x + t.nx;
-    const py = inPlace ? t.y : t.y + t.ny;
-    const pz = inPlace ? t.z : t.z + t.nz;
-    const existing = world.getBlock(px, py, pz);
-    const placeable = existing === B.AIR || BLOCKS[existing].liquid || BLOCKS[existing].replaceable;
-    let id = placementFor(item.block, inPlace ? 0 : t.nx, inPlace ? 1 : t.ny, inPlace ? 0 : t.nz, this.yaw, t.fy ?? 0.5);
-    // A lantern with no floor under it hangs instead, if there is something above to hang it from.
-    const lantern = id === null ? null : lanternInfo(id);
-    if (id !== null && lantern && !canStayAt(id, world, px, py, pz)) id = lanternId(lantern.soul, !lantern.hanging);
-    if (id === null || !placeable || !canStayAt(id, world, px, py, pz)) return false;
-    if (BLOCKS[id].solid && this.realm.players.some((p) => bodyOverlapsBlock(p.body, px, py, pz))) return false;
-    if (!world.setBlock(px, py, pz, id)) return false;
-    if (isRail(id)) railPlaced(world, px, py, pz);
-    this.realm.checkFall(px, py, pz);
-    this.realm.blockChanged(px, py, pz);
-    this.realm.emitNear(px, py, pz, { t: 'sound', sound: BLOCKS[id].sound, action: 'place', vol: 1 });
+    const spot = this.blockPlaceSpot(t);
+    if (!spot) return false;
+    if (!world.setBlock(spot.x, spot.y, spot.z, spot.id)) return false;
+    if (isChest(spot.id)) this.settleChest(spot.x, spot.y, spot.z);
+    if (isRail(spot.id)) railPlaced(world, spot.x, spot.y, spot.z);
+    this.realm.checkFall(spot.x, spot.y, spot.z);
+    this.realm.blockChanged(spot.x, spot.y, spot.z);
+    this.puff(spot.x, spot.y, spot.z, spot.id, true);
+    this.realm.emitNear(spot.x, spot.y, spot.z, { t: 'sound', sound: BLOCKS[spot.id].sound, action: 'place', vol: 1 });
     this.emit({ t: 'swing' });
     if (this.mode === 'survival') {
       held.count -= 1;
@@ -1043,6 +1153,34 @@ export class Player implements EffectOwner {
     return true;
   }
 
+  /**
+   * Where the held block would be put on this face, or null when it cannot go there. A potato is food and a seed:
+   * while this is a spot, the click plants it instead of eating it.
+   */
+  private blockPlaceSpot(t: { x: number; y: number; z: number; id: number; nx: number; ny: number; nz: number; fy?: number }): { x: number; y: number; z: number; id: number } | null {
+    const held = this.held;
+    const item = held ? getItem(held.id) : null;
+    if (!item || item.block == null) return null;
+    if (this.placeLocked(t.x, t.y, t.z, false) || this.placeLocked(t.x + t.nx, t.y + t.ny, t.z + t.nz, false)) return null;
+    const world = this.world;
+    // Plants and grass are replaced in place rather than built against.
+    const inPlace = BLOCKS[t.id].replaceable;
+    const px = inPlace ? t.x : t.x + t.nx;
+    const py = inPlace ? t.y : t.y + t.ny;
+    const pz = inPlace ? t.z : t.z + t.nz;
+    const existing = world.getBlock(px, py, pz);
+    const placeable = existing === B.AIR || BLOCKS[existing].liquid || BLOCKS[existing].replaceable;
+    // A block on a slab hangs below its cell. The click height has to be read from the block, not from the empty space above it.
+    const drop = inPlace ? 0 : seatDrop(t.id, (dy) => world.getBlock(t.x, t.y - dy, t.z));
+    let id = placementFor(item.block, inPlace ? 0 : t.nx, inPlace ? 1 : t.ny, inPlace ? 0 : t.nz, this.yaw, t.fy ?? 0.5, drop);
+    // A lantern with no floor under it hangs instead, if there is something above to hang it from.
+    const lantern = id === null ? null : lanternInfo(id);
+    if (id !== null && lantern && !canStayAt(id, world, px, py, pz)) id = lanternId(lantern.soul, !lantern.hanging);
+    if (id === null || !placeable || !canStayAt(id, world, px, py, pz)) return null;
+    if (BLOCKS[id].solid && this.realm.players.some((p) => bodyOverlapsBlock(p.body, px, py, pz))) return null;
+    return { x: px, y: py, z: pz, id };
+  }
+
   /** Bone meal on a crop, a sapling or grass: it grows (a sapling only now and then, like the original). */
   private useBoneMeal(t: { x: number; y: number; z: number; id: number }): boolean {
     const world = this.world;
@@ -1051,8 +1189,14 @@ export class Player implements EffectOwner {
     if (isSapling(t.id)) {
       used = true;
       if (rand() < 0.45) growTree(world, t.x, t.y, t.z, rand);
-    } else if (t.id >= B.WHEAT_0 && t.id < B.WHEAT_3) {
-      used = world.setBlock(t.x, t.y, t.z, Math.min(B.WHEAT_3, t.id + 1 + Math.floor(rand() * 3)));
+    } else if (isYoungCrop(t.id)) {
+      used = world.setBlock(t.x, t.y, t.z, Math.min(ripeCrop(t.id), t.id + 1 + Math.floor(rand() * 3)));
+    } else if (stemFruit(t.id) && growFruit(world, t.x, t.y, t.z, t.id, rand)) {
+      used = true;
+    } else if ((t.id === B.CACTUS || t.id === B.SUGAR_CANE) && growColumn(world, t.x, t.y, t.z, t.id)) {
+      used = true;
+    } else if ((t.id === B.CAVE_VINES || t.id === B.CAVE_VINES_BERRIES) && growVine(world, t.x, t.y, t.z, t.id)) {
+      used = true;
     } else if (t.id === B.GRASS && world.getBlock(t.x, t.y + 1, t.z) === B.AIR) {
       used = true;
       for (let i = 0; i < 14; i++) {
@@ -1070,6 +1214,44 @@ export class Player implements EffectOwner {
     this.realm.emitNear(t.x, t.y, t.z, { t: 'sound', sound: 'grass', action: 'place', vol: 1 });
     this.emit({ t: 'swing' });
     this.useUpHeld();
+    return true;
+  }
+
+  /**
+   * Right-click a campfire. Food goes on to cook, a shovel puts the fire out, and flint and steel lights it again.
+   * A full campfire still takes the click, so the food is not eaten instead.
+   */
+  private useCampfire(t: { x: number; y: number; z: number; id: number }): boolean {
+    const info = campfireInfo(t.id);
+    if (!info) return false;
+    const held = this.held;
+    const item = held ? getItem(held.id) : null;
+    if (item?.tool?.kind === 'shovel' && info.lit) {
+      this.world.setBlock(t.x, t.y, t.z, campfireId(info.facing, false));
+      this.realm.blockChanged(t.x, t.y, t.z);
+      this.realm.emitNear(t.x, t.y, t.z, { t: 'fire', kind: 'hiss', vol: 0.7 });
+      this.emit({ t: 'swing' });
+      if (this.mode === 'survival') this.damageHeld(1);
+      return true;
+    }
+    if (item?.use === 'flint' && !info.lit) {
+      this.world.setBlock(t.x, t.y, t.z, campfireId(info.facing, true));
+      this.realm.blockChanged(t.x, t.y, t.z);
+      this.realm.emitNear(t.x, t.y, t.z, { t: 'fire', kind: 'ignite', vol: 0.9 });
+      this.emit({ t: 'swing' });
+      if (this.mode === 'survival') this.damageHeld(1);
+      return true;
+    }
+    if (!held || campfireFood(held.id) === null) return false;
+    const fire = this.blockEntities.campfire(t.x, t.y, t.z);
+    if (!fire.add(held.id)) return true;
+    if (this.mode === 'survival') {
+      held.count -= 1;
+      if (held.count <= 0) this.inventory.set(this.selected, null);
+      this.emit({ t: 'inv' });
+    }
+    this.realm.emitNear(t.x, t.y, t.z, { t: 'sound', sound: 'wood', action: 'place', vol: 0.6 });
+    this.emit({ t: 'swing' });
     return true;
   }
 
@@ -1122,18 +1304,67 @@ export class Player implements EffectOwner {
       const ny = t.y + t.ny;
       const nz = t.z + t.nz;
       const there = slabInfo(world.getBlock(nx, ny, nz));
-      const wantTop = t.ny < 0 || (t.ny === 0 && (t.fy ?? 0.5) > 0.5);
+      const drop = seatDrop(t.id, (dy) => world.getBlock(t.x, t.y - dy, t.z));
+      const wantTop = placesUpper(t.ny, t.fy ?? 0.5, drop);
       if (there && there.mat === mat && there.top !== wantTop) cell = [nx, ny, nz];
     }
     if (!cell) return false;
+    const full = materialBlock(mat);
+    if (!full) return false;
     const [cx, cy, cz] = cell;
     if (this.realm.players.some((p) => bodyOverlapsBlock(p.body, cx, cy, cz))) return false;
-    if (!world.setBlock(cx, cy, cz, BUILD_MATERIALS[mat].block)) return false;
+    if (!world.setBlock(cx, cy, cz, full)) return false;
     this.realm.blockChanged(cx, cy, cz);
-    this.realm.emitNear(cx, cy, cz, { t: 'sound', sound: BLOCKS[BUILD_MATERIALS[mat].block].sound, action: 'place', vol: 1 });
+    this.puff(cx, cy, cz, full, true);
+    this.realm.emitNear(cx, cy, cz, { t: 'sound', sound: BLOCKS[full].sound, action: 'place', vol: 1 });
     this.emit({ t: 'swing' });
     this.useUpHeld();
     return true;
+  }
+
+  /** An axe shaves the bark off a log, a wood block, or a stem. */
+  private stripBlock(t: { x: number; y: number; z: number; id: number }): boolean {
+    const to = strippedOf(t.id);
+    if (!to || this.placeLocked(t.x, t.y, t.z, true)) return false;
+    if (!this.world.setBlock(t.x, t.y, t.z, to)) return false;
+    this.realm.blockChanged(t.x, t.y, t.z);
+    this.realm.emitNear(t.x, t.y, t.z, { t: 'sound', sound: 'wood', action: 'place', vol: 1 });
+    this.emit({ t: 'swing' });
+    if (this.mode === 'survival') this.damageHeld(1);
+    return true;
+  }
+
+  /**
+   * A candle takes another of the same colour, up to four. An empty flower pot takes a small plant.
+   * Either click is used up, so the plant is not placed beside the pot.
+   */
+  private dressClick(t: { x: number; y: number; z: number; id: number }): boolean {
+    const held = this.held;
+    if (!held) return false;
+    const candle = candleInfo(t.id);
+    if (candle && candle.count < 4 && held.id === candleItem(candle.color)) {
+      const next = candleId(candle.color, candle.count + 1);
+      if (!this.world.setBlock(t.x, t.y, t.z, next)) return false;
+      this.realm.blockChanged(t.x, t.y, t.z);
+      this.puff(t.x, t.y, t.z, next, true);
+      this.realm.emitNear(t.x, t.y, t.z, { t: 'sound', sound: 'wood', action: 'place', vol: 0.6 });
+      this.emit({ t: 'swing' });
+      this.useUpHeld();
+      return true;
+    }
+    if (t.id === DRESS.pot) {
+      const plant = getItem(held.id).block;
+      const filled = plant == null ? 0 : pottedOf(plant);
+      if (!filled) return false;
+      if (!this.world.setBlock(t.x, t.y, t.z, filled)) return false;
+      this.realm.blockChanged(t.x, t.y, t.z);
+      this.puff(t.x, t.y, t.z, filled, true);
+      this.realm.emitNear(t.x, t.y, t.z, { t: 'sound', sound: BLOCKS[filled].sound, action: 'place', vol: 0.7 });
+      this.emit({ t: 'swing' });
+      this.useUpHeld();
+      return true;
+    }
+    return false;
   }
 
   /** Right-click with a door: it fills two blocks, standing on the one under it, on the edge nearest you. */
@@ -1150,14 +1381,16 @@ export class Player implements EffectOwner {
     if (!this.held || !free(py) || !free(py + 1) || !IS_SOLID[world.getBlock(px, py - 1, pz)]) return false;
     if (this.realm.players.some((p) => bodyOverlapsBlock(p.body, px, py, pz) || bodyOverlapsBlock(p.body, px, py + 1, pz))) return false;
     const facing = lookDir(this.yaw) ^ 1;
-    if (!world.setBlock(px, py, pz, doorId(false, false, facing))) return false;
-    if (!world.setBlock(px, py + 1, pz, doorId(true, false, facing))) {
+    const kind = doorKind(this.held.id);
+    if (!world.setBlock(px, py, pz, doorId(false, false, facing, kind))) return false;
+    if (!world.setBlock(px, py + 1, pz, doorId(true, false, facing, kind))) {
       world.setBlock(px, py, pz, B.AIR);
       return false;
     }
     this.realm.blockChanged(px, py, pz);
     this.realm.blockChanged(px, py + 1, pz);
-    this.realm.emitNear(px, py, pz, { t: 'sound', sound: 'wood', action: 'place', vol: 1 });
+    this.puff(px, py, pz, doorId(false, false, facing, kind), true);
+    this.realm.emitNear(px, py, pz, { t: 'sound', sound: BLOCKS[doorId(false, false, facing, kind)].sound, action: 'place', vol: 1 });
     this.emit({ t: 'swing' });
     this.useUpHeld();
     return true;
@@ -1170,18 +1403,20 @@ export class Player implements EffectOwner {
     const door = doorInfo(hit.id);
     const trap = trapdoorInfo(hit.id);
     const gate = gateInfo(hit.id);
+    if ((door || trap) && !opensByHand(hit.id)) return;
     let closing = false;
     if (door) {
-      changes.push([hit.x, hit.y, hit.z, doorId(door.upper, !door.open, door.facing), hit.id]);
+      const kind = doorKind(hit.id);
+      changes.push([hit.x, hit.y, hit.z, doorId(door.upper, !door.open, door.facing, kind), hit.id]);
       const oy = door.upper ? hit.y - 1 : hit.y + 1;
       const other = world.getBlock(hit.x, oy, hit.z);
-      if (doorInfo(other)) changes.push([hit.x, oy, hit.z, doorId(!door.upper, !door.open, door.facing), other]);
+      if (doorInfo(other)) changes.push([hit.x, oy, hit.z, doorId(!door.upper, !door.open, door.facing, kind), other]);
       closing = door.open;
     } else if (trap) {
-      changes.push([hit.x, hit.y, hit.z, trapdoorId(trap.top, !trap.open, trap.facing), hit.id]);
+      changes.push([hit.x, hit.y, hit.z, trapdoorId(trap.top, !trap.open, trap.facing, trapdoorKind(hit.id)), hit.id]);
       closing = trap.open;
     } else if (gate) {
-      changes.push([hit.x, hit.y, hit.z, gateId(!gate.open, gate.facing), hit.id]);
+      changes.push([hit.x, hit.y, hit.z, gateId(!gate.open, gate.facing, gateKind(hit.id)), hit.id]);
       closing = gate.open;
     } else return;
     for (const [x, y, z, id] of changes) world.setBlock(x, y, z, id);
@@ -1190,8 +1425,38 @@ export class Player implements EffectOwner {
       for (const [x, y, z, , old] of changes) world.setBlock(x, y, z, old);
       return;
     }
-    this.realm.emitNear(hit.x, hit.y, hit.z, { t: 'sound', sound: 'wood', action: 'place', vol: 0.8 });
+    this.realm.emitNear(hit.x, hit.y, hit.z, { t: 'sound', sound: BLOCKS[hit.id].sound, action: 'place', vol: 0.8 });
     this.emit({ t: 'swing' });
+  }
+
+  /** Right-click a ripe sweet berry bush: the berries come off and the bush grows them again. */
+  private pickBerries(t: { x: number; y: number; z: number; id: number }): boolean {
+    const sweet = t.id === B.SWEET_BERRY_3;
+    const glow = t.id === B.CAVE_VINES_BERRIES;
+    if (!sweet && !glow) return false;
+    this.world.setBlock(t.x, t.y, t.z, sweet ? B.SWEET_BERRY_1 : B.CAVE_VINES);
+    this.realm.blockChanged(t.x, t.y, t.z);
+    if (this.mode === 'survival') {
+      const id = sweet ? I.SWEET_BERRIES : I.GLOW_BERRIES;
+      const count = sweet ? 2 + Math.floor(this.rand() * 2) : 1;
+      this.drops.spawnAtBlock(makeStack(id, count), t.x, t.y, t.z);
+    }
+    this.realm.emitNear(t.x, t.y, t.z, { t: 'sound', sound: 'grass', action: 'break', vol: 0.7 });
+    this.emit({ t: 'swing' });
+    return true;
+  }
+
+  /** Right-click a placed cake: one bite, if there is room for it. The seventh bite removes the cake. */
+  private biteCake(t: { x: number; y: number; z: number; id: number }): boolean {
+    const cake = cakeInfo(t.id);
+    if (!cake || this.mode !== 'survival' || !this.vitals.canEat()) return false;
+    this.vitals.eat({ hunger: 2, saturation: 0.4 });
+    const next = cake.bites >= 6 ? B.AIR : cakeId(cake.bites + 1);
+    this.world.setBlock(t.x, t.y, t.z, next);
+    if (next === B.AIR) this.realm.settleAround(t.x, t.y, t.z, false);
+    else this.realm.blockChanged(t.x, t.y, t.z);
+    this.emit({ t: 'eat' });
+    return true;
   }
 
   /** Right-click with a bucket: scoop up a water or lava source, or pour out what it holds. */
@@ -1223,6 +1488,17 @@ export class Player implements EffectOwner {
       return true;
     }
 
+    if (held.id === I.WATER_BUCKET && campfireInfo(hit.id)?.lit) {
+      const info = campfireInfo(hit.id)!;
+      this.world.setBlock(hit.x, hit.y, hit.z, campfireId(info.facing, false));
+      this.realm.blockChanged(hit.x, hit.y, hit.z);
+      this.realm.emitNear(hit.x, hit.y, hit.z, { t: 'fire', kind: 'hiss', vol: 0.7 });
+      if (survival) this.inventory.set(this.selected, makeStack(I.BUCKET, 1));
+      this.emit({ t: 'swing' });
+      this.emit({ t: 'inv' });
+      return true;
+    }
+
     const water = held.id === I.WATER_BUCKET;
     const into = IS_LIQUID[hit.id] === 1 || BLOCKS[hit.id].replaceable;
     const px = into ? hit.x : hit.x + hit.nx;
@@ -1242,9 +1518,12 @@ export class Player implements EffectOwner {
 
   // ---- mobs: damage taken, melee --------------------------------------------
 
-  /** Seconds of poison left (cave spider bites): a point of damage now and then, never the last heart. */
+  /** Seconds of the Poison status effect left (cave spider bites, a spider eye): a point of damage now and then, never the last heart. */
   poison = 0;
   private poisonTick = 0;
+  /** Seconds of the Hunger sickness status effect left (rotten flesh, raw chicken): the food bar drains while it lasts. */
+  foodSick = 0;
+  private foodSickTick = 0;
 
   hurtByMob(amount: number, kx: number, kz: number, source: MobKind | 'arrow', effect?: 'poison'): void {
     if (this.invulnerable || this.vitals.dead) return;
@@ -1502,19 +1781,67 @@ export class Player implements EffectOwner {
         this.hudProgress = 0;
         return;
       }
+      if (rightPressed && !f.sneak && this.biteCake(target)) {
+        this.placeCooldown = 0.22;
+        this.eatTimer = 0;
+        this.hudProgress = 0;
+        return;
+      }
+      if (rightPressed && this.pickBerries(target)) {
+        this.placeCooldown = 0.22;
+        this.eatTimer = 0;
+        this.hudProgress = 0;
+        return;
+      }
+      if (rightPressed && !f.sneak && this.useCampfire(target)) {
+        this.placeCooldown = 0.22;
+        this.eatTimer = 0;
+        this.hudProgress = 0;
+        return;
+      }
     }
     this.hudProgress = this.breakProgress;
     this.updateShield(dt, f, item);
 
+    if (rightPressed && this.target && item?.tool?.kind === 'axe' && this.stripBlock(this.target)) {
+      this.placeCooldown = 0.25;
+      this.eatTimer = 0;
+      this.hudProgress = 0;
+      return;
+    }
+
+    // A potato is food and a seed. Planting wins while the ground will take it, so a click on farmland does not start a meal.
+    const plantSpot = item?.food && item.block != null && this.target ? this.blockPlaceSpot(this.target) : null;
+    if (this.target && f.right && this.placeCooldown <= 0 && item && usedOnBlock(item)) {
+      this.placeCooldown = item.tool ? 0.25 : 0.22;
+      if (this.useHeldOn(this.target)) {
+        this.eatTimer = 0;
+        return;
+      }
+    }
+
     // ---- eating ----
-    if (item?.food && f.right && this.mode === 'survival' && this.vitals.canEat()) {
+    // A poisonous potato can be eaten on a full stomach. Ordinary food cannot, even when it can make you sick.
+    if (!plantSpot && item?.food && f.right && this.mode === 'survival' && (item.food.always || this.vitals.canEat())) {
       this.eatTimer += dt;
       this.hudProgress = Math.min(1, this.eatTimer / EAT_TIME);
       if (this.eatTimer >= EAT_TIME) {
         this.eatTimer = 0;
         this.vitals.eat(item.food);
+        const poison = item.food.poison;
+        if (poison && this.rand() < poison.chance) this.poison = Math.max(this.poison, poison.seconds);
+        const sickness = item.food.sickness;
+        if (sickness && this.rand() < sickness.chance) this.foodSick = Math.max(this.foodSick, sickness.seconds);
+        if (item.food.clears) {
+          this.poison = 0;
+          this.poisonTick = 0;
+          this.foodSick = 0;
+          this.foodSickTick = 0;
+        }
         held!.count -= 1;
-        if (held!.count <= 0) this.inventory.set(this.selected, null);
+        const leaves = item.food.leaves;
+        if (held!.count <= 0) this.inventory.set(this.selected, leaves != null ? makeStack(leaves) : null);
+        else if (leaves != null) this.giveOrDrop(makeStack(leaves));
         this.emit({ t: 'eat' });
         this.emit({ t: 'inv' });
       }
@@ -1547,9 +1874,18 @@ export class Player implements EffectOwner {
     // ---- minecart on a rail, boat on the water ----
     if (rightPressed && held && item?.use === 'vehicle' && this.placeVehicle(held)) return;
 
+    // ---- armor stand: set it on the block you are looking at ----
+    if (rightPressed && held && item?.use === 'armor_stand' && this.placeArmorStand()) return;
+
     // ---- ender pearl: throw it, and go where it lands ----
     if (rightPressed && held && item?.use === 'pearl') {
       this.throwPearl(held);
+      return;
+    }
+
+    // ---- fishing rod: cast it, and reel it in ----
+    if (rightPressed && held && item?.use === 'fishing_rod') {
+      this.useRod(held);
       return;
     }
 
@@ -1560,12 +1896,6 @@ export class Player implements EffectOwner {
 
     // ---- staff, wand, spellbook: right-click casts ----
     if (f.right && item?.weapon?.kind === 'spell' && this.castCooldown <= 0) this.castWeapon(item.weapon, item.id);
-
-    // ---- tilling / placing ----
-    if (this.target && f.right && this.placeCooldown <= 0 && item && usedOnBlock(item)) {
-      this.placeCooldown = item.tool ? 0.25 : 0.22;
-      this.useHeldOn(this.target);
-    }
   }
 
   /**
@@ -1632,6 +1962,69 @@ export class Player implements EffectOwner {
     if (!home) this.respawn();
     this.realm.emitNear(b.x, b.y, b.z, { t: 'ember', what: 'arrive', x: b.x, y: b.y, z: b.z }, 48);
     this.emit({ t: 'toast', text: home ? 'The Emberstone took you home.' : 'You have no bed: the Emberstone took you to the village.' });
+  }
+
+  /** Whether the line of the bobber you have out still holds: you are alive, have the rod in hand and it is not too far off. */
+  keepsLine(b: Bobber | null, leash: number): boolean {
+    if (!b || this.vitals.dead || this.spectating || this.screen === 'dead') return false;
+    if (!this.realm.players.includes(this) || !isFishingRod(this.held?.id)) return false;
+    if (Math.hypot(b.x - this.body.x, b.y - this.body.y, b.z - this.body.z) <= leash) return true;
+    this.emit({ t: 'toast', text: 'You went too far: the line came loose.' });
+    return false;
+  }
+
+  private fishEvent(what: 'cast' | 'reel' | 'catch', x: number, y: number, z: number): void {
+    this.realm.emitNear(x, y, z, { t: 'fish', what, x, y, z }, 40);
+  }
+
+  /** The use button with a rod in the hand: with no bobber out it casts one, with one out it reels it in. */
+  private useRod(rod: ItemStack): void {
+    const out = this.realm.fishing.of(this);
+    if (out) {
+      this.reelIn(out);
+      return;
+    }
+    const e = this.eye();
+    const d = this.look();
+    const { lure, luck } = rodEnchants(rod);
+    this.realm.fishing.cast(this, e.x + d.x * 0.4, e.y - 0.15 + d.y * 0.4, e.z + d.z * 0.4, d.x, d.y, d.z, lure, luck);
+    this.fishEvent('cast', e.x, e.y, e.z);
+    this.emit({ t: 'swing' });
+  }
+
+  /**
+   * Reel the bobber in. A fish that is biting comes out of the water (a fish, a bit of junk or, in open water, now and then a
+   * treasure), arcing through the air to you, with a little experience; a creature that is hooked is pulled towards you; a
+   * bobber that nothing has bitten on just comes back. Only a catch or a pull wears the rod.
+   */
+  private reelIn(b: Bobber): void {
+    const fishing = this.realm.fishing;
+    fishing.take(this);
+    const body = this.body;
+    this.emit({ t: 'swing' });
+    let wear = 0;
+    if (b.state === 'floating' && b.phase === 'bite') {
+      const c = rollCatch(this.rand, b.luck, fishing.openWater(b));
+      // It leaves the water in an arc that ends at your feet.
+      const tx = body.x;
+      const ty = body.y + 0.6;
+      const tz = body.z;
+      const dx = tx - b.x;
+      const dz = tz - b.z;
+      const T = 0.55 + Math.hypot(dx, dz) * 0.035;
+      const sy = b.y + 0.45;
+      this.drops.spawn(c.stack, b.x, sy, b.z, (dx * 0.92) / T, (ty - sy) / T + 10 * T, (dz * 0.92) / T, 0.45);
+      this.realm.awardXp(catchXp(this.rand), body.x, body.y + 0.5, body.z);
+      this.fishEvent('catch', b.x, b.y, b.z);
+      wear = ROD_WEAR.catch;
+    } else if (b.state === 'hooked' && b.hook && !b.hook.dead) {
+      pullMob(b.hook, body.x, body.y, body.z);
+      this.fishEvent('reel', b.x, b.y, b.z);
+      wear = ROD_WEAR.mob;
+    } else {
+      this.fishEvent('reel', b.x, b.y, b.z);
+    }
+    if (wear > 0 && this.mode === 'survival') this.damageHeld(wear);
   }
 
   private throwPearl(held: ItemStack): void {
@@ -3082,6 +3475,7 @@ export class Player implements EffectOwner {
     world.setBlock(hx, py, hz, bedId(true, dir));
     this.realm.blockChanged(px, py, pz);
     this.realm.blockChanged(hx, py, hz);
+    this.puff(px, py, pz, bedId(false, dir, bedItemColor(held.id)), true);
     this.realm.emitNear(px, py, pz, { t: 'sound', sound: 'wood', action: 'place', vol: 1 });
     this.emit({ t: 'swing' });
     if (this.mode === 'survival') {
@@ -3363,7 +3757,10 @@ export class Player implements EffectOwner {
     if (this.spectating || this.invulnerable || this.vitals.dead) {
       this.lavaTimer = 0;
       this.cactusTimer = 0;
+      this.berryTimer = 0;
+      this.campfireTimer = 0;
       this.poison = 0;
+      this.foodSick = 0;
       this.onFire = 0;
       return;
     }
@@ -3375,6 +3772,15 @@ export class Player implements EffectOwner {
         if (this.vitals.health > 1) this.vitals.damage(1, 'generic');
       }
     }
+    if (this.foodSick > 0) {
+      this.foodSick = Math.max(0, this.foodSick - STEP);
+      this.foodSickTick += STEP;
+      // One point of the food bar every ten seconds, the same drain as walking the exhaustion off.
+      if (this.foodSickTick >= 10) {
+        this.foodSickTick -= 10;
+        this.vitals.addExhaustion(4);
+      }
+    } else this.foodSickTick = 0;
     const b = this.body;
     if (b.inLava) {
       this.lavaTimer += STEP;
@@ -3416,6 +3822,21 @@ export class Player implements EffectOwner {
         this.vitals.damage(this.protect(1, 'all'), 'cactus');
       }
     }
+    const moving = Math.abs(b.vx) > 0.05 || Math.abs(b.vz) > 0.05;
+    if (moving && this.touchingBerries()) {
+      this.berryTimer += STEP;
+      if (this.berryTimer >= 0.5) {
+        this.berryTimer = 0;
+        this.vitals.damage(this.protect(1, 'all'), 'berry');
+      }
+    }
+    if (this.touchingCampfire()) {
+      this.campfireTimer += STEP;
+      if (this.campfireTimer >= 0.5) {
+        this.campfireTimer = 0;
+        this.vitals.damage(this.protect(1, 'fire'), 'campfire');
+      }
+    }
   }
 
   /** Set alight for seconds (fire protection shortens it). Creative players and spectators do not burn. */
@@ -3436,6 +3857,34 @@ export class Player implements EffectOwner {
       for (let x = Math.floor(b.x - r); x <= Math.floor(b.x + r); x++) {
         for (let z = Math.floor(b.z - r); z <= Math.floor(b.z + r); z++) {
           if (this.world.getBlock(x, y, z) === B.FIRE) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /** A lit campfire underfoot. It hurts, and it does not set you alight. */
+  private touchingCampfire(): boolean {
+    const b = this.body;
+    const r = 0.3;
+    const y = Math.floor(b.y + 0.1);
+    for (let x = Math.floor(b.x - r); x <= Math.floor(b.x + r); x++) {
+      for (let z = Math.floor(b.z - r); z <= Math.floor(b.z + r); z++) {
+        if (campfireInfo(this.world.getBlock(x, y, z))?.lit) return true;
+      }
+    }
+    return false;
+  }
+
+  /** A ripe sweet berry bush at the feet. Younger bushes do not scratch. */
+  private touchingBerries(): boolean {
+    const b = this.body;
+    const r = 0.3;
+    for (const dy of [0.1, 0.9]) {
+      const y = Math.floor(b.y + dy);
+      for (let x = Math.floor(b.x - r); x <= Math.floor(b.x + r); x++) {
+        for (let z = Math.floor(b.z - r); z <= Math.floor(b.z + r); z++) {
+          if (this.world.getBlock(x, y, z) === B.SWEET_BERRY_3) return true;
         }
       }
     }
@@ -3698,6 +4147,8 @@ export class Player implements EffectOwner {
     this.lowerShield();
     this.realm.mobEvents.sound('say', mob);
     this.emit({ t: 'dialog', npc: npc.id });
+    if (npc.id === AUCTIONEER) this.sendAuctions();
+    if (npc.id === STASHKEEPER) this.sendStash();
     this.emit({ t: 'swing' });
     return true;
   }
@@ -3800,6 +4251,174 @@ export class Player implements EffectOwner {
     this.emit({ t: 'shop', what: 'sell' });
   }
 
+  // ---- the Auction House -------------------------------------------------------------
+
+  /** Show the window of the Auctioneer what the house holds now (for the search made last). */
+  private sendAuctions(): void {
+    this.realm.auctions.update();
+    this.emit({ t: 'auction', view: this.realm.auctions.view(this.auctionQuery, this.account) });
+  }
+
+  /**
+   * The Auction House (see auction.ts). Everything is checked here: the Auctioneer must be in reach, the slot and the numbers must be
+   * real, and the coins and the item must be there. What is owed (an item won, the coins of a sale, a bid that was outbid) is
+   * not handed over at once but waits in the mail, and is taken from there.
+   */
+  private auctionCommand(c: Extract<Command, { t: 'auction' }>): void {
+    if (this.spectating || this.screen !== 'dialog' || this.dialogNpc !== AUCTIONEER) return;
+    const house = this.realm.auctions;
+    const say = (text: string): void => this.emit({ t: 'toast', text });
+    house.update();
+    if (c.a === 'search') {
+      this.auctionQuery = cleanQuery(c);
+      this.sendAuctions();
+      return;
+    }
+    if (!this.account) {
+      say('Sign in to sell, bid or collect mail at the Auction House.');
+      this.sendAuctions();
+      return;
+    }
+    if (this.mode === 'creative' && c.a !== 'take' && c.a !== 'cancel') {
+      say('Nobody trades in creative mode.');
+      this.sendAuctions();
+      return;
+    }
+    switch (c.a) {
+      case 'post': {
+        const stack = this.inventory.isUsable(c.slot) ? this.inventory.get(c.slot) : null;
+        const blocked = sellBlocker(stack);
+        if (blocked || !stack) {
+          say(blocked ?? 'There is nothing there.');
+          break;
+        }
+        const offered = { ...cloneStack(stack), count: Math.min(c.count, stack.count) };
+        const deposit = depositFor(offered, c.hours);
+        if (this.coins < deposit) {
+          say(`You cannot afford the deposit of ${deposit} Auren.`);
+          break;
+        }
+        const res = house.post({ seller: this.account, sellerName: this.name, item: offered, bid: c.bid, buyout: c.buyout, hours: c.hours, deposit });
+        if (!res.ok) {
+          say(res.error);
+          break;
+        }
+        stack.count -= offered.count;
+        this.inventory.set(c.slot, stack.count > 0 ? stack : null);
+        this.spendCoins(deposit);
+        this.auctionTouched = true;
+        this.emit({ t: 'inv' });
+        say(`Auction posted (deposit ${deposit} Auren).`);
+        break;
+      }
+      case 'bid':
+      case 'buyout': {
+        const res = c.a === 'bid' ? house.bid(c.id, this.account, this.name, c.amount, this.coins) : house.buyout(c.id, this.account, this.name, this.coins);
+        if (!res.ok) {
+          say(res.error);
+          break;
+        }
+        this.spendCoins(res.pay);
+        this.auctionTouched = true;
+        this.emit({ t: 'shop', what: 'buy' });
+        say(res.bought ? 'Bought! The item is waiting in your mail.' : 'Bid placed.');
+        break;
+      }
+      case 'cancel': {
+        const res = house.cancel(c.id, this.account);
+        if (!res.ok) say(res.error);
+        else {
+          this.auctionTouched = true;
+          say('Auction cancelled. The item is in your mail; the deposit is lost.');
+        }
+        break;
+      }
+      case 'take': {
+        let took = 0;
+        let full = false;
+        const wanted = c.id === 0 ? house.mailOf(this.account).map((m) => m.id) : [c.id];
+        for (const id of wanted) {
+          const m = house.mailOf(this.account).find((x) => x.id === id);
+          if (!m) continue;
+          if ((m.item && !this.inventory.canFit(m.item)) || this.coins + m.coins > MAX_COINS) {
+            full = true;
+            continue;
+          }
+          house.takeMail(this.account, id);
+          if (m.item) this.inventory.collect(cloneStack(m.item));
+          if (m.coins > 0) this.addCoins(m.coins);
+          took++;
+        }
+        if (took > 0) {
+          this.auctionTouched = true;
+          this.emit({ t: 'inv' });
+        }
+        if (full) say('Your bags or your purse are full: make room and collect again.');
+        break;
+      }
+    }
+    this.sendAuctions();
+  }
+
+  // ---- the Stash -----------------------------------------------------------------------
+
+  /** Show the window of the Stashkeeper what the wallet's stash holds now (an empty one without a wallet). */
+  private sendStash(): void {
+    this.emit({ t: 'stash', view: this.wallet ? this.realm.stashes.view(this.wallet) : { slots: [] } });
+  }
+
+  /**
+   * The Stash (see stash.ts): move an item of the inventory in, or one out of it. Everything is checked here: the Stashkeeper must be
+   * in reach, the slot must be real and there must be room on the other side. A stack moves only as far as it fits, and what is not
+   * moved stays where it was, so an item is never in two places.
+   */
+  private stashCommand(c: Extract<Command, { t: 'stash' }>): void {
+    if (this.spectating || this.screen !== 'dialog' || this.dialogNpc !== STASHKEEPER) return;
+    const say = (text: string): void => this.emit({ t: 'toast', text });
+    const wallet = this.wallet;
+    if (!wallet) {
+      say('Sign in with your wallet to use the stash.');
+      this.sendStash();
+      return;
+    }
+    if (this.mode === 'creative') {
+      say('Nobody stores things in creative mode.');
+      this.sendStash();
+      return;
+    }
+    const vault = this.realm.stashes;
+    if (c.a === 'put') {
+      const stack = this.inventory.isUsable(c.slot) ? this.inventory.get(c.slot) : null;
+      const blocked = stashBlocker(stack);
+      if (blocked || !stack) say(blocked ?? 'There is nothing there.');
+      else {
+        const moved = vault.put(wallet, stack, c.count);
+        if (moved === 0) say('The stash is full.');
+        else {
+          stack.count -= moved;
+          this.inventory.set(c.slot, stack.count > 0 ? stack : null);
+          this.stashTouched = true;
+          this.emit({ t: 'inv' });
+        }
+      }
+    } else {
+      const there = vault.peek(wallet, c.slot);
+      if (!there) say('There is nothing there.');
+      else {
+        const part = { ...cloneStack(there), count: Math.min(c.count, there.count) };
+        const wanted = part.count;
+        const left = this.inventory.collect(part);
+        const moved = wanted - (left ? left.count : 0);
+        if (moved === 0) say('Your bags are full.');
+        else {
+          vault.remove(wallet, c.slot, moved);
+          this.stashTouched = true;
+          this.emit({ t: 'inv' });
+        }
+      }
+    }
+    this.sendStash();
+  }
   // ---- test and debug helpers ---------------------------------------------
   // These bypass the protocol on purpose. They are the "dev back door" behind `window.__solrift`
   // and the unit tests, and are never reachable from a client message.
@@ -3911,6 +4530,90 @@ export class Player implements EffectOwner {
     this.realm.destroyVehicle(v, this.mode === 'survival');
   }
 
+  /** Set an armor stand on the top of the solid block you are looking at. It faces the way you face. */
+  private placeArmorStand(): boolean {
+    const d = this.look();
+    const e = this.eye();
+    const hit = raycast(this.world, e.x, e.y, e.z, d.x, d.y, d.z, REACH);
+    if (!hit || hit.ny <= 0 || IS_SOLID[hit.id] !== 1) return false;
+    const x = hit.x + 0.5;
+    const y = hit.y + 1;
+    const z = hit.z + 0.5;
+    const blocked = (px: number, py: number, pz: number): boolean => {
+      const id = this.world.getBlock(px, py, pz);
+      return IS_SOLID[id] === 1 || !!IS_LIQUID[id];
+    };
+    if (blocked(hit.x, hit.y + 1, hit.z) || blocked(hit.x, hit.y + 2, hit.z)) return false;
+    const b = this.body;
+    const tall = b.height ?? 1.8;
+    if (Math.abs(b.x - x) < 0.8 && Math.abs(b.z - z) < 0.8 && b.y < y + 2 && b.y + tall > y) return false;
+    let placed = 0;
+    for (const m of this.mobs.mobs) if (m.kind === 'armor_stand' && !m.dead) placed++;
+    if (placed >= 128) {
+      this.emit({ t: 'toast', text: 'There are already too many armor stands.' });
+      return true;
+    }
+    if (this.mobs.mobs.some((m) => m.kind === 'armor_stand' && !m.dead && Math.abs(m.body.x - x) < 0.45 && Math.abs(m.body.z - z) < 0.45 && Math.abs(m.body.y - y) < 1)) return false;
+    const mob = this.mobs.spawn('armor_stand', x, y, z);
+    mob.yaw = this.yaw;
+    mob.homeYaw = this.yaw;
+    this.realm.emitNear(x, y, z, { t: 'sound', sound: 'wood', action: 'place', vol: 1 });
+    this.emit({ t: 'swing' });
+    this.useUpHeld();
+    return true;
+  }
+
+  /**
+   * Right-click an armor stand. A piece of armor goes in its slot, anything else in its hand, and an empty hand takes
+   * one piece back. Sneaking changes the pose instead.
+   */
+  private useArmorStand(mob: Mob): boolean {
+    const gear = mob.standGear;
+    if (mob.dead || !gear) return false;
+    if (this.sneaking) {
+      mob.variant = (mob.variant + 1) % ARMOR_STAND_POSES;
+      this.realm.emitNear(mob.body.x, mob.body.y, mob.body.z, { t: 'sound', sound: 'wood', action: 'step', vol: 0.5 });
+      this.emit({ t: 'swing' });
+      return true;
+    }
+    const held = this.held;
+    if (held) {
+      const piece = getItem(held.id).armor;
+      this.swapOntoStand(mob, piece ? piece.slotIndex : 4);
+      return true;
+    }
+    for (const slot of [4, 3, 2, 1, 0]) {
+      const worn = gear[slot];
+      if (!worn) continue;
+      gear[slot] = null;
+      this.giveOrDrop(worn);
+      this.emit({ t: 'inv' });
+      this.emit({ t: 'swing' });
+      this.realm.emitNear(mob.body.x, mob.body.y, mob.body.z, { t: 'sound', sound: 'wood', action: 'step', vol: 0.6 });
+      return true;
+    }
+    return false;
+  }
+
+  /** Move one of the held stack onto an armor stand, and hand back whatever was already there. */
+  private swapOntoStand(mob: Mob, slot: number): void {
+    const held = this.held;
+    const gear = mob.standGear;
+    if (!held || !gear) return;
+    const one = cloneStack(held);
+    one.count = 1;
+    const prev = gear[slot];
+    gear[slot] = one;
+    if (this.mode === 'survival') {
+      held.count -= 1;
+      if (held.count <= 0) this.inventory.set(this.selected, prev);
+      else if (prev) this.giveOrDrop(prev);
+    } else if (prev) this.giveOrDrop(prev);
+    this.emit({ t: 'inv' });
+    this.emit({ t: 'swing' });
+    this.realm.emitNear(mob.body.x, mob.body.y, mob.body.z, { t: 'sound', sound: 'wood', action: 'place', vol: 0.7 });
+  }
+
   /** Set a minecart on the rail you aim at, or a boat on the water. Returns whether it did. */
   private placeVehicle(held: ItemStack): boolean {
     const d = this.look();
@@ -3945,12 +4648,30 @@ export class Player implements EffectOwner {
   useOnMob(): boolean {
     const hit = this.aimedMob();
     const held = this.held;
+    if (hit && hit.mob.kind === 'armor_stand') return this.useArmorStand(hit.mob);
     if (hit && hit.mob.kind === 'villager') return this.talkTo(hit.mob);
     if (hit && hit.mob.kind === 'npc') return this.talkNpc(hit.mob);
     if (!hit || !held || hit.mob.dead) return false;
+    if (held.id === I.BUCKET && (hit.mob.kind === 'cow' || hit.mob.kind === 'mooshroom')) return this.milkCow(hit.mob);
     if (hit.mob.kind === 'sheep' && this.dyeSheep(hit.mob, held)) return true;
     if (getItem(held.id).shears) return hit.mob.kind === 'sheep' && this.shear(hit.mob);
     return this.feedMob(hit.mob, held);
+  }
+
+  /** An empty bucket on a grown cow fills with milk. The cow is not hurt. */
+  private milkCow(mob: Mob): boolean {
+    if (mob.baby || mob.dead) return false;
+    const held = this.held;
+    if (!held || held.id !== I.BUCKET) return false;
+    if (this.mode === 'survival') {
+      held.count -= 1;
+      if (held.count <= 0) this.inventory.set(this.selected, makeStack(I.MILK_BUCKET, 1));
+      else this.giveOrDrop(makeStack(I.MILK_BUCKET, 1));
+    } else this.giveOrDrop(makeStack(I.MILK_BUCKET, 1));
+    this.realm.mobEvents.sound('yes', mob);
+    this.emit({ t: 'swing' });
+    this.emit({ t: 'inv' });
+    return true;
   }
 
   /** Shears on a sheep: one to three pieces of its wool, and it stays bare for a while. */

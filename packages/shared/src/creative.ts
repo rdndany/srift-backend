@@ -30,7 +30,7 @@ export function creativeShelf(def: ItemDef): CreativeShelf {
   if (jewelKind(def.id)) return 'jewels';
   if (def.armor) return 'armor';
   if (def.weapon || def.shield || def.offhand || def.tool?.kind === 'sword' || def.use === 'bow' || def.id === I.ARROW) return 'weapons';
-  if (def.tool) return 'tools';
+  if (def.tool || def.use === 'fishing_rod') return 'tools';
   if (def.food) return 'food';
   if (def.block !== null) return 'blocks';
   return 'materials';

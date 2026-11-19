@@ -1,5 +1,7 @@
 import { ABILITY_SLOTS, type AbilityId } from './abilities';
+import { AUCTION_CATEGORIES, AUCTION_HOURS, AUCTION_SORTS, cleanQuery, type AuctionCommand, type AuctionHours, type AuctionView } from './auction';
 import type { SoundKind } from './blocks';
+import { STASH_SLOTS, type StashCommand, type StashView } from './stash';
 import type { ClassId } from './classes';
 import { isCreativeAmount, validGearSpec, type CreativeAmount, type GearSpec } from './creative';
 import type { GearRoll } from './gear';
@@ -85,6 +87,10 @@ export type Command =
   | { t: 'quest'; a: 'accept' | 'complete' | 'abandon'; id: string }
   /** At a merchant: buy `n` times the ware at stock index `i`, or sell `n` of the item in inventory slot `i`. */
   | { t: 'shop'; a: 'buy' | 'sell'; i: number; n: number }
+  /** At the Auctioneer: search the house, put an item up, bid, buy out, take an auction down, collect mail (see auction.ts). */
+  | ({ t: 'auction' } & AuctionCommand)
+  /** At the Stashkeeper: put an item of the inventory into the wallet's stash, or take one out (see stash.ts). */
+  | ({ t: 'stash' } & StashCommand)
   /** The party (see party.ts): invite a player, answer an invitation, leave, remove a member or hand over the lead. */
   | { t: 'party'; a: PartyAction; name?: string }
   /** Use the ability on a button of the ability bar (0..3). Only the button: what it does, to what and for how much is the server's to decide. */
@@ -141,9 +147,13 @@ export type SessionEvent =
   | { t: 'inv' }
   | { t: 'toast'; text: string }
   | { t: 'sound'; sound: SoundKind; action: 'break' | 'place' | 'step' | 'hit' | 'land' | 'jump'; vol: number; x?: number; y?: number; z?: number }
-  /** Block-coloured particles (breaking, explosions, plants popping off). */
-  | { t: 'burst'; id: number; x: number; y: number; z: number; count: number }
+  /** Chips of a block's own texture. `soft` is the short puff of placing one; without it, the block has broken. */
+  | { t: 'burst'; id: number; x: number; y: number; z: number; count: number; soft?: boolean }
+  /** A chest lid opened or shut. Everyone near hears it. */
+  | { t: 'chest'; open: boolean; x: number; y: number; z: number }
   | { t: 'splash'; vol: number }
+  /** Fishing, where x,y,z is: a cast, the bobber landing in the water, a fish taking notice (bubbles) and biting (the bobber is pulled under), getting away, a reel-in, and a catch coming out of the water. Everyone near sees and hears it. */
+  | { t: 'fish'; what: 'cast' | 'splash' | 'lure' | 'bite' | 'escape' | 'reel' | 'catch'; x: number; y: number; z: number }
   /** Fire sounds: lighting one (flint and steel), the crackle of burning, the hiss of rain or water putting it out. */
   | { t: 'fire'; kind: 'ignite' | 'crackle' | 'hiss'; vol: number }
   | { t: 'eat' }
@@ -156,6 +166,10 @@ export type SessionEvent =
   | { t: 'coins'; gain: number }
   /** A purchase or a sale went through. */
   | { t: 'shop'; what: 'buy' | 'sell' }
+  /** What the Auction House window shows (sent when it opens and after everything done there). */
+  | { t: 'auction'; view: AuctionView }
+  /** What the stash window shows (sent when it opens and after everything done there). */
+  | { t: 'stash'; view: StashView }
   | { t: 'equip' }
   /** Something was enchanted at the table (or repaired at the anvil). */
   | { t: 'enchant'; anvil?: boolean }
@@ -220,6 +234,48 @@ export function cleanCamera(raw: unknown): { cam?: [number, number, number] } {
   const [x, y, z] = raw;
   const ok = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && Math.abs(v) < 1e7;
   return ok(x) && ok(y) && ok(z) ? { cam: [x, y, z] } : {};
+}
+
+const whole = (x: unknown, lo: number, hi: number): number | null => {
+  const v = num(x);
+  return v !== null && Number.isInteger(v) && v >= lo && v <= hi ? v : null;
+};
+
+/** The Auction House's commands: every number a whole one in range, every word one of the known ones. */
+function parseAuction(raw: Record<string, unknown>): Command | null {
+  switch (raw.a) {
+    case 'search': {
+      if (typeof raw.q !== 'string' || raw.q.length > 80 || !AUCTION_CATEGORIES.some((c) => c.id === raw.cat) || !AUCTION_SORTS.includes(raw.sort as never) || typeof raw.desc !== 'boolean') return null;
+      const page = whole(raw.page, 0, 9999);
+      if (page === null) return null;
+      const q = cleanQuery({ q: raw.q, cat: raw.cat as never, sort: raw.sort as never, desc: raw.desc, page });
+      return { t: 'auction', a: 'search', ...q };
+    }
+    case 'post': {
+      const slot = whole(raw.slot, 0, 1023);
+      const count = whole(raw.count, 1, 64);
+      const bid = whole(raw.bid, 1, 999_999_999);
+      const buyout = whole(raw.buyout, 0, 999_999_999);
+      if (slot === null || count === null || bid === null || buyout === null || !AUCTION_HOURS.includes(raw.hours as AuctionHours)) return null;
+      return { t: 'auction', a: 'post', slot, count, bid, buyout, hours: raw.hours as AuctionHours };
+    }
+    case 'bid': {
+      const id = whole(raw.id, 1, 1e9);
+      const amount = whole(raw.amount, 1, 999_999_999);
+      return id !== null && amount !== null ? { t: 'auction', a: 'bid', id, amount } : null;
+    }
+    case 'buyout':
+    case 'cancel': {
+      const id = whole(raw.id, 1, 1e9);
+      return id !== null ? { t: 'auction', a: raw.a, id } : null;
+    }
+    case 'take': {
+      const id = whole(raw.id, 0, 1e9);
+      return id !== null ? { t: 'auction', a: 'take', id } : null;
+    }
+    default:
+      return null;
+  }
 }
 
 /**
@@ -324,6 +380,21 @@ export function parseSessionMessage(raw: unknown): SessionMessage | null {
       const n = num(raw.n);
       if ((raw.a !== 'buy' && raw.a !== 'sell') || i === null || n === null || !Number.isInteger(i) || !Number.isInteger(n) || i < 0 || i > 255 || n < 1 || n > 64) return null;
       return { t: 'shop', a: raw.a, i, n };
+    }
+    case 'auction':
+      return parseAuction(raw);
+    case 'stash': {
+      const count = whole(raw.count, 1, 64);
+      if (count === null) return null;
+      if (raw.a === 'put') {
+        const slot = whole(raw.slot, 0, 255);
+        return slot === null ? null : { t: 'stash', a: 'put', slot, count };
+      }
+      if (raw.a === 'take') {
+        const slot = whole(raw.slot, 0, STASH_SLOTS - 1);
+        return slot === null ? null : { t: 'stash', a: 'take', slot, count };
+      }
+      return null;
     }
     case 'ability': {
       const slot = num(raw.slot);

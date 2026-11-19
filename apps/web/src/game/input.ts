@@ -8,6 +8,8 @@ export class Input {
   leftDown = false;
   rightDown = false;
   sensitivity = 0.0022;
+  /** Moving the mouse up looks down (a setting). */
+  invertY = false;
 
   private pressed = new Set<string>();
   /** Right-button presses not yet read by `consumeRightClick`. */
@@ -30,7 +32,7 @@ export class Input {
     on('mousemove', (e) => {
       if (!this.locked) return;
       this.yaw -= e.movementX * this.sensitivity;
-      this.pitch -= e.movementY * this.sensitivity;
+      this.pitch -= e.movementY * this.sensitivity * (this.invertY ? -1 : 1);
       const lim = Math.PI / 2 - 0.001;
       this.pitch = Math.max(-lim, Math.min(lim, this.pitch));
     });

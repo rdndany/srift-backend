@@ -474,8 +474,14 @@ describe('who spawns where', () => {
 
   it('farm animals graze on grass by day, with rabbits in the mix', () => {
     const c = census({ ground: wide(B.GRASS), daylight: 1, tries: 800 });
-    for (const k of ['pig', 'cow', 'sheep', 'chicken', 'rabbit'] as const) expect(c.kinds.has(k), k).toBe(true);
+    for (const k of ['pig', 'cow', 'sheep', 'chicken', 'rabbit', 'horse', 'fox'] as const) expect(c.kinds.has(k), k).toBe(true);
     expect(c.variants.get(0)).toBeGreaterThan(0);
+  });
+
+  it('mooshrooms graze a mushroom field', () => {
+    const c = census({ ground: wide(B.MYCELIUM), daylight: 1, tries: 200 });
+    expect(c.kinds.has('mooshroom')).toBe(true);
+    expect(c.kinds.has('pig')).toBe(false);
   });
 
   it('a forest floor is daylight: nothing hostile spawns under thin leaves by day, animals do', () => {
@@ -540,6 +546,7 @@ describe('who spawns where', () => {
     };
     const day = run(1, sea);
     expect(day.has('squid')).toBe(true);
+    expect(day.has('cod') || day.has('salmon')).toBe(true);
     expect(day.has('drowned')).toBe(false);
     const night = run(0, sea);
     expect(night.has('squid')).toBe(true);

@@ -33,9 +33,11 @@ export const ENCH = {
   FLAME: 17,
   INFINITY: 18,
   MENDING: 19,
+  LURE: 20,
+  LUCK_OF_THE_SEA: 21,
 } as const;
 
-export type Group = 'armor' | 'helmet' | 'boots' | 'melee' | 'digger' | 'bow' | 'durable';
+export type Group = 'armor' | 'helmet' | 'boots' | 'melee' | 'digger' | 'bow' | 'rod' | 'durable';
 
 export interface EnchantDef {
   id: number;
@@ -84,6 +86,8 @@ export const ENCHANTS: readonly EnchantDef[] = [
   e(ENCH.PUNCH, 'Punch', 2, 2, 'bow', (l) => 12 + (l - 1) * 20, () => 25),
   e(ENCH.FLAME, 'Flame', 1, 2, 'bow', () => 20, () => 30),
   e(ENCH.INFINITY, 'Infinity', 1, 1, 'bow', () => 20, () => 30, { family: 'mending' }),
+  e(ENCH.LURE, 'Lure', 3, 2, 'rod', (l) => 15 + (l - 1) * 9, () => 50),
+  e(ENCH.LUCK_OF_THE_SEA, 'Luck of the Sea', 3, 2, 'rod', (l) => 15 + (l - 1) * 9, () => 50),
   e(ENCH.MENDING, 'Mending', 1, 2, 'durable', (l) => 25 + (l - 1) * 25, () => 50, { family: 'mending', treasure: true }),
 ];
 
@@ -145,6 +149,8 @@ export function canCarry(item: ItemDef, d: EnchantDef): boolean {
       return !!item.tool && item.tool.kind !== 'sword';
     case 'bow':
       return item.use === 'bow';
+    case 'rod':
+      return item.use === 'fishing_rod';
     case 'durable':
       return item.durability > 0 && !item.shield;
   }
@@ -155,7 +161,7 @@ export function enchantability(id: number): number {
   const item = getItem(id);
   if (item.tool) return { wood: 15, stone: 5, iron: 14, gold: 22, diamond: 10 }[item.tool.material];
   if (item.armor) return { leather: 15, gold: 25, iron: 9, diamond: 10 }[item.armor.material];
-  if (item.use === 'bow') return 1;
+  if (item.use === 'bow' || item.use === 'fishing_rod') return 1;
   if (id === I.BOOK) return 1;
   return 0;
 }

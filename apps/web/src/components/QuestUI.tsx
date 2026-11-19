@@ -1,9 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { QUESTS, formatCoins, getItem, makeStack, npcById, questById, rewardCoins, rewardItems, shopOf, skillBookAbility, tooltipName, zoneDef, type QuestDef, type QuestLog } from '@solrift/shared';
+import { AUCTIONEER, QUESTS, STASHKEEPER, formatCoins, getItem, makeStack, npcById, questById, rewardCoins, rewardItems, shopOf, skillBookAbility, tooltipName, zoneDef, type QuestDef, type QuestLog } from '@solrift/shared';
 import { useUi } from '../ui/store';
 import { ItemView } from './ItemView';
+import { AuctionWindow } from './AuctionUI';
+import { StashWindow } from './StashUI';
 import { CoinIcon, ShopWindow, XpIcon } from './ShopUI';
 
 const nice = (name: string): string => name.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
@@ -83,6 +85,10 @@ function DialogPanel() {
   const offers = log.offeredBy(npc.id);
   const waiting = log.waitingOn(npc.id);
   const idle = ready.length === 0 && offers.length === 0 && waiting.length === 0;
+  // The Auctioneer has no wares and no quests: his window is the Auction House.
+  if (npc.id === AUCTIONEER) return <AuctionWindow npc={npc} />;
+  // The Stashkeeper has no wares and no quests either: his window is the stash.
+  if (npc.id === STASHKEEPER) return <StashWindow npc={npc} />;
   const shop = shopOf(npc.id);
   // A merchant with no quest business opens the counter at once; one who has quests talks first, with a button to the wares.
   const shopOnly = !!shop && idle;

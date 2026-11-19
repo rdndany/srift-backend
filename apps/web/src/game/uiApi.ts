@@ -7,7 +7,7 @@ import type { ItemIcons } from './icons';
 import type { Input } from './input';
 import type { RecipeMemory } from './recipeMemory';
 import type { RemoteSession } from './remote';
-import { titleAddress } from './route';
+import { gamePath, titleAddress } from './route';
 import { saveBridge } from './saveBridge';
 import type { LocalSaveStore } from './storage';
 
@@ -30,7 +30,7 @@ export interface UiApiParts {
 /** What the page's windows and buttons can ask of the game: nearly all of it is a command sent the same way a key press is. */
 export function makeUiApi(parts: UiApiParts): UiApi {
   const { session, remote, input, chat, icons, store, guest, sendCommand, openSpellbook } = parts;
-  const { toggleQuestLog, togglePartyWindow, toggleSocialWindow, openPlayerMenu, closePlayerMenu } = parts.windows;
+  const { toggleCodex, toggleQuestLog, togglePartyWindow, toggleSocialWindow, openPlayerMenu, closePlayerMenu } = parts.windows;
   const recipeBook = parts.recipes.book;
 
   return {
@@ -60,8 +60,11 @@ export function makeUiApi(parts: UiApiParts): UiApi {
     },
     questAction: (action, id) => sendCommand({ t: 'quest', a: action, id }),
     shop: (a, i, n) => sendCommand({ t: 'shop', a, i, n }),
+    auction: (cmd) => sendCommand({ t: 'auction', ...cmd }),
+    stash: (cmd) => sendCommand({ t: 'stash', ...cmd }),
     toggleQuestLog,
     toggleSocialWindow,
+    toggleCodex,
     socialRefresh: () => remote?.socialRefresh(),
     socialAct: (action, name) => remote?.socialAct(action, name),
     inspect: (name) => remote?.inspect(name),
@@ -82,6 +85,9 @@ export function makeUiApi(parts: UiApiParts): UiApi {
     deathMessage: () => session.deathMessage(),
     quitToTitle() {
       void saveBridge.flush?.().finally(() => location.assign(titleAddress(location.pathname)));
+    },
+    quitToCharacters() {
+      void saveBridge.flush?.().finally(() => location.assign(gamePath()));
     },
     async deleteWorld() {
       saveBridge.freeze?.(); // nothing may write the world back while it is being removed

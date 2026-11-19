@@ -67,7 +67,7 @@ const MINE_REGION = 128;
 const MINE_CHANCE = 0.55;
 const TEMPLE_REGION = 192;
 const TEMPLE_CHANCE = 0.5;
-const CASTLE_REGION = 320;
+export const CASTLE_REGION = 320;
 const CASTLE_CHANCE = 0.6;
 /** Where a castle may stand: open or wooded country, hills, not shores, swamps, deserts or the high bare mountains. */
 const CASTLE_BIOMES: ReadonlySet<number> = new Set([
@@ -141,6 +141,8 @@ export class StructureGenerator {
   private mines = new Map<string, StructurePlan | null>();
   private temples = new Map<string, StructurePlan | null>();
   private castles = new Map<string, StructurePlan | null>();
+  /** A world that has its own buildings can keep a castle from a spot (a village is already there, say). */
+  vetoCastle: ((x: number, z: number) => boolean) | null = null;
 
   constructor(
     private readonly seed: number,
@@ -497,6 +499,7 @@ export class StructureGenerator {
       }
     }
     if (lo <= SEA_LEVEL + 2 || hi - lo > 9) return null;
+    if (this.vetoCastle?.(cx, cz)) return null;
 
     /** The level people stand on in the courtyard; the grass of the mound is the layer below. */
     const g = hi + 1;

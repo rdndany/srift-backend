@@ -149,6 +149,8 @@ export function RecipeBookPanel({ menu, onPreview }: { menu: CraftingMenu; onPre
             placeholder="Search..."
             value={query}
             maxLength={24}
+            spellCheck={false}
+            autoComplete="off"
             onChange={(e) => change(() => setQuery(e.target.value))}
             onKeyDown={(e) => e.stopPropagation()}
           />

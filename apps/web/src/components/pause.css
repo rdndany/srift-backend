@@ -1,4 +1,7 @@
-/* The start / pause screen: a dark glass card with gold trim, matching the title screen. */
+/*
+ * The pause screen: a dark card with a gold frame and notched pixel corners, like the front page and the loading screen.
+ * The left side is you (resume, account, world, quit); the right side is the settings: Audio, Video, Gameplay and the keys.
+ */
 
 #overlay {
   --gold: #f6cf72;
@@ -12,9 +15,9 @@
   overflow-y: auto;
   padding: 24px 16px;
   background:
-    radial-gradient(ellipse at 50% 40%, rgba(10, 8, 5, 0.18), rgba(4, 3, 2, 0.72) 90%),
-    rgba(6, 5, 3, 0.12);
-  backdrop-filter: blur(4px) saturate(1.15);
+    radial-gradient(ellipse at 50% 40%, rgba(10, 8, 5, 0.2), rgba(4, 3, 2, 0.78) 90%),
+    rgba(6, 5, 3, 0.16);
+  backdrop-filter: blur(5px) saturate(1.15);
   color: #e9e1cf;
   cursor: pointer;
   scrollbar-width: thin;
@@ -25,6 +28,7 @@
 }
 #overlay h1,
 #overlay h2,
+#overlay h3,
 #overlay p {
   margin: 0;
 }
@@ -32,20 +36,30 @@
   font-weight: 400;
 }
 
+/* ---- the card: a glow, then the gold frame, then the dark glass (each notched at the corners) ---- */
 .pause-card {
+  --n: 10px;
   position: relative;
-  width: min(940px, 100%);
+  width: min(1040px, 100%);
   margin: auto;
-  padding: 26px 30px 22px;
   text-align: left;
-  background: linear-gradient(rgba(23, 18, 12, 0.93), rgba(11, 9, 6, 0.95));
-  border: 2px solid var(--gold-line);
-  box-shadow:
-    inset 0 0 0 2px #0b0906,
-    inset 0 0 0 3px rgba(246, 207, 114, 0.2),
-    0 30px 80px rgba(0, 0, 0, 0.75),
-    0 0 60px rgba(246, 170, 50, 0.12);
-  animation: pause-in 0.22s ease-out;
+  cursor: default;
+  filter: drop-shadow(0 26px 34px rgba(0, 0, 0, 0.7)) drop-shadow(0 0 26px rgba(246, 170, 50, 0.14));
+  animation: pause-in 0.24s ease-out;
+}
+.pause-edge {
+  padding: 3px;
+  background: linear-gradient(#9c7a30, #54401a 60%, #7a5e24);
+  clip-path: polygon(0 var(--n), var(--n) var(--n), var(--n) 0, calc(100% - var(--n)) 0, calc(100% - var(--n)) var(--n), 100% var(--n), 100% calc(100% - var(--n)), calc(100% - var(--n)) calc(100% - var(--n)), calc(100% - var(--n)) 100%, var(--n) 100%, var(--n) calc(100% - var(--n)), 0 calc(100% - var(--n)));
+}
+.pause-in {
+  --n: 8px;
+  position: relative;
+  padding: 26px 30px 18px;
+  background:
+    radial-gradient(ellipse 60% 40% at 50% 0, rgba(246, 170, 50, 0.1), transparent 70%),
+    linear-gradient(rgba(24, 19, 13, 0.97), rgba(10, 8, 5, 0.98));
+  clip-path: polygon(0 var(--n), var(--n) var(--n), var(--n) 0, calc(100% - var(--n)) 0, calc(100% - var(--n)) var(--n), 100% var(--n), 100% calc(100% - var(--n)), calc(100% - var(--n)) calc(100% - var(--n)), calc(100% - var(--n)) 100%, var(--n) 100%, var(--n) calc(100% - var(--n)), 0 calc(100% - var(--n)));
 }
 @keyframes pause-in {
   from {
@@ -53,27 +67,27 @@
     transform: translateY(10px) scale(0.985);
   }
 }
-/* Little corner studs, like the frames in a fantasy game. */
-.pause-card::before,
-.pause-card::after {
+/* Little studs in the top corners. */
+.pause-in::before,
+.pause-in::after {
   content: '';
   position: absolute;
-  top: 8px;
+  top: 12px;
   width: 8px;
   height: 8px;
   background: var(--gold);
   box-shadow: 0 0 8px rgba(246, 207, 114, 0.7);
 }
-.pause-card::before {
-  left: 8px;
+.pause-in::before {
+  left: 14px;
 }
-.pause-card::after {
-  right: 8px;
+.pause-in::after {
+  right: 14px;
 }
 
+/* ---- the head ---- */
 .pause-head {
   text-align: center;
-  margin-bottom: 6px;
 }
 #overlay h1 {
   font-size: clamp(34px, 6vw, 58px);
@@ -126,9 +140,10 @@
 
 .pause-body {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 28px;
+  grid-template-columns: minmax(270px, 340px) minmax(0, 1fr);
+  gap: 24px;
   margin-top: 22px;
+  align-items: start;
 }
 .pause-menu {
   display: flex;
@@ -136,19 +151,19 @@
   gap: 14px;
 }
 
-/* Resume, the big gold button. */
+/* ---- Resume: the big gold button ---- */
 .pause-resume {
   position: relative;
   overflow: hidden;
-  padding: 17px 20px;
+  padding: 0;
   font-family: inherit;
-  font-size: 19px;
+  font-size: 18px;
   letter-spacing: 5px;
   text-transform: uppercase;
   color: #2b1700;
   text-shadow: 0 1px 0 rgba(255, 244, 200, 0.7);
   border: 3px solid #4a2f06;
-  border-radius: 3px;
+  border-radius: 0;
   background: linear-gradient(#ffeaa0 0%, #f5c04a 46%, #d98f17 52%, #f2b83c 100%);
   box-shadow:
     inset 0 0 0 2px #fff3c4,
@@ -158,6 +173,20 @@
     0 0 26px rgba(255, 176, 40, 0.4);
   cursor: pointer;
   transition: transform 0.12s, filter 0.12s;
+}
+.pause-resume > span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 18px 16px 19px;
+}
+.pause-resume i {
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 8px 0 8px 13px;
+  border-color: transparent transparent transparent #2b1700;
 }
 .pause-resume::after {
   content: '';
@@ -193,17 +222,18 @@
   cursor: default;
 }
 
-/* Quit game: under Resume, quieter and tinted red so it is not hit by accident. */
+/* ---- Quit game: last, quieter and tinted red so it is not hit by accident ---- */
 .pause-quit {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  margin-top: 6px;
   cursor: default;
 }
 #overlay .pause-quit > button {
   padding: 12px 14px;
-  font-family: var(--serif);
-  font-size: 13px;
+  font-family: inherit;
+  font-size: 12px;
   letter-spacing: 4px;
   text-transform: uppercase;
   color: #e8a79a;
@@ -221,6 +251,17 @@
   color: #fff0ea;
   border-color: #d2503f;
   background: rgba(190, 55, 40, 0.42);
+}
+/* Change character is not a way of losing anything (for a wallet player), so it is gold, not red. */
+#overlay .pause-quit > #to-characters:not(.armed) {
+  color: var(--gold-hi);
+  background: rgba(246, 207, 114, 0.08);
+  border-color: var(--gold-line);
+}
+#overlay .pause-quit > #to-characters:hover:not(:disabled):not(.armed) {
+  border-color: var(--gold);
+  background: rgba(246, 207, 114, 0.18);
+  color: #fff;
 }
 #overlay .pause-quit > button:disabled {
   opacity: 0.6;
@@ -241,15 +282,20 @@
   cursor: pointer;
 }
 
+/* ---- boxes (account, world) ---- */
 .pause-box,
-.pause-keys {
-  padding: 14px 16px 16px;
-  background: rgba(6, 5, 3, 0.6);
-  border: 1px solid #2f2514;
+.pause-side {
+  background: rgba(6, 5, 3, 0.62);
+  border: 2px solid #2f2514;
   cursor: default;
 }
-.pause-box h2,
-.pause-keys h2 {
+.pause-box {
+  padding: 14px 16px 16px;
+}
+.pause-box h2 {
+  display: flex;
+  align-items: center;
+  gap: 9px;
   font-family: var(--serif);
   font-weight: 400;
   font-size: 12px;
@@ -259,6 +305,13 @@
   padding-bottom: 8px;
   margin-bottom: 8px !important;
   border-bottom: 1px solid #2f2514;
+}
+.pause-box h2::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  background: var(--gold);
+  box-shadow: 0 0 6px rgba(246, 207, 114, 0.6);
 }
 #overlay .pause-box .account-panel,
 #overlay .pause-box .world-tools,
@@ -310,34 +363,311 @@
   font-size: 12px;
   color: var(--muted);
 }
-
-/* Controls, as key caps. */
-.pause-keys dl {
+#overlay .pause-box .guest-note {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #ffc98a;
   margin: 0;
+}
+#overlay .pause-box .guest-note b {
+  color: #fff0b8;
+}
+
+/* ---- the settings side: tabs on top, a page under them ---- */
+.pause-side {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  /* as tall as the longest page (the keys), so the card stays put as the tabs change */
+  min-height: 470px;
 }
-.pause-keys dl > div {
+.ps-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-bottom: 2px solid #2f2514;
+  background: rgba(0, 0, 0, 0.35);
+}
+#overlay .ps-tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 14px 8px 13px;
+  font-family: inherit;
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  border-right: 2px solid #2f2514;
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s;
+}
+#overlay .ps-tab:last-child {
+  border-right: 0;
+}
+#overlay .ps-tab i {
+  font-style: normal;
+  font-size: 15px;
+  line-height: 1;
+}
+#overlay .ps-tab:hover {
+  color: #efe6cf;
+  background: rgba(246, 207, 114, 0.07);
+}
+#overlay .ps-tab.on {
+  color: var(--gold-hi);
+  background: linear-gradient(rgba(246, 207, 114, 0.16), rgba(246, 207, 114, 0.03));
+}
+#overlay .ps-tab.on::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -2px;
+  height: 4px;
+  background: var(--gold);
+  box-shadow: 0 0 10px rgba(246, 207, 114, 0.7);
+}
+#overlay .ps-tab:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: -4px;
+}
+
+.ps-page {
+  flex: 1;
+  padding: 18px 20px 20px;
+  animation: ps-page 0.18s ease-out;
+}
+@keyframes ps-page {
+  from {
+    opacity: 0;
+    transform: translateX(6px);
+  }
+}
+.ps-group + .ps-group,
+.ps-group + .ps-note {
+  margin-top: 18px;
+}
+.ps-group > header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 3px 0;
+  padding-bottom: 8px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid #2f2514;
+}
+#overlay .ps-group h3 {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: 12px;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+#overlay .ps-group h3::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  background: var(--gold);
+  box-shadow: 0 0 6px rgba(246, 207, 114, 0.6);
+}
+#overlay .ps-reset {
+  padding: 4px 10px;
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: none;
+  border: 1px solid #3a2e18;
+  cursor: pointer;
+}
+#overlay .ps-reset:hover {
+  color: #efe6cf;
+  border-color: var(--gold-line);
+}
+.ps-note {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+/* One row: the name (with a line of explanation), the control, the value. */
+.ps-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 190px) minmax(0, 1fr) 76px;
+  align-items: center;
+  gap: 16px;
+  padding: 11px 0;
+  border-bottom: 1px dashed #261e11;
+  transition: opacity 0.15s;
+}
+.ps-row:last-child {
+  border-bottom: 0;
+}
+.ps-row.off {
+  opacity: 0.4;
+}
+.ps-row label,
+.ps-row .ps-label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 13px;
+  color: #efe6cf;
+  cursor: default;
+}
+.ps-row small {
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+.ps-row output {
+  text-align: right;
+  font-size: 13px;
+  color: var(--gold-hi);
+  text-shadow: 1px 1px 0 #000;
+}
+
+/* The slider: a bar that fills in chunks, like the experience bar, with a gold block to pull. */
+#overlay .ps-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 28px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+#overlay .ps-range:focus {
+  outline: none;
+}
+#overlay .ps-range:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 3px;
+}
+#overlay .ps-range::-webkit-slider-runnable-track {
+  height: 20px;
+  background:
+    repeating-linear-gradient(90deg, transparent 0 14px, rgba(0, 0, 0, 0.55) 14px 16px),
+    linear-gradient(#ffe08a, #e8a02a) 0 0 / var(--p) 100% no-repeat,
+    #19130a;
+  border: 3px solid #000;
+  box-shadow: 0 0 0 1px #5a4520;
+}
+#overlay .ps-range::-moz-range-track {
+  height: 20px;
+  background:
+    repeating-linear-gradient(90deg, transparent 0 14px, rgba(0, 0, 0, 0.55) 14px 16px),
+    linear-gradient(#ffe08a, #e8a02a) 0 0 / var(--p) 100% no-repeat,
+    #19130a;
+  border: 3px solid #000;
+  box-shadow: 0 0 0 1px #5a4520;
+  box-sizing: border-box;
+}
+#overlay .ps-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 28px;
+  margin-top: -7px;
+  background: linear-gradient(#fff6d0, #e2a22b);
+  border: 3px solid #000;
+  border-radius: 0;
+  box-shadow: 0 0 8px rgba(255, 200, 80, 0.55);
+}
+#overlay .ps-range::-moz-range-thumb {
+  width: 12px;
+  height: 28px;
+  background: linear-gradient(#fff6d0, #e2a22b);
+  border: 3px solid #000;
+  border-radius: 0;
+  box-sizing: border-box;
+  box-shadow: 0 0 8px rgba(255, 200, 80, 0.55);
+}
+#overlay .ps-range:hover::-webkit-slider-thumb {
+  background: linear-gradient(#fff, #ffcb55);
+}
+#overlay .ps-range:hover::-moz-range-thumb {
+  background: linear-gradient(#fff, #ffcb55);
+}
+
+/* An on / off switch. */
+.ps-switch {
+  grid-template-columns: minmax(120px, 190px) minmax(0, 1fr);
+}
+#overlay .ps-toggle {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 98px;
+  padding: 5px 12px 5px 6px;
+  font-family: inherit;
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #cfc4aa;
+  background: #19130a;
+  border: 3px solid #000;
+  box-shadow: 0 0 0 1px #5a4520;
+  cursor: pointer;
+}
+#overlay .ps-toggle i {
+  width: 18px;
+  height: 18px;
+  background: #5b5240;
+  border: 2px solid #000;
+  transition: transform 0.12s steps(3, end), background 0.12s;
+}
+#overlay .ps-toggle.on {
+  color: #d6ffd0;
+  background: #0f2a12;
+}
+#overlay .ps-toggle.on i {
+  background: linear-gradient(#b6ff6a, #4fbe22);
+  transform: translateX(0);
+}
+#overlay .ps-toggle:hover {
+  box-shadow: 0 0 0 1px var(--gold);
+}
+#overlay .ps-toggle:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 3px;
+}
+
+/* ---- the keys, as key caps, in two columns ---- */
+.ps-keys {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 26px;
+  margin: 0;
+}
+.ps-keys > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
   border-bottom: 1px dashed #261e11;
 }
-.pause-keys dt {
+.ps-keys dt {
   display: flex;
   gap: 4px;
   flex-shrink: 0;
 }
-.pause-keys dd {
+.ps-keys dd {
   margin: 0;
-  font-size: 12px;
+  font-size: 11px;
   color: #cfc4aa;
   text-align: right;
 }
-.pause-keys kbd {
+.ps-keys kbd {
   min-width: 26px;
   padding: 3px 7px 4px;
   font-family: inherit;
@@ -350,15 +680,30 @@
   border-radius: 3px;
 }
 
+/* ---- the foot ---- */
 .pause-foot {
-  margin-top: 18px !important;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 20px;
+  padding-top: 12px;
+  border-top: 1px solid #2a2112;
+}
+.pause-hint {
   font-family: var(--serif);
   font-size: 12px;
-  letter-spacing: 5px;
+  letter-spacing: 4px;
   text-transform: uppercase;
   color: var(--gold);
   animation: pause-pulse 2.2s ease-in-out infinite;
+}
+.pause-ver {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #7d735f;
 }
 @keyframes pause-pulse {
   50% {
@@ -366,28 +711,47 @@
   }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 860px) {
   .pause-body {
     grid-template-columns: minmax(0, 1fr);
   }
-  .pause-card {
-    padding: 22px 16px 18px;
+  .pause-in {
+    padding: 22px 16px 16px;
+  }
+  .ps-row {
+    grid-template-columns: minmax(0, 1fr) 70px;
+    row-gap: 8px;
+  }
+  .ps-row .ps-range {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  .ps-row > label {
+    grid-column: 1;
+  }
+  .ps-row > output {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .ps-switch {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .ps-keys {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  #overlay .ps-tab span {
+    display: none;
+  }
+  .pause-foot {
+    justify-content: center;
+    text-align: center;
   }
 }
 @media (prefers-reduced-motion: reduce) {
   .pause-card,
   .pause-resume::after,
-  .pause-foot {
+  .pause-hint,
+  .ps-page {
     animation: none;
   }
-}
-
-#overlay .pause-box .guest-note {
-  font-size: 12px;
-  line-height: 1.5;
-  color: #ffc98a;
-  margin: 0;
-}
-#overlay .pause-box .guest-note b {
-  color: #fff0b8;
 }

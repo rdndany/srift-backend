@@ -3,8 +3,8 @@
  * later one is a named expansion with its own theme, zones, bosses, instances and dungeons.
  *
  * This file is the single list of them. The title screen, the docs and (later) the server read it, so adding an
- * expansion starts here (see docs/EXPANSIONS.md). Only expansions with status `live` are playable; everything
- * else is a plan, and the UI says so rather than promising it.
+ * expansion starts here (see docs/EXPANSIONS.md). Only expansions with status `live` are playable (the core game and the first expansion, Embers of the Hollow King,
+ * are); everything else is a plan, and the UI says so rather than promising it.
  */
 
 export type ExpansionStatus = 'live' | 'in-development' | 'announced';
@@ -68,16 +68,16 @@ export const EXPANSIONS: readonly Expansion[] = [
     subtitle: 'Embers of the Hollow King',
     tagline: 'Something stirs beneath the deepest stone.',
     blurb: 'An ancient king has woken under the world. Descend into the Cinderdeep, the first true instances, and end his reign.',
-    status: 'in-development',
+    status: 'live',
     accent: '#ff7a2e',
     content: [
-      { kind: 'zone', name: 'Dawnwatch and the Adventure mode', blurb: 'A village of quest givers where every adventurer starts. Open as a preview from the title screen.', playable: false },
-      { kind: 'dungeon', name: 'The Hollow Cellar', blurb: 'The first dungeon, behind the portal in the village chapel: a separate map made fresh for every player (level 5 and up), with three spawner cages. Open as a preview.', playable: false },
-      { kind: 'dungeon', name: 'The Cinderdeep', blurb: 'A party instance of burning halls and collapsing bridges.', playable: false },
-      { kind: 'dungeon', name: 'Gloomhold Catacombs', blurb: 'Crypts guarded by the king\u2019s hollow knights.', playable: false },
-      { kind: 'boss', name: 'Ashmaw, the Cinder Warden', blurb: 'Guards the gate of the Cinderdeep.', playable: false },
-      { kind: 'boss', name: 'The Hollow King', blurb: 'The final boss of the expansion.', playable: false },
-      { kind: 'feature', name: 'Party finder and instance lockouts', blurb: 'Group up and run instances on your own copy of the dungeon.', playable: false },
+      { kind: 'zone', name: 'Dawnwatch and the Adventure mode', blurb: 'A village of quest givers where every adventurer starts.', playable: true },
+      { kind: 'dungeon', name: 'The Hollow Cellar', blurb: 'The first dungeon, behind the portal in the village chapel: a separate map made fresh for every player (level 5 and up), with three spawner cages.', playable: true },
+      { kind: 'dungeon', name: 'The Cinderdeep', blurb: 'A party instance of burning halls and collapsing bridges.', playable: true },
+      { kind: 'dungeon', name: 'Gloomhold Catacombs', blurb: 'Crypts guarded by the king\u2019s hollow knights.', playable: true },
+      { kind: 'boss', name: 'Ashmaw, the Cinder Warden', blurb: 'Guards the gate of the Cinderdeep.', playable: true },
+      { kind: 'boss', name: 'The Hollow King', blurb: 'The final boss of the expansion.', playable: true },
+      { kind: 'feature', name: 'Party finder and instance lockouts', blurb: 'Group up and run instances on your own copy of the dungeon.', playable: true },
     ],
   },
   {
@@ -128,6 +128,16 @@ export function expansionTitle(e: Expansion): string {
 export function liveExpansions(): Expansion[] {
   return EXPANSIONS.filter((e) => e.status === 'live');
 }
+
+/** The newest expansion a player can play today (null if only the core game is live). */
+export function latestExpansion(): Expansion | undefined {
+  return liveExpansions()
+    .filter((e) => e.order > 0)
+    .pop();
+}
+
+/** The game's version as shown on the home page. Keep in step with the package.json versions when releasing. */
+export const GAME_VERSION = '0.1.0';
 
 /** The next expansion to arrive: the first one that is being built, else the first announced. */
 export function nextExpansion(): Expansion | undefined {

@@ -83,7 +83,7 @@ await sc(() => window.__solrift.holdKey('KeyW', false));
 await sleep(1500);
 await sc(([x, z, y]) => window.__solrift.teleport(x + 0.5, y, z + 0.5, 0, -0.1), [px, pz, gy]);
 await sleep(1200);
-check((await page.locator('#mount-slot').count()) === 1, 'the mount slot is on the screen, top right');
+check((await page.locator('#mount-slot').count()) === 0, 'no mount icon until you are riding');
 check((await state()).pick === 0, 'and it is empty');
 await shot('mount-slot-empty', 100, true);
 
@@ -97,7 +97,7 @@ await shot('mount-cast', 200);
 check((await state()).mount === 0, 'still on foot while the cast runs');
 check(await until(async () => (await state()).mount > 0, 20000), 'after the cast, mounted');
 check((await sc(() => window.__solrift.view())) === 0, 'the view stays first person');
-check((await page.locator('#mount-slot.riding').count()) === 1, 'the slot lights up');
+check((await page.locator('#player-frame .pf-buff.mount').count()) === 1, 'the mount shows in the buff row');
 check((await page.locator('[data-testid=mount-bar] .cb-slot').count()) === 2, 'two skill buttons are on the bar');
 await shot('mount-fp-idle', 600, true);
 await sc(() => window.__solrift.look(0.5, -0.1));

@@ -109,7 +109,29 @@ export class CharacterPreview {
   /** Wear armor and clothes (item ids). A tall hat needs the camera pulled back a little. */
   setArmor(ids: readonly number[]): void {
     this.character.setArmor(ids);
-    const tall = ids[0] ? getItem(ids[0]).armor?.outfit === 'mage' : false;
+    this.tall = ids[0] ? getItem(ids[0]).armor?.outfit === 'mage' : false;
+    this.frame();
+  }
+
+  private tall = false;
+  private grounded = false;
+
+  /** Stand the figure on the bottom edge of the picture, as large as the picture is tall (a character-select screen), instead of floating in the middle. */
+  setGrounded(on: boolean): void {
+    this.grounded = on;
+    this.frame();
+  }
+
+  private frame(): void {
+    const tall = this.tall;
+    if (this.grounded) {
+      const span = tall ? 3.8 : 3.1; // world units from the soles up, to a little above the head or hat
+      const dist = span / 2 / Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
+      const y = -1.0 + span / 2 - 0.07; // (the boots reach out a little toward the camera: lower on screen than the soles' centre)
+      this.camera.position.set(0, y, dist);
+      this.camera.lookAt(0, y, 0);
+      return;
+    }
     this.camera.position.set(0, tall ? 0.2 : 0.05, tall ? 5.3 : 4.9);
     this.camera.lookAt(0, tall ? 0.15 : 0, 0);
   }
@@ -242,11 +264,17 @@ export function warmPreview(): void {
   ];
   for (const set of sets) {
     const canvas = document.createElement('canvas');
+    // The same size as the box in the inventory, so the first time it opens the picture is not built again at a new size.
+    const host = document.createElement('div');
+    host.style.cssText = 'position:absolute;left:-9999px;top:0;width:168px;height:208px;';
+    host.appendChild(canvas);
+    document.body.appendChild(host);
     const p = new CharacterPreview(canvas);
     p.setArmor(set.armor);
     p.setShield(set.shield, set.shield ? none : null);
     p.showAll();
     p.render();
     p.dispose();
+    host.remove();
   }
 }

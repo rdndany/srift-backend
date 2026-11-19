@@ -52,6 +52,10 @@ export interface Column {
   /** Temperature and humidity, 0..1 (cold..hot, dry..wet). */
   t?: number;
   h?: number;
+  /** The detailed biome of The World Beyond (1..110, see beyondBiomes.ts); absent in the other worlds, where `biome` is all there is. */
+  sub?: number;
+  /** The water surface over this column when it is not the sea (rivers and lakes high in the hills), 0 when it is the sea. */
+  water?: number;
 }
 
 /** Names for the debug hooks, the map legend and the tests. */

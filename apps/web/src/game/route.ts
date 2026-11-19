@@ -24,8 +24,17 @@ export function nameFromPath(pathname: string): string | null {
 /** Is this address one of the friendly play addresses? */
 export const isPlayPath = (pathname: string): boolean => /^\/play(\/[^/]*)?\/?$/.test(pathname);
 
+/**
+ * `/game`: where PLAY on the front page leads: one page to choose how to play and who plays, then start. Plain, it is
+ * that page; with the game's own parameters (`?seed=` ...) it starts the game.
+ */
+export const isGamePath = (pathname: string): boolean => /^\/game\/?$/.test(pathname);
+
+/** The address PLAY goes to: `/game`, with the other parameters of the address it was opened with (`?home&debug` ...). */
+export const gamePath = (search = ''): string => (search && search !== '?' ? `/game${search}` : '/game');
+
 /** Where "back to the title screen" goes: the front page, whatever address the game was opened on. */
-export const titleAddress = (pathname: string): string => (isPlayPath(pathname) ? '/' : pathname);
+export const titleAddress = (pathname: string): string => (isPlayPath(pathname) || isGamePath(pathname) ? '/' : pathname);
 
 /** The address of the online realm for a name (empty for a name chosen at random on arrival). */
 export function playPath(name: string): string {

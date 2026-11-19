@@ -1,4 +1,4 @@
-import { B, DYE_NAMES } from './blocks';
+import { B, DYE_NAMES, DRESS, GROVE, idByName, MASONRY, terracottaOf } from './blocks';
 import { Container, makeStack, maxStackOf } from './inventory';
 import { I, dyeId, getItem } from './items';
 
@@ -17,6 +17,9 @@ export const SMELTING = new Map<number, number>([
   [I.MUTTON, I.COOKED_MUTTON],
   [I.CHICKEN, I.COOKED_CHICKEN],
   [I.RABBIT, I.COOKED_RABBIT],
+  [I.RAW_COD, I.COOKED_COD],
+  [I.RAW_SALMON, I.COOKED_SALMON],
+  [I.POTATO, I.BAKED_POTATO],
   // Cactus cooks into green dye.
   [B.CACTUS, GREEN],
 ]);
@@ -33,8 +36,41 @@ export const SMELT_XP = new Map<number, number>([
   [I.MUTTON, 0.35],
   [I.CHICKEN, 0.35],
   [I.RABBIT, 0.35],
+  [I.RAW_COD, 0.35],
+  [I.RAW_SALMON, 0.35],
+  [I.POTATO, 0.35],
   [B.CACTUS, 0.2],
 ]);
+
+for (const row of MASONRY) {
+  if (row.spec.smelt && row.cubeId) {
+    const from = idByName(row.spec.smelt);
+    if (!from) throw new Error(`masonry smelt ${row.spec.smelt} is not a block`);
+    SMELTING.set(from, row.cubeId);
+    SMELT_XP.set(from, 0.1);
+  }
+  if (row.spec.smeltSlab && row.slabBase >= 0) {
+    const from = idByName(row.spec.smeltSlab);
+    if (!from) throw new Error(`masonry smelt ${row.spec.smeltSlab} is not a block`);
+    SMELTING.set(from, row.slabBase);
+    SMELT_XP.set(from, 0.1);
+  }
+}
+SMELTING.set(GROVE.packedMud, GROVE.mudBricks);
+SMELT_XP.set(GROVE.packedMud, 0.1);
+SMELTING.set(B.STONE_BRICKS, DRESS.crackedStone);
+SMELT_XP.set(B.STONE_BRICKS, 0.1);
+const deepslateBricks = idByName('deepslate_bricks');
+if (deepslateBricks) {
+  SMELTING.set(deepslateBricks, DRESS.crackedDeepslate);
+  SMELT_XP.set(deepslateBricks, 0.1);
+}
+for (let c = 0; c < DYE_NAMES.length; c++) {
+  const clay = terracottaOf(c);
+  if (!clay) continue;
+  SMELTING.set(clay, DRESS.glazed + c);
+  SMELT_XP.set(clay, 0.1);
+}
 
 export const COOK_SECONDS = 10;
 

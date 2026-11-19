@@ -1,4 +1,4 @@
-import { B, bedId, doorId, gateId, ladderId, slabId, stairId, trapdoorId, woolId } from './blocks';
+import { B, bedId, doorId, gateId, ladderId, lanternId, slabId, stairId, trapdoorId, woolId } from './blocks';
 
 /**
  * The buildings of a village. Each builder works in lot coordinates: `i` runs along the road, `j` away
@@ -280,10 +280,12 @@ export function house(lot: Lot, kind: HouseKind, st: Style, rand: () => number):
   }
 }
 
-/** A fenced field of wheat with a ditch of water, a scarecrow and a gate. */
+/** A fenced field of wheat, carrots and beetroot with a ditch of water, a scarecrow and a gate. */
 export function farm(lot: Lot, rand: () => number): void {
   const { w, d } = lot;
-  const stages = [B.WHEAT_0, B.WHEAT_1, B.WHEAT_2, B.WHEAT_3, B.WHEAT_3];
+  const wheat = [B.WHEAT_0, B.WHEAT_1, B.WHEAT_2, B.WHEAT_3, B.WHEAT_3];
+  const carrot = [B.CARROT_0, B.CARROT_1, B.CARROT_2, B.CARROT_3, B.CARROT_3];
+  const beet = [B.BEETROOT_0, B.BEETROOT_1, B.BEETROOT_2, B.BEETROOT_3, B.BEETROOT_3];
   const mid = d >> 1;
   const gate = gateId(false, lot.iDir < 2 ? 2 : 0);
   for (let j = 0; j < d; j++) {
@@ -301,6 +303,8 @@ export function farm(lot: Lot, rand: () => number): void {
         lot.set(i, 0, j, B.WATER);
       } else {
         lot.set(i, 0, j, B.FARMLAND);
+        const n = (i + j) % 5;
+        const stages = n === 0 ? carrot : n === 1 ? beet : wheat;
         lot.set(i, 1, j, stages[Math.floor(rand() * stages.length)]);
       }
     }
@@ -316,7 +320,7 @@ export function farm(lot: Lot, rand: () => number): void {
 }
 
 /** A market stall: four posts, a striped awning of coloured wool and a counter. */
-export function stall(lot: Lot, rand: () => number): void {
+export function stall(lot: Lot, rand: () => number, colours?: readonly [number, number]): void {
   const { w, d } = lot;
   const pairs: [number, number][] = [
     [14, 0],
@@ -326,7 +330,7 @@ export function stall(lot: Lot, rand: () => number): void {
     [5, 0],
     [3, 4],
   ];
-  const [a, b] = pairs[Math.floor(rand() * pairs.length)];
+  const [a, b] = colours ?? pairs[Math.floor(rand() * pairs.length)];
   for (let j = 0; j < d; j++) for (let i = 0; i < w; i++) lot.set(i, 0, j, B.PLANKS);
   for (const i of [0, w - 1]) {
     for (const j of [0, d - 1]) for (let y = 1; y <= 3; y++) lot.set(i, y, j, B.FENCE);
@@ -338,6 +342,28 @@ export function stall(lot: Lot, rand: () => number): void {
   table(lot, w - 2, d - 2);
   lot.set(w >> 1, 2, d - 1, B.FENCE);
   lot.set(w >> 1, 3, d - 1, B.TORCH);
+}
+
+/**
+ * The Auction House: a market stall with a red and gold awning, bookshelves (the ledgers) at both ends of the counter and two
+ * hanging lanterns. The Auctioneer stands in the middle of the row in front of the counter (see `NPCS`).
+ */
+export function auctionHouse(lot: Lot, rand: () => number): void {
+  const { w, d } = lot;
+  stall(lot, rand, [14, 4]);
+  for (const i of [1, w - 2]) for (let y = 1; y <= 3; y++) lot.set(i, y, d - 1, B.BOOKSHELF);
+  for (const i of [2, w - 3]) lot.set(i, 3, 1, lanternId(false, true));
+}
+
+/**
+ * The Stash: a market stall with a brown and gold awning, stacks of crates at both ends of the counter and two hanging lanterns.
+ * The Stashkeeper stands in the middle of the row in front of the counter (see `NPCS`).
+ */
+export function stashHouse(lot: Lot, rand: () => number): void {
+  const { w, d } = lot;
+  stall(lot, rand, [12, 4]);
+  for (const i of [1, w - 2]) for (let y = 1; y <= 3; y++) lot.set(i, y, d - 1, B.PLANKS);
+  for (const i of [1, w - 2]) lot.set(i, 3, 1, lanternId(false, true));
 }
 
 /** A watchtower with a ladder inside, an open belfry and a stone roof. */

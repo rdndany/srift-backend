@@ -1,10 +1,10 @@
-/* The loading screen: a turning grass block, a gold progress bar and a tip, over the dark title-screen colours. */
+/*
+ * The loading screen of the game: the night castle of the lobby behind it, blocks of the world hopping into place, the
+ * name in chunky letters, a progress bar that fills one block at a time (like the experience bar of the game) and a tip.
+ */
 
 #loading-screen {
-  --gold: #f6cf72;
-  --gold-hi: #fff0b8;
-  --gold-line: #6d5420;
-  --serif: 'Trajan Pro', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif;
+  --gold: #ffd27a;
   position: fixed;
   inset: 0;
   z-index: 1000;
@@ -14,9 +14,10 @@
   overflow: hidden;
   color: #e9e1cf;
   background:
-    radial-gradient(ellipse at 50% 45%, rgba(70, 48, 20, 0.55), rgba(10, 8, 5, 0) 62%),
-    radial-gradient(ellipse at 50% 120%, rgba(246, 170, 50, 0.22), rgba(10, 8, 5, 0) 55%),
-    #0a0806;
+    radial-gradient(ellipse 55% 50% at 50% 50%, rgba(5, 4, 12, 0.55), rgba(5, 4, 12, 0.12) 100%),
+    linear-gradient(rgba(5, 4, 12, 0.55), rgba(5, 4, 12, 0.72)),
+    url('/art/character-select.jpg') center 30% / cover no-repeat,
+    #05040c;
   opacity: 1;
   visibility: visible;
   transition: opacity 0.6s ease, visibility 0s linear 0s;
@@ -40,112 +41,43 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  width: min(440px, 86vw);
+  width: min(460px, 88vw);
   text-align: center;
 }
 
-/* ---- the block ---- */
-.ld-stage {
-  position: relative;
-  width: 120px;
-  height: 150px;
-  perspective: 600px;
-  margin-bottom: 10px;
+/* ---- the blocks ---- */
+.ld-blocks {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 112px;
+  margin-bottom: 18px;
 }
-.ld-cube {
-  --s: 84px;
-  position: absolute;
-  left: 50%;
-  top: 14px;
-  width: var(--s);
-  height: var(--s);
-  margin-left: calc(var(--s) / -2);
-  transform-style: preserve-3d;
-  animation:
-    ld-spin 7s linear infinite,
-    ld-float 2.4s ease-in-out infinite;
+.ld-blocks span {
+  display: block;
+  animation: ld-hop 1.5s cubic-bezier(0.3, 0, 0.4, 1) infinite;
+  filter: drop-shadow(0 8px 0 rgba(0, 0, 0, 0.45));
 }
-.ld-cube .f {
-  position: absolute;
-  inset: 0;
-  border: 2px solid rgba(20, 12, 4, 0.55);
+.ld-blocks canvas {
+  display: block;
   image-rendering: pixelated;
 }
-.ld-cube .front {
-  transform: translateZ(calc(var(--s) / 2));
-}
-.ld-cube .back {
-  transform: rotateY(180deg) translateZ(calc(var(--s) / 2));
-}
-.ld-cube .right {
-  transform: rotateY(90deg) translateZ(calc(var(--s) / 2));
-}
-.ld-cube .left {
-  transform: rotateY(-90deg) translateZ(calc(var(--s) / 2));
-}
-.ld-cube .top {
-  transform: rotateX(90deg) translateZ(calc(var(--s) / 2));
-  background: conic-gradient(#5fae3a 25%, #4f9930 0 50%, #5fae3a 0 75%, #56a335 0) 0 0 / 21px 21px;
-  filter: brightness(1.1);
-}
-.ld-cube .bottom {
-  transform: rotateX(-90deg) translateZ(calc(var(--s) / 2));
-  background: conic-gradient(#5b3d24 25%, #4d321d 0 50%, #5b3d24 0 75%, #503520 0) 0 0 / 21px 21px;
-  filter: brightness(0.55);
-}
-/* Sides: a fringe of grass over dirt. */
-.ld-cube .front,
-.ld-cube .back,
-.ld-cube .left,
-.ld-cube .right {
-  background:
-    linear-gradient(#5fae3a 0 17%, #4a8f2c 17% 25%, transparent 25%),
-    conic-gradient(#7a5233 25%, #6b4528 0 50%, #7a5233 0 75%, #70492b 0) 0 0 / 21px 21px;
-}
-.ld-cube .left,
-.ld-cube .right {
-  filter: brightness(0.82);
-}
-.ld-cube .back {
-  filter: brightness(0.68);
-}
-.ld-shadow {
-  position: absolute;
-  left: 50%;
-  bottom: 8px;
-  width: 78px;
-  height: 16px;
-  margin-left: -39px;
-  border-radius: 50%;
-  background: radial-gradient(ellipse, rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0) 70%);
-  animation: ld-shadow 2.4s ease-in-out infinite;
-}
-@keyframes ld-spin {
-  from {
-    transform: translateY(0) rotateX(-24deg) rotateY(0deg);
-  }
-  to {
-    transform: translateY(0) rotateX(-24deg) rotateY(360deg);
-  }
-}
-@keyframes ld-float {
+@keyframes ld-hop {
   0%,
   100% {
-    top: 22px;
+    transform: translateY(0);
   }
-  50% {
-    top: 8px;
+  18% {
+    transform: translateY(-26px);
   }
-}
-@keyframes ld-shadow {
-  0%,
-  100% {
-    transform: scale(1);
-    opacity: 1;
+  36% {
+    transform: translateY(0);
   }
-  50% {
-    transform: scale(0.78);
-    opacity: 0.6;
+  44% {
+    transform: translateY(-5px);
+  }
+  52% {
+    transform: translateY(0);
   }
 }
 
@@ -154,47 +86,48 @@
   margin: 0;
   font-size: clamp(34px, 6vw, 54px);
   line-height: 1.05;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
   text-transform: uppercase;
   font-weight: 400;
-  background: linear-gradient(#fffbe6 0%, #ffe07a 34%, #e2a22b 50%, #b8741a 52%, #f3c15a 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  filter: drop-shadow(0 3px 0 #3a2306) drop-shadow(0 0 16px rgba(255, 160, 40, 0.4));
+  color: #fff;
+  text-shadow:
+    3px 3px 0 #3a3a3a,
+    6px 6px 0 rgba(0, 0, 0, 0.55);
 }
 .ld-logo b {
   font-weight: 400;
-  background: inherit;
-  -webkit-background-clip: text;
-  background-clip: text;
+  color: var(--gold);
+  text-shadow:
+    3px 3px 0 #5a3a0c,
+    6px 6px 0 rgba(0, 0, 0, 0.55);
 }
 .ld-bar {
   position: relative;
-  width: 100%;
-  height: 12px;
-  margin-top: 22px;
-  padding: 2px;
-  background: rgba(8, 6, 3, 0.85);
-  border: 2px solid var(--gold-line);
-  box-shadow:
-    inset 0 0 0 1px #0b0906,
-    0 0 24px rgba(246, 170, 50, 0.12);
+  width: min(340px, 78vw);
+  height: 20px;
+  margin-top: 26px;
+  padding: 3px;
+  background: #000;
+  border: 3px solid #5b5b5b;
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.5);
 }
 #loading-bar {
   position: relative;
   width: 4%;
   height: 100%;
   overflow: hidden;
-  background: linear-gradient(#ffe07a, #e2a22b 55%, #b8741a);
-  box-shadow: 0 0 10px rgba(246, 190, 70, 0.6);
-  transition: width 0.35s ease-out;
+  background: linear-gradient(#b6ff6a, #5fcf2a 50%, #3c9a1a);
+  /* cut into chunks, as the experience bar is */
+  -webkit-mask: repeating-linear-gradient(90deg, #000 0 16px, transparent 16px 20px);
+  mask: repeating-linear-gradient(90deg, #000 0 16px, transparent 16px 20px);
+  transition: width 0.35s steps(8, end);
 }
 #loading-bar::after {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, 0.55) 50%, transparent 70%);
+  background: linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, 0.5) 50%, transparent 70%);
   transform: translateX(-100%);
   animation: ld-shimmer 1.4s ease-in-out infinite;
 }
@@ -204,27 +137,98 @@
   }
 }
 #loading-text {
-  margin: 12px 0 0;
+  margin: 14px 0 0;
   min-height: 18px;
-  font-family: var(--serif);
-  font-size: 13px;
-  letter-spacing: 3px;
+  font-size: 12px;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--gold);
+  color: #e6dcc6;
+  text-shadow: 2px 2px 0 #000;
+}
+/*
+ * "Enter the world": a chunky gold button, notched at the corners like the buttons of the home page. The button carries the
+ * glow (a filter is applied before the clipping, so it cannot sit on the clipped parts), the edge is the dark frame, the face
+ * the gold, with a lighter top, a darker underside and a shine that sweeps across it.
+ */
+.ld-enter,
+.ld-hint {
+  display: none;
 }
 .ld-enter {
-  display: none;
-  margin: 22px 0 0;
-  padding: 10px 26px;
-  font-family: var(--serif);
-  font-size: 15px;
-  letter-spacing: 4px;
+  position: relative;
+  margin: 24px 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+  filter: drop-shadow(0 0 18px rgba(255, 170, 60, 0.5));
+  animation: ld-pulse 1.8s ease-in-out infinite, ld-pop 0.5s cubic-bezier(0.2, 1.4, 0.4, 1) backwards;
+  transition: transform 0.12s steps(3, end);
+}
+.ld-enter:hover {
+  transform: translateY(-3px) scale(1.04);
+}
+.ld-enter:active {
+  transform: translateY(2px) scale(0.98);
+}
+.ld-enter:focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: 5px;
+}
+.ld-enter-edge {
+  display: block;
+  padding: 4px;
+  background: #1a0e03;
+  --n: 8px;
+  clip-path: polygon(0 var(--n), var(--n) var(--n), var(--n) 0, calc(100% - var(--n)) 0, calc(100% - var(--n)) var(--n), 100% var(--n), 100% calc(100% - var(--n)), calc(100% - var(--n)) calc(100% - var(--n)), calc(100% - var(--n)) 100%, var(--n) 100%, var(--n) calc(100% - var(--n)), 0 calc(100% - var(--n)));
+}
+.ld-enter-face {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  overflow: hidden;
+  padding: 17px 44px 19px;
+  font-size: 18px;
+  letter-spacing: 0.24em;
+  text-indent: 0.24em;
   text-transform: uppercase;
-  color: #2a1a05;
-  background: linear-gradient(#ffe07a, #e2a22b 55%, #c98a1f);
-  border: 2px solid #6d5420;
-  box-shadow: 0 0 22px rgba(246, 190, 70, 0.45);
-  animation: ld-pulse 1.6s ease-in-out infinite;
+  white-space: nowrap;
+  color: #2a1604;
+  text-shadow: 0 2px 0 rgba(255, 244, 200, 0.55);
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.55) 0 3px, transparent 3px),
+    linear-gradient(transparent calc(100% - 5px), rgba(120, 50, 0, 0.55) calc(100% - 5px)),
+    linear-gradient(#ffeaa6, #ffc24e 50%, #ef8d22);
+  --n: 6px;
+  clip-path: polygon(0 var(--n), var(--n) var(--n), var(--n) 0, calc(100% - var(--n)) 0, calc(100% - var(--n)) var(--n), 100% var(--n), 100% calc(100% - var(--n)), calc(100% - var(--n)) calc(100% - var(--n)), calc(100% - var(--n)) 100%, var(--n) 100%, var(--n) calc(100% - var(--n)), 0 calc(100% - var(--n)));
+}
+.ld-enter-face::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 38%, rgba(255, 255, 255, 0.75) 50%, transparent 62%);
+  transform: translateX(-120%);
+  animation: ld-shine 2.6s 0.6s ease-in-out infinite;
+  pointer-events: none;
+}
+.ld-enter-face i {
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 9px 0 9px 15px;
+  border-color: transparent transparent transparent #2a1604;
+  filter: drop-shadow(2px 2px 0 rgba(255, 244, 200, 0.5));
+}
+.ld-hint {
+  margin: 16px 0 0;
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #cfc6b0;
+  text-shadow: 2px 2px 0 #000;
 }
 #loading-screen.ready .ld-bar,
 #loading-screen.ready #loading-text {
@@ -233,19 +237,38 @@
 #loading-screen.ready .ld-enter {
   display: block;
 }
+#loading-screen.ready .ld-hint {
+  display: block;
+}
 @keyframes ld-pulse {
   50% {
-    box-shadow: 0 0 36px rgba(255, 210, 100, 0.8);
-    transform: scale(1.03);
+    filter: drop-shadow(0 0 34px rgba(255, 210, 100, 0.9));
+  }
+}
+@keyframes ld-pop {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.9);
+  }
+}
+@keyframes ld-shine {
+  60%,
+  100% {
+    transform: translateX(120%);
   }
 }
 .ld-tip {
   margin: 26px 0 0;
   min-height: 40px;
   max-width: 380px;
-  font-size: 14px;
-  line-height: 1.45;
-  color: #a99d84;
+  padding: 8px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #d8cfba;
+  background: rgba(5, 4, 12, 0.55);
+  border-left: 3px solid var(--gold);
+  text-align: left;
+  text-shadow: 1px 1px 0 #000;
   animation: ld-tip 0.8s ease-out;
 }
 @keyframes ld-tip {
@@ -255,7 +278,7 @@
   }
 }
 
-/* ---- embers drifting up ---- */
+/* ---- embers drifting up (square, like everything else) ---- */
 .ld-embers {
   position: absolute;
   inset: 0;
@@ -286,14 +309,11 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ld-cube,
-  .ld-shadow,
+  .ld-blocks span,
   .ld-embers i,
   #loading-bar::after,
-  .ld-enter {
+  .ld-enter,
+  .ld-enter-face::after {
     animation: none;
-  }
-  .ld-cube {
-    transform: rotateX(-24deg) rotateY(35deg);
   }
 }

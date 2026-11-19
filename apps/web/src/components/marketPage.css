@@ -1,0 +1,462 @@
+/*
+ * The Market (/market): the Auction House of the game on the website. It rides on the class pages' styles (classPage.css: the
+ * hero, the steps), which ride on the front page's; everything here starts with `.mk`. `--c` is the page's colour (gold).
+ */
+
+/* ---------- the top ---------- */
+#home .fp.mk .mk-hero {
+  min-height: 0;
+  padding: 150px 24px 70px;
+}
+#home .fp.mk .mk-hero-in {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  width: min(1160px, 100%);
+  margin: 0 auto;
+  animation: fp-rise 0.8s 0.1s both cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+#home .fp.mk .mk-title {
+  font-size: clamp(48px, 8vw, 104px);
+}
+#home .fp.mk .mk-title em {
+  font-style: normal;
+  color: #fff;
+  text-shadow:
+    0 5px 0 rgba(0, 0, 0, 0.6),
+    0 0 46px color-mix(in srgb, var(--c) 80%, transparent);
+}
+#home .fp.mk .cp-lead {
+  max-width: 620px;
+}
+
+/* ---------- the board ---------- */
+#home .fp.mk .mk-sec {
+  padding-top: 72px;
+}
+#home .fp.mk .mk-board {
+  --s: 6px;
+  --e: 3px;
+  --edge: linear-gradient(135deg, color-mix(in srgb, var(--c) 80%, #fff), rgba(255, 255, 255, 0.16) 50%, color-mix(in srgb, var(--c) 55%, #000));
+  --fill: rgba(10, 7, 18, 0.92);
+  padding: 18px 20px 20px;
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.5);
+}
+
+#home .fp.mk .mk-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+#home .fp.mk .mk-tabs button,
+#home .fp.mk .mk-cats button,
+#home .fp.mk .mk-search button,
+#home .fp.mk .mk-pager button {
+  border: none;
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+  font-family: var(--pixel);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #d9d0ea;
+  cursor: pointer;
+  transition:
+    background 0.12s,
+    box-shadow 0.12s,
+    color 0.12s;
+}
+#home .fp.mk .mk-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+}
+#home .fp.mk .mk-tabs button b {
+  padding: 1px 6px;
+  background: var(--c);
+  color: #1a1000;
+  font-size: 11px;
+}
+#home .fp.mk .mk-tabs button:hover,
+#home .fp.mk .mk-cats button:hover,
+#home .fp.mk .mk-search button:hover,
+#home .fp.mk .mk-pager button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--c) 22%, #0c0817);
+  box-shadow: inset 0 0 0 1px var(--c);
+  color: #fff;
+}
+#home .fp.mk .mk-tabs button.on,
+#home .fp.mk .mk-cats button.on {
+  background: color-mix(in srgb, var(--c) 32%, #0c0817);
+  box-shadow: inset 0 0 0 2px var(--c);
+  color: #fff;
+}
+#home .fp.mk .mk-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+#home .fp.mk .mk-live i {
+  width: 9px;
+  height: 9px;
+  background: #6b6580;
+}
+#home .fp.mk .mk-live i.on {
+  background: #55ff7a;
+  box-shadow: 0 0 10px #55ff7a;
+  animation: mk-pulse 2s ease-in-out infinite;
+}
+#home .fp.mk .mk-live i.off {
+  background: #ff5b5b;
+  box-shadow: 0 0 10px #ff5b5b;
+}
+@keyframes mk-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+#home .fp.mk .mk-error {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  background: rgba(255, 91, 91, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(255, 91, 91, 0.55);
+  font-family: var(--body);
+  font-size: 14px;
+  color: #ffd0d0;
+}
+
+#home .fp.mk .mk-browse {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+#home .fp.mk .mk-cats {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+#home .fp.mk .mk-cats button {
+  padding: 9px 12px;
+  text-align: left;
+  font-size: 11px;
+}
+#home .fp.mk .mk-main {
+  min-width: 0;
+}
+#home .fp.mk .mk-search {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+#home .fp.mk .mk-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  border: none;
+  background: rgba(0, 0, 0, 0.45);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+  font-family: var(--body);
+  font-size: 15px;
+  color: #fff;
+}
+#home .fp.mk .mk-search input:focus {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--c);
+}
+#home .fp.mk .mk-search button {
+  padding: 0 18px;
+}
+#home .fp.mk .mk-search button.ghost {
+  background: none;
+}
+
+/* ---------- the rows: item | time left | seller | bid | buyout ---------- */
+#home .fp.mk .mk-head,
+#home .fp.mk .mk-row,
+#home .fp.mk .mk-letter {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px 130px 124px 124px;
+  align-items: center;
+  gap: 12px;
+}
+#home .fp.mk .mk-letter {
+  grid-template-columns: minmax(0, 1fr) 110px 150px;
+}
+#home .fp.mk .mk-head {
+  padding: 0 12px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+#home .fp.mk .mk-sort {
+  padding: 4px 0;
+  border: none;
+  background: none;
+  font-family: var(--pixel);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-align: left;
+  text-transform: uppercase;
+  color: var(--muted);
+  cursor: pointer;
+}
+#home .fp.mk .mk-sort.mk-num {
+  text-align: right;
+}
+#home .fp.mk .mk-sort:hover:not(.static),
+#home .fp.mk .mk-sort.on {
+  color: var(--gold);
+}
+#home .fp.mk .mk-sort.static {
+  cursor: default;
+}
+#home .fp.mk .mk-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+#home .fp.mk .mk-row,
+#home .fp.mk .mk-letter {
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  transition: background 0.12s;
+}
+#home .fp.mk .mk-row:hover,
+#home .fp.mk .mk-letter:hover {
+  background: color-mix(in srgb, var(--c) 12%, transparent);
+}
+#home .fp.mk .mk-row.mine {
+  box-shadow: inset 3px 0 0 #7bd0ff;
+}
+#home .fp.mk .mk-row.lead {
+  box-shadow: inset 3px 0 0 #55ff7a;
+}
+#home .fp.mk .mk-cell {
+  min-width: 0;
+  font-family: var(--body);
+  font-size: 14px;
+  color: var(--soft);
+}
+#home .fp.mk .mk-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+#home .fp.mk .mk-name {
+  overflow: hidden;
+  font-family: var(--body);
+  font-size: 15px;
+  font-weight: 600;
+  color: #fff;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#home .fp.mk .mk-slot {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  aspect-ratio: auto;
+}
+#home .fp.mk .mk-coinslot {
+  display: grid;
+  place-items: center;
+}
+#home .fp.mk .mk-left {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-family: var(--pixel);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+#home .fp.mk .mk-left small {
+  font-family: var(--body);
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--muted);
+}
+#home .fp.mk .mk-left.l-short {
+  color: #ff7a6b;
+}
+#home .fp.mk .mk-left.l-medium {
+  color: #ffb340;
+}
+#home .fp.mk .mk-left.l-long,
+#home .fp.mk .mk-left.l-very-long {
+  color: #9bd47a;
+}
+#home .fp.mk .mk-seller {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#home .fp.mk .mk-num {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  text-align: right;
+}
+#home .fp.mk .mk-num small {
+  font-size: 11px;
+  color: var(--muted);
+}
+#home .fp.mk .mk-num small.mk-lead {
+  color: #55ff7a;
+}
+#home .fp.mk .mk-price {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--pixel);
+  font-size: 14px;
+  color: var(--gold);
+}
+#home .fp.mk .mk-kind {
+  font-family: var(--pixel);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+#home .fp.mk .k-sold .mk-kind,
+#home .fp.mk .k-won .mk-kind {
+  color: #9bd47a;
+}
+#home .fp.mk .k-outbid .mk-kind,
+#home .fp.mk .k-expired .mk-kind,
+#home .fp.mk .k-cancelled .mk-kind {
+  color: #ffb340;
+}
+#home .fp.mk .mk-empty {
+  margin: 0;
+  padding: 36px 12px;
+  text-align: center;
+  font-family: var(--body);
+  font-size: 15px;
+  font-style: italic;
+  color: var(--muted);
+  list-style: none;
+}
+#home .fp.mk .mk-note {
+  padding: 14px 12px 4px;
+  font-family: var(--body);
+  font-size: 13px;
+  color: var(--muted);
+  list-style: none;
+}
+#home .fp.mk .mk-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 16px;
+  font-family: var(--body);
+  font-size: 14px;
+  color: var(--soft);
+}
+#home .fp.mk .mk-pager button {
+  min-width: 40px;
+  padding: 8px 12px;
+}
+#home .fp.mk .mk-pager button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+#home .fp.mk .mk-fine {
+  margin-top: 14px;
+  font-family: var(--body);
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* ---------- the rules ---------- */
+#home .fp.mk .mk-rules {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+#home .fp.mk .mk-rules > li {
+  padding: 20px;
+  background: rgba(12, 8, 22, 0.72);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.12),
+    inset 0 3px 0 var(--c);
+}
+#home .fp.mk .mk-rules h3 {
+  margin-bottom: 8px;
+  font-size: 15px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+#home .fp.mk .mk-rules p {
+  font-family: var(--body);
+  font-size: 14.5px;
+  line-height: 1.65;
+  color: var(--soft);
+}
+
+/* ---------- narrow screens: a row becomes a card ---------- */
+@media (max-width: 900px) {
+  #home .fp.mk .mk-browse {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  #home .fp.mk .mk-cats {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  #home .fp.mk .mk-head {
+    display: none;
+  }
+  #home .fp.mk .mk-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 6px;
+  }
+  #home .fp.mk .mk-row .mk-item {
+    grid-column: 1 / -1;
+  }
+  #home .fp.mk .mk-row .mk-left {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 8px;
+  }
+  #home .fp.mk .mk-row .mk-seller {
+    text-align: right;
+  }
+  #home .fp.mk .mk-row .mk-num {
+    align-items: flex-start;
+    text-align: left;
+  }
+  #home .fp.mk .mk-row .mk-num::before {
+    content: attr(data-label);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  #home .fp.mk .mk-letter {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  #home .fp.mk .mk-letter .mk-item {
+    grid-column: 1 / -1;
+  }
+}

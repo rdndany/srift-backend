@@ -3,18 +3,22 @@ import {
   IS_OPAQUE,
   IS_PARTIAL,
   IS_SOLID,
+  buttonBase,
   buttonInfo,
   doorInfo,
   gateId,
   gateInfo,
+  gateKind,
   isLamp,
   leverInfo,
   mountSupport,
   mountedId,
   plateInfo,
+  platePair,
   rtorchInfo,
   trapdoorId,
   trapdoorInfo,
+  trapdoorKind,
   wireId,
   wirePower,
 } from './blocks';
@@ -259,7 +263,7 @@ export class RedstoneSim {
     const btn = buttonInfo(this.get(x, y, z));
     if (!btn) return false;
     if (btn.on) return true;
-    this.host.setBlock(x, y, z, mountedId(B.BUTTON_BASE, btn.face, true));
+    this.host.setBlock(x, y, z, mountedId(buttonBase(this.get(x, y, z)), btn.face, true));
     this.buttons.push({ x, y, z, t: BUTTON_SECONDS });
     this.host.sound(x, y, z, 'click');
     this.notify(x, y, z);
@@ -408,7 +412,7 @@ export class RedstoneSim {
       if (powered === this.poweredNow.has(k)) return;
       if (powered) this.poweredNow.add(k);
       else this.poweredNow.delete(k);
-      this.host.setBlock(x, y, z, trap ? trapdoorId(trap.top, powered, trap.facing) : gateId(powered, gate!.facing));
+      this.host.setBlock(x, y, z, trap ? trapdoorId(trap.top, powered, trap.facing, trapdoorKind(id)) : gateId(powered, gate!.facing, gateKind(id)));
       this.host.sound(x, y, z, 'click');
       return;
     }
@@ -470,7 +474,7 @@ export class RedstoneSim {
       this.buttons.splice(i, 1);
       const btn = buttonInfo(this.get(b.x, b.y, b.z));
       if (!btn || !btn.on) continue;
-      this.host.setBlock(b.x, b.y, b.z, mountedId(B.BUTTON_BASE, btn.face, false));
+      this.host.setBlock(b.x, b.y, b.z, mountedId(buttonBase(this.get(b.x, b.y, b.z)), btn.face, false));
       this.host.sound(b.x, b.y, b.z, 'click');
       this.notify(b.x, b.y, b.z);
     }
@@ -486,7 +490,9 @@ export class RedstoneSim {
       if (!plate || (e.item && !plate.wood)) continue;
       const k = keyOf(x, y, z);
       if (!plate.on) {
-        this.host.setBlock(x, y, z, plate.wood ? B.PLATE_WOOD_ON : B.PLATE_STONE_ON);
+        const pair = platePair(id);
+        if (!pair) continue;
+        this.host.setBlock(x, y, z, pair.on);
         this.host.sound(x, y, z, 'click');
         this.notify(x, y, z);
       }
@@ -497,7 +503,9 @@ export class RedstoneSim {
       this.pressed.delete(k);
       const plate = plateInfo(this.get(p.x, p.y, p.z));
       if (!plate || !plate.on) continue;
-      this.host.setBlock(p.x, p.y, p.z, plate.wood ? B.PLATE_WOOD : B.PLATE_STONE);
+      const pair = platePair(this.get(p.x, p.y, p.z));
+      if (!pair) continue;
+      this.host.setBlock(p.x, p.y, p.z, pair.off);
       this.host.sound(p.x, p.y, p.z, 'click');
       this.notify(p.x, p.y, p.z);
     }

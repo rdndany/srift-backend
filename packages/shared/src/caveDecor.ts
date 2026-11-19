@@ -1,4 +1,4 @@
-import { B, IS_LIQUID, IS_SOLID } from './blocks';
+import { B, BLOCK_COUNT, GROVE, IS_LIQUID, IS_SOLID } from './blocks';
 import type { CaveCarver } from './caves';
 import { CHUNK_SIZE, WORLD_HEIGHT, blockIndex } from './chunk';
 import { Simplex, hash2, mulberry32 } from './noise';
@@ -21,7 +21,7 @@ export const CaveZone = { PLAIN: 0, LUSH: 1, DRIPSTONE: 2 } as const;
 export type CaveZoneId = (typeof CaveZone)[keyof typeof CaveZone];
 
 /** Rock that moss, dripstone and sculk may take over. */
-const ROCKY = new Uint8Array(2048);
+const ROCKY = new Uint8Array(BLOCK_COUNT);
 for (const id of [B.STONE, B.DEEPSLATE, B.TUFF, B.ANDESITE, B.DIORITE, B.GRANITE, B.DIRT]) ROCKY[id] = 1;
 
 /** Lush caves lie above this height, dripstone caves above that, the deep dark below this. */
@@ -302,15 +302,18 @@ export class CaveDecor {
         if (patchB > 0.6) {
           blocks[fi] = B.CLAY;
         } else if (patchA > -0.25) {
-          blocks[fi] = B.MOSS_BLOCK;
-          const cover = r1 < 0.24 ? B.TALL_GRASS : r1 < 0.31 ? B.FERN : r1 < 0.34 ? B.FLOWERING_AZALEA : r1 < 0.385 ? B.GLOW_LICHEN : 0;
+          const paleFloor = r3 < 0.18;
+          blocks[fi] = paleFloor ? GROVE.paleMoss : B.MOSS_BLOCK;
+          const cover = r1 < 0.22 ? B.TALL_GRASS : r1 < 0.29 ? B.FERN : r1 < 0.32 ? B.FLOWERING_AZALEA : r1 < 0.35 ? GROVE.azalea : r1 < 0.39 ? B.GLOW_LICHEN : r1 < 0.48 ? (paleFloor ? GROVE.paleMossCarpet : GROVE.mossCarpet) : 0;
           if (cover) blocks[at(y0)] = cover;
         }
       }
       if (ceilOk && patchB > -0.4) {
-        blocks[ci] = B.MOSS_BLOCK;
+        blocks[ci] = r4 < 0.18 ? GROVE.paleMoss : B.MOSS_BLOCK;
         if (r2 < 0.03) {
           blocks[at(y1)] = B.SPORE_BLOSSOM;
+        } else if (r2 < 0.08) {
+          blocks[at(y1)] = r3 < 0.5 ? GROVE.hangingRoots : GROVE.paleHangingMoss;
         } else if (r2 < 0.45 && gap >= 2) {
           // A vine hangs from the roof, ending short of the floor; its tip (and now and then another leaf) carries glowing berries.
           const len = 1 + Math.floor(Math.pow(r3, 1.4) * Math.min(gap - 1, 7));

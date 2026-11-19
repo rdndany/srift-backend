@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { B } from '@solrift/shared';
+import { BlockCube } from './BlockCube';
 import './loading.css';
 
 const TIPS = [
@@ -16,8 +18,8 @@ const TIPS = [
 
 /**
  * Shown from the moment a game is chosen until the world around the player is ready. `game/main.ts` drives it by id:
- * `#loading-text` and `#loading-bar` (progress), and the classes `ready` (waiting for a click, because the browser would
- * not hand over the mouse by itself) and `gone` (finished).
+ * `#loading-text` and `#loading-bar` (progress), and the classes `ready` (shows the "Enter the world" button, because the browser
+ * would not hand over the mouse by itself) and `gone` (finished).
  */
 export function LoadingScreen() {
   const [tip, setTip] = useState(0);
@@ -35,16 +37,12 @@ export function LoadingScreen() {
         ))}
       </div>
       <div className="ld-center">
-        <div className="ld-stage" aria-hidden>
-          <div className="ld-cube">
-            <span className="f front" />
-            <span className="f back" />
-            <span className="f left" />
-            <span className="f right" />
-            <span className="f top" />
-            <span className="f bottom" />
-          </div>
-          <div className="ld-shadow" />
+        <div className="ld-blocks" aria-hidden>
+          {[B.GRASS, B.PLANKS, B.STONE, B.GOLD_ORE, B.DIAMOND_ORE].map((id, i) => (
+            <span key={id} style={{ animationDelay: `${(i * 0.14).toFixed(2)}s` }}>
+              <BlockCube id={id} size={64} />
+            </span>
+          ))}
         </div>
         <h1 className="ld-logo">
           Sol<b>Rift</b>
@@ -53,7 +51,15 @@ export function LoadingScreen() {
           <div id="loading-bar" />
         </div>
         <p id="loading-text">Loading...</p>
-        <p className="ld-enter">Click to enter the world</p>
+        <button type="button" className="ld-enter" id="loading-enter">
+          <span className="ld-enter-edge">
+            <span className="ld-enter-face">
+              <i aria-hidden="true" />
+              Enter the world
+            </span>
+          </span>
+        </button>
+        <p className="ld-hint">or press any key</p>
         <p className="ld-tip" key={tip}>
           {TIPS[tip]}
         </p>

@@ -1,4 +1,4 @@
-import { B, BLOCKS, FALLS, SOUL_WARD_HEIGHT, SOUL_WARD_RADIUS, doorId, doorInfo, isAnvil } from './blocks';
+import { B, BLOCKS, FALLS, SOUL_WARD_HEIGHT, SOUL_WARD_RADIUS, chestId, chestInfo, chestPartnerPos, doorId, doorInfo, doorKind, isAnvil, isChest } from './blocks';
 import { WORLD_HEIGHT } from './chunk';
 import { LOOT_TABLES, positionRand, rollChest, spawnerKind } from './loot';
 import { bodyOverlapsBlock } from './physics';
@@ -6,14 +6,18 @@ import { BlockEntities } from './blockEntities';
 import { DAY_LENGTH_SECONDS, daylightAt } from './daylight';
 import { DropWorld, type DropCollector } from './dropEntities';
 import { XpOrbWorld } from './xpOrbs';
+import { BOBBER_LEASH, FishingWorld, type FishingEvents } from './fishing';
 import type { WorldAccess } from './headlessWorld';
-import { blockDrops, getItem, toolId } from './items';
-import { makeStack } from './inventory';
+import { BOTTLE_XP_MAX, BOTTLE_XP_MIN, blockDrops, getItem, toolId } from './items';
+import { makeStack, type ItemStack } from './inventory';
+import { ChestMenu } from './menu';
 import { EffectField } from './abilityEffects';
 import { MobManager, MobSpawner, type Mob, type MobEvents, type MobKind, type MobPlayer } from './mobs';
 import { hash2 } from './noise';
 import type { Player } from './player';
 import { Parties } from './party';
+import { AuctionHouse } from './auction';
+import { StashVault } from './stash';
 import { bagDrop } from './bags';
 import { skillBookDrop } from './skillbooks';
 import { gearDrop, type GearRoll } from './gear';
@@ -105,6 +109,11 @@ export interface RealmOptions {
    * respawn point.
    */
   sleeping?: boolean;
+  /**
+   * Does the Auction House put up stock of its own? On by default (single player has no other sellers); the multiplayer server turns
+   * it off, so that everything on its shelves is something a player put there.
+   */
+  auctionStock?: boolean;
 }
 
 /**
@@ -132,6 +141,15 @@ export class Realm {
   readonly drops: DropWorld;
   /** The experience orbs about (see xpOrbs.ts). */
   readonly xpOrbs: XpOrbWorld;
+  /** The bobbers of the fishing rods that are out (see fishing.ts). */
+  readonly fishing: FishingWorld;
+  private readonly fishingEvents: FishingEvents = {
+    splash: (b) => this.emitNear(b.x, b.y, b.z, { t: 'fish', what: 'splash', x: b.x, y: b.y, z: b.z }, 40),
+    lured: (b) => this.emitNear(b.x, b.y, b.z, { t: 'fish', what: 'lure', x: b.x, y: b.y, z: b.z }, 40),
+    bite: (b) => this.emitNear(b.x, b.y, b.z, { t: 'fish', what: 'bite', x: b.x, y: b.y, z: b.z }, 40),
+    escaped: (b) => this.emitNear(b.x, b.y, b.z, { t: 'fish', what: 'escape', x: b.x, y: b.y, z: b.z }, 40),
+    dry: (b) => (b.owner as Player).emit({ t: 'toast', text: 'You can only fish in water.' }),
+  };
   /** Minecarts and boats. */
   readonly vehicles: VehicleWorld;
   /** Vehicles from a save, waiting for their chunk (a cart needs its rail to be there). */
@@ -139,6 +157,17 @@ export class Realm {
   readonly players: Player[] = [];
   /** Groups of up to four that share a dungeon. */
   readonly parties = new Parties(this);
+  /** The Auction House of Dawnwatch: every auction and every letter owed (see auction.ts). */
+  readonly auctions = new AuctionHouse();
+  /** The stashes of the wallets that play here (see stash.ts): shared by a wallet's characters, never by other players. */
+  readonly stashes = new StashVault();
+  private readonly auctionStock: boolean;
+  private auctionTimer = 0;
+  private stockState = 0;
+  private readonly stockRand = (): number => {
+    this.stockState = (Math.imul(this.stockState, 1664525) + 1013904223) >>> 0;
+    return this.stockState / 4294967296;
+  };
   readonly mobEvents: MobEvents;
   /** What class abilities leave behind (pending hits, traps) and the marks players are shown. */
   readonly effects = new EffectField();
@@ -197,12 +226,19 @@ export class Realm {
     this.naturalSpawning = opts.naturalSpawning ?? true;
     this.villagers = opts.villagers ?? this.naturalSpawning;
     this.allowSleep = opts.sleeping ?? true;
+    this.auctionStock = opts.auctionStock ?? true;
+    this.stockState = (opts.seed ^ 0x5eed1e55) >>> 0;
+    // An account that is in the game is told when what it put up sells, ends or is outbid.
+    this.auctions.notify = (owner, text) => {
+      for (const p of this.players) if (p.account === owner) p.emit({ t: 'toast', text });
+    };
     this.weather = new Weather(this.rand);
     this.fluids = new FluidSim({
       getBlock: (x, y, z) => this.world.getBlock(x, y, z),
       setBlock: (x, y, z, id) => this.world.setBlock(x, y, z, id),
       washAway: (x, y, z, id) => {
         this.emitNear(x, y, z, { t: 'burst', id, x, y, z, count: 6 });
+        for (const s of this.takeBlock(x, y, z, id)) this.drops.spawnAtBlock(s, x, y, z);
         for (const d of blockDrops(BLOCKS[id], null, this.rand)) this.drops.spawnAtBlock(makeStack(d.id, d.count), x, y, z);
       },
       hiss: (x, y, z) => this.emitNear(x, y, z, { t: 'splash', vol: 0.5 }),
@@ -217,6 +253,7 @@ export class Realm {
         const id = this.world.getBlock(x, y, z);
         if (id === B.TNT) this.primeTnt(x, y, z, 0.2);
         this.world.setBlock(x, y, z, B.AIR);
+        for (const s of this.takeBlock(x, y, z, id)) this.drops.spawnAtBlock(s, x, y, z);
         this.emitNear(x, y, z, { t: 'burst', id, x, y, z, count: 8 });
         this.settleAround(x, y, z, false);
       },
@@ -240,6 +277,7 @@ export class Realm {
     });
     this.drops = new DropWorld((x, y, z) => this.world.getBlock(x, y, z), this.rand);
     this.xpOrbs = new XpOrbWorld((x, y, z) => this.world.getBlock(x, y, z), this.rand);
+    this.fishing = new FishingWorld((x, y, z) => this.world.getBlock(x, y, z), this.rand, () => this.mobs.mobs);
 
     this.vehicles = new VehicleWorld(this.world.physicsReader);
     this.blockEntities.loot = (x, y, z) => {
@@ -302,8 +340,7 @@ export class Realm {
         if (p) p.pearlLand(x, y, z);
       },
       shatter: (x, y, z) => {
-        // Three to eleven points, as the original's bottle gives.
-        this.awardXp(3 + Math.floor(this.rand() * 9), x, y, z);
+        this.awardXp(BOTTLE_XP_MIN + Math.floor(this.rand() * (BOTTLE_XP_MAX - BOTTLE_XP_MIN + 1)), x, y, z);
         this.emitNear(x, y, z, { t: 'sound', sound: 'glass', action: 'break', vol: 0.8 });
         this.emitNear(x, y, z, { t: 'burst', id: B.GLASS, x: Math.floor(x), y: Math.floor(y), z: Math.floor(z), count: 10 });
       },
@@ -380,9 +417,20 @@ export class Realm {
     this.skipNightIfAllAsleep();
     this.parties.update(dt);
     this.parties.sync();
+    this.auctionTimer += dt;
+    if (this.auctionTimer >= 1) {
+      this.auctionTimer = 0;
+      this.auctions.update();
+      // (the house has dice of its own: what it puts up must not change what the seeded simulation rolls)
+      if (this.auctionStock && this.generator.kind === 'adventure') this.auctions.restock(this.stockRand);
+    }
     if (this.generator.instanceCount() > 0) this.updateCopies(dt);
     this.countRestocks();
     this.blockEntities.tick(dt);
+    this.blockEntities.tickCampfires(dt, (x, y, z) => this.world.getBlock(x, y, z), (stack, x, y, z) => {
+      const a = this.rand() * Math.PI * 2;
+      this.drops.spawn(stack, x + 0.5, y + 0.45, z + 0.5, Math.cos(a) * 0.6, 2.4, Math.sin(a) * 0.6, 0.3);
+    });
     const thunder = this.weather.update(dt);
     if (thunder > 0) this.emitAll({ t: 'thunder', distance: this.rand() });
     this.cropTimer += dt;
@@ -429,6 +477,11 @@ export class Realm {
       dt,
       active.map((p) => ({ x: p.body.x, y: p.body.y, z: p.body.z, alive: p.screen !== 'dead' && !p.spectating, take: (v: number) => p.addXp(v, true) })),
     );
+    this.fishing.update(dt, {
+      rain: this.weather.rain,
+      events: this.fishingEvents,
+      valid: (owner) => (owner as Player).keepsLine(this.fishing.of(owner), BOBBER_LEASH),
+    });
     for (const c of collectors) {
       if (c.picked > 0) {
         c.player.emit({ t: 'pop' });
@@ -469,6 +522,7 @@ export class Realm {
           rand: this.rand,
           slimeChunk: (cx, cz) => hash2(this.seed ^ 0x51ee, cx, cz) < 0.1,
           quiet: (p) => this.generator.instanceAt(p.x, p.z) >= 0,
+          wildlife: (x, z) => this.generator.wildlifeAt(x, z),
           noMonsters: (x, z, y) => this.generator.safeFromMonsters(x, z, SAFE_BUFFER) || this.wardAt(x, y, z, 2) !== null,
         });
         this.updateSpawners(dt, living);
@@ -918,9 +972,10 @@ export class Realm {
       if (this.players.some((p) => inWay(p.body.x, p.body.y, p.body.z, p.body.height ?? 1.8))) return false;
       if (this.mobs.mobs.some((m) => !m.dead && inWay(m.body.x, m.body.y, m.body.z, m.height))) return false;
     }
-    this.world.setBlock(x, y, z, doorId(false, open, lower.facing));
-    if (doorInfo(this.world.getBlock(x, y + 1, z))) this.world.setBlock(x, y + 1, z, doorId(true, open, lower.facing));
-    this.emitNear(x, y, z, { t: 'sound', sound: 'wood', action: 'place', vol: 0.6 });
+    const kind = doorKind(this.world.getBlock(x, y, z));
+    this.world.setBlock(x, y, z, doorId(false, open, lower.facing, kind));
+    if (doorInfo(this.world.getBlock(x, y + 1, z))) this.world.setBlock(x, y + 1, z, doorId(true, open, lower.facing, kind));
+    this.emitNear(x, y, z, { t: 'sound', sound: BLOCKS[doorId(false, false, lower.facing, kind)].sound, action: 'place', vol: 0.6 });
     return true;
   }
 
@@ -1127,6 +1182,29 @@ export class Realm {
 
   // ---- world edits ---------------------------------------------------------
 
+  /**
+   * A block is gone. A double chest's other half becomes a single chest first, anyone looking inside is closed,
+   * and the contents come back exactly once.
+   */
+  takeBlock(x: number, y: number, z: number, id: number): ItemStack[] {
+    if (isChest(id)) {
+      const c = this.blockEntities.chest(x, y, z);
+      for (const p of this.players) {
+        if (p.menu instanceof ChestMenu && p.menu.chest === c) p.closeMenu();
+      }
+      const other = chestPartnerPos(id, x, y, z);
+      if (other) {
+        const [ox, oy, oz] = other;
+        const info = chestInfo(this.world.getBlock(ox, oy, oz));
+        if (info && info.half !== 0) {
+          this.world.setBlock(ox, oy, oz, chestId(info.dir, 0));
+          this.blockChanged(ox, oy, oz);
+        }
+      }
+    }
+    return this.blockEntities.remove(id, x, y, z);
+  }
+
   /** A block was placed, changed or removed here: liquids and redstone look at what it touches. */
   blockChanged(x: number, y: number, z: number): void {
     this.fluids.notify(x, y, z);
@@ -1158,7 +1236,9 @@ export class Realm {
         const def = BLOCKS[id];
         this.world.setBlock(nx, ny, nz, B.AIR);
         this.emitNear(nx, ny, nz, { t: 'burst', id, x: nx, y: ny, z: nz, count: 6 });
+        const contents = this.takeBlock(nx, ny, nz, id);
         if (withDrops) {
+          for (const s of contents) this.drops.spawnAtBlock(s, nx, ny, nz);
           for (const d of blockDrops(def, null, this.rand)) this.drops.spawnAtBlock(makeStack(d.id, d.count), nx, ny, nz);
         }
         if (isRail(id)) railRemoved(this.world, nx, ny, nz);
@@ -1245,7 +1325,7 @@ export class Realm {
             continue;
           }
           this.world.setBlock(bx, by, bz, B.AIR);
-          const contents = this.blockEntities.remove(id, bx, by, bz);
+          const contents = this.takeBlock(bx, by, bz, id);
           for (const s of contents) this.drops.spawnAtBlock(s, bx, by, bz);
           if (rand() < 0.3) {
             for (const drop of blockDrops(def, DIAMOND_PICK, rand)) this.drops.spawnAtBlock(makeStack(drop.id, drop.count), bx, by, bz);

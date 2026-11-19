@@ -117,7 +117,8 @@ describe('getting dyes', () => {
     expect(craft(dye('gray'), dye('white'))).toEqual({ id: dye('light_gray'), count: 2 });
     expect(craft(dye('black'), dye('white'))).toEqual({ id: dye('gray'), count: 2 });
     expect(craft(dye('green'), dye('white'))).toEqual({ id: dye('lime'), count: 2 });
-    expect(craft(dye('red'), dye('green'))).toEqual({ id: dye('brown'), count: 2 });
+    expect(craft(I.COCOA_BEANS)).toEqual({ id: dye('brown'), count: 1 });
+    expect(craft(dye('red'), dye('green'))).toBeNull();
   });
 
   it('cooks cactus into green dye', () => {

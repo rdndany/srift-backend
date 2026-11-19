@@ -165,6 +165,22 @@ function hashPx(x: number, y: number): number {
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
 
+/** A wooden stand: a base, a post, a pair of arms and a head. The base sits at the bottom of the icon. */
+function armorStandGrid(): Cell[] {
+  const g = blank();
+  for (let x = 3; x <= 12; x++) {
+    g[13 * N + x] = STICK;
+    g[14 * N + x] = shade(STICK, -24);
+  }
+  for (let y = 4; y <= 12; y++) {
+    g[y * N + 7] = STICK;
+    g[y * N + 8] = shade(STICK, -18);
+  }
+  for (let x = 3; x <= 12; x++) g[6 * N + x] = x < 7 ? shade(STICK, -10) : STICK;
+  for (let y = 1; y <= 4; y++) for (let x = 6; x <= 9; x++) g[y * N + x] = shade(STICK, 16);
+  return outline(bevel(g));
+}
+
 function stickGrid(): Cell[] {
   const g = blank();
   for (let i = 0; i < 13; i++) {
@@ -173,6 +189,116 @@ function stickGrid(): Cell[] {
     g[y * N + x] = STICK;
     g[y * N + x + 1] = shade(STICK, -22);
   }
+  return outline(bevel(g));
+}
+
+/** A fishing rod: a long stick from the lower left with a reel at the grip, and a line hanging from the tip with a red and white float. */
+function fishingRodGrid(withLine = true): Cell[] {
+  const g = blank();
+  for (let i = 0; i < 12; i++) {
+    const x = 1 + i;
+    const y = 14 - i;
+    dot(g, x, y, i < 4 ? shade(STICK, -14) : STICK);
+    dot(g, x + 1, y, shade(STICK, -26));
+  }
+  // The reel, just above the grip.
+  for (const [x, y] of [
+    [4, 10],
+    [5, 10],
+    [4, 11],
+    [5, 11],
+  ]) {
+    dot(g, x, y, [128, 130, 138]);
+  }
+  dot(g, 4, 10, [196, 198, 206]);
+  if (!withLine) return outline(bevel(g));
+  // The line from the tip, down the right edge, with the float at its end.
+  const cord: RGB = [236, 236, 236];
+  for (let y = 3; y <= 11; y++) dot(g, 14, y, y % 2 ? cord : shade(cord, -30));
+  dot(g, 13, 3, cord);
+  dot(g, 13, 2, cord);
+  dot(g, 14, 12, [214, 44, 44]);
+  dot(g, 14, 13, [250, 250, 250]);
+  dot(g, 13, 12, [160, 28, 32]);
+  dot(g, 13, 13, [204, 204, 210]);
+  return outline(bevel(g));
+}
+
+/** A fish, side on, nose to the right: its back, belly and fins, and an eye. `spots` lets a pattern be painted over it. */
+function fishGrid(back: RGB, belly: RGB, fin: RGB, over?: (x: number, y: number, c: RGB) => RGB): Cell[] {
+  const g = blank();
+  const cx = 8;
+  const cy = 8;
+  fillShape(
+    g,
+    (x, y) => ((x - cx) / 5.2) ** 2 + ((y - cy) / 3.1) ** 2 <= 1 || (x >= 1 && x <= 3 && Math.abs(y - cy) <= 3 - (3 - x) * 0.4 + (x === 1 ? 1 : 0) - (x - 1) * 0.4 + 0.2),
+    (x, y) => {
+      let c: RGB;
+      if (x <= 3) c = fin;
+      else if (y <= cy - 1) c = shade(back, Math.floor(hashPx(x, y) * 12) - 6);
+      else if (y >= cy + 2) c = shade(belly, -6);
+      else c = belly;
+      return over ? over(x, y, c) : c;
+    },
+  );
+  // Dorsal and belly fins.
+  for (const x of [6, 7, 8]) dot(g, x, cy - 4 + (x === 7 ? 0 : 1), fin);
+  dot(g, 7, cy + 4, fin);
+  dot(g, 8, cy + 4, fin);
+  // The eye.
+  dot(g, 11, cy - 1, [22, 22, 26]);
+  return outline(bevel(g));
+}
+
+function codGrid(cooked: boolean): Cell[] {
+  return cooked
+    ? fishGrid([176, 112, 62], [214, 160, 96], [150, 88, 48])
+    : fishGrid([150, 124, 92], [222, 204, 170], [124, 100, 72], (x, y, c) => (y === 7 && x >= 5 && x <= 10 && x % 2 === 0 ? [96, 76, 56] : c));
+}
+
+function salmonGrid(cooked: boolean): Cell[] {
+  return cooked
+    ? fishGrid([196, 108, 60], [238, 164, 108], [170, 84, 46])
+    : fishGrid([86, 106, 104], [226, 112, 96], [196, 78, 70], (x, y, c) => (y >= 8 && y <= 9 && x >= 5 && x <= 10 ? [236, 126, 108] : c));
+}
+
+function tropicalFishGrid(): Cell[] {
+  return fishGrid([248, 128, 28], [252, 190, 120], [250, 150, 40], (x, y, c) => (x === 6 || x === 9 ? [250, 250, 250] : x === 5 || x === 10 ? [90, 60, 40] : c));
+}
+
+function pufferfishGrid(): Cell[] {
+  const g = blank();
+  fillShape(
+    g,
+    (x, y) => (x - 7.5) ** 2 + (y - 8.5) ** 2 <= 20,
+    (x, y) => (y >= 10 ? [244, 232, 172] : shade([232, 190, 40], Math.floor(hashPx(x, y) * 16) - 8)),
+  );
+  // Spikes all round.
+  for (const [x, y] of [
+    [7, 3],
+    [10, 4],
+    [4, 4],
+    [12, 7],
+    [3, 8],
+    [12, 11],
+    [4, 12],
+    [8, 14],
+    [11, 13],
+  ]) {
+    dot(g, x, y, [196, 148, 30]);
+  }
+  // Big eyes and a small mouth.
+  for (const [x, y] of [
+    [9, 6],
+    [10, 6],
+    [9, 7],
+    [10, 7],
+  ]) {
+    dot(g, x, y, [250, 250, 250]);
+  }
+  dot(g, 10, 7, [20, 20, 24]);
+  dot(g, 11, 10, [140, 100, 24]);
+  dot(g, 5, 8, [170, 130, 30]);
   return outline(bevel(g));
 }
 
@@ -585,6 +711,502 @@ function appleGrid(): Cell[] {
   return outline(g);
 }
 
+/** A raw potato: a tan oval with a few dark eyes. */
+function potatoGrid(): Cell[] {
+  const g = blank();
+  fillShape(
+    g,
+    (x, y) => {
+      const dx = (x - 8) / 5.4;
+      const dy = (y - 8.4) / 4.1;
+      return dx * dx + dy * dy <= 1;
+    },
+    (x, y) => {
+      if (x <= 6 && y <= 8) return [214, 168, 88];
+      if (x >= 10 && y >= 10) return [146, 98, 46];
+      return [184, 136, 62];
+    },
+  );
+  for (const [x, y] of [[6, 6], [11, 10], [7, 12]] as const) g[y * N + x] = [88, 58, 30];
+  return outline(g);
+}
+
+/** A carrot: an orange root with a little green top. */
+function carrotGrid(): Cell[] {
+  const g = blank();
+  for (let y = 3; y <= 13; y++) {
+    const t = (y - 3) / 10;
+    const half = y <= 5 ? 2 : Math.max(0, Math.round(2.4 * (1 - (t - 0.15))));
+    for (let x = 8 - half; x <= 8 + half; x++) {
+      g[y * N + x] = y <= 5 ? (x < 8 ? [96, 168, 52] : [64, 132, 40]) : x < 8 ? [236, 132, 40] : [196, 84, 24];
+    }
+  }
+  g[13 * N + 8] = [168, 64, 20];
+  return outline(g);
+}
+
+/** A curling stem, youngest to ripe. The ripe stage shows a bud of the fruit it grows. */
+function stemGrid(stage: number, bud: RGB): Cell[] {
+  const g = blank();
+  const h = [3, 6, 9, 12][stage]!;
+  const vine: RGB = [58, 140, 36];
+  blade(g, 7, h, vine, stage % 2 ? 1 : -1);
+  blade(g, 9, Math.max(2, h - 2), shade(vine, -12), 1);
+  if (stage === 3) {
+    const top = N - 1 - h;
+    dot(g, 6, top + 1, bud);
+    dot(g, 7, top, shade(bud, 18));
+    dot(g, 5, top + 2, shade(bud, -18));
+  }
+  return g;
+}
+
+/** A few loose seeds. */
+function cropSeedGrid(color: RGB): Cell[] {
+  const g = blank();
+  for (const [x, y] of [
+    [6, 7],
+    [9, 8],
+    [7, 11],
+    [11, 10],
+    [5, 12],
+    [8, 5],
+  ] as const) {
+    dot(g, x, y, color);
+    dot(g, x + 1, y, shade(color, -22));
+  }
+  return outline(g);
+}
+
+/** A beetroot: a dark red bulb with a green top. */
+function beetrootGrid(): Cell[] {
+  const g = blank();
+  fillShape(
+    g,
+    (x, y) => {
+      const dx = (x - 8) / 4.2;
+      const dy = (y - 9.5) / 3.6;
+      return dx * dx + dy * dy <= 1 || (x >= 6 && x <= 9 && y >= 3 && y <= 6);
+    },
+    (x, y) => {
+      if (y <= 5) return y <= 3 ? [46, 120, 36] : [70, 150, 42];
+      return x <= 7 ? [168, 32, 52] : [112, 16, 36];
+    },
+  );
+  return outline(g);
+}
+
+/** A cocoa pod, small and green, then orange, then a ripe brown pod. */
+function cocoaPodGrid(stage: number): Cell[] {
+  const g = blank();
+  const body: RGB = stage === 0 ? [78, 132, 40] : stage === 1 ? [196, 112, 36] : [150, 70, 22];
+  const rx = 3.2 + stage;
+  const ry = 2.6 + stage * 0.5;
+  fillShape(
+    g,
+    (x, y) => {
+      const dx = (x - 7.5) / rx;
+      const dy = (y - 8) / ry;
+      return dx * dx + dy * dy <= 1;
+    },
+    (x, y) => ((x + y) % 4 === 0 ? shade(body, 30) : x < 7 ? shade(body, 14) : shade(body, -18)),
+  );
+  return g;
+}
+
+/** A handful of cocoa beans. */
+function cocoaBeansGrid(): Cell[] {
+  const g = blank();
+  const bean: RGB = [120, 64, 28];
+  for (const [x, y] of [
+    [5, 6],
+    [8, 5],
+    [11, 7],
+    [6, 10],
+    [9, 11],
+    [12, 10],
+  ] as const) {
+    dot(g, x, y, shade(bean, 16));
+    dot(g, x + 1, y, bean);
+    dot(g, x, y + 1, shade(bean, -20));
+  }
+  return outline(g);
+}
+
+/** A cookie: a tan disc with a few dark chips. */
+function cookieGrid(): Cell[] {
+  const g = blank();
+  const dough: RGB = [214, 164, 96];
+  const chip: RGB = [92, 52, 28];
+  fillShape(
+    g,
+    (x, y) => {
+      const dx = (x - 7.5) / 5.2;
+      const dy = (y - 8) / 4.6;
+      return dx * dx + dy * dy <= 1;
+    },
+    (x, y) => (y < 7 ? shade(dough, 22) : shade(dough, -8)),
+  );
+  dot(g, 6, 7, chip);
+  dot(g, 9, 6, chip);
+  dot(g, 8, 10, chip);
+  dot(g, 11, 9, shade(chip, 16));
+  return outline(g);
+}
+
+/** A sweet berry bush, youngest to ripe. Berries show from the third stage. */
+function sweetBerryBushGrid(stage: number): Cell[] {
+  const g = blank();
+  const leaf: RGB = [46, 130, 38];
+  const h = [4, 7, 10, 13][stage]!;
+  for (let x = 3; x < 13; x += 2) blade(g, x, h - (x % 3), x % 2 ? leaf : shade(leaf, -14), x % 2 ? 1 : -1);
+  if (stage >= 2) {
+    const berry: RGB = [176, 24, 36];
+    const spots: readonly (readonly [number, number])[] =
+      stage === 2
+        ? [
+            [6, 8],
+            [10, 9],
+            [8, 11],
+          ]
+        : [
+            [5, 6],
+            [8, 5],
+            [11, 7],
+            [6, 10],
+            [9, 11],
+            [12, 10],
+            [7, 13],
+          ];
+    for (const [x, y] of spots) {
+      dot(g, x, y, berry);
+      dot(g, x + 1, y, shade(berry, 22));
+    }
+  }
+  return g;
+}
+
+/** A handful of sweet berries. */
+function sweetBerriesGrid(): Cell[] {
+  const g = blank();
+  const berry: RGB = [186, 28, 40];
+  for (const [x, y] of [
+    [5, 7],
+    [8, 5],
+    [11, 7],
+    [6, 11],
+    [9, 10],
+    [12, 11],
+  ] as const) {
+    dot(g, x, y, shade(berry, 24));
+    dot(g, x + 1, y, berry);
+    dot(g, x, y + 1, shade(berry, -18));
+  }
+  dot(g, 8, 8, [56, 130, 40]);
+  dot(g, 9, 8, [40, 100, 32]);
+  return outline(g);
+}
+
+/** A cluster of glow berries. */
+function glowBerriesGrid(): Cell[] {
+  const g = blank();
+  const fruit: RGB = [250, 176, 44];
+  for (const [x, y] of [
+    [5, 6],
+    [8, 4],
+    [11, 7],
+    [6, 10],
+    [9, 11],
+    [12, 10],
+  ] as const) {
+    dot(g, x, y, [255, 228, 140]);
+    dot(g, x + 1, y, fruit);
+    dot(g, x, y + 1, shade(fruit, -28));
+    dot(g, x + 1, y + 1, shade(fruit, -48));
+  }
+  dot(g, 8, 8, [70, 120, 46]);
+  return outline(g);
+}
+
+/** Beetroot tops, youngest to ripe. A ripe one shows the red root at the soil. */
+function beetrootCropGrid(stage: number): Cell[] {
+  const g = blank();
+  const h = [3, 6, 10, 13][stage]!;
+  const leaf: RGB = [40, 120, 36];
+  for (let x = 2; x < N - 1; x += 3) blade(g, x, h - (x % 2), leaf, x % 2 ? 0 : 1);
+  if (stage >= 2) {
+    const root: RGB = [150, 24, 44];
+    dot(g, 5, N - 2, root);
+    dot(g, 6, N - 3, shade(root, 28));
+    if (stage === 3) {
+      dot(g, 10, N - 2, root);
+      dot(g, 11, N - 3, shade(root, -16));
+    }
+  }
+  return g;
+}
+
+/** A wooden bowl seen from above, with a rim, a hollow, and a foot. `fill` is the soup in it. */
+function bowlGrid(fill: RGB | null): Cell[] {
+  const g = blank();
+  const wood: RGB = [184, 116, 50];
+  const light: RGB = [222, 166, 94];
+  const dark: RGB = [108, 62, 26];
+  const hole: RGB = [58, 34, 16];
+  fillShape(
+    g,
+    (x, y) => {
+      const cx = 7.5;
+      if (y < 2 || y > 14) return false;
+      if (y <= 6) {
+        const dx = (x - cx) / 6.5;
+        const dy = (y - 4.2) / 2.3;
+        return dx * dx + dy * dy <= 1;
+      }
+      const half = 6.2 - ((y - 6) / 8) * 3.1;
+      return Math.abs(x - cx) <= half;
+    },
+    (x, y) => {
+      const cx = 7.5;
+      const dx = (x - cx) / 4.3;
+      const dy = (y - 4.3) / 1.35;
+      const inside = y <= 6 && dx * dx + dy * dy <= 1;
+      if (inside) {
+        if (!fill) return y <= 4 ? hole : shade(hole, -12);
+        return y <= 4 ? shade(fill, 30) : shade(fill, y === 5 ? 8 : -14);
+      }
+      if (y <= 5) return x < cx ? light : shade(light, -24);
+      if (y >= 13) return dark;
+      if (x <= cx - 3) return shade(wood, 18);
+      if (x >= cx + 3) return shade(wood, -26);
+      return shade(wood, Math.floor(hashPx(x, y) * 12) - 8);
+    },
+  );
+  return outline(g);
+}
+
+/** Frosting on top of a cake, with a few berries. */
+function cakeTopGrid(): Cell[] {
+  const g = blank();
+  const icing: RGB = [248, 246, 242];
+  fillShape(
+    g,
+    (x, y) => x >= 1 && x <= 14 && y >= 1 && y <= 14,
+    (x, y) => (x < 4 || y < 4 ? shade(icing, 8) : shade(icing, -8 + Math.floor(hashPx(x, y) * 10))),
+  );
+  for (const [x, y] of [
+    [4, 4],
+    [8, 3],
+    [12, 5],
+    [5, 8],
+    [11, 8],
+    [7, 12],
+    [12, 12],
+  ] as const) {
+    dot(g, x, y, [176, 28, 36]);
+    dot(g, x + 1, y, [210, 48, 52]);
+  }
+  return g;
+}
+
+/** The side of a cake: a band of frosting over the sponge. */
+function cakeSideGrid(): Cell[] {
+  const g = blank();
+  const icing: RGB = [246, 244, 238];
+  const sponge: RGB = [214, 150, 72];
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      if (y <= 4) g[y * N + x] = y === 4 ? shade(icing, -18) : x < 5 ? shade(icing, 10) : shade(icing, -6);
+      else g[y * N + x] = (x + y) % 5 === 0 ? shade(sponge, 22) : x < 4 ? shade(sponge, 12) : shade(sponge, -14);
+    }
+  }
+  return g;
+}
+
+/** The bottom of a cake. */
+function cakeBottomGrid(): Cell[] {
+  const g = blank();
+  const crust: RGB = [168, 104, 46];
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) g[y * N + x] = (x + y) % 4 === 0 ? shade(crust, 16) : shade(crust, -8);
+  return g;
+}
+
+/** A whole cake, as it sits in the inventory. */
+function cakeGrid(): Cell[] {
+  const g = blank();
+  const icing: RGB = [248, 246, 242];
+  const sponge: RGB = [214, 148, 68];
+  const crust: RGB = [150, 88, 36];
+  fillShape(
+    g,
+    (x, y) => {
+      if (y >= 4 && y <= 7) return x >= 2 && x <= 13;
+      if (y >= 8 && y <= 12) return x >= 3 && x <= 12;
+      return false;
+    },
+    (x, y) => {
+      if (y <= 6) return x < 7 ? shade(icing, 8) : shade(icing, -14);
+      if (y === 7) return shade(icing, -28);
+      if (y >= 12) return crust;
+      return x < 5 ? shade(sponge, 16) : shade(sponge, -10);
+    },
+  );
+  dot(g, 8, 5, [176, 28, 36]);
+  dot(g, 9, 5, [214, 52, 56]);
+  dot(g, 5, 6, [176, 28, 36]);
+  dot(g, 11, 6, [176, 28, 36]);
+  return outline(g);
+}
+
+/** Carrot tops, youngest to ripe. A ripe one shows the orange roots. */
+function carrotCropGrid(stage: number): Cell[] {
+  const g = blank();
+  const h = [3, 6, 10, 13][stage]!;
+  const leaf: RGB = [48, 132, 40];
+  for (let x = 2; x < N - 1; x += 3) blade(g, x, h - (x % 2), leaf, x % 2 ? 0 : 1);
+  if (stage >= 2) {
+    const root: RGB = [228, 112, 32];
+    const top = N - 1 - h;
+    dot(g, 4, top + 1, root);
+    dot(g, 5, top, shade(root, 20));
+    if (stage === 3) {
+      dot(g, 10, top + 1, root);
+      dot(g, 11, top, shade(root, -12));
+      dot(g, 7, top, shade(root, 24));
+    }
+  }
+  return g;
+}
+
+/** A potato plant, youngest to ripe. The ripe stage shows the tubers at the soil. */
+function potatoCropGrid(stage: number): Cell[] {
+  const g = blank();
+  const h = [4, 7, 11, 14][stage];
+  const leaf: RGB = stage === 3 ? [64, 124, 40] : [52, 148, 46];
+  for (let x = 2; x < N - 1; x += 3) blade(g, x, h - (x % 2), leaf, x % 2 ? 0 : 1);
+  if (stage >= 2) {
+    const tuber: RGB = stage === 3 ? [186, 140, 64] : [150, 112, 52];
+    dot(g, 4, N - 2, tuber);
+    dot(g, 5, N - 3, shade(tuber, 16));
+    if (stage === 3) {
+      dot(g, 11, N - 2, tuber);
+      dot(g, 12, N - 3, shade(tuber, -12));
+    }
+  }
+  return g;
+}
+
+function bakedPotatoGrid(): Cell[] {
+  const g = blank();
+  fillShape(
+    g,
+    (x, y) => {
+      const dx = (x - 8) / 5.2;
+      const dy = (y - 8.2) / 3.8;
+      return dx * dx + dy * dy <= 1;
+    },
+    (x, y) => {
+      if (x <= 6 && y <= 7) return [236, 196, 96];
+      if (x >= 10 && y >= 10) return [150, 82, 32];
+      return [204, 140, 52];
+    },
+  );
+  g[7 * N + 6] = [92, 52, 24];
+  g[10 * N + 11] = [72, 40, 18];
+  return outline(g);
+}
+
+function poisonousPotatoGrid(): Cell[] {
+  const g = blank();
+  fillShape(
+    g,
+    (x, y) => {
+      const dx = (x - 8) / 5.4;
+      const dy = (y - 8.4) / 4.1;
+      return dx * dx + dy * dy <= 1;
+    },
+    (x, y) => {
+      if (x <= 6 && y <= 8) return [150, 168, 72];
+      if (x >= 10 && y >= 10) return [72, 96, 40];
+      return [112, 132, 52];
+    },
+  );
+  for (const [x, y] of [[6, 6], [11, 10], [7, 12]] as const) g[y * N + x] = [48, 64, 28];
+  return outline(g);
+}
+
+/** A wedge of melon: red flesh and a green rind. */
+function melonSliceGrid(): Cell[] {
+  const g = blank();
+  fillShape(
+    g,
+    (x, y) => {
+      const dx = x - 3;
+      const dy = y - 13;
+      return dx >= 0 && dy <= 0 && dx * dx + dy * dy <= 70 && y >= 5;
+    },
+    (x, y) => {
+      const dx = x - 3;
+      const dy = y - 13;
+      if (dx * dx + dy * dy > 48) return [54, 132, 44];
+      return (x + y) % 3 === 0 ? [214, 52, 56] : [176, 32, 40];
+    },
+  );
+  return outline(g);
+}
+
+function sugarGrid(): Cell[] {
+  const g = blank();
+  for (const [x, y] of [
+    [6, 6],
+    [8, 7],
+    [10, 6],
+    [5, 9],
+    [7, 9],
+    [9, 10],
+    [11, 9],
+    [6, 12],
+    [8, 12],
+    [10, 13],
+  ] as const) {
+    dot(g, x, y, [246, 246, 250]);
+    dot(g, x + 1, y, [214, 214, 224]);
+  }
+  return outline(g);
+}
+
+function eggGrid(): Cell[] {
+  const g = blank();
+  fillShape(
+    g,
+    (x, y) => {
+      const dx = (x - 8) / 4.1;
+      const dy = (y - 8.6) / 5.5;
+      return dx * dx + dy * dy <= 1;
+    },
+    (x, y) => (x <= 7 && y <= 8 ? [252, 248, 238] : [210, 180, 142]),
+  );
+  return outline(g);
+}
+
+function pumpkinPieGrid(): Cell[] {
+  const g = blank();
+  fillShape(
+    g,
+    (x, y) => {
+      const dx = (x - 8) / 6.2;
+      const dy = (y - 9) / 4.4;
+      return dx * dx + dy * dy <= 1;
+    },
+    (x, y) => {
+      if (y >= 11) return [132, 74, 32];
+      if (x === 8 || y === 7) return [112, 58, 24];
+      return [214, 120, 34];
+    },
+  );
+  return outline(g);
+}
+
 function meatGrid(cooked: boolean): Cell[] {
   const g = blank();
   const base: RGB = cooked ? [150, 84, 46] : [226, 120, 128];
@@ -783,6 +1405,41 @@ function flowerGrid(petal: RGB, centre: RGB): Cell[] {
   return g;
 }
 
+/** A campfire as held and in the inventory: two crossed logs and a flame. */
+function campfireGrid(): Cell[] {
+  const g = blank();
+  const wood: RGB = [140, 92, 48];
+  const dark: RGB = [92, 58, 30];
+  const hot: RGB = [255, 220, 90];
+  const mid: RGB = [255, 140, 32];
+  const edge: RGB = [200, 60, 16];
+  for (let i = 2; i <= 13; i++) {
+    dot(g, i, 11, i % 2 ? wood : dark);
+    dot(g, i, 12, dark);
+    dot(g, 3, i, i % 2 ? dark : wood);
+    dot(g, 4, i, dark);
+    dot(g, 11, i, i % 2 ? wood : dark);
+    dot(g, 12, i, dark);
+  }
+  for (const [x, y, c] of [
+    [7, 3, hot],
+    [8, 3, hot],
+    [6, 4, mid],
+    [7, 4, hot],
+    [8, 4, hot],
+    [9, 4, mid],
+    [6, 5, edge],
+    [7, 5, mid],
+    [8, 5, mid],
+    [9, 5, edge],
+    [7, 6, edge],
+    [8, 6, mid],
+    [7, 7, edge],
+    [8, 7, edge],
+  ] as [number, number, RGB][]) dot(g, x, y, c);
+  return g;
+}
+
 function torchGrid(tip: RGB = [255, 168, 40], top: RGB = [255, 236, 130], glow: RGB | null = [255, 150, 40]): Cell[] {
   const g = blank();
   // Stem lives in columns 7-8, rows 6-15: the in-world mesh samples exactly that window.
@@ -794,7 +1451,7 @@ function torchGrid(tip: RGB = [255, 168, 40], top: RGB = [255, 236, 130], glow: 
     dot(g, x, 6, top);
     dot(g, x, 7, tip);
   }
-  // Glow, visible only in inventory icons.
+  // A few warm pixels beside the tip, so the icon reads as a flame too.
   for (const [x, y] of [
     [6, 6],
     [9, 6],
@@ -804,6 +1461,30 @@ function torchGrid(tip: RGB = [255, 168, 40], top: RGB = [255, 236, 130], glow: 
     [8, 5],
   ]) {
     if (glow) g[y * N + x] = glow;
+  }
+  return g;
+}
+
+/** The flame that stands on a torch: a teardrop, clear around it, swaying a little from frame to frame. */
+function torchFlameGrid(frame: number): Cell[] {
+  const g = blank();
+  const sway = [0, 1.1, 0.2, -1.1][frame] ?? 0;
+  const hot: RGB = [255, 246, 186];
+  const mid: RGB = [255, 168, 36];
+  const edge: RGB = [232, 78, 14];
+  const tip: RGB = [168, 28, 8];
+  for (let y = 0; y < N; y++) {
+    const up = (N - 1 - y) / 13;
+    if (up > 1) continue;
+    const lean = sway * up * up;
+    const half = up < 0.18 ? 1.3 + up * 6 : 3.6 * (1 - up) + 0.45;
+    for (let x = 0; x < N; x++) {
+      const dx = x - 7.5 - lean;
+      const e = Math.abs(dx) / half;
+      if (e > 1) continue;
+      const c = up > 0.72 ? tip : e > 0.62 ? edge : up < 0.28 && e < 0.4 ? hot : mid;
+      g[y * N + x] = shade(c, Math.floor((1 - e) * 10) - 4);
+    }
   }
   return g;
 }
@@ -1089,8 +1770,8 @@ function caveVinesGrid(berries: boolean): Cell[] {
   return g;
 }
 
-/** A small bush of dark leaves on a short trunk, studded with pink flowers. */
-function azaleaGrid(): Cell[] {
+/** A small bush of dark leaves on a short trunk. `flowers` studs it with pink blossoms. */
+function azaleaGrid(flowers = true): Cell[] {
   const g = blank();
   for (let y = 11; y < N; y++) dot(g, 7, y, shade([104, 78, 48], y % 2 ? -10 : 0));
   dot(g, 8, 13, [88, 64, 40]);
@@ -1102,10 +1783,12 @@ function azaleaGrid(): Cell[] {
       dot(g, x, y, d > 0.8 ? shade(base, -22) : y < 5 ? shade(base, 12) : base);
     }
   }
-  for (const [x, y] of [[4, 5], [9, 3], [11, 7], [6, 8], [8, 10], [3, 9], [10, 5]] as [number, number][]) {
-    if (!g[y * N + x]) continue;
-    dot(g, x, y, [240, 124, 176]);
-    dot(g, x + 1, y, [252, 190, 214]);
+  if (flowers) {
+    for (const [x, y] of [[4, 5], [9, 3], [11, 7], [6, 8], [8, 10], [3, 9], [10, 5]] as [number, number][]) {
+      if (!g[y * N + x]) continue;
+      dot(g, x, y, [240, 124, 176]);
+      dot(g, x + 1, y, [252, 190, 214]);
+    }
   }
   return g;
 }
@@ -2216,6 +2899,55 @@ function chainItemGrid(): Cell[] {
   return outline(g);
 }
 
+/** A short candle with a flame, drawn in the middle of the tile so a cross of them reads as one wick. */
+function candleGrid(wax: RGB): Cell[] {
+  const g = blank();
+  for (let y = 7; y <= 14; y++) {
+    for (let x = 6; x <= 9; x++) dot(g, x, y, shade(wax, y === 7 ? 18 : y > 12 ? -16 : x === 6 ? -8 : 0));
+  }
+  dot(g, 7, 6, [40, 32, 28]);
+  dot(g, 8, 6, [40, 32, 28]);
+  const flame: [number, number, RGB][] = [
+    [7, 5, [255, 236, 140]],
+    [8, 5, [255, 210, 70]],
+    [7, 4, [255, 170, 40]],
+    [8, 4, [255, 140, 30]],
+    [7, 3, [255, 90, 30]],
+    [8, 2, [255, 240, 200]],
+  ];
+  for (const [x, y, c] of flame) dot(g, x, y, c);
+  return g;
+}
+
+/** A flag on a pole. The cloth is the dye colour, with a lighter stripe so two banners don't read as one block. */
+function bannerGrid(cloth: RGB): Cell[] {
+  const g = blank();
+  const pole: RGB = [92, 64, 40];
+  for (let y = 1; y <= 15; y++) {
+    dot(g, 2, y, shade(pole, y % 4 === 0 ? -12 : 0));
+    dot(g, 3, y, shade(pole, 8));
+  }
+  for (let y = 2; y <= 12; y++) {
+    for (let x = 4; x <= 13; x++) {
+      const stripe = y === 6 || y === 7;
+      dot(g, x, y, shade(cloth, stripe ? 28 : x === 13 ? -18 : 0));
+    }
+  }
+  return g;
+}
+
+/** The picture of an empty flower pot. The pot in the world is a clay model; this is only the icon. */
+function flowerPotGrid(): Cell[] {
+  const g = blank();
+  const clay: RGB = [158, 98, 78];
+  for (let y = 8; y <= 14; y++) {
+    const inset = y > 12 ? 4 : y > 10 ? 5 : 4;
+    for (let x = inset; x <= 15 - inset; x++) dot(g, x, y, shade(clay, y === 8 ? 16 : x === inset ? -12 : 0));
+  }
+  for (let x = 3; x <= 12; x++) dot(g, x, 7, shade(clay, 10));
+  return outline(g);
+}
+
 const BUILDERS: Record<string, () => Cell[]> = {
   lantern: () => lanternSideGrid(false, false),
   lantern_hang: () => lanternSideGrid(false, true),
@@ -2249,6 +2981,8 @@ const BUILDERS: Record<string, () => Cell[]> = {
   jungle_sapling: () => saplingGrid([44, 140, 36], [88, 68, 36]),
   dark_oak_sapling: () => saplingGrid([36, 96, 40], [60, 42, 26]),
   cherry_sapling: () => saplingGrid([246, 176, 204], [94, 58, 66]),
+  pale_oak_sapling: () => saplingGrid([186, 198, 180], [168, 156, 132]),
+  mangrove_propagule: () => saplingGrid([62, 122, 72], [96, 62, 44]),
   fern: fernGrid,
   tulip_red: () => tulipGrid([214, 36, 40]),
   tulip_orange: () => tulipGrid([240, 124, 28]),
@@ -2266,7 +3000,8 @@ const BUILDERS: Record<string, () => Cell[]> = {
   pink_petals: petalsGrid,
   cave_vines: () => caveVinesGrid(false),
   cave_vines_berries: () => caveVinesGrid(true),
-  flowering_azalea: azaleaGrid,
+  flowering_azalea: () => azaleaGrid(true),
+  azalea: () => azaleaGrid(false),
   spore_blossom: sporeBlossomGrid,
   stalagmite_base: () => dripstoneGrid(false, false),
   stalagmite_tip: () => dripstoneGrid(true, false),
@@ -2302,6 +3037,10 @@ const BUILDERS: Record<string, () => Cell[]> = {
   rose: () => flowerGrid([204, 28, 40], [250, 214, 60]),
   dandelion: () => flowerGrid([250, 214, 40], [214, 150, 20]),
   torch: () => torchGrid(),
+  torch_flame_0: () => torchFlameGrid(0),
+  torch_flame_1: () => torchFlameGrid(1),
+  torch_flame_2: () => torchFlameGrid(2),
+  torch_flame_3: () => torchFlameGrid(3),
   redstone_torch: () => torchGrid([230, 40, 28], [255, 110, 90], [220, 40, 30]),
   redstone_torch_off: () => torchGrid([92, 28, 24], [120, 52, 46], null),
   redstone: redstoneGrid,
@@ -2309,6 +3048,26 @@ const BUILDERS: Record<string, () => Cell[]> = {
   wheat_1: () => wheatGrid(1),
   wheat_2: () => wheatGrid(2),
   wheat_3: () => wheatGrid(3),
+  potato_0: () => potatoCropGrid(0),
+  potato_1: () => potatoCropGrid(1),
+  potato_2: () => potatoCropGrid(2),
+  potato_3: () => potatoCropGrid(3),
+  carrot_0: () => carrotCropGrid(0),
+  carrot_1: () => carrotCropGrid(1),
+  carrot_2: () => carrotCropGrid(2),
+  carrot_3: () => carrotCropGrid(3),
+  melon_stem_0: () => stemGrid(0, [86, 170, 48]),
+  melon_stem_1: () => stemGrid(1, [86, 170, 48]),
+  melon_stem_2: () => stemGrid(2, [86, 170, 48]),
+  melon_stem_3: () => stemGrid(3, [86, 170, 48]),
+  pumpkin_stem_0: () => stemGrid(0, [214, 126, 32]),
+  pumpkin_stem_1: () => stemGrid(1, [214, 126, 32]),
+  pumpkin_stem_2: () => stemGrid(2, [214, 126, 32]),
+  pumpkin_stem_3: () => stemGrid(3, [214, 126, 32]),
+  beetroot_0: () => beetrootCropGrid(0),
+  beetroot_1: () => beetrootCropGrid(1),
+  beetroot_2: () => beetrootCropGrid(2),
+  beetroot_3: () => beetrootCropGrid(3),
   wheat_seeds: seedsGrid,
   wheat: wheatItemGrid,
   bread: breadGrid,
@@ -2317,6 +3076,14 @@ const BUILDERS: Record<string, () => Cell[]> = {
   gunpowder: powderGrid,
   rotten_flesh: fleshGrid,
   stick: stickGrid,
+  fishing_rod: () => fishingRodGrid(true),
+  fishing_rod_cast: () => fishingRodGrid(false),
+  raw_cod: () => codGrid(false),
+  cooked_cod: () => codGrid(true),
+  raw_salmon: () => salmonGrid(false),
+  cooked_salmon: () => salmonGrid(true),
+  tropical_fish: tropicalFishGrid,
+  pufferfish: pufferfishGrid,
   coal: coalGrid,
   raw_iron: () => rawOreGrid([222, 170, 140]),
   raw_gold: () => rawOreGrid([250, 214, 56]),
@@ -2347,6 +3114,39 @@ const BUILDERS: Record<string, () => Cell[]> = {
   jewel_rift: () => jewelGrid('rift'),
   jewel_bloom: () => jewelGrid('bloom'),
   apple: appleGrid,
+  potato: potatoGrid,
+  baked_potato: bakedPotatoGrid,
+  poisonous_potato: poisonousPotatoGrid,
+  melon_slice: melonSliceGrid,
+  sugar: sugarGrid,
+  egg: eggGrid,
+  pumpkin_pie: pumpkinPieGrid,
+  carrot: carrotGrid,
+  melon_seeds: () => cropSeedGrid([214, 206, 150]),
+  pumpkin_seeds: () => cropSeedGrid([232, 196, 110]),
+  beetroot_seeds: () => cropSeedGrid([140, 36, 48]),
+  beetroot: beetrootGrid,
+  bowl: () => bowlGrid(null),
+  beetroot_soup: () => bowlGrid([132, 28, 44]),
+  mushroom_stew: () => bowlGrid([150, 96, 42]),
+  rabbit_stew: () => bowlGrid([168, 78, 42]),
+  cocoa_0: () => cocoaPodGrid(0),
+  cocoa_1: () => cocoaPodGrid(1),
+  cocoa_2: () => cocoaPodGrid(2),
+  cocoa_beans: cocoaBeansGrid,
+  cookie: cookieGrid,
+  cake_top: cakeTopGrid,
+  cake_side: cakeSideGrid,
+  cake_bottom: cakeBottomGrid,
+  cake: cakeGrid,
+  milk_bucket: () => bucketGrid([244, 242, 232]),
+  sweet_berry_0: () => sweetBerryBushGrid(0),
+  sweet_berry_1: () => sweetBerryBushGrid(1),
+  sweet_berry_2: () => sweetBerryBushGrid(2),
+  sweet_berry_3: () => sweetBerryBushGrid(3),
+  sweet_berries: sweetBerriesGrid,
+  glow_berries: glowBerriesGrid,
+  campfire: campfireGrid,
   raw_meat: () => meatGrid(false),
   cooked_meat: () => meatGrid(true),
 };
@@ -2357,6 +3157,14 @@ DYE_NAMES.forEach((n, i) => {
   BUILDERS[`bed_${n}`] = () => bedGrid([c[0] * 0.9, c[1] * 0.9, c[2] * 0.9]);
 });
 DYE_NAMES.forEach((n, i) => (BUILDERS[`dye_${n}`] = () => dyeGrid(DYE_RGB[i] as unknown as RGB)));
+BUILDERS.candle = () => candleGrid([236, 224, 196]);
+DYE_NAMES.forEach((n, i) => {
+  const c = DYE_RGB[i] as unknown as RGB;
+  BUILDERS[`candle_${n}`] = () => candleGrid(c);
+  BUILDERS[`banner_${n}`] = () => bannerGrid(c);
+});
+BUILDERS.flower_pot_item = flowerPotGrid;
+BUILDERS.armor_stand = armorStandGrid;
 for (const m of TOOL_MATERIALS) for (const k of TOOL_KINDS) BUILDERS[`${m}_${k}`] = () => toolGrid(k, m);
 for (const m of ARMOR_MATERIALS) for (const s of ARMOR_SLOTS) BUILDERS[`${m}_${s}`] = () => armorGrid(s, m);
 for (const c of OUTFIT_CLASSES) ARMOR_SLOTS.forEach((s, i) => (BUILDERS[`outfit_${c}_${s}`] = () => outfitGrid(c, i)));

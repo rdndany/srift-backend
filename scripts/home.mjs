@@ -39,24 +39,24 @@ page.on('pageerror', (e) => errors.push(e.message));
 const HOME = `${url}/?home&debug&nomobs`;
 const sc = (fn, ...args) => page.evaluate(fn, ...args);
 const ready = () => page.waitForFunction(() => window.__solrift?.isReady?.(), undefined, { timeout: 120000 });
-// The front page has one big PLAY GAME button; it opens the play page (single player or multiplayer, then the modes or the realm). The character step comes last, right before the game.
+// The front page has one big PLAY GAME button; it opens the game page, /game: PLAY asks single player or multiplayer (and the mode) in a dialog, then /game is the character lobby with one Play button.
 // chooseCharacter makes a Warrior: 28 health and a fifth less damage taken (the numbers of the vanilla game are for a character with no class).
 const WARRIOR_HP = 28;
 const WARRIOR_TAKEN = 0.8;
-const toPlayPage = async () => {
-  await openPlay(page);
-  await page.waitForSelector('#single-panel[data-ready=true]'); // (the signed-in character's saved worlds are listed)
+const toPlayPage = async (mode = 'survival', way = 'single') => {
+  await openPlay(page, { mode, way });
+  if (way === 'single') await page.waitForSelector('#single-panel[data-ready=true]'); // (the signed-in character's saved worlds are listed)
 };
-/** After a world was chosen: the character step, then the game. */
+/** Who plays (a wallet, signing in and making its character the first time), then Play. */
 const play = () => chooseCharacter(page, 'wallet');
-const goHome = async () => {
+const goHome = async (mode = 'survival', way = 'single') => {
   await page.goto(HOME, { waitUntil: 'load' });
-  await toPlayPage();
+  await toPlayPage(mode, way);
 };
-const card = (mode) => `#home .mode-card[data-mode="${mode}"]`;
-const pick = (mode) => page.click(card(mode));
-const panelBtn = (cls) => `#single-panel button.${cls}`;
-const worldRows = () => page.$$eval('#home .world-list li', (els) => els.map((e) => ({ seed: e.dataset.seed, text: e.textContent })));
+// (The mode is chosen in PLAY's dialog, so picking one opens the lobby again with it.)
+const pick = (mode) => goHome(mode);
+const panelBtn = (cls) => (cls === 'continue' ? '.lb-continue' : '#play-go');
+const worldRows = () => page.$$eval('#home .lb-worlds li', (els) => els.map((e) => ({ seed: e.dataset.seed, text: e.textContent })));
 const shot = async (name) => {
   await page.screenshot({ path: `${outDir}/${name}.png` });
   console.log('saved', name);
@@ -65,75 +65,83 @@ const typeSeed = async (seed) => {
   await page.fill('#seed-input', String(seed));
 };
 const startNew = async (mode, seed) => {
-  if (seed !== undefined) await typeSeed(seed);
   await pick(mode);
-  await page.click(panelBtn('new-world'));
+  if (seed !== undefined) await typeSeed(seed);
   await play();
   await ready();
 };
 
 // ---- 1. the title screen -----------------------------------------------------------------
-console.log('expansions');
+console.log('front page');
 await page.goto(HOME, { waitUntil: 'load' });
 await page.waitForSelector('.wow-play', { timeout: 30000 });
-const xp = await page.$$eval('#l-expansions .xp-card', (els) => els.map((e) => ({ id: e.id, cls: e.className, text: e.textContent ?? '' })));
-check(xp.length >= 2, `the front page lists the core game and its expansions (${xp.length})`);
-check(xp[0]?.cls.includes('live') && xp[0].text.includes('Play it now'), 'the core game is live');
-check(xp.slice(1).every((c) => !c.cls.includes('live') && c.text.includes('Not playable yet')), 'expansions that are not built say they are not playable');
-check(xp.some((c) => c.text.includes('Embers of the Hollow King') && c.text.includes('Boss') && c.text.includes('Dungeon')), 'an expansion lists its bosses and dungeons');
-check((await page.textContent('#hero-next'))?.includes('Embers of the Hollow King'), 'the hero names the next expansion');
+check((await page.$('#l-expansions')) !== null, 'the front page has an expansions section');
+check((await page.$('.site-portrait .char-preview')) === null, 'with no wallet character, the portrait is empty');
+check((await page.textContent('.site-nav'))?.includes('Play'), 'the menu names Play');
 check(/SolRift/i.test(await page.title()), 'the page is called SolRift');
 await page.screenshot({ path: `${outDir}/home-top.png` });
-await page.evaluate(() => document.getElementById('l-expansions')?.scrollIntoView());
-await page.waitForTimeout(1200);
-await page.screenshot({ path: `${outDir}/home-expansions.png` });
 
 console.log('title screen');
-await goHome();
-const text = await page.$eval('#home', (e) => e.textContent);
-check((await page.$$('#home .mode-card')).length === 3, 'three game mode cards');
-for (const t of ['The classic experience', 'Unlimited building', 'Extreme difficulty']) check(text.includes(t), `says "${t}"`);
-check(text.includes('Single player') && text.includes('Multiplayer'), 'single player and multiplayer to choose from');
-// Each mode explains itself when picked.
+await page.goto(HOME, { waitUntil: 'load' });
+await page.waitForSelector('.wow-play');
+await page.click('.wow-play');
+await page.waitForSelector('#way-dialog');
+check(await page.isVisible('#pick-single') && await page.isVisible('#pick-multi'), 'PLAY GAME opens a dialog with Single player and Multiplayer');
+await page.keyboard.press('Escape');
+check(!(await page.isVisible('#way-dialog')), 'Escape closes it');
+await page.click('.wow-play');
+await page.click('#pick-single');
+await page.waitForSelector('#pick-mode-survival');
+const dlgText = await page.$eval('#way-dialog', (e) => e.textContent);
+check((await page.$$('#way-dialog [data-mode]')).length === 3, 'single player asks for the game mode: three cards');
+for (const t of ['The classic experience', 'Unlimited building', 'Extreme difficulty']) check(dlgText.includes(t), `the dialog says "${t}"`);
+check(new URL(page.url()).pathname === '/', 'nothing has left the front page yet');
+await page.click('#way-back');
+check(await page.isVisible('#pick-multi'), 'Back returns to single player or multiplayer');
+await page.click('#pick-single');
+await page.click('#pick-mode-survival');
+await page.waitForSelector('#play-go');
+check(new URL(page.url()).pathname === '/game' && new URL(page.url()).hash === '' && !page.url().includes('way=') && !page.url().includes('pick='), 'then the plain game address: /game, no steps and no hash');
+check((await page.$('#way-dialog')) === null, 'with no dialog on it');
+check(await page.isVisible('#who-guest') && await page.isVisible('#who-wallet'), 'the lobby offers guest or Solana wallet');
+check((await page.$$('#cc-stage canvas.char-preview')).length === 1, 'with the character in the middle');
+check((await page.textContent('#dest-title')) === 'Single player' && (await page.textContent('#lb-how')).includes('Survival'), 'and says what is being played');
+check(await page.isVisible('#play-go'), 'with one Play button');
+// Each mode explains itself (the mode is what the dialog chose).
 const detail = async (mode) => {
   await pick(mode);
-  return page.$eval('#mode-detail', (e) => e.textContent);
+  return page.$eval('#lb-how', (e) => e.textContent);
 };
 const survivalText = await detail('survival');
-check(survivalText.includes('Mine blocks and collect resources'), 'survival lists what you can do');
-check(survivalText.includes('Explore caves and villages'), 'promises caves and villages');
-check(!/Explore caves, villages, the Nether/.test(text + survivalText), 'does not promise the Nether or the End');
-check((await detail('creative')).includes('Fly by double-tapping jump'), 'creative explains flying');
+check(survivalText.includes('collect resources'), 'survival explains itself');
+const text = survivalText;
+check(!/Explore caves, villages, the Nether/.test(text), 'does not promise the Nether or the End');
+check((await detail('creative')).includes('every block and item'), 'creative explains itself');
 const hardText = await detail('hardcore');
 check(hardText.includes('permanent death') || hardText.includes('One life only'), 'hardcore explains one life');
 await pick('survival');
 check((await worldRows()).length === 0, 'no saved worlds on a fresh device');
 check((await page.$$(panelBtn('continue'))).length === 0, 'nothing to continue yet');
 check(await page.isVisible('#seed-input'), 'a seed box');
-await page.click('#way-multi');
-check(await page.isVisible('#online-link-home'), 'a button to join the realm');
-check(!(await page.$('#player-name')) && !(await page.$('input#player-name')), 'no name here: the character is made after the realm is chosen');
+await goHome('survival', 'multi');
+check(await page.isVisible('#multi-panel') && await page.isVisible('#who-guest'), 'multiplayer shows its realm, and still who plays');
 check(!(await page.$('#adventure-card')) && !(await page.$('#adventure-begin')), 'Adventure is not offered in single player');
-check((await page.$$('#multi-panel .realm-row')).length === 1, 'multiplayer has one realm');
-check((await page.textContent('#multi-panel .realm-name')) === 'Dawnwatch', 'and it is the Adventure one');
+check((await page.textContent('#multi-panel h3')) === 'Dawnwatch', 'the one realm is the Adventure one');
 check(!(await page.textContent('#multi-panel'))?.includes('SolRift Realm'), 'there is no plain SolRift Realm any more');
 check((await page.textContent('#adventure-about'))?.includes('quests'), 'it explains the quests and the dungeon');
+check((await page.textContent('#dest-title'))?.includes('Multiplayer'), 'the lobby says it leads to multiplayer');
 await page.screenshot({ path: `${outDir}/home-adventure.png`, fullPage: false });
-check(page.url().endsWith('#play'), 'the play page has its own address');
-await page.click('#online-link-home');
-check(await page.isVisible('#who-wallet-card') && page.url().endsWith('#who'), 'Join realm leads to the character step, before connecting');
-check((await page.textContent('#dest-chip'))?.includes('Multiplayer') && (await page.textContent('#dest-chip'))?.includes('Dawnwatch'), 'which says it leads to the Dawnwatch realm');
 await page.click('#back-home');
-check(await page.isVisible('#way-multi') && page.url().endsWith('#play'), 'Back from the character step returns to the play page');
-check(await page.isVisible('#multi-panel'), 'with the realm still chosen');
-await page.click('#way-single');
-await page.click('#back-home');
-check(await page.isVisible('.wow-play'), 'Back returns to the front page with the PLAY GAME button');
+await page.waitForSelector('.wow-play');
+check(new URL(page.url()).pathname === '/', 'Back returns to the front page');
 check((await page.$('.hero-logo')) !== null, 'the front page shows the game logo');
-await toPlayPage();
-check(await page.isVisible('#way-single') && await page.isVisible('#way-multi'), 'PLAY GAME opens Single player and Multiplayer');
-check((await page.$('#who-wallet-card')) === null, 'with no character step in the way');
-check((await sc(() => window.__solrift === undefined || true)) === true, 'the page is alive');
+// A mode badge on the front page lights its mode in the dialog.
+await page.click('#home .fp-badge >> text=Hardcore');
+await page.click('#pick-single');
+check((await page.getAttribute('#pick-mode-hardcore', 'class'))?.includes('lit') === true, 'a mode badge lights its mode in the dialog');
+await page.click('#pick-mode-hardcore');
+await page.waitForSelector('#single-panel[data-ready=true]');
+check((await page.getAttribute('#single-panel', 'data-mode')) === 'hardcore', 'and the lobby plays that mode');
 await shot('home');
 
 // ---- 2. hardcore: one life -----------------------------------------------------------------
@@ -179,7 +187,6 @@ check(rows.length === 1 && rows[0].seed === '4242' && /Hardcore/.test(rows[0].te
 await shot('home-with-world');
 await pick('hardcore');
 await page.click(panelBtn('continue'));
-await play();
 await ready();
 const again = await sc(() => window.__solrift.hardcore());
 check(again.hardcore === true && again.screen === 'dead', `still dead after a reload (${JSON.stringify(again)})`);
@@ -204,9 +211,10 @@ await toPlayPage();
 await until(async () => (await worldRows()).length > 0); // (the save finishes in the background)
 rows = await worldRows();
 check(rows.length === 1, 'back at the title screen, the world is still listed');
-await page.click('#home .world-list li .delete');
-check((await page.textContent('#home .world-list li .delete')).includes('Really'), 'deleting asks twice');
-await page.click('#home .world-list li .delete');
+await page.click('.gp-worlds summary'); // (the list opens from "Your worlds")
+await page.click('#home .lb-worlds li .delete');
+check((await page.textContent('#home .lb-worlds li .delete')).includes('Sure'), 'deleting asks twice');
+await page.click('#home .lb-worlds li .delete');
 check(await until(async () => (await worldRows()).length === 0), 'the world is deleted');
 
 // ---- 3. creative ------------------------------------------------------------------------
@@ -266,16 +274,13 @@ rows = await worldRows();
 check(rows.length === 2, 'two worlds listed');
 await pick('creative');
 await page.click(panelBtn('continue'));
-await play();
 await ready();
 check((await sc(() => window.__solrift.mode())) === 'creative', 'Continue reopens the creative world as creative');
 
 // Typing a seed that already exists reopens that world.
-await goHome();
+await goHome('hardcore');
 await page.fill('#seed-input', '31337');
-check(await until(() => page.isVisible('#home .seed-note')), 'typing an existing seed says so');
-await pick('hardcore');
-await page.click(panelBtn('new-world'));
+check(await until(() => page.isVisible('#home .lb-hint:has-text("already have")')), 'typing an existing seed says so');
 await play();
 await ready();
 check((await sc(() => window.__solrift.hardcore())).hardcore === false, 'a new hardcore world on an old seed reopens the old world');

@@ -203,8 +203,9 @@ export class PostFx {
     ao.configuration.denoiseSamples = 6;
     ao.configuration.denoiseIterations = 1;
     ao.configuration.halfRes = true;
-    // (Looking for see-through things to draw again would walk the whole scene each frame.)
-    ao.configuration.transparencyAware = false;
+    // See-through things (water above all) are drawn again on their own, and the occlusion fades out under them: otherwise the blocks of the
+    // sea floor, seen through a lake, would print their dark creases on the surface of the water, and the lake would show squares.
+    ao.configuration.transparencyAware = true;
     // The occlusion pass composes into a buffer of its own that is not labelled sRGB, while the picture it reads is (8 bits, sRGB): it
     // reads the colours back as linear light and stores them linear in 8 bits, where all the dark colours (the night sky, the shade)
     // are crushed into a few bands and black. Label the buffer the same as the picture and it is stored the same way.

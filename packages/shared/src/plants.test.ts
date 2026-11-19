@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ATLAS_COLS,
   ATLAS_ROWS,
+  ATLAS_TILES,
   B,
   BLOCKS,
   CHUNK_SIZE,
@@ -13,8 +14,11 @@ import {
   blockDrop,
   blockDrops,
   blockIndex,
+  SMELTING,
   breakTime,
+  cakeId,
   canStayAt,
+  cocoaId,
   computeLight,
   findRecipe,
   getItem,
@@ -174,6 +178,158 @@ describe('farming', () => {
     expect(blockDrops(BLOCKS[B.STONE], null)).toEqual([]);
   });
 
+  it('a potato plants on farmland, grows, and a ripe one drops two to five', () => {
+    const potato = getItem(I.POTATO);
+    expect(potato.block).toBe(B.POTATO_0);
+    expect(potato.food).toEqual({ hunger: 1, saturation: 0.6 });
+    const w = reader({ '1,0,1': B.FARMLAND });
+    expect(canStayAt(B.POTATO_0, w, 1, 1, 1)).toBe(true);
+    expect(canStayAt(B.POTATO_0, w, 2, 1, 2)).toBe(false);
+    expect(blockDrops(BLOCKS[B.POTATO_1], null)).toEqual([{ id: I.POTATO, count: 1 }]);
+    expect(blockDrops(BLOCKS[B.POTATO_3], null, () => 0.99)).toEqual([{ id: I.POTATO, count: 5 }]);
+    expect(blockDrops(BLOCKS[B.POTATO_3], null, () => 0)).toEqual([
+      { id: I.POTATO, count: 2 },
+      { id: I.POISONOUS_POTATO, count: 1 },
+    ]);
+    expect(SMELTING.get(I.POTATO)).toBe(I.BAKED_POTATO);
+    expect(getItem(I.BAKED_POTATO).food).toEqual({ hunger: 5, saturation: 6 });
+    expect(getItem(I.POISONOUS_POTATO).food?.poison).toEqual({ chance: 0.6, seconds: 5 });
+    expect(getItem(I.POISONOUS_POTATO).food?.always).toBe(true);
+  });
+
+  it('a carrot plants on farmland, and a ripe one drops one to four', () => {
+    const carrot = getItem(I.CARROT);
+    expect(carrot.block).toBe(B.CARROT_0);
+    expect(carrot.food).toEqual({ hunger: 3, saturation: 3.6 });
+    const w = reader({ '1,0,1': B.FARMLAND });
+    expect(canStayAt(B.CARROT_0, w, 1, 1, 1)).toBe(true);
+    expect(canStayAt(B.CARROT_0, w, 2, 1, 2)).toBe(false);
+    expect(blockDrops(BLOCKS[B.CARROT_1], null)).toEqual([{ id: I.CARROT, count: 1 }]);
+    expect(blockDrops(BLOCKS[B.CARROT_3], null, () => 0)).toEqual([{ id: I.CARROT, count: 1 }]);
+    expect(blockDrops(BLOCKS[B.CARROT_3], null, () => 0.99)).toEqual([{ id: I.CARROT, count: 4 }]);
+  });
+
+  it('melon seeds and pumpkin seeds plant a stem, and a ripe stem drops seeds', () => {
+    expect(getItem(I.MELON_SEEDS).block).toBe(B.MELON_STEM_0);
+    expect(getItem(I.PUMPKIN_SEEDS).block).toBe(B.PUMPKIN_STEM_0);
+    const w = reader({ '1,0,1': B.FARMLAND });
+    expect(canStayAt(B.MELON_STEM_0, w, 1, 1, 1)).toBe(true);
+    expect(canStayAt(B.PUMPKIN_STEM_0, w, 2, 1, 2)).toBe(false);
+    expect(blockDrops(BLOCKS[B.MELON_STEM_1], null)).toEqual([{ id: I.MELON_SEEDS, count: 1 }]);
+    expect(blockDrops(BLOCKS[B.MELON_STEM_3], null, () => 0)).toEqual([{ id: I.MELON_SEEDS, count: 1 }]);
+    expect(blockDrops(BLOCKS[B.MELON_STEM_3], null, () => 0.99)).toEqual([{ id: I.MELON_SEEDS, count: 3 }]);
+    expect(blockDrops(BLOCKS[B.PUMPKIN_STEM_2], null)).toEqual([{ id: I.PUMPKIN_SEEDS, count: 1 }]);
+    expect(blockDrops(BLOCKS[B.PUMPKIN_STEM_3], null, () => 0.99)).toEqual([{ id: I.PUMPKIN_SEEDS, count: 3 }]);
+    expect(findRecipe([makeStack(I.MELON_SLICE)], 1, 1)?.result).toEqual({ id: I.MELON_SEEDS, count: 1 });
+    expect(findRecipe([makeStack(B.PUMPKIN)], 1, 1)?.result).toEqual({ id: I.PUMPKIN_SEEDS, count: 4 });
+  });
+
+  it('beetroot seeds plant a crop, a ripe one drops the root and seeds, and six roots make soup', () => {
+    expect(getItem(I.BEETROOT_SEEDS).block).toBe(B.BEETROOT_0);
+    expect(getItem(I.BEETROOT).food).toEqual({ hunger: 1, saturation: 1.2 });
+    expect(getItem(I.BEETROOT_SOUP).food).toEqual({ hunger: 6, saturation: 7.2, leaves: I.BOWL });
+    const w = reader({ '1,0,1': B.FARMLAND });
+    expect(canStayAt(B.BEETROOT_0, w, 1, 1, 1)).toBe(true);
+    expect(canStayAt(B.BEETROOT_0, w, 2, 1, 2)).toBe(false);
+    expect(blockDrops(BLOCKS[B.BEETROOT_1], null)).toEqual([{ id: I.BEETROOT_SEEDS, count: 1 }]);
+    expect(blockDrops(BLOCKS[B.BEETROOT_3], null, () => 0)).toEqual([
+      { id: I.BEETROOT, count: 1 },
+      { id: I.BEETROOT_SEEDS, count: 1 },
+    ]);
+    expect(blockDrops(BLOCKS[B.BEETROOT_3], null, () => 0.99)).toEqual([
+      { id: I.BEETROOT, count: 1 },
+      { id: I.BEETROOT_SEEDS, count: 3 },
+    ]);
+    expect(findRecipe([makeStack(B.PLANKS), null, makeStack(B.PLANKS), null, makeStack(B.PLANKS), null], 3, 2)?.result).toEqual({ id: I.BOWL, count: 4 });
+    const soup = [I.BOWL, I.BEETROOT, I.BEETROOT, I.BEETROOT, I.BEETROOT, I.BEETROOT, I.BEETROOT, null, null].map((id) => (id ? makeStack(id) : null));
+    expect(findRecipe(soup, 3, 3)?.result).toEqual({ id: I.BEETROOT_SOUP, count: 1 });
+  });
+
+  it('a red mushroom and a brown one in a bowl make stew', () => {
+    expect(getItem(I.MUSHROOM_STEW).food).toEqual({ hunger: 6, saturation: 7.2, leaves: I.BOWL });
+    expect(getItem(I.MUSHROOM_STEW).maxStack).toBe(1);
+    const stew = [I.BOWL, B.RED_MUSHROOM, B.BROWN_MUSHROOM].map((id) => makeStack(id));
+    expect(findRecipe(stew, 3, 1)?.result).toEqual({ id: I.MUSHROOM_STEW, count: 1 });
+    expect(findRecipe([makeStack(I.BOWL), makeStack(B.RED_MUSHROOM)], 2, 1)).toBeNull();
+  });
+
+  it('a bowl, baked potato, carrot, cooked rabbit and a brown mushroom make rabbit stew', () => {
+    expect(getItem(I.RABBIT_STEW).food).toEqual({ hunger: 10, saturation: 12, leaves: I.BOWL });
+    expect(getItem(I.RABBIT_STEW).maxStack).toBe(1);
+    const cell = (id: number | null) => (id ? makeStack(id) : null);
+    const stew = [null, I.BOWL, null, I.CARROT, I.COOKED_RABBIT, B.BROWN_MUSHROOM, null, I.BAKED_POTATO, null].map(cell);
+    expect(findRecipe(stew, 3, 3)?.result).toEqual({ id: I.RABBIT_STEW, count: 1 });
+    expect(findRecipe([I.BOWL, I.CARROT, I.COOKED_RABBIT, B.BROWN_MUSHROOM, I.BAKED_POTATO].map((id) => makeStack(id)), 5, 1)).toBeNull();
+  });
+
+  it('cocoa beans stick to a jungle log, a ripe pod drops three, and wheat plus cocoa makes cookies', () => {
+    expect(getItem(I.COCOA_BEANS).block).toBe(cocoaId(0, 0));
+    expect(getItem(I.COOKIE).food).toEqual({ hunger: 2, saturation: 0.4 });
+    const log = reader({ '0,1,1': B.JUNGLE_LOG });
+    expect(canStayAt(cocoaId(1, 0), log, 1, 1, 1)).toBe(true);
+    expect(canStayAt(cocoaId(1, 2), log, 1, 1, 1)).toBe(true);
+    expect(canStayAt(cocoaId(0, 0), log, 1, 1, 1)).toBe(false);
+    expect(canStayAt(cocoaId(1, 0), reader({ '0,1,1': B.LOG }), 1, 1, 1)).toBe(false);
+    expect(placementFor(cocoaId(0, 0), 1, 0, 0)).toBe(cocoaId(1, 0));
+    expect(placementFor(cocoaId(0, 0), 0, 1, 0)).toBeNull();
+    expect(blockDrops(BLOCKS[cocoaId(1, 0)], null)).toEqual([{ id: I.COCOA_BEANS, count: 1 }]);
+    expect(blockDrops(BLOCKS[cocoaId(1, 1)], null)).toEqual([{ id: I.COCOA_BEANS, count: 1 }]);
+    expect(blockDrops(BLOCKS[cocoaId(2, 2)], null)).toEqual([{ id: I.COCOA_BEANS, count: 3 }]);
+    expect(findRecipe([makeStack(I.WHEAT), makeStack(I.COCOA_BEANS)], 2, 1)?.result).toEqual({ id: I.COOKIE, count: 8 });
+  });
+
+  it('a cake sits on solid ground, drops nothing, and three buckets of milk bake one', () => {
+    expect(getItem(I.CAKE).block).toBe(cakeId(0));
+    expect(getItem(I.MILK_BUCKET).food).toEqual({ hunger: 0, saturation: 0, always: true, leaves: I.BUCKET, clears: true });
+    expect(canStayAt(cakeId(0), reader(), 1, 1, 1)).toBe(true);
+    expect(canStayAt(cakeId(4), reader(), 1, 1, 1)).toBe(true);
+    expect(canStayAt(cakeId(0), reader(), 1, 2, 1)).toBe(false);
+    expect(canStayAt(cakeId(0), reader({ '1,0,1': cakeId(0) }), 1, 1, 1)).toBe(false);
+    expect(blockDrops(BLOCKS[cakeId(0)], null)).toEqual([]);
+    expect(blockDrops(BLOCKS[cakeId(6)], null)).toEqual([]);
+    const baked = [I.MILK_BUCKET, I.MILK_BUCKET, I.MILK_BUCKET, I.SUGAR, I.EGG, I.SUGAR, I.WHEAT, I.WHEAT, I.WHEAT].map((id) => makeStack(id));
+    expect(findRecipe(baked, 3, 3)?.result).toEqual({ id: I.CAKE, count: 1 });
+  });
+
+  it('sweet berries plant on grass or dirt, and a ripe bush drops a handful', () => {
+    expect(getItem(I.SWEET_BERRIES).block).toBe(B.SWEET_BERRY_0);
+    expect(getItem(I.SWEET_BERRIES).food).toEqual({ hunger: 2, saturation: 0.4 });
+    expect(canStayAt(B.SWEET_BERRY_0, reader({ '1,0,1': B.GRASS }), 1, 1, 1)).toBe(true);
+    expect(canStayAt(B.SWEET_BERRY_0, reader({ '1,0,1': B.DIRT }), 1, 1, 1)).toBe(true);
+    expect(canStayAt(B.SWEET_BERRY_0, reader({ '1,0,1': B.STONE }), 1, 1, 1)).toBe(false);
+    expect(blockDrops(BLOCKS[B.SWEET_BERRY_1], null)).toEqual([{ id: I.SWEET_BERRIES, count: 1 }]);
+    expect(blockDrops(BLOCKS[B.SWEET_BERRY_3], null, () => 0)).toEqual([{ id: I.SWEET_BERRIES, count: 2 }]);
+    expect(blockDrops(BLOCKS[B.SWEET_BERRY_3], null, () => 0.99)).toEqual([{ id: I.SWEET_BERRIES, count: 3 }]);
+  });
+
+  it('glow berries hang from a ceiling, and a vine with berries drops them', () => {
+    expect(getItem(I.GLOW_BERRIES).block).toBe(B.CAVE_VINES);
+    expect(getItem(I.GLOW_BERRIES).food).toEqual({ hunger: 2, saturation: 0.4 });
+    expect(canStayAt(B.CAVE_VINES, reader({ '1,2,1': B.STONE }), 1, 1, 1)).toBe(true);
+    expect(canStayAt(B.CAVE_VINES, reader({ '1,2,1': B.CAVE_VINES_BERRIES }), 1, 1, 1)).toBe(true);
+    expect(canStayAt(B.CAVE_VINES, reader(), 1, 1, 1)).toBe(false);
+    expect(placementFor(B.CAVE_VINES, 0, -1, 0)).toBe(B.CAVE_VINES);
+    expect(placementFor(B.CAVE_VINES, 0, 1, 0)).toBeNull();
+    expect(blockDrops(BLOCKS[B.CAVE_VINES], null)).toEqual([{ id: I.GLOW_BERRIES, count: 1 }]);
+    expect(blockDrops(BLOCKS[B.CAVE_VINES_BERRIES], null)).toEqual([{ id: I.GLOW_BERRIES, count: 1 }]);
+  });
+
+  it('a melon breaks into slices, and a pumpkin bakes into a pie', () => {
+    expect(blockDrops(BLOCKS[B.MELON], null, () => 0)).toEqual([{ id: I.MELON_SLICE, count: 3 }]);
+    expect(blockDrops(BLOCKS[B.MELON], null, () => 0.99)).toEqual([{ id: I.MELON_SLICE, count: 7 }]);
+    expect(blockDrop(BLOCKS[B.MELON], null, () => 0, { silk: true })).toEqual({ id: B.MELON, count: 1 });
+    expect(getItem(I.MELON_SLICE).food).toEqual({ hunger: 2, saturation: 1.2 });
+    const sugar = findRecipe([makeStack(B.SUGAR_CANE)], 1, 1);
+    expect(sugar?.result).toEqual({ id: I.SUGAR, count: 1 });
+    const pie = findRecipe([makeStack(B.PUMPKIN), makeStack(I.SUGAR), makeStack(I.EGG)], 3, 1);
+    expect(pie?.result).toEqual({ id: I.PUMPKIN_PIE, count: 1 });
+    expect(getItem(I.PUMPKIN_PIE).food).toEqual({ hunger: 8, saturation: 4.8 });
+    expect(getItem(I.ROTTEN_FLESH).food?.sickness).toEqual({ chance: 0.8, seconds: 30 });
+    expect(getItem(I.CHICKEN).food?.sickness).toEqual({ chance: 0.3, seconds: 30 });
+    expect(getItem(I.SPIDER_EYE).food?.poison).toEqual({ chance: 1, seconds: 4 });
+    expect(getItem(I.SPIDER_EYE).food?.always).toBeUndefined();
+  });
+
   it('farmland drops dirt', () => {
     expect(blockDrop(BLOCKS[B.FARMLAND], null)).toEqual({ id: B.DIRT, count: 1 });
   });
@@ -190,9 +346,11 @@ describe('farming', () => {
   });
 
   it('keeps every tile index inside the atlas', () => {
-    for (const item of allItems()) expect(item.tile).toBeLessThan(ATLAS_COLS * ATLAS_ROWS);
-    // The mesher keeps a block's tile in nine bits.
-    for (const b of BLOCKS) for (const t of [b.tiles.top, b.tiles.bottom, b.tiles.side]) expect(t).toBeLessThan(512);
+    expect(ATLAS_TILES).toBe(ATLAS_COLS * ATLAS_ROWS);
+    expect(ATLAS_TILES & (ATLAS_TILES - 1)).toBe(0);
+    for (const item of allItems()) expect(item.tile).toBeLessThan(ATLAS_TILES);
+    // The mesher keeps a block's tile in the low bits of a face key, wide enough for the whole atlas.
+    for (const b of BLOCKS) for (const t of [b.tiles.top, b.tiles.bottom, b.tiles.side]) expect(t).toBeLessThan(ATLAS_TILES);
     expect(getItem(toolId('hoe', 'iron')).tool?.kind).toBe('hoe');
   });
 });

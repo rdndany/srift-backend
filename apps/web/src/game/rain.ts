@@ -17,6 +17,8 @@ export class Rain {
   private readonly top = new Float32Array(COUNT);
   private readonly speed = new Float32Array(COUNT);
   private readonly mat: THREE.LineBasicMaterial;
+  /** 0 rain .. 1 snow: flakes fall slowly, drift and are short, pale and a little denser. */
+  private flake = 0;
   private readonly attr: THREE.BufferAttribute;
   private seeded = false;
 
@@ -41,10 +43,12 @@ export class Rain {
   }
 
   /** `amount` is the 0..1 rain intensity. Skipped entirely (hidden) when it is dry. */
-  update(dt: number, amount: number, cam: THREE.Vector3): void {
+  update(dt: number, amount: number, cam: THREE.Vector3, snow = false): void {
     this.object.visible = amount > 0.02;
     if (!this.object.visible) return;
-    this.mat.opacity = 0.18 + 0.4 * amount;
+    this.flake += ((snow ? 1 : 0) - this.flake) * Math.min(1, dt * 1.5);
+    this.mat.color.setRGB(0.71 + 0.29 * this.flake, 0.8 + 0.2 * this.flake, 1);
+    this.mat.opacity = (0.18 + 0.4 * amount) * (1 + 0.35 * this.flake);
     if (!this.seeded) {
       for (let i = 0; i < COUNT; i++) this.respawn(i, cam.x, cam.y, cam.z, true);
       this.seeded = true;
@@ -52,7 +56,7 @@ export class Rain {
     const live = Math.floor(COUNT * amount);
     const p = this.pos;
     for (let i = 0; i < COUNT; i++) {
-      let y = this.y[i] - this.speed[i] * dt;
+      let y = this.y[i] - this.speed[i] * (1 - 0.88 * this.flake) * dt;
       const far = Math.abs(this.x[i] - cam.x) > RADIUS || Math.abs(this.z[i] - cam.z) > RADIUS;
       if (y < this.top[i] || y < cam.y - 10 || far) {
         this.respawn(i, cam.x, cam.y, cam.z, far);
@@ -62,11 +66,14 @@ export class Rain {
       const o = i * 6;
       // Only drops above their roof are drawn; the rest (and the surplus when it is drizzling) collapse to a point.
       const shown = i < live && y > this.top[i];
-      const len = shown ? STREAK : 0;
+      const len = shown ? STREAK * (1 - 0.82 * this.flake) : 0;
       p[o] = this.x[i];
       p[o + 1] = y;
       p[o + 2] = this.z[i];
-      p[o + 3] = this.x[i] - len * 0.08;
+      // Flakes sway as they fall.
+      const sway = this.flake * Math.sin(y * 0.9 + i) * 0.35;
+      p[o] = this.x[i] + sway;
+      p[o + 3] = this.x[i] + sway - len * 0.08;
       p[o + 4] = y + len;
       p[o + 5] = this.z[i];
     }

@@ -103,7 +103,11 @@ export function withPlayersJson(snap: { players: unknown[] }, playersJson: strin
 
 export const DEV_ORIGINS = ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:3100', 'http://127.0.0.1:3100'];
 
+/** How often one address may read the market page's list (the page asks every few seconds; searching adds to it). */
+const MARKET_PER_MINUTE = 120;
+
 export function createGameServer(opts: GameServerOptions): GameServer {
+  const marketByIp = new Map<string, number[]>();
   const repo = opts.repo ?? new SqliteRepo(':memory:');
   const auth = new AuthService(repo, { origins: opts.origins ?? DEV_ORIGINS, chainId: opts.chainId });
   const authRoutes = createAuthRouter(auth, {
@@ -112,6 +116,8 @@ export function createGameServer(opts: GameServerOptions): GameServer {
     trustProxy: opts.trustProxy ?? false,
     rateLimitPerMinute: opts.rateLimitPerMinute ?? 30,
     isPlaying: (accountId) => room.hasAccount(accountId),
+    saveOf: (accountId) => room.characterSave(accountId),
+    stashOf: (wallet) => room.stashOf(wallet),
   });
 
   const cloud = new CloudService(repo.cloud, opts.cloud);
@@ -123,6 +129,30 @@ export function createGameServer(opts: GameServerOptions): GameServer {
     if (req.url === '/health') {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ ok: true, players: room.playerCount, maxPlayers: room.capacity, connections: wss.clients.size, protocol: PROTOCOL_VERSION, room: room.stats(), memoryMb: Math.round(process.memoryUsage().rss / 1e6) }));
+      return;
+    }
+    // The Auction House for the website (`/api/market` there): public to read, and an account sees its own auctions and mail too.
+    if (req.method === 'GET' && req.url?.split('?')[0] === '/market') {
+      const ip = clientIp(req);
+      const now = Date.now();
+      const recent = (marketByIp.get(ip) ?? []).filter((t) => now - t < 60_000);
+      recent.push(now);
+      marketByIp.set(ip, recent);
+      if (recent.length > MARKET_PER_MINUTE) {
+        res.writeHead(429, { 'content-type': 'application/json', 'retry-after': '10' });
+        res.end(JSON.stringify({ error: 'Too many requests, wait a moment.' }));
+        return;
+      }
+      const params = new URL(req.url, 'http://localhost').searchParams;
+      const page = Number(params.get('page') ?? 0);
+      const origin = req.headers.origin;
+      const account = origin === undefined || auth.isAllowedOrigin(origin) ? auth.resolve(readCookie(req.headers.cookie, SESSION_COOKIE)) : null;
+      const view = room.market(
+        { q: params.get('q') ?? '', cat: (params.get('cat') ?? 'all') as never, sort: (params.get('sort') ?? 'ending') as never, desc: params.get('desc') === '1', page: Number.isFinite(page) ? page : 0 },
+        account?.id ?? null,
+      );
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      res.end(JSON.stringify({ view, players: room.playerCount, max: room.capacity, now: Date.now(), user: account?.displayName ?? null }));
       return;
     }
     void authRoutes(req, res)
@@ -155,7 +185,11 @@ export function createGameServer(opts: GameServerOptions): GameServer {
     const first = typeof fwd === 'string' ? fwd.split(',')[0].trim() : '';
     return first || req.socket.remoteAddress || 'unknown';
   };
-  const purge = setInterval(() => auth.purgeExpired(), 60 * 60 * 1000);
+  const purge = setInterval(() => {
+    auth.purgeExpired();
+    const t = Date.now();
+    for (const [ip, times] of marketByIp) if (times.every((x) => t - x >= 60_000)) marketByIp.delete(ip);
+  }, 60 * 60 * 1000);
   purge.unref();
 
   const send = (ws: WebSocket, msg: ServerMessage | NetServerMessage): void => {
@@ -254,8 +288,8 @@ export function createGameServer(opts: GameServerOptions): GameServer {
         // A signed-in account plays under its own name; guests choose one.
         memberId = room.join(
           {
-            send: (m) => void sendWithBackpressure(ws, m),
-            sendSnapshot: (snap, playersJson) => void sendWithBackpressure(ws, snap, () => withPlayersJson(snap, playersJson)),
+            send: (m) => sendWithBackpressure(ws, m),
+            sendSnapshot: (snap, playersJson) => sendWithBackpressure(ws, snap, () => withPlayersJson(snap, playersJson)),
             close: (reason) => ws.close(1000, reason),
           },
           account?.displayName ?? msg.name,
@@ -264,6 +298,7 @@ export function createGameServer(opts: GameServerOptions): GameServer {
           account?.look ?? msg.look ?? null,
           // An account's class was chosen when its character was made and never changes; only a guest picks one here.
           account ? (account.class ?? null) : (msg.class ?? null),
+          account?.wallet ?? null,
         );
         return;
       }

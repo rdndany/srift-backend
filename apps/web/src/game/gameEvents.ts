@@ -68,9 +68,14 @@ export function makeEventHandler(parts: EventParts): (events: SessionEvent[]) =>
           audio.play(e.sound, e.action, e.vol, e.x !== undefined && e.z !== undefined ? panOf(e.x, e.z) : 0);
           if ((e.action === 'step' || e.action === 'land') && e.x !== undefined && e.y !== undefined && e.z !== undefined) footDust(e.sound, e.action, e.x, e.y, e.z, e.vol);
           break;
-        case 'burst':
-          particles.burst(e.x, e.y, e.z, BLOCKS[e.id].tiles.side, e.count);
+        case 'chest':
+          audio.chest(e.open);
           break;
+        case 'burst': {
+          const tiles = BLOCKS[e.id]?.tiles;
+          particles.chips(e.x, e.y, e.z, tiles ? [tiles.side, tiles.top, tiles.bottom] : [0], e.count, e.soft === true);
+          break;
+        }
         case 'splash':
           audio.splash(e.vol);
           break;
@@ -227,6 +232,23 @@ export function makeEventHandler(parts: EventParts): (events: SessionEvent[]) =>
           selfView.swing();
           if (session.held?.id === I.DAGGER) audio.ability('dagger_swish', 0.7);
           break;
+        case 'fish': {
+          // Heard and seen where it happens: quieter with the distance, and gone beyond the reach of the realm's events.
+          const dist = Math.hypot(e.x - camera.position.x, e.y - camera.position.y, e.z - camera.position.z);
+          const vol = Math.max(0, 1 - dist / 40) ** 1.5;
+          audio.fishing(e.what, vol);
+          if (dist > 48) break;
+          const drops = e.what === 'bite' ? 12 : e.what === 'splash' ? 7 : e.what === 'catch' || e.what === 'reel' ? 6 : 0;
+          for (let n = 0; n < drops; n++) {
+            const a = Math.random() * Math.PI * 2;
+            const sp = 0.4 + Math.random() * 0.9;
+            particles.mote(e.x, e.y + 0.05, e.z, Math.cos(a) * sp, 2.4 + Math.random() * 2.4, Math.sin(a) * sp, 14, 0.5 + Math.random() * 0.3, 0.06 + Math.random() * 0.04, 0.78, 0.9, 1);
+          }
+          if (e.what === 'lure') {
+            for (let n = 0; n < 3; n++) particles.mote(e.x + (Math.random() - 0.5) * 0.5, e.y - 0.05, e.z + (Math.random() - 0.5) * 0.5, 0, 0.5, 0, -0.2, 0.7 + Math.random() * 0.4, 0.05, 0.9, 0.96, 1);
+          }
+          break;
+        }
         case 'pins':
           parts.setPartyPins(e.party);
           break;
@@ -244,7 +266,13 @@ export function makeEventHandler(parts: EventParts): (events: SessionEvent[]) =>
           setQuests(e.log);
           break;
         case 'dialog':
-          useUi.setState({ dialogNpc: e.npc, shopOpen: false });
+          useUi.setState({ dialogNpc: e.npc, shopOpen: false, auction: null, stash: null });
+          break;
+        case 'auction':
+          useUi.setState({ auction: e.view });
+          break;
+        case 'stash':
+          useUi.setState({ stash: e.view });
           break;
         case 'zone':
           showZone(e.id);

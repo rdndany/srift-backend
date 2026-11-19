@@ -1,7 +1,7 @@
 // Marketing screenshots of the Adventure interface for the home page: HUD, gear, quest log, spellbook, recipe book.
 // 1600x900 JPEGs. Usage: node scripts/uishots.mjs [url] [outDir] [shot,shot...]
 import { mkdirSync } from 'node:fs';
-import { chromium } from 'playwright';
+import { launchBrowser } from './browser.mjs';
 
 const url = process.argv[2] ?? 'http://localhost:3000';
 const outDir = process.argv[3] ?? 'tmp-shots/ui';
@@ -10,10 +10,10 @@ mkdirSync(outDir, { recursive: true });
 const want = (n) => !only || only.includes(n);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl'] });
+const browser = await launchBrowser();
 const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));
-await page.goto(`${url}/?world=adventure&debug&nomobs&class=mage&shadows=2048`, { waitUntil: 'load' });
+await page.goto(`${url}/?world=adventure&debug&nomobs&class=mage&shadows=4096&postfx`, { waitUntil: 'load' });
 await page.waitForFunction(() => window.__solrift?.isReady?.() && window.__solrift.worldKind() === 'adventure', undefined, { timeout: 240000 });
 const sc = (fn, a) => page.evaluate(fn, a);
 const lock = () => sc(() => {
@@ -34,17 +34,17 @@ await sc(() => {
   s.addXp(900);
   s.addCoins(340);
   s.clearInventory();
-  for (const n of ['iron_helmet', 'iron_chestplate', 'iron_leggings', 'iron_boots']) {
-    s.give(s.itemId(n));
-    s.select(0);
-    s.equipHeld();
-  }
+  ['diamond_helmet', 'diamond_chestplate', 'diamond_leggings', 'diamond_boots'].forEach((n, i) => s.setArmorSlot(i, s.itemId(n)));
 });
 await sc(() => {
   const s = window.__solrift;
+  s.give(s.itemId('staff')); // (the first free hotbar slot: it is the one in the hand)
+  s.select(0);
   for (const [n, c] of [['iron_sword', 1], ['bow', 1], ['arrow', 40], ['bread', 12], ['torch', 16], ['oak_planks', 48], ['cobblestone', 64], ['iron_ingot', 14], ['coal', 20], ['diamond', 3], ['crafting_table', 1], ['furnace', 1], ['iron_pickaxe', 1], ['stick', 24], ['apple', 6], ['gold_ingot', 9], ['redstone', 30], ['glass', 20], ['oak_log', 32]]) {
     try { s.give(s.itemId(n), c); } catch {}
   }
+  // The Mage's own tools and spells: a staff in the hand, and all four abilities learned (their skill books are not needed to look).
+  for (const a of ['fireball', 'frost_nova', 'meteor', 'arcane_shield']) s.unlockAbility(a);
 });
 
 // Talk to the people of the village and take up what they offer.
@@ -74,14 +74,17 @@ for (let round = 0; round < (want('hud') || want('quests') ? 3 : 0); round++) {
   }
 }
 
-// Back to the square, golden hour.
+// Back to the square at sunset, the sun low and the long shadows out (the windows are drawn over this view).
 const maren = (await sc(() => window.__solrift.mobs().filter((m) => m.kind === 'npc'))).find((n) => n.variant === 0);
+await sc(() => window.__solrift.setTime(0.48));
+await sc(() => window.__solrift.teleport(0.5, 76, 26.5, 0.9, 0.02));
+await lock();
 if (want('hud')) {
-  await sc(() => window.__solrift.setTime?.(0.45));
-  await sc(() => window.__solrift.teleport(0.5, 80, 24.5, 0, -0.08));
   await sleep(6000);
   await snap('adv-hud');
 }
+// (The windows are drawn over the view: the staff in the hand would only be in the way.)
+await sc(() => window.__solrift.setHandHidden(true));
 
 const open = async (kind) => {
   await sc((k) => window.__solrift.openMenu(k), kind);

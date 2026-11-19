@@ -303,6 +303,32 @@ const JUMP_LEAP = 4;
 const JUMP_FALL = 5;
 const mix = (a: number, b: number, k: number): number => a + (b - a) * k;
 const clamp01 = (x: number): number => Math.min(1, Math.max(0, x));
+/** An angle brought to -PI..PI, so that blending towards another angle takes the short way round. */
+const wrapPi = (a: number): number => a - Math.PI * 2 * Math.round(a / (Math.PI * 2));
+
+/** The height above the feet at which a swimmer's body lies, in blocks: its back just under the surface, the head clear of it. */
+const SWIM_HEIGHT = 0.62;
+
+/**
+ * The swimming pose (the front crawl, as the player swims in Minecraft) at a point of the stroke: the body lies face down along the water
+ * (`pitch` of the whole body about its middle, tipped up a little when rising and down when sinking by `tilt`), rolling a little with each
+ * stroke, with where the root has to be (`y`, `z`) for it to turn about its middle. The arms go right round in turn, one reaching ahead
+ * while the other pulls back under the water (`armL`, `armR`), the legs kick in quick alternation (`legL`, `legR`). Angles are the figure's own.
+ */
+export function swimShape(phase: number, tilt: number): { pitch: number; roll: number; y: number; z: number; armL: number; armR: number; legL: number; legR: number } {
+  const pitch = -Math.PI / 2 + tilt;
+  const middle = 0.9 * BODY_SCALE;
+  return {
+    pitch,
+    roll: Math.sin(phase) * 0.2,
+    y: SWIM_HEIGHT - middle * Math.cos(pitch),
+    z: -middle * Math.sin(pitch),
+    armL: -phase + 0.2,
+    armR: -phase + Math.PI + 0.2,
+    legL: 0.12 + 0.45 * Math.sin(phase * 2),
+    legR: 0.12 - 0.45 * Math.sin(phase * 2),
+  };
+}
 const easeStep = (x: number): number => {
   const v = clamp01(x);
   return v * v * (3 - 2 * v);
@@ -1144,6 +1170,84 @@ export class Character {
       this.restPose();
       this.sit(spd, attack, holding, rise, air);
     } else this.humanize(dt, ease, { s, a, walk, run, air, rise, crouch, still, breath, eatK, wL, wR });
+    this.swimStep(dt, ease, vy);
+  }
+
+  /**
+   * In the water with the feet off the bottom (set by the caller before `animate`). Moving, the figure swims as a player does in Minecraft:
+   * the body lies out flat along the water face down, the arms go round in turn (the front crawl) and the legs kick; keeping still it treads
+   * water upright, the legs pedalling and the arms sculling. On the bottom, or wading, it walks as it does on land.
+   */
+  afloat = false;
+  /** 0 not in the water, 1 swimming, 2 treading water (kept with a little hysteresis, so the pose does not flicker at the edge of the speed). */
+  private swimMode = 0;
+  private swimW = 0;
+  private treadW = 0;
+  private swimPhase = 0;
+  private swimTilt = 0;
+
+  /** Blend the swimming (or treading) pose over what `humanize` did, by how far it has come in. */
+  private swimStep(dt: number, ease: (rate: number) => number, vy: number): void {
+    const on = this.afloat && !this.riding && this.slamPhase === 0;
+    if (!on) this.swimMode = 0;
+    else if (this.spd > 0.5) this.swimMode = 1;
+    else if (this.spd < 0.2 || this.swimMode === 0) this.swimMode = 2;
+    this.swimW += ((this.swimMode === 1 ? 1 : 0) - this.swimW) * ease(this.swimMode === 1 ? 7 : 5);
+    this.treadW += ((this.swimMode === 2 ? 1 : 0) - this.treadW) * ease(6);
+    if (this.swimW < 0.002) this.swimW = 0;
+    if (this.treadW < 0.002) this.treadW = 0;
+    if (this.swimW === 0 && this.treadW === 0) {
+      this.swimTilt = 0;
+      return;
+    }
+    // A stroke a little over a second, quicker the faster it goes.
+    this.swimPhase += dt * (4.4 + 0.6 * Math.min(this.spd, 4));
+    this.swimTilt += (Math.max(-0.45, Math.min(0.45, vy * 0.1)) - this.swimTilt) * ease(5);
+    const root = this.root;
+    const sw = this.swimW;
+    if (sw > 0) {
+      const pose = swimShape(this.swimPhase, this.swimTilt);
+      // The body turns about its middle, which is kept at the height it floats at.
+      root.rotation.x = mix(root.rotation.x, pose.pitch, sw);
+      root.rotation.y = mix(root.rotation.y, pose.roll, sw);
+      root.rotation.z = mix(root.rotation.z, 0, sw);
+      root.position.x = mix(root.position.x, 0, sw);
+      root.position.y = mix(root.position.y, pose.y, sw);
+      root.position.z = mix(root.position.z, pose.z, sw);
+      this.torso.position.set(mix(this.torso.position.x, 0, sw), mix(this.torso.position.y, 0, sw), mix(this.torso.position.z, 0, sw));
+      this.torso.rotation.x = mix(this.torso.rotation.x, 0, sw);
+      this.torso.rotation.y = mix(this.torso.rotation.y, 0, sw);
+      // The head is lifted up out of the water to look ahead (the neck turns back what the body has turned forward).
+      this.headPivot.position.set(0, mix(this.headPivot.position.y, 1.65, sw), mix(this.headPivot.position.z, 0, sw));
+      this.headPivot.rotation.x = mix(this.headPivot.rotation.x, Math.max(0.35, Math.min(2.1, this.headPivot.rotation.x * 0.6 - pose.pitch)), sw);
+      this.headPivot.rotation.y = mix(this.headPivot.rotation.y, this.headPivot.rotation.y * 0.5, sw);
+      this.headPivot.rotation.z = mix(this.headPivot.rotation.z, 0, sw);
+      for (const [arm, side, ang] of [[this.armL, -1, pose.armL], [this.armR, 1, pose.armR]] as const) {
+        arm.position.set(mix(arm.position.x, side * 0.375, sw), mix(arm.position.y, 1.5, sw), mix(arm.position.z, 0, sw));
+        arm.rotation.x += wrapPi(ang - arm.rotation.x) * sw;
+        arm.rotation.z = mix(arm.rotation.z, side * 0.1, sw);
+        arm.rotation.y = mix(arm.rotation.y, 0, sw);
+      }
+      for (const [leg, side, ang] of [[this.legL, -1, pose.legL], [this.legR, 1, pose.legR]] as const) {
+        leg.position.set(mix(leg.position.x, side * 0.125, sw), mix(leg.position.y, Character.HIP, sw), mix(leg.position.z, 0, sw));
+        leg.rotation.x = mix(leg.rotation.x, ang, sw);
+        leg.rotation.z = mix(leg.rotation.z, 0, sw);
+      }
+    }
+    const tr = this.treadW;
+    if (tr > 0) {
+      // Upright and bobbing a little: the legs pedal in turn, the arms sweep out and in to hold the body up.
+      const t = this.clock * 5.5;
+      root.position.y = mix(root.position.y, Math.sin(this.clock * 2.1) * 0.04 - 0.05, tr);
+      this.legL.rotation.x = mix(this.legL.rotation.x, 0.25 + 0.5 * Math.sin(t), tr);
+      this.legR.rotation.x = mix(this.legR.rotation.x, 0.25 - 0.5 * Math.sin(t), tr);
+      this.armL.rotation.x = mix(this.armL.rotation.x, 0.3 + 0.2 * Math.sin(t + 1), tr);
+      this.armR.rotation.x = mix(this.armR.rotation.x, 0.3 - 0.2 * Math.sin(t + 1), tr);
+      this.armL.rotation.z = mix(this.armL.rotation.z, -(0.55 + 0.3 * Math.sin(t)), tr);
+      this.armR.rotation.z = mix(this.armR.rotation.z, 0.55 + 0.3 * Math.sin(t), tr);
+    }
+    // A lantern hangs straight down from the hand whatever the arm does.
+    if (this.carry === 'hang') this.heldMount.rotation.x = -this.armR.rotation.x;
   }
 
   /**

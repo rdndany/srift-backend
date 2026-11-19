@@ -1,8 +1,20 @@
 import type { SessionScreen } from '@solrift/shared';
-import { useUi } from '../ui/store';
+import { HOTBAR_SLOTS, type ItemStack } from '@solrift/shared';
+import { bumpUi, useUi } from '../ui/store';
 import type { ClientSession } from './clientSession';
 import type { Input } from './input';
 import type { RecipeMemory } from './recipeMemory';
+
+const stackHash = (h: number, s: ItemStack | null): number => (Math.imul(h, 31) + (s ? s.id * 1009 + s.count * 17 + s.damage + 1 : 0)) | 0;
+
+/** One number for the stacks on the hotbar, in the off hand and on the body: it changes when any of them does. */
+function gearSignature(session: ClientSession): number {
+  let h = 7;
+  for (let i = 0; i < HOTBAR_SLOTS; i++) h = stackHash(h, session.inventory.get(i));
+  h = stackHash(h, session.offhand.get(0));
+  for (let i = 0; i < session.armor.size; i++) h = stackHash(h, session.armor.get(i));
+  return h;
+}
 
 /**
  * Makes the function that mirrors the session's state into the React store, and reacts to a change of screen. It writes
@@ -10,9 +22,18 @@ import type { RecipeMemory } from './recipeMemory';
  */
 export function makeUiSync(session: ClientSession, input: Input, overlay: HTMLElement, recipes: RecipeMemory): () => void {
   let shownScreen: SessionScreen = 'none';
+  let shownGear = 0;
 
   return function syncUi(): void {
     recipes.observe();
+    // What the hotbar, the off hand and the clothes hold, looked at every frame: the screen is told to read them again whenever
+    // they differ from what it last drew, so that no missed message (the first snapshot of a character, a save that was
+    // loaded late) can leave it empty until a window is opened.
+    const gear = gearSignature(session);
+    if (gear !== shownGear) {
+      shownGear = gear;
+      bumpUi();
+    }
     // The class state: published when something in it changed (a cooldown ticking, the resource moving), not every frame.
     const mv = session.mountView();
     const mshown = useUi.getState().mount;
@@ -31,6 +52,9 @@ export function makeUiSync(session: ClientSession, input: Input, overlay: HTMLEl
     if (s.armor !== armor) useUi.setState({ armor });
     if (s.coins !== session.coins) useUi.setState({ coins: session.coins });
     if (s.burning !== session.burning) useUi.setState({ burning: session.burning });
+    const poison = Math.ceil(session.poison);
+    const foodSick = Math.ceil(session.foodSick);
+    if (s.poison !== poison || s.foodSick !== foodSick) useUi.setState({ poison, foodSick });
     if (s.hardcore !== session.hardcore || s.spectating !== session.spectating) {
       useUi.setState({ hardcore: session.hardcore, spectating: session.spectating });
     }

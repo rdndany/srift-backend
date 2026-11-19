@@ -1,7 +1,7 @@
 import type { MobKind, MobSound, SoundKind } from '@solrift/shared';
-import { Ambience, type AmbientEnv } from './ambience';
+import { Ambience, hallImpulse, type AmbientEnv } from './ambience';
 import { playAbilitySound, type AbilitySound } from './abilitySounds';
-import { stepBuffers } from './stepSounds';
+import { STEP_ACTIONS, STEP_SURFACES, prepareStep, stepBuffers } from './stepSounds';
 
 type Action = 'break' | 'place' | 'step' | 'hit' | 'land' | 'jump';
 
@@ -33,6 +33,25 @@ const ACTION_GAIN: Record<Action, number> = { break: 0.55, place: 0.42, step: 0.
 const ACTION_LEN: Record<Action, number> = { break: 1.15, place: 0.8, step: 0.6, hit: 0.5, land: 1.4, jump: 0.5 };
 const ACTION_PITCH: Record<Action, number> = { break: 0.9, place: 1.15, step: 1.0, hit: 1.25, land: 0.7, jump: 1.0 };
 
+/** The beds of the World Beyond's places (`Atmosphere.ambience`): a filter, a loudness, and how fast and how deep the swell is. */
+export const BED_SOUNDS: Record<string, { type: BiquadFilterType; freq: number; q: number; gain: number; rate: number; depth: number }> = {
+  forest: { type: 'bandpass', freq: 1200, q: 0.5, gain: 0.012, rate: 0.12, depth: 0.5 },
+  jungle: { type: 'bandpass', freq: 3200, q: 2, gain: 0.02, rate: 0.6, depth: 0.45 },
+  swamp: { type: 'lowpass', freq: 420, q: 0.7, gain: 0.03, rate: 0.25, depth: 0.5 },
+  desert: { type: 'bandpass', freq: 900, q: 0.6, gain: 0.035, rate: 0.18, depth: 0.55 },
+  wind: { type: 'bandpass', freq: 520, q: 0.6, gain: 0.05, rate: 0.14, depth: 0.6 },
+  snow: { type: 'bandpass', freq: 760, q: 0.5, gain: 0.03, rate: 0.1, depth: 0.5 },
+  sea: { type: 'lowpass', freq: 650, q: 0.5, gain: 0.06, rate: 0.11, depth: 0.7 },
+  deep: { type: 'lowpass', freq: 210, q: 0.7, gain: 0.05, rate: 0.05, depth: 0.4 },
+  river: { type: 'bandpass', freq: 2200, q: 0.8, gain: 0.03, rate: 0.5, depth: 0.15 },
+  cave: { type: 'lowpass', freq: 170, q: 0.7, gain: 0.035, rate: 0.07, depth: 0.4 },
+  magic: { type: 'bandpass', freq: 3000, q: 9, gain: 0.015, rate: 0.35, depth: 0.6 },
+  storm: { type: 'bandpass', freq: 420, q: 0.5, gain: 0.08, rate: 0.3, depth: 0.7 },
+  fire: { type: 'lowpass', freq: 320, q: 0.8, gain: 0.05, rate: 1.1, depth: 0.6 },
+  night: { type: 'lowpass', freq: 130, q: 0.7, gain: 0.04, rate: 0.05, depth: 0.5 },
+  hollow: { type: 'lowpass', freq: 260, q: 0.8, gain: 0.04, rate: 0.08, depth: 0.35 },
+};
+
 export class GameAudio {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
@@ -47,7 +66,49 @@ export class GameAudio {
   private ambience: Ambience | null = null;
   private rainGain: GainNode | null = null;
   private rainFilter: BiquadFilterNode | null = null;
-  volume = 0.8;
+  /** The bed of a place (wind, sea, a storm...): one looping noise through a filter, with a slow swell on its level. */
+  private bed: { filter: BiquadFilterNode; gain: GainNode; lfo: OscillatorNode; lfoDepth: GainNode } | null = null;
+  /** The knob for everything that is heard (see `resume`), and the one for the weather and the places. */
+  private main: GainNode | null = null;
+  private ambBus: GainNode | null = null;
+  private levels = { master: 0.8, effects: 1, ambience: 1, muted: false };
+  /** Footsteps still to synthesise while the world loads, and the noise bed copied in when sound starts. */
+  private stepPlan: { kind: (typeof STEP_SURFACES)[number]; action: (typeof STEP_ACTIONS)[number]; rate: number }[] | null = null;
+  private stepAt = 0;
+  private beds = new Map<number, { noise: Float32Array; left: Float32Array; right: Float32Array }>();
+  private static readonly RATES = [44100, 48000];
+
+  /**
+   * A slice of the sounds heard the first time the player walks, jumps or lands, and of the noise the weather uses.
+   * Call it each frame while the world is loading. Returns true when nothing is left to build.
+   */
+  warm(budgetMs = 8): boolean {
+    try {
+      if (!this.stepPlan) {
+        this.stepPlan = [];
+        for (const rate of GameAudio.RATES) for (const kind of STEP_SURFACES) for (const action of STEP_ACTIONS) this.stepPlan.push({ kind, action, rate });
+      }
+      const t0 = performance.now();
+      while (this.stepAt < this.stepPlan.length && performance.now() - t0 < budgetMs) {
+        const job = this.stepPlan[this.stepAt++];
+        prepareStep(job.kind, job.action, job.rate);
+      }
+      if (this.stepAt >= this.stepPlan.length) {
+        for (const rate of GameAudio.RATES) {
+          if (this.beds.has(rate)) continue;
+          if (performance.now() - t0 >= budgetMs) return false;
+          const noise = new Float32Array(rate);
+          for (let i = 0; i < rate; i++) noise[i] = Math.random() * 2 - 1;
+          const [left, right] = hallImpulse(rate);
+          this.beds.set(rate, { noise, left, right });
+        }
+      }
+      return this.stepAt >= this.stepPlan.length && this.beds.size === GameAudio.RATES.length;
+    } catch {
+      this.stepAt = this.stepPlan?.length ?? 0;
+      return true;
+    }
+  }
 
   /** Must be called from a user gesture (e.g. the click that locks the pointer). */
   resume(): void {
@@ -55,18 +116,50 @@ export class GameAudio {
       const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
       if (!Ctor) return;
       this.ctx = new Ctor();
+      // The player's three volumes: `main` is the knob for everything, `master` the one for the effects (the name stayed, as
+      // nearly everything that makes a sound is an effect), `ambBus` the one for the weather and the places.
+      this.main = this.ctx.createGain();
+      this.main.connect(this.ctx.destination);
       this.master = this.ctx.createGain();
-      this.master.gain.value = this.volume;
-      this.master.connect(this.ctx.destination);
+      this.master.connect(this.main);
+      this.ambBus = this.ctx.createGain();
+      this.ambBus.connect(this.main);
+      this.applyLevels(true);
       this.sfx = this.ctx.createGain();
       this.sfx.connect(this.master);
       const len = this.ctx.sampleRate;
       this.noise = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
       const d = this.noise.getChannelData(0);
-      for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
-      this.ambience = new Ambience(this.ctx, this.master, this.noise);
+      const bed = this.beds.get(len);
+      if (bed) d.set(bed.noise);
+      else for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+      let impulse: AudioBuffer | undefined;
+      if (bed) {
+        impulse = this.ctx.createBuffer(2, bed.left.length, this.ctx.sampleRate);
+        impulse.getChannelData(0).set(bed.left);
+        impulse.getChannelData(1).set(bed.right);
+      }
+      this.ambience = new Ambience(this.ctx, this.ambBus, this.noise, impulse, this.main);
     }
     if (this.ctx.state === 'suspended') void this.ctx.resume();
+  }
+
+  /** The loudness the player chose (see settings.ts). Takes effect at once, or when sound starts. */
+  setLevels(levels: Partial<{ master: number; effects: number; ambience: number; muted: boolean }>): void {
+    this.levels = { ...this.levels, ...levels };
+    this.applyLevels(false);
+  }
+
+  private applyLevels(now: boolean): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.main || !this.master || !this.ambBus) return;
+    const set = (g: GainNode, v: number): void => {
+      if (now) g.gain.value = v;
+      else g.gain.setTargetAtTime(v, ctx.currentTime, 0.03);
+    };
+    set(this.main, this.levels.muted ? 0 : this.levels.master);
+    set(this.master, this.levels.effects);
+    set(this.ambBus, this.levels.ambience);
   }
 
   /** A block sound; `pan` is -1 (left) .. 1 (right) for where it is heard from. */
@@ -199,6 +292,40 @@ export class GameAudio {
     }
   }
 
+  /**
+   * Fishing: the whoosh of the cast, the plop of the float, the small bubbling of a fish coming, the sharp splash of the bite,
+   * the flick of reeling in and the happy chirp of a catch. `volume` is 0..1 and already follows how far away it was.
+   */
+  fishing(what: 'cast' | 'splash' | 'lure' | 'bite' | 'escape' | 'reel' | 'catch', volume = 1): void {
+    if (!this.ctx || volume <= 0.01) return;
+    switch (what) {
+      case 'cast':
+        this.blip(900, 0.7, 0.28, 0.32 * volume, 'bandpass', 3.2);
+        break;
+      case 'reel':
+        this.blip(2600, 0.9, 0.16, 0.3 * volume, 'bandpass', 0.35);
+        setTimeout(() => this.blip(1800, 1.2, 0.04, 0.22 * volume, 'bandpass'), 90);
+        break;
+      case 'splash':
+        this.splash(0.55 * volume);
+        break;
+      case 'lure':
+        for (let i = 0; i < 4; i++) setTimeout(() => this.blip(700 + Math.random() * 700, 3, 0.05, 0.22 * volume, 'bandpass', 1.8), i * (60 + Math.random() * 70));
+        break;
+      case 'bite':
+        this.splash(0.85 * volume);
+        this.blip(320, 1.4, 0.12, 0.4 * volume, 'lowpass', 0.6);
+        break;
+      case 'escape':
+        this.blip(1500, 0.8, 0.12, 0.18 * volume, 'bandpass', 0.5);
+        break;
+      case 'catch':
+        this.pop();
+        setTimeout(() => this.pop(), 90);
+        break;
+    }
+  }
+
   /** Crunchy bites. */
   eat(): void {
     for (let i = 0; i < 3; i++) setTimeout(() => this.blip(900 + Math.random() * 500, 1.2, 0.07, 0.5, 'bandpass'), i * 110);
@@ -208,6 +335,12 @@ export class GameAudio {
   munch(): void {
     this.blip(260 + Math.random() * 140, 1.4, 0.05, 0.45, 'bandpass');
     setTimeout(() => this.blip(1100 + Math.random() * 500, 1.2, 0.035, 0.3, 'bandpass'), 30);
+  }
+
+  /** A chest lid: a wooden knock and a short creak, higher as it opens. */
+  chest(open: boolean): void {
+    this.blip(open ? 210 : 160, 0.7, 0.05, 0.35, 'lowpass');
+    setTimeout(() => this.blip(open ? 380 : 240, 1.4, 0.09, 0.22, 'bandpass', open ? 1.4 : 0.7), 35);
   }
 
   /** Item pickup pop. */
@@ -585,6 +718,7 @@ export class GameAudio {
     }
     switch (kind) {
       case 'dummy':
+      case 'armor_stand':
         // A dull thud of wood and straw.
         this.voice('triangle', 150 * r, 70, 0.14, 0.34 * v, 500);
         this.blip(1100, 0.8, 0.06, 0.22 * v, 'bandpass');
@@ -784,13 +918,56 @@ export class GameAudio {
       this.rainFilter.frequency.value = 7000;
       this.rainGain = ctx.createGain();
       this.rainGain.gain.value = 0;
-      src.connect(hp).connect(this.rainFilter).connect(this.rainGain).connect(this.master);
+      src.connect(hp).connect(this.rainFilter).connect(this.rainGain).connect(this.ambBus ?? this.master);
       src.start();
     }
     const t = ctx.currentTime;
     // A soft bed under the other sounds (it was 0.32, which was too loud).
     this.rainGain.gain.setTargetAtTime(0.065 * amount * (1 - 0.6 * shelter), t, 0.4);
     this.rainFilter!.frequency.setTargetAtTime(6000 - 5200 * shelter, t, 0.4);
+  }
+
+  /**
+   * The sound under a place: `name` is one of `BED_SOUNDS` (null or an unknown name fades it out), `level` 0..1 scales it
+   * and `shelter` (0..1) muffles it under a roof. Cheap: one noise source, one filter and one slow oscillator for the swell,
+   * re-tuned smoothly whenever the place changes.
+   */
+  setBed(name: string | null, level: number, shelter: number): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.master || !this.noise) return;
+    if (!this.bed) {
+      if (!name) return;
+      const src = ctx.createBufferSource();
+      src.buffer = this.noise;
+      src.loop = true;
+      const filter = ctx.createBiquadFilter();
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      const lfo = ctx.createOscillator();
+      lfo.frequency.value = 0.1;
+      const lfoDepth = ctx.createGain();
+      lfoDepth.gain.value = 0;
+      lfo.connect(lfoDepth).connect(gain.gain);
+      src.connect(filter).connect(gain).connect(this.ambBus ?? this.master);
+      src.start();
+      lfo.start();
+      this.bed = { filter, gain, lfo, lfoDepth };
+    }
+    const spec = name ? BED_SOUNDS[name] : undefined;
+    const t = ctx.currentTime;
+    const b = this.bed;
+    if (!spec) {
+      b.gain.gain.setTargetAtTime(0, t, 0.8);
+      b.lfoDepth.gain.setTargetAtTime(0, t, 0.8);
+      return;
+    }
+    const g = spec.gain * Math.max(0, Math.min(1, level)) * (1 - 0.6 * shelter);
+    b.filter.type = spec.type;
+    b.filter.frequency.setTargetAtTime(spec.freq * (1 - 0.6 * shelter), t, 0.8);
+    b.filter.Q.setTargetAtTime(spec.q, t, 0.8);
+    b.gain.gain.setTargetAtTime(g, t, 1.2);
+    b.lfo.frequency.setTargetAtTime(spec.rate, t, 1.2);
+    b.lfoDepth.gain.setTargetAtTime(g * spec.depth, t, 1.2);
   }
 
   /** Thunder: distance 0 (overhead) .. 1 (far). Far strikes arrive later and softer. */

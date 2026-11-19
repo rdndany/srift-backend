@@ -39,6 +39,21 @@ describe('item tooltips', () => {
     expect(lines[lines.length - 1].text).toBe('Durability: 200 / 250');
   });
 
+  it("a bottle o' enchanting says to throw it for experience", () => {
+    const lines = text(I.EXPERIENCE_BOTTLE);
+    expect(lines[0]).toBe("Bottle o' Enchanting");
+    expect(lines[1]).toBe('Item');
+    expect(lines).toContain('Breaks into 3 to 11 experience');
+    expect(lines).toContain('Right-click to throw it');
+  });
+
+  it('names poison and hunger sickness as status effects, and milk clears them', () => {
+    expect(text(I.SPIDER_EYE)).toContain('100% chance of the Poison status effect (4s)');
+    expect(text(I.ROTTEN_FLESH)).toContain('80% chance of the Hunger sickness status effect (30s)');
+    expect(text(I.CHICKEN)).toContain('30% chance of the Hunger sickness status effect (30s)');
+    expect(text(I.MILK_BUCKET)).toContain('Clears status effects');
+  });
+
   it('plain blocks and materials get a kind line and nothing is empty', () => {
     expect(text(I.STICK)[1]).toBe('Material');
     expect(tooltipLines(null)).toEqual([]);

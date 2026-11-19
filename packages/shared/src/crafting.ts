@@ -1,5 +1,6 @@
-import { B, BUILD_MATERIALS, DYE_NAMES, woolColor, woolId, TOOL_KINDS, TOOL_MATERIALS, gateId, ladderId, slabId, stairId, trapdoorId, type ToolKind, type ToolMaterial } from './blocks';
+import { B, BB, BEYOND, BUILD_MATERIALS, CONNECT, DYE_NAMES, DRESS, GROVE, JOINERY, LOG_BLOCKS, woolColor, woolId, terracottaOf, TOOL_KINDS, TOOL_MATERIALS, campfireId, gateId, idByName, ladderId, MASONRY, slabId, stairId, trapdoorId, type ToolKind, type ToolMaterial } from './blocks';
 import { ARMOR_MATERIALS, type ArmorMaterial } from './armor';
+import { BEYOND_SHAPES } from './beyondBlocks';
 import { I, armorId, bagId, bedItemId, dyeId, toolId } from './items';
 import type { ItemStack } from './inventory';
 
@@ -22,15 +23,15 @@ function shapeless(result: number, count: number, ingredients: number[]): void {
 }
 
 // ---- basics ----
+// Oak logs (and a mushroom stem) make oak planks. Every other log makes planks of its own kind, below.
 shapeless(B.PLANKS, 4, [B.LOG]);
-shapeless(B.PLANKS, 4, [B.BIRCH_LOG]);
-shapeless(B.PLANKS, 4, [B.SPRUCE_LOG]);
-for (const log of [B.ACACIA_LOG, B.JUNGLE_LOG, B.DARK_OAK_LOG, B.CHERRY_LOG]) shapeless(B.PLANKS, 4, [log]);
 // Giant mushrooms are good for planks too, if a little soft.
 shapeless(B.PLANKS, 2, [B.MUSHROOM_STEM]);
 shaped(I.STICK, 4, ['P', 'P'], { P: B.PLANKS });
 shaped(B.CRAFTING_TABLE, 1, ['PP', 'PP'], { P: B.PLANKS });
 shaped(B.FURNACE, 1, ['CCC', 'C C', 'CCC'], { C: B.COBBLE });
+// Sticks over a coal, over any kind of log. It is placed already burning.
+for (const log of LOG_BLOCKS) shaped(campfireId(0, true), 1, ['SSS', ' C ', 'LLL'], { S: I.STICK, C: I.COAL, L: log });
 shaped(B.SANDSTONE, 1, ['SS', 'SS'], { S: B.SAND });
 shaped(B.CHEST, 1, ['PPP', 'P P', 'PPP'], { P: B.PLANKS });
 
@@ -77,10 +78,104 @@ BUILD_MATERIALS.forEach((m, i) => {
   shaped(stairId(i, false, 0), 4, ['M  ', 'MM ', 'MMM'], { M: m.block });
   shaped(stairId(i, false, 0), 4, ['  M', ' MM', 'MMM'], { M: m.block });
 });
+/** A block or item the masonry recipes name. */
+function masonryNamed(name: string): number {
+  const block = idByName(name);
+  if (block) return block;
+  if (name.endsWith('_dye')) {
+    const color = (DYE_NAMES as readonly string[]).indexOf(name.slice(0, -4));
+    if (color >= 0) return dyeId(color);
+  }
+  if (name === 'slimeball') return I.SLIMEBALL;
+  throw new Error(`masonry ingredient ${name} is not an item`);
+}
+for (const row of MASONRY) {
+  const s = row.spec;
+  const src = row.blockId;
+  if (src && s.slab && row.slabBase >= 0) shaped(row.slabBase, 6, ['MMM'], { M: src });
+  if (src && s.stair && row.stairBase >= 0) {
+    shaped(row.stairBase, 4, ['M  ', 'MM ', 'MMM'], { M: src });
+    shaped(row.stairBase, 4, ['  M', ' MM', 'MMM'], { M: src });
+  }
+  if (src && s.wall && row.wallId) shaped(row.wallId, 6, ['WWW', 'WWW'], { W: src });
+  if (s.planks && row.cubeId) {
+    shapeless(row.cubeId, 4, [masonryNamed(s.planks)]);
+    shaped(I.STICK, 4, ['P', 'P'], { P: row.cubeId });
+  }
+  if (s.square && row.cubeId) shaped(row.cubeId, 4, ['SS', 'SS'], { S: masonryNamed(s.square) });
+  if (s.row3 && row.cubeId) shaped(row.cubeId, 1, ['SSS'], { S: masonryNamed(s.row3) });
+  if (s.shapeless && row.cubeId) shapeless(row.cubeId, 1, s.shapeless.map(masonryNamed));
+}
 shaped(I.DOOR, 3, ['PP', 'PP', 'PP'], { P: B.PLANKS });
 shaped(trapdoorId(false, false, 0), 2, ['PPP', 'PPP'], { P: B.PLANKS });
 shaped(B.FENCE, 2, ['PSP', 'PSP'], { P: B.PLANKS, S: I.STICK });
 shaped(gateId(false, 0), 1, ['SPS', 'SPS'], { P: B.PLANKS, S: I.STICK });
+const whiteDye = dyeId(DYE_NAMES.indexOf('white'));
+shapeless(JOINERY.poplarLog, 1, [idByName('birch_log'), whiteDye]);
+for (const w of JOINERY.woods) {
+  const planks = idByName(w.spec.planks);
+  if (w.spec.log) shaped(w.wood, 3, ['LL', 'LL'], { L: idByName(w.spec.log) });
+  if (w.spec.logFrom) {
+    shaped(w.wood, 3, ['LL', 'LL'], { L: JOINERY.poplarLog });
+    shapeless(planks, 4, [JOINERY.poplarLog]);
+  }
+  shapeless(planks, 4, [w.wood]);
+  shapeless(planks, 4, [w.strippedLog]);
+  shapeless(planks, 4, [w.strippedWood]);
+  shaped(w.strippedWood, 3, ['LL', 'LL'], { L: w.strippedLog });
+  shapeless(w.button, 1, [planks]);
+  if (!w.door) continue;
+  shaped(w.door, 3, ['PP', 'PP', 'PP'], { P: planks });
+  shaped(w.trapdoor, 2, ['PPP', 'PPP'], { P: planks });
+  shaped(w.fence, 2, ['PSP', 'PSP'], { P: planks, S: I.STICK });
+  shaped(w.gate, 1, ['SPS', 'SPS'], { P: planks, S: I.STICK });
+  shaped(w.plate, 1, ['PP'], { P: planks });
+}
+shaped(JOINERY.ironDoor, 3, ['II', 'II', 'II'], { I: I.IRON_INGOT });
+shaped(JOINERY.ironTrapdoor, 1, ['II', 'II'], { I: I.IRON_INGOT });
+shaped(JOINERY.heavyPlate, 1, ['II'], { I: I.IRON_INGOT });
+shaped(JOINERY.lightPlate, 1, ['GG'], { G: I.GOLD_INGOT });
+for (const n of JOINERY.nether) {
+  const partner = n.with === 'lapis_lazuli' ? I.LAPIS_LAZULI : idByName(n.with);
+  shapeless(n.stem, 1, [B.LOG, partner]);
+  shaped(n.hyphae, 3, ['SS', 'SS'], { S: n.stem });
+}
+for (const w of [GROVE.mangrove, GROVE.paleOak, GROVE.bambooWood]) {
+  const planks = w.planks;
+  if (w.wood) {
+    shaped(w.wood, 3, ['LL', 'LL'], { L: w.log });
+    shapeless(planks, 4, [w.wood]);
+    shapeless(planks, 4, [w.strippedWood]);
+    shaped(w.strippedWood, 3, ['LL', 'LL'], { L: w.strippedLog });
+  }
+  shapeless(planks, w.name === 'bamboo' ? 2 : 4, [w.log]);
+  shapeless(planks, w.name === 'bamboo' ? 2 : 4, [w.strippedLog]);
+  shaped(I.STICK, 4, ['P', 'P'], { P: planks });
+  shaped(w.slab, 6, ['PPP'], { P: planks });
+  shaped(w.stair, 4, ['P  ', 'PP ', 'PPP'], { P: planks });
+  shaped(w.stair, 4, ['  P', ' PP', 'PPP'], { P: planks });
+  shaped(w.door, 3, ['PP', 'PP', 'PP'], { P: planks });
+  shaped(w.trapdoor, 2, ['PPP', 'PPP'], { P: planks });
+  shaped(w.fence, 2, ['PSP', 'PSP'], { P: planks, S: I.STICK });
+  shaped(w.gate, 1, ['SPS', 'SPS'], { P: planks, S: I.STICK });
+  shapeless(w.button, 1, [planks]);
+  shaped(w.plate, 1, ['PP'], { P: planks });
+  shaped(campfireId(0, true), 1, ['SSS', ' C ', 'LLL'], { S: I.STICK, C: I.COAL, L: w.log });
+}
+shaped(GROVE.bambooWood.log, 1, ['BBB', 'BBB', 'BBB'], { B: GROVE.bamboo });
+shaped(GROVE.mosaic, 1, ['S', 'S'], { S: GROVE.bambooWood.slab });
+shaped(GROVE.mosaicSlab, 6, ['MMM'], { M: GROVE.mosaic });
+shaped(GROVE.mosaicStair, 4, ['M  ', 'MM ', 'MMM'], { M: GROVE.mosaic });
+shaped(GROVE.mosaicStair, 4, ['  M', ' MM', 'MMM'], { M: GROVE.mosaic });
+shapeless(GROVE.packedMud, 1, [B.MUD, I.WHEAT]);
+shapeless(GROVE.rootedDirt, 1, [B.DIRT, B.MOSS_BLOCK]);
+shapeless(GROVE.hangingRoots, 1, [GROVE.rootedDirt]);
+shapeless(GROVE.muddyMangroveRoots, 1, [GROVE.mangroveRoots, B.MUD]);
+shapeless(GROVE.azalea, 1, [B.MOSS_BLOCK]);
+shaped(GROVE.mudBrickSlab, 6, ['MMM'], { M: GROVE.mudBricks });
+shaped(GROVE.mudBrickStair, 4, ['M  ', 'MM ', 'MMM'], { M: GROVE.mudBricks });
+shaped(GROVE.mudBrickStair, 4, ['  M', ' MM', 'MMM'], { M: GROVE.mudBricks });
+shaped(GROVE.mudBrickWall, 6, ['WWW', 'WWW'], { W: GROVE.mudBricks });
 shaped(ladderId(0), 3, ['S S', 'SSS', 'S S'], { S: I.STICK });
 shaped(B.PANE, 16, ['GGG', 'GGG'], { G: B.GLASS });
 
@@ -131,8 +226,18 @@ shapeless(dye('light_blue'), 2, [dye('blue'), dye('white')]);
 shapeless(dye('purple'), 2, [dye('red'), dye('blue')]);
 shapeless(dye('cyan'), 2, [dye('green'), dye('blue')]);
 shapeless(dye('magenta'), 2, [dye('purple'), dye('pink')]);
-// There is no cocoa here, so brown is a mix of its own.
-shapeless(dye('brown'), 2, [dye('red'), dye('green')]);
+shapeless(dye('brown'), 1, [I.COCOA_BEANS]);
+shapeless(I.SUGAR, 1, [B.SUGAR_CANE]);
+shaped(B.MELON, 1, ['SSS', 'SSS', 'SSS'], { S: I.MELON_SLICE });
+shapeless(I.MELON_SEEDS, 1, [I.MELON_SLICE]);
+shapeless(I.PUMPKIN_SEEDS, 4, [B.PUMPKIN]);
+shapeless(I.PUMPKIN_PIE, 1, [B.PUMPKIN, I.SUGAR, I.EGG]);
+shaped(I.BOWL, 4, ['P P', ' P '], { P: B.PLANKS });
+shapeless(I.BEETROOT_SOUP, 1, [I.BOWL, I.BEETROOT, I.BEETROOT, I.BEETROOT, I.BEETROOT, I.BEETROOT, I.BEETROOT]);
+shapeless(I.MUSHROOM_STEW, 1, [I.BOWL, B.RED_MUSHROOM, B.BROWN_MUSHROOM]);
+shaped(I.RABBIT_STEW, 1, [' B ', 'CRM', ' P '], { B: I.BOWL, C: I.CARROT, R: I.COOKED_RABBIT, M: B.BROWN_MUSHROOM, P: I.BAKED_POTATO });
+shapeless(I.COOKIE, 8, [I.WHEAT, I.COCOA_BEANS]);
+shaped(I.CAKE, 1, ['MMM', 'SES', 'WWW'], { M: I.MILK_BUCKET, S: I.SUGAR, E: I.EGG, W: I.WHEAT });
 // Dyeing wool: any wool plus a dye. The recipes are written for white wool; `findRecipe` lets any colour stand in for it.
 DYE_NAMES.forEach((_, c) => shapeless(woolId(c), 1, [B.WOOL, dyeId(c)]));
 
@@ -169,6 +274,73 @@ const ARMOR_PATTERNS: string[][] = [['MMM', 'M M'], ['M M', 'MMM', 'MMM'], ['MMM
 for (const material of ARMOR_MATERIALS) {
   ARMOR_PATTERNS.forEach((pattern, slotIndex) => shaped(armorId(slotIndex, material), 1, pattern, { M: ARMOR_PIECE[material] }));
 }
+// Six sticks and one smooth stone slab: three across the top, one in the middle, and one on each side of the slab.
+const SMOOTH_STONE = BUILD_MATERIALS.length + MASONRY.findIndex((row) => row.spec.name === 'smooth_stone');
+shaped(I.ARMOR_STAND, 1, ['SSS', ' S ', 'S#S'], { S: I.STICK, '#': slabId(SMOOTH_STONE, false) });
+// Three sticks along a diagonal and the line hanging from the tip (it may be made the other way round too).
+shaped(I.FISHING_ROD, 1, ['  S', ' S#', 'S #'], { S: I.STICK, '#': I.STRING });
+
+// ---- dressing: glass, cloth, stone, candles, banners, pots and signs ----
+for (let c = 0; c < DYE_NAMES.length; c++) {
+  const dye = dyeId(c);
+  shaped(DRESS.glass + c, 8, ['GGG', 'GDG', 'GGG'], { G: B.GLASS, D: dye });
+  shaped(DRESS.pane + c, 16, ['GGG', 'GGG'], { G: DRESS.glass + c });
+  shaped(DRESS.carpet + c, 3, ['WW'], { W: woolId(c) });
+  shapeless(DRESS.concrete + c, 8, [B.SAND, B.SAND, B.SAND, B.SAND, B.GRAVEL, B.GRAVEL, B.GRAVEL, B.GRAVEL, dye]);
+  const clay = terracottaOf(c);
+  if (clay) shapeless(clay, 1, [B.TERRACOTTA, dye]);
+  shaped(DRESS.bannerFloor + c * 4, 1, ['WWW', 'WWW', ' S '], { W: woolId(c), S: I.STICK });
+  shapeless(DRESS.dyeCandle + c * 4, 1, [DRESS.plainCandle, dye]);
+}
+shaped(DRESS.crackedStoneSlab, 6, ['MMM'], { M: DRESS.crackedStone });
+shaped(DRESS.crackedStoneStair, 4, ['M  ', 'MM ', 'MMM'], { M: DRESS.crackedStone });
+shaped(DRESS.crackedStoneWall, 6, ['WWW', 'WWW'], { W: DRESS.crackedStone });
+shaped(DRESS.chiseledStone, 1, ['S', 'S'], { S: slabId(4, false) });
+shaped(DRESS.crackedDeepslateSlab, 6, ['MMM'], { M: DRESS.crackedDeepslate });
+shaped(DRESS.crackedDeepslateStair, 4, ['M  ', 'MM ', 'MMM'], { M: DRESS.crackedDeepslate });
+shaped(DRESS.crackedDeepslateWall, 6, ['WWW', 'WWW'], { W: DRESS.crackedDeepslate });
+shaped(DRESS.chiseledDeepslate, 1, ['S', 'S'], { S: idByName('deepslate_bricks_slab') });
+shaped(DRESS.ironBars, 16, ['III', 'III'], { I: I.IRON_INGOT });
+shaped(DRESS.plainCandle, 1, ['S', 'C'], { S: I.STRING, C: I.COAL });
+shapeless(DRESS.pot, 4, [idByName('bricks')]);
+for (const s of DRESS.signs) shaped(s.standing, 3, ['PPP', 'PPP', ' S '], { P: idByName(s.plank), S: I.STICK });
+
+// Nether bricks are the plain ones: four of the red nether bricks, squared. Quartz is cut from polished diorite (a square of plain diorite is already polished diorite).
+const RED_NETHER = MASONRY.find((row) => row.spec.name === 'red_nether_bricks')!.cubeId;
+shaped(CONNECT.netherBricks, 4, ['RR', 'RR'], { R: RED_NETHER });
+shaped(CONNECT.netherSlab, 6, ['NNN'], { N: CONNECT.netherBricks });
+shaped(CONNECT.netherStair, 4, ['N  ', 'NN ', 'NNN'], { N: CONNECT.netherBricks });
+shaped(CONNECT.netherStair, 4, ['  N', ' NN', 'NNN'], { N: CONNECT.netherBricks });
+shaped(CONNECT.netherWall, 6, ['WWW', 'WWW'], { W: CONNECT.netherBricks });
+shaped(CONNECT.quartz, 4, ['DD', 'DD'], { D: idByName('polished_diorite') });
+shaped(CONNECT.quartzSlab, 6, ['QQQ'], { Q: CONNECT.quartz });
+shaped(CONNECT.quartzStair, 4, ['Q  ', 'QQ ', 'QQQ'], { Q: CONNECT.quartz });
+shaped(CONNECT.quartzStair, 4, ['  Q', ' QQ', 'QQQ'], { Q: CONNECT.quartz });
+shaped(CONNECT.quartzPillar, 2, ['Q', 'Q'], { Q: CONNECT.quartz });
+
+// ---- The World Beyond: what its woods and stones can be made into (the rest is found, not crafted) ----
+shapeless(BB.redwood_planks, 4, [BB.redwood_log]);
+shapeless(BB.palm_planks, 4, [BB.palm_log]);
+shapeless(B.PLANKS, 4, [BB.ebon_log]);
+shapeless(B.PLANKS, 4, [BB.worldroot_log]);
+for (const s of BEYOND_SHAPES) {
+  const at = BEYOND.shape[s.key];
+  const src = BB[s.key];
+  shaped(at.slab, 6, ['MMM'], { M: src });
+  shaped(at.stair, 4, ['M  ', 'MM ', 'MMM'], { M: src });
+  shaped(at.stair, 4, ['  M', ' MM', 'MMM'], { M: src });
+  if (s.wall) shaped(at.wall, 6, ['WWW', 'WWW'], { W: src });
+}
+shaped(BB.ancient_bricks, 4, ['LL', 'LL'], { L: BB.limestone });
+shaped(BB.polished_marble, 4, ['MM', 'MM'], { M: BB.marble });
+shaped(BB.marble_bricks, 4, ['PP', 'PP'], { P: BB.polished_marble });
+shapeless(BB.mossy_ancient_bricks, 1, [BB.ancient_bricks, B.MOSS_BLOCK]);
+shapeless(BB.mossy_stone, 1, [B.STONE, B.MOSS_BLOCK]);
+shapeless(BB.cracked_ancient_bricks, 1, [BB.ancient_bricks, I.FLINT]);
+shaped(BB.carved_ancient_stone, 1, ['A', 'A'], { A: BB.ancient_bricks });
+shaped(BB.obsidian_bricks, 4, ['OO', 'OO'], { O: B.OBSIDIAN });
+shaped(BB.bone_block, 1, ['BBB', 'BBB', 'BBB'], { B: I.BONE });
+shapeless(I.BONE, 9, [BB.bone_block]);
 
 // ---- matching --------------------------------------------------------------
 

@@ -101,6 +101,38 @@ describe('joining', () => {
     expect(snap.inv?.slots.length).toBe(INVENTORY_SLOTS);
   });
 
+  it('tells you what you wear in the snapshot, with no inventory window open', () => {
+    const room = makeRoom();
+    const c = new Client(room);
+    c.join('steve');
+    room.player(c.id!)!.armor.set(0, makeStack(armorId(0, 'iron'), 1));
+    room.player(c.id!)!.inventoryChanged();
+    ticks(room, 3);
+    // (Only the snapshot after a change carries the view.)
+    const view = c.of('snap').filter((s) => s.inv).pop()!.inv!;
+    expect(view.menu).toBeNull();
+    expect(view.armor?.[0]?.id).toBe(armorId(0, 'iron'));
+  });
+
+  it('sends the inventory and clothes again when the snapshot that had them was skipped (a client still taking in the world)', () => {
+    const room = makeRoom();
+    const c = new Client(room);
+    let behind = true;
+    const send = c.conn.send;
+    (c.conn as { send: (m: NetServerMessage) => unknown }).send = (m: NetServerMessage) => {
+      if (behind && m.t === 'snap') return 'skipped'; // (what `sendWithBackpressure` answers while the socket is full)
+      return send(m);
+    };
+    c.join('steve');
+    ticks(room, 3);
+    expect(c.of('snap')).toHaveLength(0);
+    behind = false;
+    ticks(room, 2);
+    const first = c.of('snap')[0];
+    expect(first.inv?.slots.length).toBe(INVENTORY_SLOTS);
+    expect(first.inv?.armor).toBeDefined();
+  });
+
   it('shows every player the character the others chose, and makes one for those who chose none', () => {
     const room = makeRoom();
     const chosen = lookCode({ skin: 7, hair: 11, style: 2, eyes: 5, shirt: 8, pants: 6 });
@@ -1044,5 +1076,57 @@ describe('minecarts and boats', () => {
     room.tick();
     expect(cart.rider).toBeNull();
     expect(room.realm.vehicles.list).toContain(cart);
+  });
+});
+
+describe('fishing', () => {
+  /** A pond to the north (the way yaw 0 looks), and a rod in the hand. */
+  const pond = (room: GameRoom): void => {
+    for (let x = CX - 4; x <= CX + 4; x++)
+      for (let z = CZ - 12; z <= CZ - 5; z++) {
+        room.world.setBlock(x, FLOOR - 1, z, B.SAND);
+        room.world.setBlock(x, FLOOR, z, B.WATER);
+      }
+  };
+
+  it('shows the float to the people near it, the caster knowing which one is theirs, and takes it away on reeling in', () => {
+    const room = makeRoom();
+    pond(room);
+    const a = joinAt(room, 'alex', CX + 0.5, CZ + 0.5);
+    const b = joinAt(room, 'bob', CX + 3.5, CZ + 4.5);
+    const p = room.player(a.id!)!;
+    p.inventory.set(p.selected, makeStack(I.FISHING_ROD));
+    expect(a.snap.bobbers).toBeUndefined();
+    a.input({ right: true, pitch: 0.12 }, 1);
+    a.input({ right: false, pitch: 0.12 }, 1);
+    ticks(room, 60);
+    expect(a.snap.bobbers).toHaveLength(1);
+    expect(a.snap.bobbers![0]).toMatchObject({ o: a.id, m: 1, own: 1 });
+    expect(b.snap.bobbers).toHaveLength(1);
+    expect(b.snap.bobbers![0].o).toBe(a.id);
+    expect(b.snap.bobbers![0].own).toBeUndefined();
+    // Reel in: it is gone for both.
+    a.input({ right: true, pitch: 0.12 }, 1);
+    a.input({ right: false, pitch: 0.12 }, 1);
+    room.tick();
+    expect(a.snap.bobbers).toBeUndefined();
+    expect(b.snap.bobbers).toBeUndefined();
+  });
+
+  it('takes the line away when the player who cast it leaves', () => {
+    const room = makeRoom();
+    pond(room);
+    const a = joinAt(room, 'alex');
+    const b = joinAt(room, 'bob', CX + 3.5, CZ + 4.5);
+    const p = room.player(a.id!)!;
+    p.inventory.set(p.selected, makeStack(I.FISHING_ROD));
+    a.input({ right: true, pitch: 0.12 }, 1);
+    a.input({ right: false, pitch: 0.12 }, 1);
+    ticks(room, 30);
+    expect(b.snap.bobbers).toHaveLength(1);
+    room.leave(a.id!);
+    room.tick();
+    expect(b.snap.bobbers).toBeUndefined();
+    expect(room.realm.fishing.bobbers).toHaveLength(0);
   });
 });

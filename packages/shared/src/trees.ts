@@ -1,17 +1,17 @@
-import { B, IS_LEAVES, IS_SOLID } from './blocks';
+import { B, GROVE, IS_LEAVES, IS_SOLID } from './blocks';
 import type { BlockReader } from './physics';
 
 /**
  * Tree shapes, used by world generation and by sapling growth. Driven by an injected random source
  * so the same tree comes out of the same seed on the client, on the server and in tests.
  *
- * Seven kinds, one for each climate: oak and birch (the temperate woods), spruce (the cold), acacia (the savanna: a leaning
- * trunk under a flat umbrella), jungle (very tall), dark oak (a broad, shady dome) and cherry (a pink cloud). `big` makes the
+ * Oak, birch, spruce, acacia, jungle, dark oak and cherry, plus mangrove (roots and a low crown), pale oak
+ * and the azalea tree a bush grows into. `big` makes the
  * rare giant of a kind: a fancy oak with branches, a tall birch, a mighty spruce, a jungle giant with a trunk two blocks wide,
  * a dark oak whose trunk is 2 x 2 too. Giants are only grown by world generation; a sapling always makes the ordinary tree.
  */
 
-export type TreeKind = 'oak' | 'birch' | 'spruce' | 'acacia' | 'jungle' | 'dark_oak' | 'cherry';
+export type TreeKind = 'oak' | 'birch' | 'spruce' | 'acacia' | 'jungle' | 'dark_oak' | 'cherry' | 'mangrove' | 'pale_oak' | 'azalea';
 
 export interface TreeBlock {
   x: number;
@@ -33,6 +33,9 @@ const LOG: Record<TreeKind, number> = {
   jungle: B.JUNGLE_LOG,
   dark_oak: B.DARK_OAK_LOG,
   cherry: B.CHERRY_LOG,
+  mangrove: GROVE.mangrove.log,
+  pale_oak: GROVE.paleOak.log,
+  azalea: B.LOG,
 };
 const LEAVES: Record<TreeKind, number> = {
   oak: B.LEAVES,
@@ -42,6 +45,9 @@ const LEAVES: Record<TreeKind, number> = {
   jungle: B.JUNGLE_LEAVES,
   dark_oak: B.DARK_OAK_LEAVES,
   cherry: B.CHERRY_LEAVES,
+  mangrove: GROVE.mangrove.leaves,
+  pale_oak: GROVE.paleOak.leaves,
+  azalea: GROVE.azaleaLeaves,
 };
 
 /** Trunk heights: oaks are short and round, birches taller, spruces tallest, jungle trees tower. */
@@ -59,6 +65,12 @@ export function trunkHeight(kind: TreeKind, rand: () => number, big = false): nu
       return big ? 6 + Math.floor(rand() * 3) : 4 + Math.floor(rand() * 2);
     case 'cherry':
       return 5 + Math.floor(rand() * 3);
+    case 'mangrove':
+      return 5 + Math.floor(rand() * 3);
+    case 'pale_oak':
+      return 4 + Math.floor(rand() * 3);
+    case 'azalea':
+      return 3 + Math.floor(rand() * 2);
     default:
       return big ? 7 + Math.floor(rand() * 4) : 4 + Math.floor(rand() * 3);
   }
@@ -72,6 +84,9 @@ export function treeKindOfSapling(id: number): TreeKind | null {
   if (id === B.JUNGLE_SAPLING) return 'jungle';
   if (id === B.DARK_OAK_SAPLING) return 'dark_oak';
   if (id === B.CHERRY_SAPLING) return 'cherry';
+  if (id === GROVE.mangrove.sapling) return 'mangrove';
+  if (id === GROVE.paleOak.sapling) return 'pale_oak';
+  if (id === GROVE.azalea || id === B.FLOWERING_AZALEA) return 'azalea';
   return null;
 }
 
@@ -95,7 +110,8 @@ export function treeBlocks(x: number, y: number, z: number, trunk: number, rand:
   const leaves = LEAVES[kind];
   const log = LOG[kind];
   const leaf = (lx: number, ly: number, lz: number): void => {
-    out.push({ x: lx, y: ly, z: lz, id: leaves, leaf: true });
+    const id = kind === 'azalea' && rand() < 0.22 ? GROVE.floweringAzaleaLeaves : leaves;
+    out.push({ x: lx, y: ly, z: lz, id, leaf: true });
   };
   const wood = (lx: number, ly: number, lz: number): void => {
     out.push({ x: lx, y: ly, z: lz, id: log, leaf: false });
@@ -262,6 +278,14 @@ export function treeBlocks(x: number, y: number, z: number, trunk: number, rand:
   if (kind === 'oak' && !big) for (let ty = y; ty < topY; ty++) wood(x, ty, z);
   else if (kind === 'birch' && !big) for (let ty = y; ty < topY; ty++) wood(x, ty, z);
   else if (kind === 'spruce') for (let ty = y; ty < topY; ty++) wood(x, ty, z);
+  else if (kind === 'pale_oak' || kind === 'azalea') for (let ty = y; ty < topY; ty++) wood(x, ty, z);
+  else if (kind === 'mangrove') {
+    out.push({ x, y, z, id: GROVE.mangroveRoots, leaf: false });
+    for (let ty = y + 1; ty < topY; ty++) wood(x, ty, z);
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+      if (rand() < 0.65) out.push({ x: x + dx, y, z: z + dz, id: GROVE.mangroveRoots, leaf: false });
+    }
+  }
   return out;
 }
 

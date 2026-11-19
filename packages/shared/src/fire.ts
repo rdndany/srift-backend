@@ -1,4 +1,4 @@
-import { B, BLOCK_COUNT, BUILD_MATERIALS, DYE_COUNT, IS_SOLID, LEAF_BLOCKS, LOG_BLOCKS, slabId, stairId, woolId } from './blocks';
+import { B, BLOCK_COUNT, BUILD_MATERIALS, DYE_COUNT, IS_SOLID, LEAF_BLOCKS, LOG_BLOCKS, dressBurnWool, groveLeaves, joineryBurnLogs, joineryBurnPlanks, masonryWoolBlocks, masonryWoodBlocks, slabId, stairId, woolId } from './blocks';
 
 /**
  * Fire, with the numbers of the original game.
@@ -32,10 +32,12 @@ const WOODEN_SLABS = [slabId(WOODEN, false), slabId(WOODEN, true)];
 const WOODEN_STAIRS = [false, true].flatMap((top) => [0, 1, 2, 3].map((d) => stairId(WOODEN, top, d)));
 const WOOLS = Array.from({ length: DYE_COUNT }, (_, c) => woolId(c));
 
-flammable([B.PLANKS, B.FENCE, ...WOODEN_SLABS, ...WOODEN_STAIRS, ...GATES], 5, 20);
+flammable([B.PLANKS, B.FENCE, ...WOODEN_SLABS, ...WOODEN_STAIRS, ...GATES, ...masonryWoodBlocks(), ...joineryBurnPlanks()], 5, 20);
 flammable(LOG_BLOCKS, 5, 5);
+flammable(joineryBurnLogs(), 5, 5);
 flammable(LEAF_BLOCKS, 30, 60);
-flammable(WOOLS, 30, 60);
+flammable(groveLeaves(), 30, 60);
+flammable([...WOOLS, ...masonryWoolBlocks(), ...dressBurnWool()], 30, 60);
 flammable(
   [
     B.TALL_GRASS, B.ROSE, B.DANDELION, B.DEAD_BUSH, B.SAPLING, B.BIRCH_SAPLING, B.SPRUCE_SAPLING, B.ACACIA_SAPLING, B.JUNGLE_SAPLING, B.DARK_OAK_SAPLING, B.CHERRY_SAPLING,

@@ -53,6 +53,41 @@ export class DamageNumbers {
   private readonly fwd = new THREE.Vector3();
   private readonly right = new THREE.Vector3();
   private totalNum: Num | null = null;
+  private dummy: THREE.Sprite | null = null;
+
+  /**
+   * Draw the letters a floating number uses, and one sprite, so the first hit does not build them.
+   * `release` takes the spare sprite away once the loading screen has drawn it.
+   */
+  warm(): void {
+    if (this.dummy) return;
+    const samples: [string, Kind][] = [
+      ['8', 'dealt'],
+      ['8!', 'crit'],
+      ['-8', 'taken'],
+      ['-8', 'guarded'],
+      ['+8 XP', 'xp'],
+      ['+8 Auren', 'coins'],
+      ['BLOCK', 'block'],
+      ['PARRY!', 'parry'],
+      ['DODGE!', 'dodge'],
+      ['HEADSHOT', 'head'],
+      ['FINISHER', 'combo'],
+      ['\u03A3 8', 'total'],
+    ];
+    for (const [text, kind] of samples) this.material(text, kind);
+    this.dummy = new THREE.Sprite(this.material('8', 'dealt'));
+    this.dummy.frustumCulled = false;
+    this.dummy.position.set(0, -4000, 0);
+    this.dummy.scale.set(0.01, 0.01, 0.01);
+    this.group.add(this.dummy);
+  }
+
+  release(): void {
+    if (!this.dummy) return;
+    this.group.remove(this.dummy);
+    this.dummy = null;
+  }
 
   private material(text: string, kind: Kind): THREE.SpriteMaterial {
     const key = `${kind}:${text}`;

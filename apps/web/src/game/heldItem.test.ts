@@ -131,6 +131,24 @@ describe('the first-person hand', () => {
     hand.dispose();
   });
 
+  it('puts a flame on a torch in the hand and in a figure\'s hand', () => {
+    const hand = makeHand();
+    const flames = (root: THREE.Object3D): number => {
+      let n = 0;
+      root.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (mesh.isMesh && (mesh.material as THREE.Material).side === THREE.DoubleSide) n++;
+      });
+      return n;
+    };
+    settle(hand, B.TORCH);
+    expect(flames(hand.scene)).toBe(2);
+    expect(flames(hand.figureModel(B.TORCH)!)).toBe(2);
+    settle(hand, B.RTORCH_BASE + 1);
+    expect(flames(hand.scene)).toBe(0);
+    hand.dispose();
+  });
+
   it('shows what is in the other hand beside it', () => {
     const hand = makeHand();
     const sword = allItems().find((i) => i.tool?.kind === 'sword')!.id;

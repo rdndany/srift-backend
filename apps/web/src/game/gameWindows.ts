@@ -36,6 +36,18 @@ export function makeWindows(parts: WindowParts) {
       if (document.pointerLockElement) document.exitPointerLock();
     } else if (session.screen === 'none') input.lock();
   }
+  /** The Codex of the World Beyond (key B): the biomes, places and caverns found so far. */
+  function toggleCodex(open?: boolean): void {
+    const s = useUi.getState();
+    if (!s.codex) return;
+    const next = open ?? !s.codexOpen;
+    if (next === s.codexOpen) return;
+    useUi.setState({ codexOpen: next });
+    input.wasPressed('KeyB'); // (a press made while it was open is not a second one)
+    if (next) {
+      if (document.pointerLockElement) document.exitPointerLock();
+    } else if (session.screen === 'none') input.lock();
+  }
   /** The party window (key P): like the quest log, a page over the game with the mouse back. */
   function togglePartyWindow(open?: boolean): void {
     const s = useUi.getState();
@@ -62,7 +74,7 @@ export function makeWindows(parts: WindowParts) {
   /** Is a window up that needs the mouse (the quest log, party, social, trade, a player's menu, a look at a player)? */
   function mouseWindowOpen(): boolean {
     const s = useUi.getState();
-    return s.questLogOpen || s.partyOpen || s.socialOpen || !!s.trade || !!s.playerMenu || !!s.inspect;
+    return s.codexOpen || s.questLogOpen || s.partyOpen || s.socialOpen || !!s.trade || !!s.playerMenu || !!s.inspect;
   }
   /** Back to the game after a window closed, when nothing else needs the mouse. */
   function relockIfFree(): void {
@@ -122,6 +134,14 @@ export function makeWindows(parts: WindowParts) {
       }
       return true;
     }
+    // The Codex closes with B, E or Escape.
+    if (useUi.getState().codexOpen) {
+      if (e.code === 'KeyB' || e.code === 'KeyE' || e.code === 'Escape') {
+        e.preventDefault();
+        toggleCodex(false);
+      }
+      return true;
+    }
     // The quest log closes with L, E or Escape.
     if (useUi.getState().questLogOpen) {
       if (e.code === 'KeyL' || e.code === 'KeyE' || e.code === 'Escape') {
@@ -152,5 +172,5 @@ export function makeWindows(parts: WindowParts) {
     return false;
   }
 
-  return { toggleQuestLog, togglePartyWindow, toggleSocialWindow, mouseWindowOpen, relockIfFree, showTrade, openPlayerMenu, closePlayerMenu, handleKey };
+  return { toggleCodex, toggleQuestLog, togglePartyWindow, toggleSocialWindow, mouseWindowOpen, relockIfFree, showTrade, openPlayerMenu, closePlayerMenu, handleKey };
 }

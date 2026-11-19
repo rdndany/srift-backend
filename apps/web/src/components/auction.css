@@ -1,0 +1,429 @@
+/* The Auction House: the merchant window's bronze frame, wider, with a ledger of rows in place of the wares. */
+#menu-screen .panel.wow.shop-win.auction-win {
+  width: 880px;
+  max-width: calc(100vw - 24px);
+  min-height: 0;
+  gap: 8px;
+}
+#menu-screen:has(.auction-win) {
+  padding-bottom: 24px;
+}
+
+/* The tabs of the window, along the top of the ledger. */
+.auc-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 2px solid #3d2c12;
+}
+.auc-tab {
+  position: relative;
+  padding: 7px 16px 6px;
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--w-dim, #a48f6a);
+  cursor: pointer;
+  background: linear-gradient(#17120d, #0f0c09);
+  border: 2px solid #0b0806;
+  border-bottom: 0;
+  box-shadow: inset 2px 2px 0 #4f360f;
+  text-shadow: 1px 1px 0 #000;
+}
+.auc-tab:hover {
+  color: var(--w-gold-hi, #ffe49a);
+}
+.auc-tab.on {
+  color: var(--w-gold-hi, #ffe49a);
+  background: linear-gradient(#3a2d1a, #1f170d);
+  box-shadow: inset 2px 2px 0 #d0a24c;
+}
+.auc-tab b {
+  display: inline-block;
+  min-width: 14px;
+  margin-left: 6px;
+  padding: 1px 4px;
+  font-size: 11px;
+  line-height: 1.1;
+  text-align: center;
+  color: #1a1206;
+  background: var(--w-gold, #f0bc4c);
+}
+
+/* Browse: the shelves on the left, the search, the ledger and the bidding bar on the right. */
+.auc-browse {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+.auc-cats {
+  flex: none;
+  width: 138px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.auc-cat {
+  padding: 6px 8px;
+  text-align: left;
+  font: inherit;
+  font-size: 12px;
+  color: #d8c7a4;
+  cursor: pointer;
+  background: rgba(0, 0, 0, 0.3);
+  border: 2px solid;
+  border-color: #000 #3d2c12 #3d2c12 #000;
+  text-shadow: 1px 1px 0 #000;
+}
+.auc-cat:hover {
+  color: var(--w-gold-hi, #ffe49a);
+}
+.auc-cat.on {
+  color: var(--w-gold-hi, #ffe49a);
+  background: linear-gradient(90deg, rgba(240, 188, 76, 0.28), rgba(0, 0, 0, 0.3));
+  border-color: #6b4f1e;
+}
+.auc-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.auc-search {
+  display: flex;
+  gap: 6px;
+}
+.auc-search input,
+.auc-field input {
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--w-text, #f1e4c8);
+  background: rgba(0, 0, 0, 0.45);
+  border: 2px solid;
+  border-color: #000 #6b4f1e #6b4f1e #000;
+  border-radius: 0;
+  outline: none;
+}
+.auc-search input {
+  flex: 1;
+}
+.auc-search input:focus,
+.auc-field input:focus {
+  border-color: #000 var(--w-gold, #f0bc4c) var(--w-gold, #f0bc4c) #000;
+}
+.auc-field input:disabled {
+  opacity: 0.5;
+}
+
+/* The ledger: a header you can sort by, and rows in the same columns. */
+.auc-head,
+.auc-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px 120px 116px 116px;
+  align-items: center;
+  column-gap: 6px;
+}
+.auc-lists .auc-head,
+.auc-lists .auc-row {
+  grid-template-columns: minmax(0, 1fr) 96px 120px 116px 116px 84px;
+}
+.auc-head {
+  padding: 0 6px;
+}
+.auc-sort {
+  padding: 3px 4px;
+  text-align: left;
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--w-dim, #a48f6a);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  text-shadow: 1px 1px 0 #000;
+  white-space: nowrap;
+}
+.auc-sort.static {
+  cursor: default;
+}
+.auc-sort:not(.static):hover,
+.auc-sort.on {
+  color: var(--w-gold-hi, #ffe49a);
+}
+.auc-num {
+  text-align: right;
+}
+.auc-sort.auc-num {
+  text-align: right;
+}
+.auc-list {
+  height: 312px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #8a6424 #0e0b08;
+  background: rgba(0, 0, 0, 0.28);
+  border: 2px solid;
+  border-color: #000 #3d2c12 #3d2c12 #000;
+  box-shadow: inset 3px 3px 0 rgba(0, 0, 0, 0.45);
+}
+.auc-list.tall {
+  height: 408px;
+}
+/* Every tab is as tall as Browse, so the window does not jump when you switch. */
+.auc-browse,
+.auc-sell,
+.auc-lists {
+  box-sizing: border-box;
+  min-height: 462px;
+}
+.auc-row {
+  flex: none;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 40px;
+  padding: 2px 6px;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  color: var(--w-text, #f1e4c8);
+  background: rgba(255, 240, 210, 0.04);
+  border: 2px solid transparent;
+  text-shadow: 1px 1px 0 #000;
+}
+button.auc-row {
+  cursor: pointer;
+}
+button.auc-row:hover {
+  background: rgba(240, 188, 76, 0.12);
+}
+.auc-row.on {
+  background: rgba(240, 188, 76, 0.22);
+  border-color: #8a6424;
+}
+.auc-row.mine .auc-seller {
+  color: #6bff8a;
+}
+.auc-cell {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.auc-cell.auc-item {
+  flex-direction: row;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 8px;
+}
+.auc-cell.auc-num {
+  align-items: flex-end;
+}
+.auc-cell small {
+  font-size: 10px;
+  color: var(--w-dim, #a48f6a);
+}
+.auc-cell small.auc-lead {
+  color: #6bff8a;
+}
+.auc-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #fff3cf;
+}
+.auc-slot.slot {
+  position: relative;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  pointer-events: none;
+}
+.auc-slot.slot.big {
+  width: 52px;
+  height: 52px;
+}
+.auc-slot .item-icon {
+  width: 100%;
+  height: 100%;
+}
+.auc-price {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--w-gold-hi, #ffe49a);
+}
+.auc-empty {
+  margin: 28px 12px;
+  text-align: center;
+  font-size: 13px;
+  font-style: italic;
+  color: var(--w-dim, #a48f6a);
+}
+.auc-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  font-size: 12px;
+  color: #d8c7a4;
+}
+
+/* The bar at the bottom of Browse: the bid you make and the buyout. */
+.auc-buy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 2px solid;
+  border-color: #000 #3d2c12 #3d2c12 #000;
+}
+.auc-buy-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #fff3cf;
+}
+.auc-hint {
+  font-size: 12px;
+  font-style: italic;
+  color: var(--w-dim, #a48f6a);
+}
+.auc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--w-dim, #a48f6a);
+}
+.auc-buy .auc-field {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.auc-buy .auc-field input {
+  width: 110px;
+  text-align: right;
+}
+.auc-buy .quest-btn:disabled,
+.auc-lists .quest-btn:disabled,
+.auc-form .quest-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* Sell: your bags on the left, the form on the right. */
+.auc-sell {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+.auc-bags {
+  flex: none;
+}
+.auc-form {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 2px solid;
+  border-color: #000 #3d2c12 #3d2c12 #000;
+  box-shadow: inset 3px 3px 0 rgba(0, 0, 0, 0.45);
+}
+.auc-form-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+}
+.auc-form .auc-field input {
+  width: 100%;
+  text-align: right;
+}
+.auc-hours {
+  display: flex;
+  gap: 4px;
+}
+.auc-hour {
+  flex: 1;
+  padding: 5px 0;
+  font: inherit;
+  font-size: 13px;
+  color: #d8c7a4;
+  cursor: pointer;
+  background: rgba(0, 0, 0, 0.4);
+  border: 2px solid;
+  border-color: #000 #3d2c12 #3d2c12 #000;
+}
+.auc-hour.on {
+  color: var(--w-gold-hi, #ffe49a);
+  border-color: #8a6424;
+  background: rgba(240, 188, 76, 0.2);
+}
+.auc-sum {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: #d8c7a4;
+}
+.auc-sum > div {
+  display: flex;
+  justify-content: space-between;
+}
+.auc-sum small {
+  font-size: 10px;
+  color: var(--w-dim, #a48f6a);
+}
+.auc-problem {
+  font-size: 11px;
+  color: #ff9a7a;
+}
+.shop-slot.picked {
+  border-color: var(--w-gold, #f0bc4c);
+  box-shadow: inset 0 0 0 1px #000, 0 0 8px rgba(240, 188, 76, 0.6);
+}
+
+/* Mail. */
+.auc-mailbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #d8c7a4;
+}
+.auc-row.mail {
+  grid-template-columns: minmax(0, 1fr) 140px 84px;
+}
+.auc-lists {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.auc-row.static {
+  cursor: default;
+}
+.quest-btn.small {
+  padding: 4px 12px;
+  font-size: 12px;
+}

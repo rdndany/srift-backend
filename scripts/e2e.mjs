@@ -83,7 +83,7 @@ try {
   await waitForPort(ADVENTURE_PORT);
   // E2E_ONLY=cloud (comma separated) runs just those suites while developing.
   const only = (process.env.E2E_ONLY ?? '').split(',').filter(Boolean);
-  for (const name of ['smoke', 'scenarios', 'gameplay', 'mobs', 'plants', 'bow', 'weather', 'saves', 'auth', 'cloud', 'online', 'crowd', 'xp', 'armor', 'view', 'home', 'world', 'nature', 'recipes', 'shield', 'bed', 'building', 'dyes', 'villages', 'trading', 'enchanting', 'anvil', 'fire', 'worlds', 'adventure', 'legacy', 'vehicles', 'redstone', 'character', 'map', 'identity', 'classes']) {
+  for (const name of ['smoke', 'scenarios', 'gameplay', 'mobs', 'plants', 'bow', 'weather', 'saves', 'auth', 'cloud', 'online', 'crowd', 'xp', 'armor', 'view', 'home', 'world', 'nature', 'recipes', 'shield', 'bed', 'building', 'dyes', 'villages', 'trading', 'enchanting', 'anvil', 'fire', 'worlds', 'adventure', 'legacy', 'vehicles', 'redstone', 'character', 'map', 'identity', 'classes', 'beyond']) {
     if (only.length && !only.includes(name)) continue;
     console.log(`> ${name}`);
     run(process.execPath, [`scripts/${name}.mjs`, url, 'screenshots']);

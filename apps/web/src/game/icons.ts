@@ -1,13 +1,18 @@
-import { ATLAS_COLS, BLOCKS, TILE_PX, compassTileName, getItem, tileIndex } from '@solrift/shared';
+import { ATLAS_COLS, BLOCKS, TILE_PX, allItems, compassTileName, getItem, tileIndex } from '@solrift/shared';
 
 /** Isometric block icon (or flat sprite for items), cached per item id. */
 export class ItemIcons {
   private canvases = new Map<number, HTMLCanvasElement>();
   private urls = new Map<number, string>();
 
-  constructor(private readonly atlas: HTMLCanvasElement) {}
+  /** ensure paints a tile into the atlas just before it is read (a page that has no full atlas, like the lobby, paints only the tiles it needs). */
+  constructor(
+    private readonly atlas: HTMLCanvasElement,
+    private readonly ensure?: (index: number) => void,
+  ) {}
 
   private tile(index: number): HTMLCanvasElement {
+    this.ensure?.(index);
     const t = document.createElement('canvas');
     t.width = TILE_PX;
     t.height = TILE_PX;
@@ -101,5 +106,19 @@ export class ItemIcons {
       this.urls.set(id, u);
     }
     return u;
+  }
+
+  private queue: number[] | null = null;
+
+  /**
+   * Encode a few item pictures. Opening the inventory draws every picture at once, and the first time each one is
+   * turned into an image the game stops. Call this each frame while the world is loading. Returns true when every
+   * item already has its picture.
+   */
+  warm(budgetMs = 6): boolean {
+    if (!this.queue) this.queue = allItems().map((item) => item.id);
+    const t0 = performance.now();
+    while (this.queue.length > 0 && performance.now() - t0 < budgetMs) this.url(this.queue.pop()!);
+    return this.queue.length === 0;
   }
 }

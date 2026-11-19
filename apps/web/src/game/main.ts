@@ -4,6 +4,7 @@ import {
   BLOCKS,
   SOUL_LANTERN_LIGHT,
   NPCS,
+  campfireInfo,
   GameSession,
   LoopbackLink,
   ADVENTURE_SEED,
@@ -23,13 +24,18 @@ import {
   type InputFrame,
   type PlayerSave,
   getItem,
+  CraftingMenu,
   I,
   MOUNTS,
   IS_LIQUID,
+  isWaterBlock,
   type SaveMode,
+  type DiscoveryLog,
   type WorldState,
 } from '@solrift/shared';
-import { bumpUi, showZone, useUi } from '../ui/store';
+import { bumpUi, showZone, useUi, type CodexView } from '../ui/store';
+import { BeyondClient } from './beyondClient';
+import { CampfireFood } from './campfireFood';
 import { Chat } from './chat';
 import { paramsFor, prettyAddress } from './route';
 import type { ClientSession } from './clientSession';
@@ -55,12 +61,14 @@ import { Rain } from './rain';
 import { RemoteSession } from './remote';
 import { saveBridge } from './saveBridge';
 import { Sky } from './sky';
-import { DEFAULT_FX, PostFx, type FxFlags } from './postfx';
+import { PostFx, type FxFlags } from './postfx';
 import { SunShadows } from './shadows';
 import { AdminBar, type AdminDetails } from './adminBar';
 import { TorchGlow } from './torchGlow';
 import { CRACK_STAGES, makeCrackTexture, setCrackStage } from './breakCracks';
 import { XpOrbRenderer } from './xpOrbRenderer';
+import { BobberRenderer } from './bobbers';
+import { rodLine } from './held/basic';
 import { EatFx } from './eatFx';
 import { LevelUpFx } from './levelUpFx';
 import { CHEWS_PER_SECOND } from './character';
@@ -77,6 +85,8 @@ import { WindBlur } from './windBlur';
 import { ShaderKeeper } from './shaderKeep';
 import { HitchLog, describeHitch, hitchShaders, type Hitch } from './hitch';
 import { FigureWarm } from './figureWarm';
+import { warmText } from './textWarm';
+import { getSettings, subscribeSettings, type Settings } from './settings';
 import { warmPreview } from './characterPreview';
 import { RushLines } from './spellFx';
 import { ARCANE_VEIL, GuardVeil } from './guardFx';
@@ -186,6 +196,9 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   const autoQuality = !params.has('debug') && !params.has('noautoquality');
   let qualityLevel = 0;
   let shadowsOff = false;
+  /** The player turned the sun's shadows off (a setting); shadowsOff is the automatic quality having done so. */
+  let shadowsUserOff = false;
+  let adaptiveOn = true;
   let aqTime = 0;
   let aqFrames = 0;
   let aqSlow = 0;
@@ -216,18 +229,19 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
       else if (!open && session.ready) input.lock();
     },
   );
+  const worldName = (kind: WorldKind): string => (kind === 'square' ? 'square platform' : kind === 'beyond' ? 'World Beyond' : 'overworld');
   /** Single-player has no one to talk to, but `/` still takes the few cheats (they need creative mode). */
   function localCommand(text: string): void {
     const [name, arg] = text.replace(/^\//, '').trim().toLowerCase().split(/\s+/);
     if (!text.startsWith('/')) return;
     if (name === 'help') {
-      chat.add('Commands: /help /world [overworld|square]', 'notice');
+      chat.add('Commands: /help /world [overworld|beyond|square]', 'notice');
     } else if (name === 'world') {
       if (KIND === 'adventure') chat.add('Adventure is its own world: leave it from the pause menu and pick another from the title screen.', 'notice');
-      else if (!arg) chat.add(`You are in the ${KIND === 'square' ? 'square platform' : 'overworld'}. Use /world overworld or /world square.`, 'notice');
-      else if (arg !== 'overworld' && arg !== 'square') chat.add('Worlds: overworld, square.', 'notice');
+      else if (!arg) chat.add(`You are in the ${worldName(KIND)}. Use /world overworld, /world beyond or /world square.`, 'notice');
+      else if (arg !== 'overworld' && arg !== 'square' && arg !== 'beyond') chat.add('Worlds: overworld, beyond, square.', 'notice');
       else if (session.mode !== 'creative') chat.add('Switching worlds is a cheat: it needs creative mode (F4).', 'notice');
-      else if (arg === KIND) chat.add(`You are already in the ${arg === 'square' ? 'square platform' : 'overworld'}.`, 'notice');
+      else if (arg === KIND) chat.add(`You are already in the ${worldName(arg)}.`, 'notice');
       else switchWorld(arg);
     } else {
       chat.add(`Unknown command: /${name}. Try /help.`, 'notice');
@@ -358,6 +372,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   let caveBannerWait = 0;
   let placeWait = 0;
   const caveFog = new THREE.Color();
+  const beyondTint = new THREE.Color();
   scene.add(sky.group);
   const postfx = new PostFx(renderer, scene, camera, sky.sunMesh);
   const fxWanted: FxFlags = ((): FxFlags => {
@@ -365,14 +380,15 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     if (params.has('nopostfx')) return all(false);
     if (params.has('postfx')) return all(true);
     try {
-      const raw = localStorage.getItem('solrift.fx');
-      if (raw) return { ...DEFAULT_FX, ...(JSON.parse(raw) as Partial<FxFlags>) };
-      if (localStorage.getItem('solrift.postfx') === '0') return all(false); // (the first version had one switch)
+      if (localStorage.getItem('solrift.postfx') === '0' && !localStorage.getItem('solrift.fx') && !localStorage.getItem('solrift-settings')) return all(false); // (the first version had one switch)
     } catch {
-      // (no storage: the defaults)
+      // (no storage: the settings)
     }
-    return { ...DEFAULT_FX };
+    const s = getSettings();
+    return { ao: s.ao, glow: s.glow, grade: s.grade, rays: s.rays, menuBlur: s.menuBlur };
   })();
+  /** ?nopostfx and ?postfx decide the picture's finishing whatever the settings say. */
+  const fxForced = params.has('nopostfx') || params.has('postfx');
   const applyPostfx = (): void => {
     const wasOn = postfx.on;
     postfx.setFlags(qualityLevel < 1 ? fxWanted : { ao: false, glow: false, grade: false, rays: false, menuBlur: false });
@@ -389,15 +405,21 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   renderer.autoClear = false;
   const hand = new HeldItem(atlas.canvas, atlas.texture);
 
-  const particles = new Particles(atlas.canvas);
+  const particles = new Particles(atlas.canvas, atlas.texture);
   scene.add(particles.mesh);
+  scene.add(particles.debris);
   const torchGlow = new TorchGlow();
+  let campfireSmoke = 0;
   scene.add(torchGlow.group);
   const audio = new GameAudio();
 
   const drops = new ItemEntities(icons, (id) => hand.dropModel(id));  scene.add(drops.group);
+  const campfireFood = new CampfireFood((id) => hand.dropModel(id), (x, y, z) => world.getBlock(x, y, z));
+  scene.add(campfireFood.group);
   const xpOrbs = new XpOrbRenderer();
   scene.add(xpOrbs.group);
+  const bobbers = new BobberRenderer();
+  scene.add(bobbers.group);
   const eatFx = new EatFx();
   scene.add(eatFx.group);
   let bowWas = 0;
@@ -569,12 +591,34 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   hand.setMapSheet(mapSheet);
   let mapPaintWait = 0;
   let mapWasShown = false;
-  /** The shaders of the hand are built in the first frame, behind the loading screen (see `HeldItem.warm`). */
+  /** The hand's shaders are built once, behind the loading screen, just before the world is entered (see `HeldItem.warm`). */
   let handWarm = false;
+  /** The line "Preparing the hand..." is up for a frame before the build, so the bar can show it while the card works. */
+  let handAnnounced = false;
   /** What the world only shows later (your body in gear, the mount, the block outline, the rain) is drawn once while loading (see `FigureWarm`). */
   let figureWarm: FigureWarm | null = null;
   let figureWarmStarted = false;
   let figureWarmWait = 1;
+  /** The inventory window drawn for the loading screen (one frame at each of its tabs, see `FigureWarm` and `MenuScreen`). */
+  function warmWindows(step: number): void {
+    if (step < 0) {
+      delete document.documentElement.dataset.uiWarm;
+      useUi.setState({ warmMenu: null, invTab: 'inventory', questLogOpen: false, codexOpen: false, socialOpen: false, partyOpen: false });
+      return;
+    }
+    if (step === 3) {
+      // The windows of the store's own flags, in the games that have them (nothing else about the game changes: only the flags).
+      const s = useUi.getState();
+      document.documentElement.dataset.uiWarm = '1';
+      useUi.setState({ warmMenu: null, questLogOpen: s.adventure, codexOpen: !!s.codex, socialOpen: !!remote, partyOpen: !!remote && s.adventure });
+      return;
+    }
+    const tabs = ['inventory', 'crafting', 'spells'] as const;
+    if (tabs[step] === 'spells' && !session.classView()) return;
+    const menu = new CraftingMenu(session.inventory, 2, session.armor, session.offhand, session.mountSlot);
+    menu.attachBags(session.inventory, session.bags);
+    useUi.setState({ warmMenu: menu, invTab: tabs[step] });
+  }
   /** What the server last said the map should mark besides the quest givers: the rest of your party. */
   let mapPartyPins: { name: string; x: number; z: number }[] = [];
   /** The pins for this frame: quest givers (Adventure) and party members. Far-off places in another map (a dungeon copy) are left out. */
@@ -606,7 +650,9 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   const entityLight = new EntityLight((x, z) => world.surfaceY(x, z), torchGlow);
   mobRenderer.setEnvironment(entityLight);
   players.setEnvironment(entityLight);
+  players.isWater = (x, y, z) => isWaterBlock(world.getBlock(Math.floor(x), Math.floor(y), Math.floor(z)));
   drops.setEnvironment(entityLight);
+  campfireFood.setEnvironment(entityLight);
   scene.add(mobRenderer.group);
   const vehicleRenderer = new VehicleRenderer();
   vehicleRenderer.setEnvironment(entityLight);
@@ -629,6 +675,16 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   );
   crack.visible = false;
   scene.add(crack);
+  // Water and glass share a shader that is built the first time one of them is drawn. This sliver stays hidden, and the
+  // warm-up draws it with the other hidden things, so the first lake or window does not stop the game.
+  const glassGeo = new THREE.PlaneGeometry(0.02, 0.02);
+  glassGeo.setAttribute('aTile', new THREE.BufferAttribute(new Float32Array(4), 1));
+  glassGeo.setAttribute('aLight', new THREE.BufferAttribute(new Float32Array(16), 4));
+  const glassWarm = new THREE.Mesh(glassGeo, world.materials.translucent);
+  glassWarm.visible = false;
+  glassWarm.frustumCulled = false;
+  glassWarm.position.set(0, -8, 0);
+  scene.add(glassWarm);
 
   const hud = new Hud();
   /** The admin bar at the top centre (F2, or ?admin): the choice is remembered. */
@@ -730,6 +786,33 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   }
   mobRenderer.markerFor = KIND === 'adventure' ? (npc) => useUi.getState().quests.markerFor(npc) : null;
 
+  // The World Beyond: its atmosphere, the specks in the air, and the Codex of what the traveller has found.
+  let noteKey = 0;
+  const pushNote = (kind: 'discovery' | 'achievement', title: string, text: string): void => {
+    const key = ++noteKey;
+    useUi.setState((s) => ({ beyondNotes: [...s.beyondNotes.slice(-3), { key, kind, title, text }] }));
+    setTimeout(() => useUi.setState((s) => ({ beyondNotes: s.beyondNotes.filter((n) => n.key !== key) })), 6500);
+  };
+  const codexView = (log: DiscoveryLog, here: number): CodexView => {
+    const j = log.toJSON();
+    return { here, biomes: j.b, structures: j.s, caves: j.c, achievements: j.a };
+  };
+  const beyond: BeyondClient | null =
+    KIND === 'beyond'
+      ? new BeyondClient(session.generator, worldId, {
+          onDiscover: (d) => {
+            pushNote('discovery', d.name, d.desc);
+            chat.add(`Discovered: ${d.name} (${d.family})`, 'notice');
+          },
+          onAchievement: (a) => {
+            pushNote('achievement', a.name, a.desc);
+            chat.add(`Achievement: ${a.name}`, 'notice');
+          },
+          onChange: (log, here) => useUi.setState({ codex: codexView(log, here) }),
+        })
+      : null;
+  if (beyond?.active) useUi.setState({ codex: codexView(beyond.log, beyond.here) });
+
   useUi.setState({
     adventure: KIND === 'adventure',
     map: mapData,
@@ -753,6 +836,8 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     invTab: 'inventory',
     dialogNpc: null,
     shopOpen: false,
+    auction: null,
+    stash: null,
     api: makeUiApi({ session, remote, input, chat, icons, store, guest, recipes, windows, sendCommand, openSpellbook }),
     mode: session.mode,
     hardcore: session.hardcore,
@@ -779,6 +864,41 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   net?.connect();
   if (net) saveBridge.reconnectNet = () => net.reconnect();
 
+  // ---- the player's settings (see settings.ts): applied now, and each time one changes ----
+  const BASE_SENSITIVITY = input.sensitivity;
+  let shownSettings: Settings | null = null;
+  let previewTimer = 0;
+  const applySettings = (s: Settings): void => {
+    audio.setLevels({ master: s.master, effects: s.effects, ambience: s.ambience, muted: s.muted });
+    audio.musicVolume = s.music;
+    input.sensitivity = BASE_SENSITIVITY * s.sensitivity;
+    input.invertY = s.invertY;
+    feel.baseFov = s.fov;
+    shadowsUserOff = !s.shadows;
+    adaptiveOn = s.adaptive;
+    // The finishing of the picture (the keys F6 to F10 change the same settings).
+    if (!fxForced && (!shownSettings || (['ao', 'glow', 'grade', 'rays', 'menuBlur'] as const).some((k) => shownSettings![k] !== s[k]))) {
+      Object.assign(fxWanted, { ao: s.ao, glow: s.glow, grade: s.grade, rays: s.rays, menuBlur: s.menuBlur });
+      applyPostfx();
+    }
+    if (world.renderDistance !== s.renderDistance) world.setRenderDistance(s.renderDistance);
+    // A slider for the sounds is heard as it is moved: one knock of a block, once it has stopped for a moment.
+    if (shownSettings && (shownSettings.master !== s.master || shownSettings.effects !== s.effects) && !s.muted) {
+      window.clearTimeout(previewTimer);
+      previewTimer = window.setTimeout(() => {
+        audio.resume();
+        audio.play('stone', 'place', 0.9);
+      }, 140);
+    }
+    shownSettings = s;
+  };
+  applySettings(getSettings());
+  const stopSettings = subscribeSettings(applySettings);
+  signal.addEventListener('abort', () => {
+    stopSettings();
+    window.clearTimeout(previewTimer);
+  });
+
   // ---- loop -----------------------------------------------------------
   let last = performance.now();
   let fps = 0;
@@ -796,7 +916,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   /** 0..1 how black the screen is while sleeping; it fades up in bed and back down on waking. */
   let sleepFade = 0;
   let wasSleeping = false;
-
+  let textPrimed = false;
 
   /** Wait for the terrain around the player, then let the session start. */
   function tryFinishLoading(): void {
@@ -811,16 +931,50 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
       }
     }
     const pct = Math.round((done / total) * 100);
+    // Footsteps, and the pictures of every item, are built a little at a time. The first step and the first
+    // opening of the inventory would otherwise stop the game while they are made.
+    if (!textPrimed) {
+      textPrimed = true;
+      chat.prepare();
+      damageNumbers.warm();
+    }
+    const soundsReady = audio.warm(6);
+    const iconsReady = icons.warm(done >= total && !figureWarm ? 14 : 6);
+    const textReady = warmText(done >= total && !figureWarm ? 8 : 4);
     // While the warm-up (see `FigureWarm`) goes, the words and the bar are its (they are set in the frame, see there).
     const warming = !figureWarmStarted || !!figureWarm;
-    if (!warming) {
+    if (!warming && done >= total && !soundsReady) {
+      statusEl.textContent = 'Preparing sounds...';
+      setLoading('Preparing sounds...', 92);
+    } else if (!warming && done >= total && !iconsReady) {
+      statusEl.textContent = 'Preparing the inventory...';
+      setLoading('Preparing the inventory...', 96);
+    } else if (!warming && done >= total && !textReady) {
+      statusEl.textContent = 'Preparing text...';
+      setLoading('Preparing text...', 98);
+    } else if (!warming && done >= total && !handWarm) {
+      statusEl.textContent = 'Preparing the hand...';
+      setLoading('Preparing the hand...', 99);
+    } else if (!warming) {
       statusEl.textContent = `Generating world... ${pct}%`;
       setLoading(`Generating world... ${pct}%`, 40 + Math.round(pct * 0.58));
     }
-    if (done < total || warming) return;
+    // The hand's shader is built the frame after the words go up: the card can take seconds, and that wait stays on this screen.
+    if (!warming && done >= total && soundsReady && iconsReady && textReady && !handWarm) {
+      if (!handAnnounced) {
+        handAnnounced = true;
+        return;
+      }
+      hand.warm(renderer);
+      handWarm = true;
+    }
+    if (done < total || warming || !soundsReady || !iconsReady || !textReady || !handWarm) return;
+    damageNumbers.release();
     if (local) act(() => local.finishLoading());
     else remote!.ready = true;
     statusEl.textContent = '';
+    // Whatever the bags and the clothes got while the world was loading is shown now (the hotbar only redraws when told to).
+    bumpUi();
     enterWorld();
   }
 
@@ -828,7 +982,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   /**
    * The world is ready: go straight in, with the mouse taken, instead of stopping at the pause screen. A browser only
    * hands over the mouse after a click or key press, so when that was too long ago (or the page was just opened, as it
-   * is for the online realm) the loading screen turns into "Click to enter the world".
+   * is for the online realm) the loading screen turns into the "Enter the world" button.
    */
   function enterWorld(): void {
     if (entered) return;
@@ -846,7 +1000,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
 
   // Keys that start something (as opposed to held keys, which go in the frame): see gameKeys.ts.
   const keys = new KeyActions({
-    session, remote, online, input, world, hud, admin, chat, audio, selfView, chase, fxWanted, applyPostfx, windows, sendCommand, toggleMinimap, openSpellbook,
+    session, remote, online, input, world, hud, admin, chat, audio, selfView, chase, windows, sendCommand, toggleMinimap, openSpellbook,
     quality: () => qualityLevel,
   });
 
@@ -887,7 +1041,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
       width: renderer.domElement.width,
       height: renderer.domElement.height,
       quality: qualityLevel,
-      shadows: shadows !== null && !shadowsOff,
+      shadows: shadows !== null && !shadowsOff && !shadowsUserOff,
       net: remote ? { ping: remote.connected ? remote.pingMs : null, players: remote.others.size + 1 } : null,
     };
   };
@@ -915,7 +1069,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
 
-    if (autoQuality && session.ready && document.visibilityState === 'visible' && qualityLevel < 4) {
+    if (autoQuality && adaptiveOn && session.ready && document.visibilityState === 'visible' && qualityLevel < 4) {
       aqTime += dt;
       aqFrames++;
       if (aqTime >= 2.5) {
@@ -1070,11 +1224,12 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
 
     sky.time = session.time;
     sky.rain = weather.rain;
-    sky.dim = weather.darkness;
+    // (The World Beyond's skies: an eternal night under a sky that gives little light.)
+    sky.dim = beyond ? Math.min(0.92, 1 - (1 - weather.darkness) * beyond.feel.light) : weather.darkness;
     sky.flash = weather.flash;
     sky.update(camera);
     const fogFar = world.renderDistance * 16;
-    const fogScale = 1 - 0.35 * weather.rain;
+    const fogScale = (1 - 0.35 * weather.rain) * (beyond ? 1 - 0.8 * beyond.feel.fog : 1);
     const light = sky.lighting;
     if (body.eyeInWater) {
       const lava = body.eyeInLava === true;
@@ -1088,6 +1243,12 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
       const under = sy >= 0 && camera.position.y < sy - 2 ? 1 : 0;
       caveDark += (under - caveDark) * Math.min(1, dt * 1.5);
       caveFog.copy(sky.color).multiplyScalar(1 - 0.94 * caveDark);
+      // The haze of the place tints the distance (a desert's dust, a swamp's green, a blizzard's white).
+      if (beyond && beyond.feel.fogColor && beyond.feel.fogMix > 0.01) {
+        const fc = beyond.feel.fogColor;
+        beyondTint.setRGB(fc[0] / 255, fc[1] / 255, fc[2] / 255, THREE.SRGBColorSpace).multiplyScalar(0.2 + 0.8 * sky.brightness);
+        caveFog.lerp(beyondTint, beyond.feel.fogMix * (1 - caveDark));
+      }
       sky.setView(caveFog, caveDark, false);
       world.setFog(caveFog, fogFar * 0.55 * fogScale * (1 - 0.45 * caveDark), fogFar * 0.98 * fogScale * (1 - 0.35 * caveDark), sky.domeZenith);
       scene.background = caveFog;
@@ -1124,7 +1285,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     if (shadows) {
       // (Not before the warm-up is over: it builds the depth shader of the maps, and the first chunks drawn into one would build it in the middle of the loading.)
       const warmingUp = !figureWarmStarted || figureWarm !== null;
-      if (!shadowsOff && !warmingUp && light.sun.r > 0.02 && caveDark < 0.7 && !body.eyeInWater) {
+      if (!shadowsOff && !shadowsUserOff && !warmingUp && light.sun.r > 0.02 && caveDark < 0.7 && !body.eyeInWater) {
         shadowFocus.copy(camera.position);
         const before = renderer.info.render.triangles;
         shadows.update(renderer, scene, shadowFocus, sky.lightDir, sky.lightHeight, performance.now() / 1000);
@@ -1135,6 +1296,20 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     updateWeatherFx(dt);
     torchGlow.soulLights(world.materials.soulLights, SOUL_LANTERN_LIGHT + 1);
     torchGlow.update(dt, camera.position, (x, y, z) => world.getBlock(x, y, z), sky.brightness, performance.now() / 1000, !body.eyeInWater && !params.has('nohalos'));
+    campfireSmoke -= dt;
+    if (campfireSmoke <= 0) {
+      campfireSmoke = 0.45;
+      const cx = Math.floor(camera.position.x);
+      const cy = Math.floor(camera.position.y);
+      const cz = Math.floor(camera.position.z);
+      for (let y = cy - 4; y <= cy + 4; y++) {
+        for (let z = cz - 8; z <= cz + 8; z++) {
+          for (let x = cx - 8; x <= cx + 8; x++) {
+            if (campfireInfo(world.getBlock(x, y, z))?.lit) particles.smoke(x + 0.5, y + 0.55, z + 0.5);
+          }
+        }
+      }
+    }
     entityLight.update(sky);
     particles.update(dt);
     deathFx.update(dt);
@@ -1162,6 +1337,8 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
       bowDraw: drawShown,
       vy: body.vy,
       airborne: !body.onGround && !body.inWater && !body.onLadder,
+      // Swimming: in water that comes up to the chest or has none under the feet (floating at the surface); wading in a shallow is still walking.
+      afloat: body.inWater && !body.inLava && !body.onLadder && !session.flying && (isWaterBlock(world.getBlock(Math.floor(view.x), Math.floor(view.y + 1), Math.floor(view.z))) || isWaterBlock(world.getBlock(Math.floor(view.x), Math.floor(view.y - 0.5), Math.floor(view.z)))),
       sneaking: session.sneaking,
       armor: [0, 1, 2, 3].map((i) => session.armor.get(i)?.id ?? 0),
       // A bow is held with both hands: the figure shows the dagger only while it stabs, with the bow put away.
@@ -1181,7 +1358,16 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     });
     chat.tick();
     drops.sync(session.drops.drops, camera.position, session.classView()?.id ?? myClass);
+    const foods = local ? local.blockEntities.foods() : (remote?.campfires ?? []);
+    campfireFood.sync(foods.filter((c) => Math.abs(c.x + 0.5 - camera.position.x) <= 64 && Math.abs(c.z + 0.5 - camera.position.z) <= 64));
     xpOrbs.sync(session.xpOrbs.orbs, camera, eye);
+    rodLine.out = session.bobbers.bobbers.some((b) => b.own);
+    bobbers.sync(session.bobbers.bobbers, dt, {
+      camera,
+      firstPerson: selfView.mode === 0,
+      self: { x: view.x, y: view.y, z: view.z, yaw: selfView.mode !== 0 ? selfView.facing : input.yaw },
+      brightness: sky.brightness,
+    });
     hitches.lap('things');
     abilityFx.sync(session.fx, dt);
     hitches.lap('effects');
@@ -1227,6 +1413,8 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
             // (no second graphics context: the inventory goes without its figure)
           }
         },
+        windows: warmWindows,
+        bobber: () => bobbers.warm(),
         shadows: () => {
           shadows?.warmEntities(renderer);
           shadows?.warmTerrain(renderer);
@@ -1338,10 +1526,6 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     }
     mapWasShown = mapShown;
     hitches.lap('map');
-    if (!handWarm) {
-      handWarm = true;
-      hand.warm(renderer);
-    }
     hand.render(renderer);
     hitches.lap('hand draw');
 
@@ -1360,11 +1544,13 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     const roof = world.surfaceY(Math.floor(body.x), Math.floor(body.z));
     const covered = roof >= 0 && camera.position.y < roof + 1;
     shelter += ((covered ? 1 : 0) - shelter) * Math.min(1, dt * 3);
-    rain.update(dt, weather.rain, camera.position);
+    rain.update(dt, beyond ? beyond.feel.precip : weather.rain, camera.position, beyond?.feel.snow ?? false);
+    beyond?.update(dt, camera.position.x, camera.position.y, camera.position.z, caveDark > 0.5, weather, sky.brightness, particles, body.eyeInWater);
     weatherTimer -= dt;
     if (weatherTimer > 0) return;
     weatherTimer = 0.1;
-    audio.setRain(weather.rain, shelter);
+    audio.setRain(beyond ? (beyond.feel.snow ? 0 : beyond.feel.precip) : weather.rain, shelter);
+    if (beyond) audio.setBed(caveDark > 0.6 ? 'cave' : beyond.feel.bed, 1, shelter);
     audio.setCave(caveDark);
     audio.ambient(0.1, { underground: covered && roof - body.y > 6, day: sky.brightness, rain: weather.rain });
   }
@@ -1434,23 +1620,50 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     },
     { signal },
   );
-  // "Click to enter the world": the click gives the browser the gesture it wants for the mouse.
-  loadingEl?.addEventListener(
-    'click',
+  // "Enter the world": the click (or any key) gives the browser the gesture it wants for the mouse.
+  const enterNow = (e: Event): void => {
+    if (!loadingEl?.classList.contains('ready')) return;
+    // (a browser shortcut or a modifier on its own is not a way in)
+    if (e instanceof KeyboardEvent && (e.ctrlKey || e.metaKey || e.altKey || /^(Shift|Control|Alt|Meta|F\d+)/.test(e.code))) return;
+    audio.resume();
+    void input.lock().then((ok) => {
+      if (!ok && !input.locked) overlay.style.display = 'flex'; // still refused: fall back to the pause screen
+      hideLoading();
+    });
+  };
+  loadingEl?.addEventListener('click', enterNow, { signal });
+  document.addEventListener('keydown', enterNow, { signal });
+  // The menu is for Esc. Leaving the window (Alt+Tab, another program coming up) also lets go of the mouse, but that is not a request for
+  // the menu: the game just waits, and the next click in it takes the mouse back.
+  let unlockedAt = -1e9;
+  const windowOpen = (): boolean => {
+    const s = useUi.getState();
+    return chat.isOpen || session.screen !== 'none' || s.codexOpen || s.questLogOpen || s.partyOpen || s.socialOpen || !!s.trade || !!s.playerMenu || !!s.inspect;
+  };
+  window.addEventListener(
+    'blur',
     () => {
-      if (!loadingEl.classList.contains('ready')) return;
+      if (performance.now() - unlockedAt < 600 && !input.locked && overlay.style.display !== 'none' && session.ready) overlay.style.display = 'none';
+    },
+    { signal },
+  );
+  document.addEventListener(
+    'mousedown',
+    (e) => {
+      if (input.locked || !session.ready || windowOpen() || overlay.style.display !== 'none') return;
+      if (loadingEl && !loadingEl.classList.contains('gone')) return;
+      if ((e.target as HTMLElement | null)?.closest('button, input, select, textarea, a, #overlay, #menu-screen, #quest-log, #codex-window, #social-window, #party-window, #loading-screen, #home-layer')) return;
       audio.resume();
-      void input.lock().then((ok) => {
-        if (!ok && !input.locked) overlay.style.display = 'flex'; // still refused: fall back to the pause screen
-        hideLoading();
-      });
+      void input.lock();
     },
     { signal },
   );
   document.addEventListener(
     'pointerlockchange',
     () => {
-      overlay.style.display = input.locked || chat.isOpen || session.screen !== 'none' || useUi.getState().questLogOpen || useUi.getState().partyOpen || useUi.getState().socialOpen || !!useUi.getState().trade || !!useUi.getState().playerMenu || !!useUi.getState().inspect ? 'none' : 'flex';
+      if (!input.locked) unlockedAt = performance.now();
+      const away = !document.hasFocus() || document.hidden;
+      overlay.style.display = input.locked || windowOpen() || (away && session.ready) ? 'none' : 'flex';
       if (!input.locked) {
         void world.save();
         savePlayer();
@@ -1500,6 +1713,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
       postfx, fxWanted, applyPostfx, torchGlow, shadows, particles, players, hand, selfView, deathFx, chase, books, abilityFx, mapData,
       act, syncUi, sendCommand, setMapUp, switchWorld,
       caveDark: () => caveDark,
+      beyond,
       drawn: () => ({ calls: sceneCalls, triangles: sceneTris, fps }),
       setHandHidden: (hidden) => void (debugHideHand = hidden),
       setPartyPins: (party) => void (mapPartyPins = party),
@@ -1535,7 +1749,9 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     shadows?.dispose();
     hand.dispose();
     drops.dispose();
+    campfireFood.dispose();
     xpOrbs.dispose();
+    bobbers.dispose();
     eatFx.dispose();
     levelFx.dispose();
     abilityFx.destroy();
@@ -1563,7 +1779,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     atlas.dispose();
     postfx.dispose();
     renderer.dispose();
-    useUi.setState({ api: null, screen: 'none', adventure: false, questLogOpen: false, partyOpen: false, socialOpen: false, social: null, inspect: null, target: null, playerMenu: null, trade: null, tradeAsk: null, invTab: 'inventory', mount: { mount: 0, pick: 0, cd: [0, 0] }, cls: null, party: [], partyInvite: null, dialogNpc: null, shopOpen: false, zone: null, questNotes: [], map: null, mapUp: false });
+    useUi.setState({ api: null, screen: 'none', adventure: false, codex: null, codexOpen: false, beyondNotes: [], questLogOpen: false, partyOpen: false, socialOpen: false, social: null, inspect: null, target: null, playerMenu: null, trade: null, tradeAsk: null, invTab: 'inventory', mount: { mount: 0, pick: 0, cd: [0, 0] }, cls: null, party: [], partyInvite: null, dialogNpc: null, shopOpen: false, auction: null, stash: null, zone: null, questNotes: [], map: null, mapUp: false, poison: 0, foodSick: 0 });
     mapData.dispose();
     mapSheet.dispose();
     useUi.getState().quests.loadJSON(null);

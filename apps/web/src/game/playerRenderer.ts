@@ -184,6 +184,9 @@ export class PlayerRenderer {
     this.env = env;
   }
 
+  /** Tells whether the cell at a point is water: a player with water at the feet and under them is swimming, not walking. */
+  isWater: ((x: number, y: number, z: number) => boolean) | null = null;
+
   private light(f: Figure, p: OtherPlayer): void {
     if (f.character) {
       if (this.env) f.character.setLight(this.env.at(p.x, p.y, p.z, this.tint), this.env, f.group.rotation.y);
@@ -336,6 +339,10 @@ export class PlayerRenderer {
       f.lastY = p.y;
       // In the air when they rise or fall fast (with a margin, so the pose does not flicker at the edge).
       f.air = Math.abs(f.vy) > (f.air ? 1.2 : 3);
+      // In water that comes up to the chest or has none under the feet (floating at the surface): swimming, not wading, a leap or a fall.
+      const afloat = !p.mount && !!this.isWater && this.isWater(p.x, p.y + 0.4, p.z) && (this.isWater(p.x, p.y + 1, p.z) || this.isWater(p.x, p.y - 0.5, p.z));
+      if (afloat) f.air = false;
+      c.afloat = afloat;
       if (f.rig) f.rig.onStep = this.onMountStep;
       f.rig?.update(dt, p.mount ? (MOUNTS[p.mount - 1]?.id ?? null) : null, p.speed, f.turn, f.vy, f.air, this.env ? this.env.at(p.x, p.y, p.z, this.tint) : this.tint.setScalar(Math.max(0.3, this.brightness)), eye);
       c.slamPhase = p.mount ? 0 : (p.slam ?? 0);

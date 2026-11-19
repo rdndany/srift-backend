@@ -226,7 +226,7 @@ describe('an Adventure player', () => {
     expect(s.drainEvents().find((e) => e.t === 'quests')).toBeDefined();
     run(s, 1.5);
     const people = s.mobs.mobs.filter((m) => m.kind === 'npc');
-    expect(people.map((m) => m.variant).sort()).toEqual(NPCS.map((_, i) => i));
+    expect(people.map((m) => m.variant).sort((a, b) => a - b)).toEqual(NPCS.map((_, i) => i));
     for (const m of people) {
       expect(m.def.invulnerable).toBe(true);
       const n = NPCS[m.variant];

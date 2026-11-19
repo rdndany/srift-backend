@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BLOCKS, type ItemDef } from '@solrift/shared';
+import { BLOCKS, tileIndex, type ItemDef } from '@solrift/shared';
 import type { HandFrame, HeldKit, HeldView } from './view';
 
 /** The plain ways of holding things: a block, a tool, a shield, and anything that is just its picture. */
@@ -12,6 +12,16 @@ export function cubeView(item: ItemDef, kit: HeldKit): HeldView {
   group.rotation.set(0.15, 0.6, 0);
   group.position.set(0, 0.02, 0);
   return { object: group };
+}
+
+/** A torch: its picture, and a flame on the tip that shows from the front and from the side. */
+export function torchView(item: ItemDef, kit: HeldKit): HeldView {
+  const group = new THREE.Group();
+  group.add(kit.models.sprite(item.tile));
+  group.add(kit.models.torchFlame());
+  group.rotation.set(0.05, 0.3, 0);
+  group.scale.setScalar(0.4);
+  return { object: group, rest: new THREE.Vector3(0.66, -0.32, -0.75) };
 }
 
 /** Anything with no way of its own: its picture, small, in the corner. */
@@ -42,6 +52,35 @@ export function toolView(item: ItemDef, kit: HeldKit): HeldView {
     rest: new THREE.Vector3(0.6, -0.35, -0.82),
     pose(f: HandFrame): void {
       group.rotation.z = restZ + f.root * swingZ;
+    },
+  };
+}
+
+/** Whether the line is out (set from the session each frame): the rod in the hand is drawn without its dangling line then. */
+export const rodLine = { out: false };
+
+/**
+ * A fishing rod, held like a tool, the tip leaning out ahead. While the line is out the rod's picture has no line of its own
+ * (the real one is drawn from the tip to the float: see `bobbers.ts`).
+ */
+export function rodView(item: ItemDef, kit: HeldKit): HeldView {
+  const group = new THREE.Group();
+  const idle = kit.models.sprite(item.tile);
+  const cast = kit.models.sprite(tileIndex('fishing_rod_cast'));
+  for (const s of [idle, cast]) {
+    s.position.set(0.1, 0.1, 0);
+    group.add(s);
+  }
+  group.scale.setScalar(0.5);
+  const restZ = 0.5;
+  group.rotation.set(0, 0.8, restZ);
+  return {
+    object: group,
+    rest: new THREE.Vector3(0.5, -0.38, -0.8),
+    pose(f: HandFrame): void {
+      group.rotation.z = restZ + f.root * 0.9;
+      idle.visible = !rodLine.out;
+      cast.visible = rodLine.out;
     },
   };
 }

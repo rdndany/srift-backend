@@ -16,9 +16,12 @@ import {
   type QuestEvent,
   type SaveMode,
   type WorldKind,
+  BEYOND_BIOMES,
+  BeyondWorldGenerator,
 } from '@solrift/shared';
 import { bumpUi, useUi } from '../ui/store';
 import type { AbilityFx } from './abilityFx';
+import type { BeyondClient } from './beyondClient';
 import type { AdminBar } from './adminBar';
 import type { Atlas } from './atlas';
 import type { GameAudio } from './audio';
@@ -88,6 +91,8 @@ export interface DebugParts {
   switchWorld(kind: WorldKind): void;
   /** How far underground the view is (0 in the open .. 1). */
   caveDark(): number;
+  /** The World Beyond's client (null in the other worlds). */
+  beyond: BeyondClient | null;
   /** Draw calls and triangles of the last scene render, and the frame rate. */
   drawn(): { calls: number; triangles: number; fps: number };
   setHandHidden(hidden: boolean): void;
@@ -128,6 +133,8 @@ export function installDebugHooks(parts: DebugParts): void {
       audio.thunder(0.3);
     },
     brightness: () => sky.brightness,
+    /** The clouds on or off (for pictures taken at their height). */
+    setClouds: (on: boolean) => sky.setCloudsVisible(on),
     /** Ambient occlusion and edge smoothing on or off (for pictures); `ao` reaches the N8AO settings (aoRadius, intensity ...). */
     setPostfx: (on: boolean | Partial<FxFlags>) => {
       const all = typeof on === 'boolean';
@@ -149,6 +156,13 @@ export function installDebugHooks(parts: DebugParts): void {
     rainDrops: (x0: number, x1: number, z0: number, z1: number, maxY: number) => rain.countVisible(x0, x1, z0, z1, maxY),
     save: () => saveBridge.flush!(),
     worldKind: () => KIND,
+    /** The World Beyond: where the traveller is, what the Codex holds and how the air feels now (null elsewhere). */
+    beyond: () => (parts.beyond ? { here: parts.beyond.here, name: BEYOND_BIOMES[parts.beyond.here].name, found: parts.beyond.log.toJSON(), feel: { ...parts.beyond.feel } } : null),
+    /** The places (structures) of the World Beyond within 
+ of a point, nearest first. */
+    beyondPlaces: (x: number, z: number, r: number) => (session.generator instanceof BeyondWorldGenerator ? session.generator.places.near(x, z, r).map((p) => ({ key: p.key, x: p.x, y: p.y, z: p.z, rot: p.rot, radius: p.info.radius })) : []),
+    /** The biome of a column of the World Beyond. */
+    beyondBiomeAt: (x: number, z: number) => (session.generator instanceof BeyondWorldGenerator ? session.generator.biomeAt(Math.floor(x), Math.floor(z)).name : null),
     switchWorld: (kind: WorldKind) => switchWorld(kind),
     freezeSaves: () => store.freeze(),
     isGuest: () => guest,
@@ -174,6 +188,8 @@ export function installDebugHooks(parts: DebugParts): void {
       parts.setPartyPins(party);
     },
     setRenderDistance: (r: number) => world.setRenderDistance(r),
+    /** How many chunks in view are still on their way (0: the land is all there). */
+    chunksWaiting: () => world.waiting,
     burst: (x: number, y: number, z: number, id: number) => particles.burst(x, y, z, BLOCKS[id].tiles.side, 24),
     dust: (x: number, y: number, z: number, id: number, count = 16) => particles.dust(x, y, z, BLOCKS[id].tiles.top, count, 1),
     sparks: (x: number, y: number, z: number, crit = false) => (crit ? particles.sparks(x, y, z, 1, 0.82, 0.25, 14) : particles.sparks(x, y, z, 0.95, 0.3, 0.25, 8)),
@@ -234,6 +250,16 @@ export function installDebugHooks(parts: DebugParts): void {
     /** How many experience orbs are about, and a way to let some out. */
     xpOrbs: () => session.xpOrbs.orbs.length,
     spawnXp: (amount: number, x: number, y: number, z: number) => L().realm.awardXp(amount, x, y, z),
+    /** The fishing lines out (as drawn), and a way to make your own fish bite or come now. */
+    bobbers: () => session.bobbers.bobbers.map((b) => ({ ...b })),
+    fishNow: (phase: 'lured' | 'bite') =>
+      act(() => {
+        const b = L().fishing.of(L());
+        if (b && b.state === 'floating') {
+          b.phase = phase;
+          b.timer = 2;
+        }
+      }),
     /** Lay items in a row on the ground (nobody can pick them up): `ids` along +x from (x, y, z). */
     spawnDrops: (ids: number[], x: number, y: number, z: number, gap = 0.9) =>
       ids.forEach((id, i) => L().realm.drops.spawn(makeStack(id, 1), x + i * gap, y, z, 0, 0, 0, 999)),
@@ -267,6 +293,8 @@ export function installDebugHooks(parts: DebugParts): void {
     bodyShown: () => selfView.group.visible && !selfView.cameraInHead,
     // ---- armor hooks ----
     armor: () => ({ defense: session.defense, worn: L().armorIds(), wear: [0, 1, 2, 3].map((i) => L().armor.get(i)?.damage ?? 0) }),
+    /** What the screen has of the worn clothes and the hotbar (single player or online), for tests of a first load. */
+    worn: () => ({ armor: [0, 1, 2, 3].map((i) => session.armor.get(i)?.id ?? 0), offhand: session.offhand.get(0)?.id ?? 0, hotbar: [0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => session.inventory.get(i)?.id ?? 0) }),
     equipHeld: () => act(() => L().equipHeld()),
     /** Put an item in an armor slot (0 helmet .. 3 boots), or empty it with id 0: how the clothes of a class are taken off. */
     setArmorSlot: (slot: number, id: number) => act(() => L().armor.set(slot, id ? makeStack(id, 1) : null)),

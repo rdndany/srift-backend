@@ -7,9 +7,9 @@ const WORLD_SEED = Number(process.env.WORLD_SEED ?? 1337);
 /**
  * The multiplayer world is the Adventure one: the village of Dawnwatch, its quests and the dungeon (a fixed world,
  * so WORLD_SEED does not matter). WORLD_KIND=overworld runs the plain generated world instead (used by the tests
- * of the core game and by developers).
+ * of the core game and by developers). WORLD_KIND=beyond runs the World Beyond, the huge 110-biome planet (WORLD_SEED picks it).
  */
-const WORLD_KIND = process.env.WORLD_KIND === 'overworld' ? 'overworld' : 'adventure';
+const WORLD_KIND = process.env.WORLD_KIND === 'overworld' ? 'overworld' : process.env.WORLD_KIND === 'beyond' ? 'beyond' : 'adventure';
 const DATABASE_PATH = process.env.DATABASE_PATH ?? 'data/solrift.db';
 /** Comma-separated browser origins allowed to sign in, e.g. `https://play.example.com`. */
 const ORIGINS = process.env.AUTH_ORIGINS ? process.env.AUTH_ORIGINS.split(',').map((s) => s.trim()) : DEV_ORIGINS;

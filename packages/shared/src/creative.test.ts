@@ -62,6 +62,7 @@ describe('the shelves of the creative inventory', () => {
     expect(names('zzzz')).toEqual([]);
     expect(creativeIndices('gear', '')).toEqual([]);
     expect(creativeIndices('food', 'apple').length).toBeGreaterThan(0);
+    expect(names('potato').sort()).toEqual(['baked_potato', 'poisonous_potato', 'potato']);
   });
 });
 

@@ -20,6 +20,8 @@ export class Chat {
     this.input.placeholder = 'Say something (Enter to send, Esc to cancel)';
     this.input.style.display = 'none';
     this.input.autocomplete = 'off';
+    this.input.spellcheck = false;
+    this.input.autocapitalize = 'off';
     this.root.append(this.logEl, this.input);
     document.body.appendChild(this.root);
     this.input.addEventListener('keydown', (e) => {
@@ -37,6 +39,16 @@ export class Chat {
 
   get isOpen(): boolean {
     return this.open;
+  }
+
+  /** Lay the box out once, while the loading screen still covers it, so the first time it opens is not the first time it exists. */
+  prepare(): void {
+    if (this.open) return;
+    this.input.style.display = 'block';
+    this.input.value = 'Say something 0123456789';
+    void this.input.offsetWidth;
+    this.input.value = '';
+    this.input.style.display = 'none';
   }
 
   show(prefix = ''): void {

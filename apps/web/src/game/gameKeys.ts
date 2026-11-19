@@ -8,8 +8,9 @@ import type { ClientSession } from './clientSession';
 import type { makeWindows } from './gameWindows';
 import type { Hud } from './hud';
 import type { Input } from './input';
-import { FX_KEYS, type FxFlags } from './postfx';
+import { FX_KEYS } from './postfx';
 import type { RemoteSession } from './remote';
+import { DEFAULT_SETTINGS, getSettings, setSettings } from './settings';
 import type { SelfView } from './selfView';
 import type { World } from './world';
 
@@ -31,9 +32,6 @@ export interface KeyParts {
   audio: GameAudio;
   selfView: SelfView;
   chase: ChaseCamera;
-  /** The effects the player asked for (the keys turn them on and off). */
-  fxWanted: FxFlags;
-  applyPostfx(): void;
   /** How far the automatic quality has stepped down (0 = not at all). */
   quality(): number;
   windows: ReturnType<typeof makeWindows>;
@@ -53,8 +51,8 @@ export class KeyActions {
 
   /** Called once a frame while the player has the mouse and no window is open. */
   handle(): void {
-    const { session, remote, online, input, world, hud, admin, chat, audio, selfView, chase, fxWanted, applyPostfx, quality, sendCommand, toggleMinimap, openSpellbook } = this.parts;
-    const { toggleQuestLog, togglePartyWindow, toggleSocialWindow, openPlayerMenu } = this.parts.windows;
+    const { session, remote, online, input, world, hud, admin, chat, audio, selfView, chase, quality, sendCommand, toggleMinimap, openSpellbook } = this.parts;
+    const { toggleCodex, toggleQuestLog, togglePartyWindow, toggleSocialWindow, openPlayerMenu } = this.parts.windows;
     for (let i = 0; i < 9; i++) if (input.wasPressed(`Digit${i + 1}`)) sendCommand({ t: 'select', slot: i });
     const w = input.consumeWheel();
     if (w !== 0) {
@@ -82,23 +80,24 @@ export class KeyActions {
     }
     for (const fx of FX_KEYS) {
       if (!input.wasPressed(fx.key)) continue;
-      fxWanted[fx.flag] = !fxWanted[fx.flag];
-      try {
-        localStorage.setItem('solrift.fx', JSON.stringify(fxWanted));
-      } catch {
-        // (a private window may not keep it)
-      }
-      applyPostfx();
-      hud.toast(`${fx.name} ${fxWanted[fx.flag] ? 'on' : 'off'}${fxWanted[fx.flag] && quality() >= 1 ? ' (paused while the frame rate is low)' : ''}`);
+      // (the settings are the source of truth: they apply it to the picture, and the menu's switches follow the key)
+      const on = !getSettings()[fx.flag];
+      setSettings({ [fx.flag]: on });
+      hud.toast(`${fx.name} ${on ? 'on' : 'off'}${on && quality() >= 1 ? ' (paused while the frame rate is low)' : ''}`);
     }
-    if (input.wasPressed('KeyM')) audio.musicVolume = audio.musicVolume > 0 ? 0 : 0.5;
+    // (the settings are the source of truth, so the pause screen's sliders follow these keys)
+    if (input.wasPressed('KeyM')) setSettings({ music: getSettings().music > 0 ? 0 : DEFAULT_SETTINGS.music });
     if (input.wasPressed('F4')) sendCommand({ t: 'mode', mode: session.mode === 'survival' ? 'creative' : 'survival' });
     if (input.wasPressed('KeyF')) sendCommand({ t: 'swap' });
     if (input.wasPressed('KeyH')) sendCommand({ t: 'mount' });
     if (input.wasPressed('KeyR')) sendCommand({ t: 'home' });
-    if (input.wasPressed('BracketRight')) world.setRenderDistance(Math.min(16, world.renderDistance + 1));
-    if (input.wasPressed('BracketLeft')) world.setRenderDistance(Math.max(3, world.renderDistance - 1));
+    if (input.wasPressed('BracketRight')) setSettings({ renderDistance: Math.min(16, world.renderDistance + 1) });
+    if (input.wasPressed('BracketLeft')) setSettings({ renderDistance: Math.max(3, world.renderDistance - 1) });
 
+    if (input.wasPressed('KeyB') && useUi.getState().codex) {
+      toggleCodex(true);
+      return;
+    }
     if (input.wasPressed('KeyL') && useUi.getState().adventure) {
       toggleQuestLog(true);
       return;

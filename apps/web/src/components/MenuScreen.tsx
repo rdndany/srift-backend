@@ -78,7 +78,7 @@ interface ForgeCell {
 
 function Slot({ index, onHover, ghost, ghostCount, preview, selected, hot, forge }: { index: number; onHover: (i: number | null) => void; ghost?: number; ghostCount?: number; preview?: ItemStack; selected?: boolean; hot?: number; forge?: ForgeCell }) {
   const api = useUi((s) => s.api)!;
-  const menu = api.menu()!;
+  const menu = useUi((s) => s.warmMenu) ?? api.menu()!;
   const slot = menu.slots[index];
   // With a jewel in hand, every item it would not work on is dimmed under a dark mask (empty slots are left alone).
   const jewelFx = useUi((s) => s.jewelFx);
@@ -166,7 +166,7 @@ function Grid({ indices, cols, onHover, className, ghosts, ghostCounts, previews
  */
 function BagHud({ onHover }: { onHover: (i: number | null) => void }) {
   const api = useUi((s) => s.api)!;
-  const menu = api.menu()!;
+  const menu = useUi((s) => s.warmMenu) ?? api.menu()!;
   if (menu.bagStart < 0) return null;
   const worn = range(0, BAG_SLOTS).flatMap((b) => {
     const bag = api.bags.get(b);
@@ -322,7 +322,8 @@ export function MenuScreen() {
   };
   const cursorRef = useRef<HTMLDivElement>(null);
   const tipRef = useRef<HTMLDivElement>(null);
-  const open = !!api && screen !== 'none' && screen !== 'dead' && !!api.menu();
+  const warmMenu = useUi((s) => s.warmMenu);
+  const open = !!api && (!!warmMenu || (screen !== 'none' && screen !== 'dead' && !!api.menu()));
 
   // The tabs start over at the bags each time the screen is closed (a request for the spellbook is made before it opens).
   const wasOpen = useRef(false);
@@ -369,7 +370,7 @@ export function MenuScreen() {
   });
 
   if (!open || !api) return null;
-  const menu = api.menu()!;
+  const menu = warmMenu ?? api.menu()!;
   // The piece the forge would make, previewed in the empty result slot (hovering it shows its new stats).
   const forgePreview = menu instanceof CraftingMenu && menu.forgeReady() ? forgeUpgrade(menu.grid.slots) : null;
   const shown = hover !== null ? (menu.stackAt(hover) ?? (menu instanceof CraftingMenu && hover === menu.resultSlot ? forgePreview : null)) : null;
@@ -538,7 +539,7 @@ export function MenuScreen() {
       </>
     );
   } else if (menu instanceof ChestMenu) {
-    title = 'Chest';
+    title = menu.chest.size > 27 ? 'Large Chest' : 'Chest';
     body = (
       <>
         <Grid indices={range(menu.chestStart, menu.chestStart + menu.chest.size)} cols={9} onHover={setHover} />
@@ -689,6 +690,8 @@ export function MenuScreen() {
           className="anvil-name"
           data-testid="anvil-name"
           type="text"
+          spellCheck={false}
+          autoComplete="off"
           maxLength={35}
           disabled={!left}
           placeholder="Name"
@@ -748,6 +751,7 @@ export function MenuScreen() {
   return (
     <div
       id="menu-screen"
+      className={warmMenu ? 'ui-warm' : undefined}
       onContextMenu={(e) => e.preventDefault()}
       onMouseDown={(e) => {
         // A click beside the screen with something on the cursor puts it on the ground (left: all of it, right: one).

@@ -407,29 +407,29 @@ export class HeldItem {
 
   render(renderer: THREE.WebGLRenderer): void {
     if (!this.visible) return;
+    // Onto the screen, the same place `warm` built the shaders for. A picture left bound (the effects' own
+    // buffer) would be a different shader, and the card would build it the first time the hand was seen.
+    renderer.setRenderTarget(null);
     renderer.clearDepth();
     renderer.render(this.scene, this.camera);
   }
 
   /**
-   * Build the shaders of everything the hand can show, once, while the game is loading. The graphics card builds a shader the
-   * first time something that needs it is drawn, and the game stands still while it does: a player who comes in with a sword in
-   * the hand has never been shown the empty arm, a block or the map, so the first time one of those came up the game froze.
+   * Build the shaders of everything the hand can show, once, while the loading screen is still up. The card builds a
+   * shader the first time something that needs it is drawn, and the game stands still while it does.
    *
-   * It is a real draw, in the hand's own pass (as `render` is), of one small copy of each thing behind the camera, where nothing
-   * of it can be seen: the arm (skin, sleeve, armor, a class's clothes), the map with both its hands, a block and a flat item.
-   * Call it where `render` is called, so the picture it is drawn to is the same.
+   * Drawn here, tiny and in front of the hand's camera, onto the screen (as `render` draws): the arm with whatever
+   * is on it, the item in each hand, the map, a solid block, a glass block, a flat item, a torch flame and a page.
    */
   warm(renderer: THREE.WebGLRenderer): void {
     const scene = new THREE.Scene();
     const group = new THREE.Group();
-    group.position.set(0, 0, 1);
+    group.position.set(0, 0, -0.4);
     group.scale.setScalar(0.001);
     scene.add(group);
     const seen = new Set<string>();
     const add = (mesh: THREE.Mesh): void => {
       const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      // One of each material on each kind of geometry (what a mesh is made of decides the shader as much as the material does).
       const key = `${materials.map((m) => m.uuid).join()}:${Object.keys(mesh.geometry.attributes).sort().join()}`;
       if (seen.has(key)) return;
       seen.add(key);
@@ -439,13 +439,28 @@ export class HeldItem {
     };
     const take = (root: THREE.Object3D | undefined): void => root?.traverse((o) => o instanceof THREE.Mesh && add(o));
     take(this.arm);
+    take(this.view?.object);
+    take(this.offObj ?? undefined);
     take(this.map.main?.object);
     take(this.map.off?.object);
-    const samples = [this.models.cube(BLOCKS[B.STONE]), new THREE.Mesh(this.models.colorBox(1, 1, 1, 0xffffff), this.models.flat())];
-    for (const s of samples) add(s);
+    const flame = this.models.torchFlame();
+    const page = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.2), this.models.track(new THREE.MeshBasicMaterial({ map: this.models.atlasTexture })));
+    const samples: THREE.Object3D[] = [
+      this.models.cube(BLOCKS[B.STONE]),
+      this.models.cube(BLOCKS[B.GLASS]),
+      new THREE.Mesh(this.models.colorBox(1, 1, 1, 0xffffff), this.models.flat()),
+      flame,
+      page,
+    ];
+    for (const s of samples) take(s);
+    const prev = renderer.getRenderTarget();
+    renderer.setRenderTarget(null);
     renderer.clearDepth();
     renderer.render(scene, this.camera);
-    for (const s of samples) s.geometry.dispose();
+    renderer.setRenderTarget(prev);
+    const geos = new Set<THREE.BufferGeometry>();
+    for (const s of samples) s.traverse((o) => o instanceof THREE.Mesh && geos.add(o.geometry));
+    for (const g of geos) g.dispose();
   }
 
   dispose(): void {

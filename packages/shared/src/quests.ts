@@ -137,6 +137,7 @@ export interface ZoneDef {
 /** Named places, shown as a banner when the player walks into one. */
 export const ZONES: readonly ZoneDef[] = [
   { id: 'dawnwatch', name: 'Dawnwatch', sub: 'A small village at the edge of the Rift' },
+  { id: 'greykeep', name: 'Greykeep', sub: 'The castle north of Dawnwatch' },
   { id: 'undercroft', name: 'The Undercroft', sub: 'The old storm cellars under Dawnwatch' },
   { id: 'training_yard', name: 'Training Yard', sub: 'Hit the dummies to test your damage and abilities' },
   { id: 'hollow_cellar', name: 'The Hollow Cellar', sub: 'Dungeon' },
@@ -250,6 +251,28 @@ export const NPCS: readonly NpcDef[] = [
     cellar: true,
     greeting: 'Rest while you can. The stair at the west end of the cave climbs up into Dawnwatch, whenever you are ready for the light.',
     look: { robe: [196, 188, 160], trim: [92, 140, 96], hair: [120, 72, 40], hat: 'hood', beard: false },
+  },
+  // The Auctioneer of the market square (see auction.ts: his id is `AUCTIONEER`). He stands behind the counter of the stall in the south-east corner.
+  {
+    id: 'auctioneer',
+    name: 'Auctioneer Corvin',
+    title: 'Auction House',
+    x: 27.5,
+    z: 18.5,
+    yaw: 0,
+    greeting: 'Going once, going twice! Put what you do not need up for bids, and take home what you do. The house keeps only its small cut.',
+    look: { robe: [128, 30, 40], trim: [236, 196, 70], hair: [52, 38, 30], hat: 'wide', beard: true },
+  },
+  // The Stashkeeper of the market square (see stash.ts: his id is `STASHKEEPER`). He stands behind the counter of the stall in the north of the square.
+  {
+    id: 'stashkeeper',
+    name: 'Stashkeeper Bram',
+    title: 'The Stash',
+    x: 19.5,
+    z: 12.5,
+    yaw: Math.PI,
+    greeting: 'Anything you leave with me waits for you, and for any other hero on your wallet. Leave a wand as a mage and your warrior can pick it up. Nobody else gets near it.',
+    look: { robe: [76, 60, 38], trim: [196, 150, 60], hair: [150, 150, 150], hat: 'cap', beard: true },
   },
 ];
 

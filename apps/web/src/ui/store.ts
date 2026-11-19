@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { QuestLog, type ClassView, type Container, type CreativeAmount, type GearRoll, type GearSpec, type ClassId, type MountView, type InspectView, type SocialAction, type SocialView, type TradeAct, type TradeView, type Menu, type MenuKind, type PartyAction, type PartyMemberView, type QuestLogJSON, type RecipeBook } from '@solrift/shared';
+import { QuestLog, type AuctionCommand, type AuctionView, type StashCommand, type StashView, type ClassView, type Container, type CreativeAmount, type GearRoll, type GearSpec, type ClassId, type MountView, type InspectView, type SocialAction, type SocialView, type TradeAct, type TradeView, type Menu, type MenuKind, type PartyAction, type PartyMemberView, type QuestLogJSON, type RecipeBook } from '@solrift/shared';
 import type { ItemIcons } from '../game/icons';
 import type { MapData } from '../game/mapData';
 
@@ -45,6 +45,10 @@ export interface UiApi {
   questAction(action: 'accept' | 'complete' | 'abandon', id: string): void;
   /** At a merchant: buy `n` times the ware at stock index `i`, or sell `n` of the item in inventory slot `i`. */
   shop(action: 'buy' | 'sell', i: number, n: number): void;
+  /** At the Auctioneer: search the house, post, bid, buy out, cancel, collect mail. The house answers with its view (`auction` in the state). */
+  auction(cmd: AuctionCommand): void;
+  /** At the Stashkeeper: put an inventory slot's items into the wallet's stash, or take some out. The stash answers with its view (stash in the state). */
+  stash(cmd: StashCommand): void;
   /** Open or close the quest log (key L). */
   toggleQuestLog(open?: boolean): void;
   /** The party: invite, accept or decline an invitation, leave, remove a member, hand over the lead. */
@@ -53,6 +57,7 @@ export interface UiApi {
   togglePartyWindow(open?: boolean): void;
   /** The social window (key O): ask for its lists, add or drop a friend, ignore or hear somebody, look at a player. */
   toggleSocialWindow(open?: boolean): void;
+  toggleCodex(open?: boolean): void;
   socialRefresh(): void;
   socialAct(action: SocialAction, name: string): void;
   inspect(name: string): void;
@@ -76,6 +81,8 @@ export interface UiApi {
   deathMessage(): string;
   /** Leave this world and go back to the title screen. */
   quitToTitle(): void;
+  /** Save, then go to the character lobby (where the character, and the way to play, is chosen again). */
+  quitToCharacters(): void;
   /** Delete this world from the device and go back to the title screen. */
   deleteWorld(): Promise<void>;
   /** Furnace progress for the open furnace menu (0..1), or null. */
@@ -97,6 +104,15 @@ export interface PickupNote {
   stamp: number;
 }
 
+/** What the Codex shows: the biome the traveller is in, and what they have found (see `DiscoveryLog`). */
+export interface CodexView {
+  here: number;
+  biomes: number[];
+  structures: string[];
+  caves: string[];
+  achievements: string[];
+}
+
 export interface UiState {
   screen: Screen;
   /** Bumped whenever inventory/menu contents change so components re-read them. */
@@ -113,6 +129,10 @@ export interface UiState {
   coins: number;
   /** Defense points of the worn armor (0..20); the HUD shows them as armor icons. */
   armor: number;
+  /** Seconds of the Poison status effect left, rounded up. 0 hides the icon. */
+  poison: number;
+  /** Seconds of the Hunger sickness status effect left, rounded up. 0 hides the icon. */
+  foodSick: number;
   /** Hardcore world: the hearts look different and death is final. */
   hardcore: boolean;
   /** Hardcore, after dying: no hotbar or vitals, only looking around. */
@@ -131,6 +151,10 @@ export interface UiState {
   dialogNpc: string | null;
   /** The merchant's wares are shown in place of the talk. */
   shopOpen: boolean;
+  /** The Auction House as the Auctioneer last showed it (null: the window is not open). */
+  auction: AuctionView | null;
+  /** The wallet's stash as the Stashkeeper last showed it (null: the window is not open). */
+  stash: StashView | null;
   questLogOpen: boolean;
   /** Your party (the leader first; empty when alone), who is inviting you, and whether the party window (P) is open. */
   party: PartyMemberView[];
@@ -151,6 +175,8 @@ export interface UiState {
   cls: ClassView | null;
   /** The tab of the inventory window (E): the bags, the crafting grid, or the spellbook (K opens it there). */
   invTab: 'inventory' | 'crafting' | 'spells';
+  /** A window drawn for the loading screen only, so that its first real opening paints nothing new (see warmWindows in main.ts). */
+  warmMenu: Menu | null;
   /** Your mount: the one ridden, the one in the mount slot (H summons it), and the cooldowns of its two skills. */
   mount: MountView;
   /** What a jewel just did to the piece in this slot of the window (shown floating above it; `n` restarts it). */
@@ -173,6 +199,11 @@ export interface UiState {
   compassFrame: number;
   mapUp: boolean;
   mapZoom: number;
+  /** The Codex of the World Beyond (key B): whether it is open, and what has been found (null outside that world). */
+  codexOpen: boolean;
+  codex: CodexView | null;
+  /** Notifications of a find or an achievement, shown a few seconds (the game removes them). */
+  beyondNotes: { key: number; kind: 'discovery' | 'achievement'; title: string; text: string }[];
   api: UiApi | null;
 }
 
@@ -188,7 +219,11 @@ export const useUi = create<UiState>()(() => ({
   xpProgress: 0,
   coins: 0,
   shopOpen: false,
+  auction: null,
+  stash: null,
   armor: 0,
+  poison: 0,
+  foodSick: 0,
   hardcore: false,
   spectating: false,
   sleeping: false,
@@ -212,6 +247,7 @@ export const useUi = create<UiState>()(() => ({
   tradeAsk: null,
   cls: null,
   invTab: 'inventory',
+  warmMenu: null,
   mount: { mount: 0, pick: 0, cd: [0, 0] },
   jewelFx: null,
   zone: null,
@@ -224,6 +260,9 @@ export const useUi = create<UiState>()(() => ({
   compassFrame: 0,
   mapUp: false,
   mapZoom: 2,
+  codexOpen: false,
+  codex: null,
+  beyondNotes: [],
   api: null,
 }));
 

@@ -209,23 +209,47 @@ function render(sr: number, p: Params, rnd: () => number): Float32Array {
   return out;
 }
 
+const samples = new Map<string, Float32Array[]>();
 const cache = new Map<string, AudioBuffer[]>();
 
-/** The variants of a surface's footstep (made once, the first time the surface is walked on). */
+/** Every surface a foot can land on, and the three ways it does. */
+export const STEP_SURFACES = Object.keys(SURFACES) as Surface[];
+export const STEP_ACTIONS: MoveSound[] = ['step', 'jump', 'land'];
+
+function samplesFor(kind: Surface, action: MoveSound, sampleRate: number): Float32Array[] {
+  const key = `${sampleRate}:${kind}:${action}`;
+  let list = samples.get(key);
+  if (!list) {
+    list = [];
+    const names = STEP_SURFACES;
+    for (let v = 0; v < STEP_VARIANTS; v++) {
+      const params = action === 'jump' ? jumpOf(SURFACES[kind]) : action === 'land' ? landOf(SURFACES[kind]) : SURFACES[kind];
+      const salt = action === 'jump' ? 31 : action === 'land' ? 57 : 0;
+      list.push(render(sampleRate, params, mulberry32((names.indexOf(kind) + 1) * 7919 + v * 104729 + salt * 1000003)));
+    }
+    samples.set(key, list);
+  }
+  return list;
+}
+
+/**
+ * Build one surface's footsteps with no audio device. The loading screen calls this for every surface, so the first
+ * step, jump or landing does not stop the game to synthesise them.
+ */
+export function prepareStep(kind: Surface, action: MoveSound, sampleRate: number): void {
+  samplesFor(kind, action, sampleRate);
+}
+
+/** The variants of a surface's footstep (made once, the first time the surface is walked on, unless `prepareStep` already did). */
 export function stepBuffers(ctx: BaseAudioContext, kind: Surface, action: MoveSound = 'step'): AudioBuffer[] {
   const key = `${ctx.sampleRate}:${kind}:${action}`;
   let list = cache.get(key);
   if (!list) {
-    list = [];
-    const names = Object.keys(SURFACES);
-    for (let v = 0; v < STEP_VARIANTS; v++) {
-      const params = action === 'jump' ? jumpOf(SURFACES[kind]) : action === 'land' ? landOf(SURFACES[kind]) : SURFACES[kind];
-      const salt = action === 'jump' ? 31 : action === 'land' ? 57 : 0;
-      const data = render(ctx.sampleRate, params, mulberry32((names.indexOf(kind) + 1) * 7919 + v * 104729 + salt * 1000003));
+    list = samplesFor(kind, action, ctx.sampleRate).map((data) => {
       const buf = ctx.createBuffer(1, data.length, ctx.sampleRate);
       buf.getChannelData(0).set(data);
-      list.push(buf);
-    }
+      return buf;
+    });
     cache.set(key, list);
   }
   return list;

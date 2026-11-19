@@ -19,6 +19,9 @@ import {
   parseLookCode,
   makeGenerator,
   parsePlayerSave,
+  type PlayerSave,
+  type StashView,
+  stashViewOf,
   parseWorldState,
   type ArrowView,
   type ClassId,
@@ -26,6 +29,8 @@ import {
   type Command,
   type DropView,
   type XpOrbView,
+  type BobberView,
+  bobberMode,
   totalForLevel,
   MAX_LEVEL,
   MAX_AWARD,
@@ -76,19 +81,21 @@ import {
   type TradeView,
 } from '@solrift/shared';
 
+import { cleanQuery, type AuctionQuery, type AuctionView } from '@solrift/shared';
 import type { RoomStore } from './roomStore';
 import { entryOf, findMember, inspectView, socialView, splitTarget } from './social';
 import { GuildRegistry } from './guilds';
 
 /** The room's view of one connection. */
 export interface RoomConnection {
-  send(msg: NetServerMessage): void;
+  /** Says 'skipped' when the connection can tell a snapshot was not sent (it is skipped while the client is behind; see sendWithBackpressure). */
+  send(msg: NetServerMessage): unknown;
   /**
    * Optional fast path for snapshots on a crowded server. `snap.players` is empty; `playersJson` is the JSON
    * array of the players in view, already serialised once for everybody (each player is written to JSON once
    * per tick instead of once per recipient). The connection must send what `JSON.stringify` would for the full snapshot.
    */
-  sendSnapshot?(snap: Snapshot, playersJson: string): void;
+  sendSnapshot?(snap: Snapshot, playersJson: string): unknown;
   close(reason: string): void;
 }
 
@@ -272,8 +279,9 @@ export class GameRoom {
     this.tickHz = opts.tickHz ?? 20;
     const generator = makeGenerator(this.seed, this.kind);
     this.world = new HeadlessWorld(generator);
-    this.realm = new Realm({ seed: this.seed, world: this.world, generator, naturalSpawning: opts.naturalSpawning ?? true, rand: opts.rand, sleeping: false });
+    this.realm = new Realm({ seed: this.seed, world: this.world, generator, naturalSpawning: opts.naturalSpawning ?? true, rand: opts.rand, sleeping: false, auctionStock: false });
     if (opts.store) this.loadWorld(opts.store);
+    if (opts.store) this.realm.auctions.load(opts.store.getJson(this.auctionKey));
     this.guilds = new GuildRegistry(opts.store ?? null);
     this.world.onChange = (x, y, z, id) => {
       this.pendingBlocks.push(x, y, z, id);
@@ -283,6 +291,31 @@ export class GameRoom {
 
   get playerCount(): number {
     return this.members.size;
+  }
+
+  /** The saved record of a signed-in character (what it carries and has done), fresh if it is in the room right now. Null: it never played here. */
+  characterSave(accountId: string): PlayerSave | null {
+    for (const m of this.members.values()) if (m.key === accountId) return m.player.savePlayer();
+    return this.opts.store ? parsePlayerSave(this.opts.store.getJson(`player:${accountId}`)) : null;
+  }
+
+  /** What a wallet's Stash holds right now (the live one when a character has it open, else the saved one), for the lobby. */
+  stashOf(wallet: string): StashView {
+    if (this.realm.stashes.has(wallet)) return this.realm.stashes.view(wallet);
+    return stashViewOf(this.opts.store?.getJson(`stash:${wallet}`) ?? null);
+  }
+
+  /**
+   * The Auction House as the website shows it: the same list the Auctioneer's window gives (search, shelf, sort, page), without
+   * having to stand at his counter. Anyone may look; an account also gets its own auctions, bids and mail (to read: everything is
+   * still done at the Auctioneer, where the coins and the bags are).
+   */
+  market(raw: Partial<AuctionQuery>, accountId: string | null): AuctionView {
+    const house = this.realm.auctions;
+    house.update();
+    // (an account counts only where the room keeps accounts: the same rule as for a player joining)
+    const viewer = accountId && this.opts.store ? accountId : null;
+    return house.view(cleanQuery(raw), viewer);
   }
 
   /** Is this account's character in the room right now? */
@@ -323,9 +356,26 @@ export class GameRoom {
 
   // ---- persistence ---------------------------------------------------------------
 
-  /** What the world is stored under: the Adventure world is kept apart from an overworld that happens to share its seed. */
+  /** What the world is stored under: the Adventure world and the World Beyond are kept apart from an overworld that happens to share their seed. */
   private get storeSeed(): number {
-    return this.kind === 'adventure' ? -this.seed : this.seed;
+    return this.kind === 'adventure' ? -this.seed : this.kind === 'beyond' ? -2_000_000_000 - this.seed : this.seed;
+  }
+
+  /** Where the Auction House is kept (one per world, like the world itself). */
+  private get auctionKey(): string {
+    return `auction:${this.storeSeed}`;
+  }
+
+  /** Write the Auction House down now (what a player did there is money and items: it is not left for the next autosave). */
+  private saveAuctions(): void {
+    const store = this.opts.store;
+    if (!store) return;
+    try {
+      store.setJson(this.auctionKey, this.realm.auctions.toJSON());
+      this.realm.auctions.dirty = false;
+    } catch (err) {
+      console.error('[solrift] saving the auction house failed', err);
+    }
   }
 
   private loadWorld(store: RoomStore): void {
@@ -370,6 +420,15 @@ export class GameRoom {
       this.dirtyChunks.clear();
     });
     attempt('world state', () => store.setJson(`world:${this.storeSeed}`, this.realm.saveState()));
+    attempt('auction house', () => {
+      if (this.realm.auctions.dirty) this.saveAuctions();
+    });
+    attempt('stashes', () => {
+      for (const owner of [...this.realm.stashes.dirty]) {
+        store.setJson(`stash:${owner}`, this.realm.stashes.toJSON(owner));
+        this.realm.stashes.dirty.delete(owner);
+      }
+    });
     for (const m of this.members.values()) attempt(`player ${m.name}`, () => this.savePlayer(m));
   }
 
@@ -380,8 +439,10 @@ export class GameRoom {
   // ---- joining and leaving ---------------------------------------------------
 
   /** Add a player. Returns null (after telling the connection why) when the room is full. */
-  join(conn: RoomConnection, wantedName: string, accountId: string | null = null, wantedLook: number | null = null, classId: ClassId | null = null): number | null {
+  join(conn: RoomConnection, wantedName: string, accountId: string | null = null, wantedLook: number | null = null, classId: ClassId | null = null, wallet: string | null = null): number | null {
     const key = accountId && this.opts.store ? accountId : null;
+    // The Stash belongs to the wallet, so every character of it opens the same one (and nobody else's: a guest has none).
+    const stashOwner = key ? wallet : null;
     // One body per account, or the same items could be carried by two players. Signing in again (a reload before the old connection has been
     // noticed to be gone, a second tab) takes the account over: the earlier session is saved and put out first, so the items exist once.
     const earlier = key ? [...this.members.values()].find((o) => o.key === key) : undefined;
@@ -395,7 +456,9 @@ export class GameRoom {
       return null;
     }
     const name = this.uniqueName(wantedName);
-    const player = new Player(this.realm, { mode: this.opts.mode ?? 'survival', name, classId });
+    // (a guest has no account: it can look at the Auction House, not use it)
+    const player = new Player(this.realm, { mode: this.opts.mode ?? 'survival', name, classId, account: key, wallet: stashOwner });
+    if (stashOwner) this.realm.stashes.load(stashOwner, this.opts.store!.getJson(`stash:${stashOwner}`));
     const saved = key ? parsePlayerSave(this.opts.store!.getJson(`player:${key}`)) : null;
     if (saved) player.loadPlayer(saved);
     player.finishLoading();
@@ -1112,10 +1175,52 @@ export class GameRoom {
       for (const p of players) p.postRealm(dt);
     }
     this.realm.advanceClock(dt);
+    this.keepAuctions(all);
+    this.keepStashes(all);
     this.watchTrades(all);
     this.flush(all);
   }
 
+  /**
+   * What happened at the Auction House this tick is written down at once: first what the players carry (the item that went up, the coins
+   * that were paid), then the house. A crash between the two loses an item rather than making one twice.
+   */
+  private keepAuctions(all: Member[]): void {
+    for (const m of all) {
+      if (!m.player.auctionTouched) continue;
+      m.player.auctionTouched = false;
+      try {
+        this.savePlayer(m);
+      } catch (err) {
+        console.error(`[solrift] saving player ${m.name} failed`, err);
+      }
+    }
+    if (this.realm.auctions.dirty) this.saveAuctions();
+  }
+
+  /**
+   * What a player did at the Stash this tick is written down at once, the player and the stash together in one write: an item that moved
+   * between them is never lost and never in both. (A store that cannot write several records at once gets them one after the other.)
+   */
+  private keepStashes(all: Member[]): void {
+    const store = this.opts.store;
+    if (!store) return;
+    for (const m of all) {
+      if (!m.player.stashTouched) continue;
+      m.player.stashTouched = false;
+      const owner = m.player.wallet;
+      try {
+        const entries: [string, unknown][] = [];
+        if (m.key) entries.push([`player:${m.key}`, m.player.savePlayer()]);
+        if (owner) entries.push([`stash:${owner}`, this.realm.stashes.toJSON(owner)]);
+        if (store.setJsonBatch) store.setJsonBatch(entries);
+        else for (const [k, v] of entries) store.setJson(k, v);
+        if (owner) this.realm.stashes.dirty.delete(owner);
+      } catch (err) {
+        console.error(`[solrift] saving the stash of ${m.name} failed`, err);
+      }
+    }
+  }
   /** Run as much queued input as the player's time budget allows. */
   private runQueue(m: Member): void {
     const p = m.player;
@@ -1196,6 +1301,17 @@ export class GameRoom {
     };
   }
 
+  /**
+   * A snapshot that was skipped (the client is behind: right after joining it is still taking in the world) never arrived, and the
+   * things only a snapshot says once go with it: the inventory and clothes, and the effects the client was told in full.
+   * They are sent again with the next one.
+   */
+  private delivered(m: Member, snap: Snapshot, result: unknown): void {
+    if (result !== 'skipped') return;
+    if (snap.inv) m.invDirty = true;
+    m.fxSent.clear();
+  }
+
   private sendState(m: Member): void {
     const events: SessionEvent[] = m.player.drainEvents();
     if (events.length > 0) {
@@ -1206,8 +1322,11 @@ export class GameRoom {
       const snap = this.snapshot(m, true);
       const { frames, keep } = this.framesFor(m);
       if (keep.length > 0) snap.keep = keep;
-      m.conn.sendSnapshot(snap, '[' + frames.map((f) => (f.json ??= JSON.stringify(f.view))).join(',') + ']');
-    } else m.conn.send(this.snapshot(m));
+      this.delivered(m, snap, m.conn.sendSnapshot(snap, '[' + frames.map((f) => (f.json ??= JSON.stringify(f.view))).join(',') + ']'));
+    } else {
+      const snap = this.snapshot(m);
+      this.delivered(m, snap, m.conn.send(snap));
+    }
   }
 
   /** The other players inside `m`'s view range, from this tick's frames (or built fresh outside a tick). */
@@ -1261,6 +1380,8 @@ export class GameRoom {
       saturation: p.vitals.saturation,
       air: p.vitals.air,
       dead: p.vitals.dead,
+      ...(p.poison > 0.05 ? { poison: round(p.poison) } : {}),
+      ...(p.foodSick > 0.05 ? { foodSick: round(p.foodSick) } : {}),
       level: p.xp.level,
       xpProgress: round(p.xp.progress),
       coins: p.coins,
@@ -1308,6 +1429,7 @@ export class GameRoom {
         ...(mob.baby ? { baby: 1 as const } : {}),
         ...(mob.sheared ? { sheared: 1 as const } : {}),
         ...(mob.love > 0 ? { love: 1 as const } : {}),
+        ...(mob.gear ? { gear: [...mob.gear] } : {}),
       });
     }
 
@@ -1321,6 +1443,12 @@ export class GameRoom {
       if (near(v.x, v.z, VIEW_MOBS)) vehicles.push({ id: v.id, kind: v.kind, x: round(v.x), y: round(v.y), z: round(v.z), yaw: round(v.yaw), speed: round(v.speed), hurt: round(Math.min(v.hurt, 9.99)), rider: !!v.rider });
     }
 
+    const fires: number[] = [];
+    for (const c of this.realm.blockEntities.foods()) {
+      if (!near(c.x + 0.5, c.z + 0.5, VIEW_DROPS)) continue;
+      fires.push(c.x, c.y, c.z, c.slots[0] ?? 0, c.slots[1] ?? 0, c.slots[2] ?? 0, c.slots[3] ?? 0);
+    }
+
     const drops: DropView[] = [];
     for (const d of this.realm.drops.drops) {
       if (!near(d.x, d.z, VIEW_DROPS)) continue;
@@ -1330,6 +1458,17 @@ export class GameRoom {
     const orbs: XpOrbView[] = [];
     for (const o of this.realm.xpOrbs.orbs) {
       if (near(o.x, o.z, VIEW_DROPS)) orbs.push({ id: o.id, v: o.value, x: round(o.x), y: round(o.y), z: round(o.z), age: round(o.age), phase: round(o.phase) });
+    }
+
+    const bobbers: BobberView[] = [];
+    if (this.realm.fishing.bobbers.length > 0) {
+      const ids = new Map<unknown, number>();
+      for (const o of this.members.values()) ids.set(o.player, o.id);
+      for (const f of this.realm.fishing.bobbers) {
+        const owner = ids.get(f.owner);
+        if (owner === undefined || !near(f.x, f.z, VIEW_MOBS)) continue;
+        bobbers.push({ id: f.id, o: owner, x: round(f.x), y: round(f.y), z: round(f.z), m: bobberMode(f), ...(f.owner === p ? { own: 1 as const } : {}) });
+      }
     }
 
     // (A real connection is sent an effect in full when it is new or has moved, and later only its id in `fxKeep`: the client plays it by itself.)
@@ -1367,7 +1506,9 @@ export class GameRoom {
       arrows,
       vehicles,
       drops,
+      ...(fires.length > 0 ? { fires } : {}),
       ...(orbs.length > 0 ? { orbs } : {}),
+      ...(bobbers.length > 0 ? { bobbers } : {}),
       ...(fx.length > 0 ? { fx } : {}),
       ...(fxKeep.length > 0 ? { fxKeep } : {}),
     };
@@ -1395,7 +1536,7 @@ export class GameRoom {
         craft: p.menu instanceof CraftingMenu ? { forging: p.menu.forging ? { duration: p.menu.forging.duration, sets: p.menu.forging.sets } : null, made: p.menu.hasMade } : null,
       };
     }
-    return { slots, bags: p.bags.slots.map((s) => itemView(s)), menu };
+    return { slots, bags: p.bags.slots.map((s) => itemView(s)), armor: p.armor.slots.map((s) => itemView(s)), menu };
   }
 
   /** The players' sessions, for tests. */

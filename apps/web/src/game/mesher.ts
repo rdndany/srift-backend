@@ -1,5 +1,6 @@
 import {
   B,
+  BB,
   BED_HEIGHT,
   BED_RED,
   BLOCKS,
@@ -11,21 +12,36 @@ import {
   IS_OPAQUE,
   IS_TINTED_LEAVES,
   IS_TINTED_PLANT,
+  WATER_DEPTH_FLAG,
   WORLD_HEIGHT,
   bedInfo,
   bedTileName,
+  bannerInfo,
+  candleInfo,
+  campfireInfo,
   computeLight,
   fluidSurface,
   grassTint,
   doorHinge,
+  chestInfo,
+  BED_DIRS,
+  CHEST_CCW,
+  CHEST_CW,
   ladderInfo,
   meshBoxes,
+  isCarpet,
+  isSeatCube,
+  MAX_SEAT_PILE,
+  supportTop,
+  stairFaceCovered,
   railInfo,
   rtorchInfo,
   wireArms,
   wirePower,
+  ATLAS_TILES,
   tileIndex,
   torchSupport,
+  TINT_WATER_BASE,
   packWaterDepth,
   waterDepthClass,
   waterTint,
@@ -223,8 +239,21 @@ const FACES: FaceDef[] = [
 const AO_LEVELS = [0.5, 0.66, 0.83, 1.0];
 
 // Scratch buffers (single-threaded per worker).
+/**
+ * A greedy-face key keeps the tile in the low bits (the atlas size is a power of two).
+ * Above that: 1 bit translucent, 4 bits of fluid drop, 2 of ambient occlusion, 6 of sky light, 6 of block light.
+ */
+const TILE_MASK = ATLAS_TILES - 1;
+const TILE_SHIFT = 32 - Math.clz32(TILE_MASK);
+
 const mask = new Int32Array(WORLD_HEIGHT * CHUNK_SIZE);
-const tmask = new Uint8Array(WORLD_HEIGHT * CHUNK_SIZE);
+/** The tint byte of a face, and above it (times 256) its water flags: see TILE_EXTRA. */
+const tmask = new Uint16Array(WORLD_HEIGHT * CHUNK_SIZE);
+/** The four horizontal neighbours a water surface looks at to know where its shore is (bit order of the shore mask). */
+const SHORE_DX = [-1, 1, 0, 0] as const;
+const SHORE_DZ = [0, 0, -1, 1] as const;
+/** The tile of a vertex carries a number in the thousands: 1024 marks leaf fuzz, and every 4096 above it is a water flag (decoded in chunkMaterial.ts). */
+export const TILE_EXTRA = 4096;
 const aoV = [0, 0, 0, 0];
 const skyV = [0, 0, 0, 0];
 const blkV = [0, 0, 0, 0];
@@ -235,8 +264,83 @@ const dirVec = [0, 0, 0];
 
 /** Height of a fluid cell's surface in sixteenths: full when the same fluid sits on top of it. */
 function surfaceOf(region: Uint16Array, x: number, y: number, z: number, id: number): number {
-  if (y + 1 < WORLD_HEIGHT && FLUID_KIND[region[regionIndex(x, y + 1, z)]] === FLUID_KIND[id]) return 16;
+  const seeThroughCube = (b: number): boolean => b !== 0 && FLUID_KIND[b] === 0 && IS_OPAQUE[b] === 0 && BLOCKS[b].shape === 'cube' && BLOCKS[b].render === 'translucent';
+  if (y + 1 < WORLD_HEIGHT) {
+    const above = region[regionIndex(x, y + 1, z)];
+    if (FLUID_KIND[above] === FLUID_KIND[id]) return 16;
+    // Water under ice or glass fills its cell to the top, like water under more water: no step between it and the water next to it.
+    if (FLUID_KIND[id] === FLUID_WATER && seeThroughCube(above)) return 16;
+  }
+  if (FLUID_KIND[id] === FLUID_WATER) {
+    // A pool in a sheet of ice (ice on three sides or more) lies flush with the ice instead of sunk into it like a square basin.
+    let ring = 0;
+    for (let d = 0; d < 4; d++) if (seeThroughCube(region[regionIndex(x + SHORE_DX[d], y, z + SHORE_DZ[d])])) ring++;
+    if (ring >= 3) return 16;
+  }
   return fluidSurface(id);
+}
+
+/**
+ * The faces of the water come first in the translucent mesh. The mesh writes depth, so whatever is drawn after the surface of the sea and
+ * lies under it (a crystal, ice, glass) is hidden by it, and whatever stands above it is drawn over it, in any order the faces were made.
+ * A quad is water when its tint byte (the alpha of the light) carries the water flag.
+ */
+function waterFirst(m: MeshData | null): MeshData | null {
+  if (!m) return m;
+  const idx = m.indices;
+  const quadsN = idx.length / 6;
+  const isWater = (q: number): boolean => m.light[idx[q * 6]! * 4 + 3]! >= WATER_DEPTH_FLAG;
+  let water = 0;
+  for (let q = 0; q < quadsN; q++) if (isWater(q)) water++;
+  if (water === 0 || water === quadsN) return m;
+  const out = new Uint32Array(idx.length);
+  let w = 0;
+  let o = water * 6;
+  for (let q = 0; q < quadsN; q++) {
+    const at = isWater(q) ? (w += 6) - 6 : (o += 6) - 6;
+    out.set(idx.subarray(q * 6, q * 6 + 6), at);
+  }
+  m.indices = out;
+  return m;
+}
+
+/** The plants that grow in the sea (kelp, seagrass, coral fans). The Beyond ids are not fixed, so they are looked up by name. */
+const SEA_PLANTS: ReadonlySet<number> = new Set(['kelp', 'seagrass', 'coral_fan_pink', 'coral_fan_blue'].map((k) => BB[k]).filter((id) => id !== undefined));
+const isSeaPlant = (id: number): boolean => id !== 0 && FLUID_KIND[id] === 0 && IS_OPAQUE[id] === 0 && BLOCKS[id].shape !== 'cube';
+
+/**
+ * The region as the water sees it: every plant standing in the sea (a stalk of kelp, seagrass, a coral fan) counts as water, so the
+ * surface runs on over it and no wall or square of water shows round it. A plant is in the sea when the water is over the top of its
+ * stalk, or when it is a plant of the sea standing in the top layer with water (or more such plants) on at least three of its four sides. The plant itself is still drawn from the
+ * region (this copy is only for the water). The region is copied only when there is such a plant.
+ */
+function plantsInWater(region: Uint16Array, yCount: number): Uint16Array {
+  let out = region;
+  const reach = Math.min(WORLD_HEIGHT - 1, yCount + 1);
+  for (let z = -1; z <= CHUNK_SIZE; z++) {
+    for (let x = -1; x <= CHUNK_SIZE; x++) {
+      for (let y = 1; y < yCount; y++) {
+        if (!isSeaPlant(region[regionIndex(x, y, z)])) continue;
+        let t = y + 1;
+        while (t < reach && isSeaPlant(region[regionIndex(x, t, z)])) t++;
+        const above = region[regionIndex(x, t, z)];
+        let wet = FLUID_KIND[above] === FLUID_WATER;
+        // (Only the plants of the sea itself, with water round them: a meadow of grass and flowers must never be taken for water.)
+        if (!wet && above === 0 && SEA_PLANTS.has(region[regionIndex(x, t - 1, z)])) {
+          let sides = 0;
+          for (let d = 0; d < 4; d++) {
+            const nb = region[regionIndex(x + SHORE_DX[d], t - 1, z + SHORE_DZ[d])];
+            if (FLUID_KIND[nb] === FLUID_WATER || SEA_PLANTS.has(nb)) sides++;
+          }
+          wet = sides >= 3;
+        }
+        if (!wet) continue;
+        if (out === region) out = region.slice();
+        out[regionIndex(x, y, z)] = B.WATER;
+      }
+    }
+  }
+  return out;
 }
 
 /**
@@ -279,8 +383,14 @@ export function meshChunk(region: Uint16Array, tint?: Uint8Array): MeshResult {
   if (maxY < 0) return { opaque: null, translucent: null };
   const yCount = maxY + 1;
 
-  const blockAt = (x: number, y: number, z: number): number => (y >= WORLD_HEIGHT ? 0 : region[regionIndex(x, y, z)]);
+  // What the faces see: the region itself until the seats are worked out, then the same with the plants that stand in the sea turned into
+  // water (see plantsInWater), so the water goes on around and over a stalk of kelp or a coral fan instead of being cut out of by it.
+  let seen = region;
+  const blockAt = (x: number, y: number, z: number): number => (y >= WORLD_HEIGHT ? 0 : seen[regionIndex(x, y, z)]);
   const isOpaque = (x: number, y: number, z: number): boolean => (y < 0 ? true : IS_OPAQUE[blockAt(x, y, z)] === 1);
+  // Ice and glass lie in the water without cutting it: the water faces that would touch them are not drawn.
+  const coversWater = (nid: number): boolean => nid !== 0 && FLUID_KIND[nid] === 0 && IS_OPAQUE[nid] === 0 && BLOCKS[nid].shape === 'cube' && BLOCKS[nid].render === 'translucent';
+  const watery = (x: number, y: number, z: number): boolean => y >= 0 && FLUID_KIND[blockAt(x, y, z)] === FLUID_WATER;
   const lightAt = (x: number, y: number, z: number): number => {
     if (y >= litHeight) return 0xf0;
     if (y < 0) return 0;
@@ -288,6 +398,35 @@ export function meshChunk(region: Uint16Array, tint?: Uint8Array): MeshResult {
   };
 
   const sizeOf = (axis: number): number => (axis === 1 ? yCount : CHUNK_SIZE);
+
+  // Cubes that rest on a short block are drawn lower, by however much that block falls short of a full cell.
+  // Built once per column so a solid hill does not walk to bedrock for every face.
+  const SPAN = CHUNK_SIZE + 2;
+  const seatMask = new Float32Array(SPAN * yCount * SPAN);
+  for (let z = -1; z <= CHUNK_SIZE; z++) {
+    for (let x = -1; x <= CHUNK_SIZE; x++) {
+      let carry = 0;
+      let pile = 0;
+      for (let y = 0; y < yCount; y++) {
+        const id = blockAt(x, y, z);
+        const cube = isSeatCube(id);
+        // Only a short pile sits on the block under it (the same limit `seatDrop` uses for collisions).
+        if (cube && carry > 0 && ++pile <= MAX_SEAT_PILE) seatMask[(y * SPAN + (z + 1)) * SPAN + (x + 1)] = carry;
+        const top = supportTop(id);
+        if (top !== null) {
+          carry = 1 - top;
+          pile = 0;
+        } else if (!cube) {
+          carry = 0;
+          pile = 0;
+        }
+      }
+    }
+  }
+  seen = plantsInWater(region, yCount);
+  const seatDropOf = (x: number, y: number, z: number): number =>
+    y >= 0 && y < yCount && x >= -1 && x <= CHUNK_SIZE && z >= -1 && z <= CHUNK_SIZE ? seatMask[(y * SPAN + (z + 1)) * SPAN + (x + 1)] : 0;
+  const seatOf = (x: number, y: number, z: number): boolean => seatDropOf(x, y, z) > 0;
 
   for (const face of FACES) {
     const { nAxis, sAxis, tAxis, nSign, sSign, tSign } = face;
@@ -312,10 +451,12 @@ export function meshChunk(region: Uint16Array, tint?: Uint8Array): MeshResult {
           const y = cell[1];
           const z = cell[2];
 
-          const id = region[regionIndex(x, y, z)];
+          const id = seen[regionIndex(x, y, z)];
         if (id === 0) continue;
         const def = BLOCKS[id];
           if (def.shape !== 'cube') continue;
+          // How far this cube is drawn below its cell, so it meets the short block under it.
+          const seat = seatDropOf(x, y, z);
           const fluid = FLUID_KIND[id];
 
           const nx = x + dirVec[0];
@@ -323,29 +464,46 @@ export function meshChunk(region: Uint16Array, tint?: Uint8Array): MeshResult {
           const nz = z + dirVec[2];
           if (ny < 0) continue;
           const nid = blockAt(nx, ny, nz);
-          if (IS_OPAQUE[nid]) continue;
+          // A lowered cube does not sit on the cell face, so the neighbour's cell does not cover it.
+          if (IS_OPAQUE[nid] && seat === 0 && !seatOf(nx, ny, nz)) continue;
           let drop = 0;
           if (fluid !== 0) {
-            const surf = surfaceOf(region, x, y, z, id);
+            const surf = surfaceOf(seen, x, y, z, id);
             if (FLUID_KIND[nid] === fluid) {
               // The same fluid on top or underneath hides the face; beside it, only a step shows.
               if (face.kind !== 'side') continue;
-              if (surfaceOf(region, nx, ny, nz, nid) >= surf) continue;
-            }
+              if (surfaceOf(seen, nx, ny, nz, nid) >= surf) continue;
+            } else if (fluid === FLUID_WATER && coversWater(nid)) continue;
             drop = 16 - surf;
-          } else if (nid === id && def.cullSame) continue;
+          } else if (nid === id && def.cullSame && seat === 0 && !seatOf(nx, ny, nz)) continue;
 
           const translucent = def.render === 'translucent';
           const isWater = def.liquid;
-          const tile = def.tiles[face.kind];
-          let tintIdx = 0;
-          if (tint) {
-            if (fluid === FLUID_WATER) {
-              let below = 1;
-              while (below < 8 && y - below >= 0 && FLUID_KIND[blockAt(x, y - below, z)] === FLUID_WATER) below++;
-              tintIdx = packWaterDepth(waterTint(tint[z * CHUNK_SIZE + x]), waterDepthClass(below));
-            } else if (IS_TINTED_LEAVES[id] === 1 || (id === B.GRASS && face.kind !== 'bottom')) tintIdx = grassTint(tint[z * CHUNK_SIZE + x]);
+          // Water flags: the top of a surface knows which of its four sides is shore (so the shader can draw foam and shallows along
+          // it); an opaque face under the water knows how deep the water over it is (so the shader can throw caustics on it).
+          let extra = 0;
+          if (fluid === FLUID_WATER) {
+            if (face.kind === 'top') {
+              for (let d = 0; d < 4; d++) {
+                const sx = x + SHORE_DX[d];
+                const sz = z + SHORE_DZ[d];
+                // Ice and glass are no shore: the water goes on under them.
+                if (!watery(sx, y, sz) && !coversWater(blockAt(sx, y, sz))) extra |= 1 << d;
+              }
+            }
+          } else if (fluid === 0 && !translucent && watery(nx, ny, nz)) {
+            let up = 1;
+            while (up < 8 && watery(nx, ny + up, nz)) up++;
+            extra = 1 + waterDepthClass(up);
           }
+          const tile = def.axis !== undefined ? (face.nAxis === def.axis ? def.tiles.top : def.tiles.side) : def.tiles[face.kind];
+          let tintIdx = 0;
+          // Water is always drawn as water (a plain temperate sea where there is no climate to ask), so the whole game shares one look.
+          if (fluid === FLUID_WATER) {
+            let below = 1;
+            while (below < 8 && y - below >= 0 && watery(x, y - below, z)) below++;
+            tintIdx = packWaterDepth(tint ? waterTint(tint[z * CHUNK_SIZE + x]) : TINT_WATER_BASE + 4, waterDepthClass(below));
+          } else if (tint && (IS_TINTED_LEAVES[id] === 1 || (id === B.GRASS && face.kind !== 'bottom'))) tintIdx = grassTint(tint[z * CHUNK_SIZE + x]);
 
           // Per-corner ambient occlusion and smooth light (sky + block).
           const centerL = lightAt(nx, ny, nz);
@@ -402,11 +560,18 @@ export function meshChunk(region: Uint16Array, tint?: Uint8Array): MeshResult {
             blkV[2] === blkV[3];
 
           const builder = translucent ? translucentB : opaqueB;
-          if (flat) {
-            mask[j * S + i] = tile | ((translucent ? 1 : 0) << 9) | (drop << 10) | (aoV[0] << 14) | (skyV[0] << 16) | (blkV[0] << 22);
-            tmask[j * S + i] = tintIdx;
+          // A lowered cube cannot merge with the cubes around it: their faces do not share a plane.
+          if (flat && seat === 0) {
+            mask[j * S + i] =
+              tile |
+              ((translucent ? 1 : 0) << TILE_SHIFT) |
+              (drop << (TILE_SHIFT + 1)) |
+              (aoV[0] << (TILE_SHIFT + 5)) |
+              (skyV[0] << (TILE_SHIFT + 7)) |
+              (blkV[0] << (TILE_SHIFT + 13));
+            tmask[j * S + i] = tintIdx + extra * 256;
           } else {
-            emitQuad(builder, face, n, i, j, 1, 1, S, T, tile, drop, aoV, skyV, blkV, tintIdx);
+            emitQuad(builder, face, n, i, j, 1, 1, S, T, tile + extra * TILE_EXTRA, drop, aoV, skyV, blkV, tintIdx, -seat);
           }
         }
       }
@@ -429,16 +594,16 @@ export function meshChunk(region: Uint16Array, tint?: Uint8Array): MeshResult {
           }
           for (let dj = 0; dj < h; dj++) for (let di = 0; di < w; di++) mask[(j + dj) * S + i + di] = -1;
 
-          const tile = key & 511;
-          const translucent = ((key >> 9) & 1) === 1;
-          const drop = (key >> 10) & 15;
-          const ao = (key >> 14) & 3;
-          const sky = (key >> 16) & 63;
-          const blk = (key >> 22) & 63;
+          const tile = key & TILE_MASK;
+          const translucent = ((key >> TILE_SHIFT) & 1) === 1;
+          const drop = (key >> (TILE_SHIFT + 1)) & 15;
+          const ao = (key >> (TILE_SHIFT + 5)) & 3;
+          const sky = (key >> (TILE_SHIFT + 7)) & 63;
+          const blk = (key >> (TILE_SHIFT + 13)) & 63;
           aoV[0] = aoV[1] = aoV[2] = aoV[3] = ao;
           skyV[0] = skyV[1] = skyV[2] = skyV[3] = sky;
           blkV[0] = blkV[1] = blkV[2] = blkV[3] = blk;
-          emitQuad(translucent ? translucentB : opaqueB, face, n, i, j, w, h, S, T, tile, drop, aoV, skyV, blkV, tk);
+          emitQuad(translucent ? translucentB : opaqueB, face, n, i, j, w, h, S, T, tile + (tk >> 8) * TILE_EXTRA, drop, aoV, skyV, blkV, tk & 255);
           i += w;
         }
       }
@@ -492,19 +657,22 @@ export function meshChunk(region: Uint16Array, tint?: Uint8Array): MeshResult {
         const id = region[base + x];
         if (id === 0) continue;
         const def = BLOCKS[id];
-        if (def.shape === 'cube') {
-          if (IS_LEAVES[id] === 1) emitLeafFuzz(id, x, y, z);
-          continue;
-        }
         const l = lightAt(x, y, z);
         const sky = (l >> 4) * 4;
         // Torches glow: always fully lit.
         const unlit = rtorchInfo(id)?.on === false;
-        const blk = (def.shape === 'torch' || def.shape === 'lantern') && !unlit ? 60 : (l & 15) * 4;
+        const blk = (def.shape === 'torch' || def.shape === 'lantern' || def.shape === 'candle') && !unlit ? 60 : (l & 15) * 4;
+        if (def.shape === 'cube') {
+          if (IS_LEAVES[id] === 1) emitLeafFuzz(id, x, y, z);
+          continue;
+        }
         const tile = def.tiles.side;
         if (wirePower(id) >= 0) {
           const arms = wireArms((ax, ay, az) => (ay < 0 ? 0 : blockAt(ax, ay, az)), x, y, z);
           emitWire(opaqueB, wirePower(id), x, y, z, arms, def.tiles.top, def.tiles.side, sky, blk);
+        } else if (isCarpet(id) || id === B.LILY_PAD) {
+          // One pixel thick, so a block placed on top meets the carpet instead of hovering a cell above it.
+          emitBoxes(opaqueB, [[0, 0, 0, 1, 1 / 16, 1]], x, y, z, def.tiles, sky, blk, (dx, dy, dz) => isOpaque(x + dx, y + dy, z + dz));
         } else if (def.shape === 'flat') {
           // Rails and the like: a thin sheet on the floor of the cell.
           const fy = y + 0.04;
@@ -539,14 +707,62 @@ export function meshChunk(region: Uint16Array, tint?: Uint8Array): MeshResult {
           emitPlane(opaqueB, x, y, z + 0.75, x + 1, y, z + 0.75, 1, tile, sky, blk);
         } else if (def.shape === 'bed') {
           emitBed(opaqueB, id, x, y, z, sky, blk, blockAt);
+        } else if (def.shape === 'campfire') {
+          emitCampfire(opaqueB, id, x, y, z, sky, blk, (dx, dy, dz) => isOpaque(x + dx, y + dy, z + dz));
+        } else if (def.shape === 'candle') {
+          const count = candleInfo(id)?.count ?? 1;
+          const spots: readonly (readonly [number, number])[] =
+            count === 1 ? [[0.5, 0.5]] : count === 2 ? [[0.35, 0.5], [0.65, 0.5]] : count === 3 ? [[0.5, 0.34], [0.32, 0.66], [0.68, 0.66]] : [[0.32, 0.32], [0.68, 0.32], [0.32, 0.68], [0.68, 0.68]];
+          for (const [cx, cz] of spots) {
+            emitPlane(opaqueB, x + cx - 0.2, y, z + cz - 0.2, x + cx + 0.2, y, z + cz + 0.2, 1, tile, sky, blk);
+            emitPlane(opaqueB, x + cx - 0.2, y, z + cz + 0.2, x + cx + 0.2, y, z + cz - 0.2, 1, tile, sky, blk);
+          }
+        } else if (def.shape === 'banner') {
+          const info = bannerInfo(id);
+          const facing = info?.facing ?? 0;
+          const alongX = facing >= 2;
+          const edge = info?.wall ? (facing % 2 === 0 ? 0.92 : 0.08) : 0.5;
+          if (alongX) emitPlane(opaqueB, x, y, z + edge, x + 1, y, z + edge, 1, tile, sky, blk);
+          else emitPlane(opaqueB, x + edge, y, z, x + edge, y, z + 1, 1, tile, sky, blk);
+        } else if (def.shape === 'pot') {
+          const boxes = meshBoxes(id, (dx, dz) => blockAt(x + dx, y, z + dz));
+          emitBoxes(opaqueB, boxes, x, y, z, { top: tile, bottom: tile, side: tile }, sky, blk, (dx, dy, dz) => isOpaque(x + dx, y + dy, z + dz));
+          if (def.tiles.top !== tile) {
+            emitPlane(opaqueB, x + 0.25, y, z + 0.25, x + 0.75, y, z + 0.75, 1, def.tiles.top, sky, blk);
+            emitPlane(opaqueB, x + 0.25, y, z + 0.75, x + 0.75, y, z + 0.25, 1, def.tiles.top, sky, blk);
+          }
         } else if (BOXED.has(def.shape)) {
           // Slabs, stairs, doors, fences...: a handful of boxes. Faces on the cell boundary are dropped when the block next to them is solid.
-          const plain = def.shape !== 'slab' && def.shape !== 'stair' && def.shape !== 'table' && def.shape !== 'lantern';
+          const plain = def.shape !== 'slab' && def.shape !== 'stair' && def.shape !== 'wall' && def.shape !== 'table' && def.shape !== 'lantern' && def.shape !== 'cake' && def.shape !== 'chest';
           const tiles = plain ? { top: tile, bottom: tile, side: tile } : def.tiles;
           const ladder = ladderInfo(id);
           const onlyAxis = ladder ? (ladder.facing < 2 ? 0 : 2) : -1;
-          const boxes = meshBoxes(id, (dx, dz) => blockAt(x + dx, y, z + dz));
-          emitBoxes(opaqueB, boxes, x, y, z, tiles, sky, blk, (dx, dy, dz) => isOpaque(x + dx, y + dy, z + dz), onlyAxis, doorHinge(id));
+          const boxes = meshBoxes(
+            id,
+            (dx, dz) => blockAt(x + dx, y, z + dz),
+            (dx, dy, dz) => blockAt(x + dx, y + dy, z + dz),
+          );
+          const chest = def.shape === 'chest' ? chestInfo(id) : null;
+          const hides =
+            chest && chest.half !== 0
+              ? (nx: number, ny: number, nz: number): boolean => {
+                  const d = chest.half === 1 ? CHEST_CCW[chest.dir] : CHEST_CW[chest.dir];
+                  const [dx, dz] = BED_DIRS[d];
+                  return ny === 0 && nx === dx && nz === dz;
+                }
+              : def.shape === 'stair'
+              ? (nx: number, ny: number, nz: number, fx0: number, fy0: number, fz0: number, fx1: number, fy1: number, fz1: number): boolean => {
+                  if (ny !== 0) return false;
+                  const side = nx > 0 ? 0 : nx < 0 ? 1 : nz > 0 ? 2 : 3;
+                  const onEdge = side === 0 ? fx1 === 1 : side === 1 ? fx0 === 0 : side === 2 ? fz1 === 1 : fz0 === 0;
+                  if (!onEdge) return false;
+                  const a0 = side < 2 ? fz0 : fx0;
+                  const a1 = side < 2 ? fz1 : fx1;
+                  return stairFaceCovered(blockAt(x + nx, y, z + nz), side, fy0, fy1, a0, a1, (dx, dz) => blockAt(x + dx, y, z + dz));
+                }
+              : undefined;
+          const sheet = def.render === 'translucent' ? translucentB : opaqueB;
+          emitBoxes(sheet, boxes, x, y, z, tiles, sky, blk, (dx, dy, dz) => isOpaque(x + dx, y + dy, z + dz), onlyAxis, doorHinge(id), hides);
         } else {
           emitTorch(opaqueB, id, x, y, z, tile, sky, blk);
         }
@@ -554,7 +770,7 @@ export function meshChunk(region: Uint16Array, tint?: Uint8Array): MeshResult {
     }
   }
 
-  return { opaque: opaqueB.finish(), translucent: translucentB.finish() };
+  return { opaque: opaqueB.finish(), translucent: waterFirst(translucentB.finish()) };
 }
 
 /** A vertical double-sided quad from (x0,z0) to (x1,z1), `h` tall, with the full tile mapped on it. */
@@ -635,7 +851,50 @@ function emitWire(b: Builder, power: number, x: number, y: number, z: number, ar
   if (tall & 8) side(z + 0.02, x + 5 / 16, x + 11 / 16);
 }
 
-const BOXED = new Set(['slab', 'stair', 'door', 'trapdoor', 'ladder', 'fence', 'gate', 'pane', 'table', 'lever', 'button', 'plate', 'lantern', 'chain']);
+const BOXED = new Set(['slab', 'stair', 'door', 'trapdoor', 'ladder', 'fence', 'gate', 'pane', 'table', 'lever', 'button', 'plate', 'lantern', 'chain', 'cocoa', 'cake', 'wall', 'sign', 'chest']);
+
+const CAMPFIRE_LOG = { top: tileIndex('log_top'), bottom: tileIndex('log_top'), side: tileIndex('log_side') };
+const CAMPFIRE_FIRE = tileIndex('fire_0');
+
+/** Turn a box 90 degrees around the middle of the cell, `turns` times, counter-clockwise looking down. */
+function turnBox(box: readonly number[], turns: number): [number, number, number, number, number, number] {
+  let [x0, y0, z0, x1, y1, z1] = box;
+  for (let i = 0; i < turns; i++) {
+    const nx0 = z0;
+    const nz0 = 1 - x1;
+    const nx1 = z1;
+    const nz1 = 1 - x0;
+    x0 = Math.min(nx0, nx1);
+    x1 = Math.max(nx0, nx1);
+    z0 = Math.min(nz0, nz1);
+    z1 = Math.max(nz0, nz1);
+  }
+  return [x0, y0, z0, x1, y1, z1];
+}
+
+/**
+ * Four logs in a square, and a flame in the middle when it is lit. The top pair of logs points the way the campfire faces.
+ * Facing +z is the unrotated arrangement; the others are that arrangement turned to match BED_DIRS.
+ */
+function emitCampfire(b: Builder, id: number, x: number, y: number, z: number, sky: number, blk: number, solidAt: (dx: number, dy: number, dz: number) => boolean): void {
+  const info = campfireInfo(id);
+  const turns = [1, 3, 0, 2][info?.facing ?? 2]!;
+  const logs: [number, number, number, number, number, number][] = [
+    [0, 0, 1 / 16, 1, 4 / 16, 5 / 16],
+    [0, 0, 11 / 16, 1, 4 / 16, 15 / 16],
+    [1 / 16, 3 / 16, 0, 5 / 16, 7 / 16, 1],
+    [11 / 16, 3 / 16, 0, 15 / 16, 7 / 16, 1],
+  ];
+  emitBoxes(b, logs.map((box) => turnBox(box, turns)), x, y, z, CAMPFIRE_LOG, sky, blk, solidAt);
+  if (!info?.lit) return;
+  const w = 3 / 16;
+  const h = 12 / 16;
+  const yb = y + 2 / 16;
+  const px = x + 0.5;
+  const pz = z + 0.5;
+  emitPlane(b, px - w, yb, pz - w, px + w, yb, pz + w, h, CAMPFIRE_FIRE, sky, 60);
+  emitPlane(b, px - w, yb, pz + w, px + w, yb, pz - w, h, CAMPFIRE_FIRE, sky, 60);
+}
 
 /**
  * Draw boxes given in cell units. Texture coordinates follow the world position, so a half-height slab shows
@@ -655,6 +914,8 @@ function emitBoxes(
   onlyAxis = -1,
   /** Doors: the handle goes on the end away from the hinge, on both faces, and the thin edges show plain wood. */
   door: { alongZ: boolean; hingeAtOne: boolean } | null = null,
+  /** A stair face already filled by the block it sits against is left out, so a corner has one surface. */
+  hides?: (nx: number, ny: number, nz: number, x0: number, y0: number, z0: number, x1: number, y1: number, z1: number) => boolean,
 ): void {
   for (const q of boxes) {
     const [x0, y0, z0, x1, y1, z1] = q;
@@ -680,10 +941,10 @@ function emitBoxes(
       const pz1 = uOfZ(z1) ?? 1 - z1;
       const nz0 = uOfZ(z0) ?? z0;
       const nz1 = uOfZ(z1) ?? z1;
-      if (!(x1 === 1 && fullY && fullZ && solidAt(1, 0, 0))) {
+      if (!(x1 === 1 && fullY && fullZ && solidAt(1, 0, 0)) && !hides?.(1, 0, 0, x1, y0, z0, x1, y1, z1)) {
         pushFacing(b, [[x + x1, y + y0, z + z0, pz0, y0], [x + x1, y + y0, z + z1, pz1, y0], [x + x1, y + y1, z + z1, pz1, y1], [x + x1, y + y1, z + z0, pz0, y1]], 1, 0, 0, tiles.side, 0.8, sky, blk);
       }
-      if (!(x0 === 0 && fullY && fullZ && solidAt(-1, 0, 0))) {
+      if (!(x0 === 0 && fullY && fullZ && solidAt(-1, 0, 0)) && !hides?.(-1, 0, 0, x0, y0, z0, x0, y1, z1)) {
         pushFacing(b, [[x + x0, y + y0, z + z0, nz0, y0], [x + x0, y + y0, z + z1, nz1, y0], [x + x0, y + y1, z + z1, nz1, y1], [x + x0, y + y1, z + z0, nz0, y1]], -1, 0, 0, tiles.side, 0.8, sky, blk);
       }
     }
@@ -692,10 +953,10 @@ function emitBoxes(
       const px1 = uOfX(x1) ?? x1;
       const mx0 = uOfX(x0) ?? 1 - x0;
       const mx1 = uOfX(x1) ?? 1 - x1;
-      if (!(z1 === 1 && fullX && fullY && solidAt(0, 0, 1))) {
+      if (!(z1 === 1 && fullX && fullY && solidAt(0, 0, 1)) && !hides?.(0, 0, 1, x0, y0, z1, x1, y1, z1)) {
         pushFacing(b, [[x + x0, y + y0, z + z1, px0, y0], [x + x1, y + y0, z + z1, px1, y0], [x + x1, y + y1, z + z1, px1, y1], [x + x0, y + y1, z + z1, px0, y1]], 0, 0, 1, tiles.side, 0.9, sky, blk);
       }
-      if (!(z0 === 0 && fullX && fullY && solidAt(0, 0, -1))) {
+      if (!(z0 === 0 && fullX && fullY && solidAt(0, 0, -1)) && !hides?.(0, 0, -1, x0, y0, z0, x1, y1, z0)) {
         pushFacing(b, [[x + x0, y + y0, z + z0, mx0, y0], [x + x1, y + y0, z + z0, mx1, y0], [x + x1, y + y1, z + z0, mx1, y1], [x + x0, y + y1, z + z0, mx0, y1]], 0, 0, -1, tiles.side, 0.9, sky, blk);
       }
     }
@@ -800,6 +1061,16 @@ function emitTorch(b: Builder, id: number, x: number, y: number, z: number, tile
     });
     pushQuad(b, pts, tile, f.shade, sky, blk);
   }
+  // A redstone torch is a red tip on a stick. A normal torch carries a flame above the wood.
+  if (rtorchInfo(id)) return;
+  const flame = tileIndex('torch_flame_0');
+  const yb = y + lift + 8 / 16;
+  const w = 4 / 16;
+  const h = 7 / 16;
+  const px = x + cx;
+  const pz = z + cz;
+  emitPlane(b, px - w, yb, pz - w, px + w, yb, pz + w, h, flame, sky, blk);
+  emitPlane(b, px - w, yb, pz + w, px + w, yb, pz - w, h, flame, sky, blk);
 }
 
 function emitQuad(
@@ -818,6 +1089,7 @@ function emitQuad(
   sky: number[],
   blk: number[],
   tint = 0,
+  yBias = 0,
 ): void {
   origin[f.nAxis] = n + (f.nSign > 0 ? 1 : 0);
   origin[f.sAxis] = f.sSign > 0 ? i0 : S - i0;
@@ -837,7 +1109,7 @@ function emitQuad(
       // Fluid surfaces sit below the block top: all top-face vertices, and the upper two of side faces.
       if (f.kind === 'top' || (f.kind === 'side' && c >= 2)) py -= drop / 16;
     }
-    b.positions.push3(pos[0], py, pos[2]);
+    b.positions.push3(pos[0], py + yBias, pos[2]);
     b.uvs.push2(ds, dt);
     b.tiles.push1(tile);
     b.light.push4(

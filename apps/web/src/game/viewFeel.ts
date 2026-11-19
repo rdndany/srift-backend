@@ -28,6 +28,8 @@ export interface FeelFrame {
  * it through `impact`, `kick` and `blow`.
  */
 export class ViewFeel {
+  /** The field of view of a player standing still or walking, in degrees (a setting; the rest of the feel is added to it). */
+  baseFov = 75;
   /** Hard hits on the ground (a Ground Slam, a meteor) knock the screen: the closer, the harder, dying away quickly. */
   private shake = 0;
   /** The weight of a blow you land: the view kicks and zooms in a hair, and for `hitStop` seconds the hand stands almost still. */
@@ -155,7 +157,7 @@ export class ViewFeel {
     const slamFov = 6 * slamCam.up + 10 * slamCam.fall - 3 * slamCam.wind - 5 * slamCam.hit * slamBump;
     const wind = Math.max(rushing ? (rolling ? 1 : 0.85) : 0, 0.6 * slamCam.fall + 0.25 * slamCam.up);
     this.runK += ((!f.firstPerson ? Math.max(0, Math.min(1, (Math.hypot(body.vx, body.vz) - 3.5) / 4)) : 0) - this.runK) * Math.min(1, dt * 3);
-    const fov = 75 - 9 * f.bowDraw * f.bowDraw + 16 * this.rushK + 4 * this.rollK + 5 * this.runK + slamFov - 3.5 * this.hitK * this.hitK - (!f.firstPerson ? THIRD_PERSON_FOV_TRIM : 0);
+    const fov = this.baseFov - 9 * f.bowDraw * f.bowDraw + 16 * this.rushK + 4 * this.rollK + 5 * this.runK + slamFov - 3.5 * this.hitK * this.hitK - (!f.firstPerson ? THIRD_PERSON_FOV_TRIM : 0);
     if (Math.abs(camera.fov - fov) > 0.01) {
       camera.fov = fov;
       camera.updateProjectionMatrix();

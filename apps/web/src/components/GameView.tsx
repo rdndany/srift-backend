@@ -10,62 +10,48 @@ import { useProfile } from '../profile/store';
 import { useUi } from '../ui/store';
 import { WorldTools } from './WorldTools';
 import { LoadingScreen } from './LoadingScreen';
+import { PauseSettings } from './PauseSettings';
+import { GAME_VERSION, latestExpansion } from '@solrift/shared';
 import './pause.css';
 
-/** The keys the pause screen lists: [keys, what they do]. */
-const CONTROLS: readonly (readonly [readonly string[], string])[] = [
-  [['W', 'A', 'S', 'D'], 'Move'],
-  [['Space'], 'Jump'],
-  [['Shift'], 'Sneak'],
-  [['W', 'W'], 'Sprint (double-tap, or Ctrl)'],
-  [['Left click'], 'Mine (hold)'],
-  [['Right click'], 'Place, use, eat'],
-  [['1-9'], 'Hotbar (or mouse wheel)'],
-  [['E'], 'Inventory'],
-  [['Q'], 'Drop (Ctrl+Q the stack)'],
-  [['F4'], 'Survival / creative'],
-  [['F'], 'Fly (creative)'],
-  [['J'], 'Show / hide the minimap'],
-  [['F3'], 'Debug info'],
-  [['F2'], 'Admin bar (frame rate, load)'],
-  [['[', ']'], 'Render distance'],
-  [['R'], 'Respawn'],
-  [['T'], 'Chat (online)'],
-  [['Esc'], 'Pause'],
-];
+const latest = latestExpansion();
 
 /**
- * Leave the game: the world is saved, then the page goes back to the front page. A guest keeps nothing, so for them it
- * asks a second time before everything is thrown away.
+ * Leave the game, for the character lobby or for the front page: the world is saved, then the page goes there. A guest keeps
+ * nothing, so for them either one asks a second time before everything is thrown away.
  */
 function QuitButton({ guest }: { guest: boolean }) {
   const api = useUi((s) => s.api);
-  const [armed, setArmed] = useState(false);
+  const [armed, setArmed] = useState<'characters' | 'title' | null>(null);
   const [busy, setBusy] = useState(false);
   // Going back into the game takes the question back.
   useEffect(() => {
-    const onLock = () => document.pointerLockElement && setArmed(false);
+    const onLock = () => document.pointerLockElement && setArmed(null);
     document.addEventListener('pointerlockchange', onLock);
     return () => document.removeEventListener('pointerlockchange', onLock);
   }, []);
-  const quit = () => {
+  const leave = (to: 'characters' | 'title') => {
     if (!api || busy) return;
-    if (guest && !armed) {
-      setArmed(true);
+    if (guest && armed !== to) {
+      setArmed(to);
       return;
     }
     setBusy(true);
-    api.quitToTitle();
+    if (to === 'characters') api.quitToCharacters();
+    else api.quitToTitle();
   };
   return (
     <div className="pause-quit" data-no-play>
-      <button id="quit-game" className={armed ? 'armed' : ''} disabled={busy} onClick={quit}>
-        {busy ? 'Leaving...' : armed ? 'Yes, quit and lose everything' : 'Quit game'}
+      <button id="to-characters" className={armed === 'characters' ? 'armed' : ''} disabled={busy} onClick={() => leave('characters')}>
+        {busy ? 'Leaving...' : armed === 'characters' ? 'Yes, leave and lose everything' : 'Change character'}
+      </button>
+      <button id="quit-game" className={armed === 'title' ? 'armed' : ''} disabled={busy} onClick={() => leave('title')}>
+        {busy ? 'Leaving...' : armed === 'title' ? 'Yes, quit and lose everything' : 'Quit game'}
       </button>
       {armed && !busy && (
         <p id="quit-warning">
           You are a guest: this world, your progress and your character are not saved.{' '}
-          <button className="link" id="quit-cancel" onClick={() => setArmed(false)}>
+          <button className="link" id="quit-cancel" onClick={() => setArmed(null)}>
             Keep playing
           </button>
         </p>
@@ -73,29 +59,6 @@ function QuitButton({ guest }: { guest: boolean }) {
     </div>
   );
 }
-
-/** The corner minimap on or off (key J too); the choice is remembered. It can be brought back from here while the game is paused. */
-function MinimapSetting() {
-  const on = useUi((s) => s.minimap);
-  const toggle = () => {
-    const next = !on;
-    useUi.setState({ minimap: next });
-    try {
-      localStorage.setItem('solrift-minimap', next ? 'on' : 'off');
-    } catch {
-      /* storage may be blocked; the choice then lasts until the page is closed */
-    }
-  };
-  return (
-    <div className="pause-box" data-no-play>
-      <h2>Display</h2>
-      <button id="minimap-toggle" onClick={toggle}>
-        Minimap: {on ? 'on' : 'off'} (J)
-      </button>
-    </div>
-  );
-}
-
 /**
  * React shell for the game. React owns the static DOM (canvas, HUD containers,
  * start overlay) and the inventory/vitals UI; the engine owns everything inside
@@ -108,7 +71,10 @@ export default function GameView() {
   const [start, setStart] = useState<PlayChoice | 'home' | 'direct' | null>(null);
   const identity = useProfile((s) => s.identity);
   const name = useProfile((s) => s.name);
-  useEffect(() => setStart(!isPlayPath(location.pathname) && (location.search === '' || new URLSearchParams(location.search).has('home')) ? 'home' : 'direct'), []);
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    setStart(!isPlayPath(location.pathname) && (params.size === 0 || params.has('home')) ? 'home' : 'direct');
+  }, []);
 
   useEffect(() => {
     if (start === null || start === 'home') return;
@@ -167,11 +133,16 @@ export default function GameView() {
       )}
       <div id="overlay">
         <div className="pause-card">
+         <div className="pause-edge">
+          <div className="pause-in">
           <header className="pause-head">
             <h1>
               Sol<b>Rift</b>
             </h1>
-            <div className="pause-sub">Game paused</div>
+            <div className="pause-sub">
+              <span className="only-single">Game paused</span>
+              <span className="only-online">Menu</span>
+            </div>
             {/* The connection status shows only here, while the game is paused. */}
             <div id="net" className="off">
               offline
@@ -182,10 +153,13 @@ export default function GameView() {
           <div className="pause-body">
             <section className="pause-menu">
               <button id="resume" className="pause-resume">
-                <span>Resume game</span>
+                <span>
+                  <i aria-hidden="true" />
+                  <span className="only-single">Resume game</span>
+                  <span className="only-online">Back to the game</span>
+                </span>
               </button>
-              <QuitButton guest={identity === 'guest'} />
-              <div className="pause-box">
+              <div className="pause-box" data-no-play>
                 <h2>Account</h2>
                 {identity === 'guest' ? (
                   <p className="guest-note" id="guest-pause-note">
@@ -198,32 +172,29 @@ export default function GameView() {
                   </>
                 )}
               </div>
-              <MinimapSetting />
               {identity !== 'guest' && (
-                <div className="pause-box only-single">
+                <div className="pause-box only-single" data-no-play>
                   <h2>World</h2>
                   <WorldTools />
                 </div>
               )}
+              <QuitButton guest={identity === 'guest'} />
             </section>
 
-            <section className="pause-keys">
-              <h2>Controls</h2>
-              <dl>
-                {CONTROLS.map(([keys, what]) => (
-                  <div key={what}>
-                    <dt>
-                      {keys.map((k, i) => (
-                        <kbd key={i}>{k}</kbd>
-                      ))}
-                    </dt>
-                    <dd>{what}</dd>
-                  </div>
-                ))}
-              </dl>
-            </section>
+            <PauseSettings />
           </div>
-          <p className="pause-foot">Click anywhere to play</p>
+          <footer className="pause-foot">
+            <p className="pause-hint">
+              <span className="only-single">Click anywhere outside the panels to play</span>
+              <span className="only-online">The world keeps going while this is open. Click outside the panels to go back.</span>
+            </p>
+            <p className="pause-ver" id="pause-version">
+              SolRift {GAME_VERSION}
+              {latest?.subtitle ? ` \u00B7 ${latest.subtitle}` : ''}
+            </p>
+          </footer>
+          </div>
+         </div>
         </div>
       </div>
     </>

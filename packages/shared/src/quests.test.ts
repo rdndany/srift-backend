@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FIRST_QUEST, MOBS, NPCS, QUESTS, QuestLog, ZONES, getItem, npcById, questById, shopOf, zoneDef, type Objective, type QuestDef } from './index';
+import { AUCTIONEER, STASHKEEPER, FIRST_QUEST, MOBS, NPCS, QUESTS, QuestLog, ZONES, getItem, npcById, questById, shopOf, zoneDef, type Objective, type QuestDef } from './index';
 
 /** Do what a quest asks, as the game would tell the log. */
 function doObjective(log: QuestLog, o: Objective): void {
@@ -69,7 +69,7 @@ describe('the quest data', () => {
   it('keeps every NPC as the index of a mob variant, and gives each a quest to give', () => {
     expect(NPCS.length).toBeGreaterThan(0);
     expect(NPCS.length).toBeLessThan(256);
-    for (const n of NPCS) expect(QUESTS.some((q) => q.giver === n.id || q.turnIn === n.id) || shopOf(n.id) !== null, `${n.id} has no business`).toBe(true);
+    for (const n of NPCS) expect(QUESTS.some((q) => q.giver === n.id || q.turnIn === n.id) || shopOf(n.id) !== null || n.id === AUCTIONEER || n.id === STASHKEEPER, `${n.id} has no business`).toBe(true);
     expect(new Set(NPCS.map((n) => n.id)).size).toBe(NPCS.length);
   });
 

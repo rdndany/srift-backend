@@ -8,8 +8,8 @@ import type { DummyStation, NpcStation } from './quests';
 import { StructureGenerator, type StructureKind, type StructurePlan } from './structures';
 import { CHUNK_SIZE, CHUNK_VOLUME, SEA_LEVEL, WORLD_HEIGHT, blockIndex } from './chunk';
 import { Simplex, hash2, mulberry32 } from './noise';
-import { SurfaceRules, strataAt } from './surface';
-import { Terrain, newColumnData } from './terrain';
+import { SurfaceRules, strataAt, type Ground } from './surface';
+import { Terrain, newColumnData, type TerrainSource } from './terrain';
 import { Vegetation } from './vegetation';
 import { VillageGenerator, type VillageSite } from './village';
 
@@ -22,6 +22,8 @@ interface ColumnChunk {
   heat: Uint8Array;
   t: Uint8Array;
   h: Uint8Array;
+  sub: Uint8Array;
+  water: Uint8Array;
 }
 
 /** Biomes a pond may lie in: open, fresh, level country. */
@@ -86,7 +88,7 @@ const BLOBS: { id: number; minY: number; maxY: number; count: number; radius: nu
 ];
 
 /** A seed always has the same spawn point, so it is only searched for once per process. */
-const SPAWN_CACHE = new Map<number, { x: number; y: number; z: number }>();
+const SPAWN_CACHE = new Map<string, { x: number; y: number; z: number }>();
 
 /** Carved-out cells at or below this height fill with lava. */
 export const LAVA_LEVEL = 10;
@@ -111,34 +113,39 @@ export interface InstanceRequirement {
  * on the client (worker) and on the server.
  */
 export class WorldGenerator {
-  private terrain: Terrain;
-  private nCave1: Simplex;
-  private nCave2: Simplex;
-  private nCavern: Simplex;
-  private nWide: Simplex;
-  private nNoodleA: Simplex;
-  private nNoodleB: Simplex;
-  private nAquifer: Simplex;
-  private nTint: Simplex;
+  protected terrain: TerrainSource;
+  protected nCave1: Simplex;
+  protected nCave2: Simplex;
+  protected nCavern: Simplex;
+  protected nWide: Simplex;
+  protected nNoodleA: Simplex;
+  protected nNoodleB: Simplex;
+  protected nAquifer: Simplex;
+  protected nTint: Simplex;
   private lakes = new Map<string, LakePlan | null>();
   private columns = new Map<number, ColumnChunk>();
   private touched = new Map<number, number>();
   private sampleOut = newColumnData();
-  private carver: CaveCarver;
+  protected carver: CaveCarver;
   /** The country of the caves (lush, dripstone, deep dark), the geodes, and the walls of rubble across tunnels. */
-  private decor: CaveDecor;
+  protected decor: CaveDecor;
   /** What the ground is made of, biome by biome. */
   readonly rules: SurfaceRules;
-  private readonly vegetation: Vegetation;
+  protected readonly vegetation: Vegetation;
   /** Dungeons and mineshafts. */
   readonly structures: StructureGenerator;
   /** Villages: where they are and what they look like. */
   readonly villages: VillageGenerator;
   /** Which kind of world this makes ('square' is the flat platform of squareWorld.ts, 'adventure' the quest world of adventure.ts). */
-  readonly kind: 'overworld' | 'square' | 'adventure' = 'overworld';
+  readonly kind: 'overworld' | 'square' | 'adventure' | 'beyond' = 'overworld';
+
+  /** The land of the world. The World Beyond makes its own (the constructor asks, before anything else is set up). */
+  protected createTerrain(seed: number): TerrainSource {
+    return new Terrain(seed);
+  }
 
   constructor(public readonly seed: number) {
-    this.terrain = new Terrain(seed);
+    this.terrain = this.createTerrain(seed);
     this.nCave1 = new Simplex(seed + 7);
     this.nCave2 = new Simplex(seed + 8);
     this.nCavern = new Simplex(seed + 9);
@@ -171,6 +178,13 @@ export class WorldGenerator {
   }
 
   /** The loot table of a generated chest (dungeon, mineshaft, village), or null for an ordinary chest. */
+  /** The animals that live on the land at a column, most common first: null in the worlds whose animals follow the ground (all but the World Beyond). */
+  wildlifeAt(x: number, z: number): readonly MobKind[] | null {
+    void x;
+    void z;
+    return null;
+  }
+
   lootAt(x: number, y: number, z: number): LootTableName | null {
     return this.structures.lootAt(x, y, z) ?? (this.villages.hasChestAt(x, y, z) ? 'village' : this.carver.cacheAt(x, y, z) ? 'cache' : null);
   }
@@ -248,12 +262,22 @@ export class WorldGenerator {
         this.touched.set(key, n);
         const o = this.sampleOut;
         this.terrain.sample(x, z, o);
-        return { height: o.height, biome: o.biome as BiomeId, heat: o.heat, t: Math.round(o.t * 255) / 255, h: Math.round(o.h * 255) / 255 };
+        const col: Column = { height: o.height, biome: o.biome as BiomeId, heat: o.heat, t: Math.round(o.t * 255) / 255, h: Math.round(o.h * 255) / 255 };
+        if (o.sub) {
+          col.sub = o.sub;
+          col.water = o.water;
+        }
+        return col;
       }
       cc = this.columnChunk(cx, cz);
     }
     const i = (z & 15) * CHUNK_SIZE + (x & 15);
-    return { height: cc.height[i], biome: cc.biome[i] as BiomeId, heat: cc.heat[i], t: cc.t[i] / 255, h: cc.h[i] / 255 };
+    const col: Column = { height: cc.height[i], biome: cc.biome[i] as BiomeId, heat: cc.heat[i], t: cc.t[i] / 255, h: cc.h[i] / 255 };
+    if (cc.sub[i]) {
+      col.sub = cc.sub[i];
+      col.water = cc.water[i];
+    }
+    return col;
   }
 
   private columnChunk(cx: number, cz: number): ColumnChunk {
@@ -266,6 +290,8 @@ export class WorldGenerator {
       heat: new Uint8Array(CHUNK_SIZE * CHUNK_SIZE),
       t: new Uint8Array(CHUNK_SIZE * CHUNK_SIZE),
       h: new Uint8Array(CHUNK_SIZE * CHUNK_SIZE),
+      sub: new Uint8Array(CHUNK_SIZE * CHUNK_SIZE),
+      water: new Uint8Array(CHUNK_SIZE * CHUNK_SIZE),
     };
     const o = newColumnData();
     for (let lz = 0; lz < CHUNK_SIZE; lz++) {
@@ -277,6 +303,8 @@ export class WorldGenerator {
         cc.heat[i] = o.heat;
         cc.t[i] = Math.round(o.t * 255);
         cc.h[i] = Math.round(o.h * 255);
+        cc.sub[i] = o.sub;
+        cc.water[i] = o.water;
       }
     }
     if (this.columns.size > 3000) this.columns.clear();
@@ -302,13 +330,17 @@ export class WorldGenerator {
     return true;
   }
 
+  private cacheKey(): string {
+    return `${this.kind}:${this.seed}`;
+  }
+
   /** Finds a dry-land spawn point by spiralling out from the origin. */
   findSpawn(): { x: number; y: number; z: number } {
-    const known = SPAWN_CACHE.get(this.seed);
+    const known = SPAWN_CACHE.get(this.cacheKey());
     if (known) return { ...known };
     const found = this.searchSpawn();
     if (SPAWN_CACHE.size > 64) SPAWN_CACHE.clear();
-    SPAWN_CACHE.set(this.seed, found);
+    SPAWN_CACHE.set(this.cacheKey(), found);
     return { ...found };
   }
 
@@ -450,7 +482,7 @@ export class WorldGenerator {
   }
 
   /** What fills a cell that was cut out of the rock: lava deep down, water in flooded caves, else air. */
-  private caveFluid(wx: number, y: number, wz: number): number {
+  protected caveFluid(wx: number, y: number, wz: number): number {
     if (y <= LAVA_LEVEL) return B.LAVA;
     const n = this.nAquifer.noise2(wx / 70, wz / 70);
     if (n > 0.3 && y <= 14 + Math.floor((n - 0.3) * 40)) return B.WATER;
@@ -463,7 +495,7 @@ export class WorldGenerator {
    * about between the rooms), and "cheese" (one field very high makes a hall; halls are larger in the lush and dripstone
    * country, where there is something to see in them).
    */
-  private noiseCave(wx: number, y: number, wz: number, cheese: number): boolean {
+  protected noiseCave(wx: number, y: number, wz: number, cheese: number): boolean {
     const c1 = this.nCave1.noise3(wx * 0.035, y * 0.055, wz * 0.035);
     const a1 = Math.abs(c1);
     if (a1 < 0.1) {
@@ -479,7 +511,7 @@ export class WorldGenerator {
   }
 
   /** Stone, or deepslate in the depths (with a ragged border between the two). */
-  private rock(y: number, wx: number, wz: number): number {
+  protected rock(y: number, wx: number, wz: number): number {
     if (y >= 24) return B.STONE;
     if (y <= 6) return B.DEEPSLATE;
     return hash2(this.seed + 55 + y, wx, wz) < (24 - y) / 18 ? B.DEEPSLATE : B.STONE;
@@ -515,9 +547,9 @@ export class WorldGenerator {
         const he = heights[at + 1];
         const slope = Math.max(Math.abs(h - hn), Math.abs(h - hs), Math.abs(h - hw), Math.abs(h - he));
         const shore = h <= SEA_LEVEL + 1 && (hn < SEA_LEVEL || hs < SEA_LEVEL || hw < SEA_LEVEL || he < SEA_LEVEL);
-        const ground = this.rules.ground(col.biome, wx, wz, h, slope, shore, col.t ?? 0.5);
-        const sandTop = ground.top === B.RED_SAND ? B.RED_SAND : B.SAND;
-        const sandRock = ground.top === B.RED_SAND ? B.RED_SANDSTONE : B.SANDSTONE;
+        const ground = this.groundFor(col, wx, wz, h, slope, shore);
+        const sandTop = ground.sandTop ?? (ground.top === B.RED_SAND ? B.RED_SAND : B.SAND);
+        const sandRock = ground.sandRock ?? (ground.top === B.RED_SAND ? B.RED_SANDSTONE : B.SANDSTONE);
         // Under lush and dripstone country the halls grow bigger.
         const cheese = this.decor.zoneAt(wx, wz) === CaveZone.PLAIN ? 0.62 : 0.54;
 
@@ -546,14 +578,7 @@ export class WorldGenerator {
           blocks[blockIndex(lx, y, lz)] = id;
         }
 
-        for (let y = h + 1; y <= SEA_LEVEL; y++) {
-          blocks[blockIndex(lx, y, lz)] = B.WATER;
-        }
-        // The frozen seas and rivers wear a sheet of ice with a few cracks and floes of packed ice.
-        if (h < SEA_LEVEL && (col.biome === Biome.FROZEN_OCEAN || col.biome === Biome.FROZEN_RIVER)) {
-          const floe = hash2(seed + 312, wx >> 2, wz >> 2) < 0.1;
-          if (hash2(seed + 313, wx, wz) < 0.96) blocks[blockIndex(lx, SEA_LEVEL, lz)] = floe ? B.PACKED_ICE : B.ICE;
-        }
+        this.fillSea(blocks, lx, lz, wx, wz, h, col);
       }
     }
 
@@ -566,14 +591,38 @@ export class WorldGenerator {
     this.structures.apply(blocks, cx, cz);
     this.decor.decorate(blocks, heights, cx, cz);
     this.decor.caches(blocks, cx, cz);
+    this.underground(blocks, heights, cx, cz);
     this.placeLakes(blocks, cx, cz);
+    this.dress(blocks, cx, cz);
+    return blocks;
+  }
+
+  /** What the top of a column is made of (the Beyond overrides this: it reads the detailed biome). */
+  protected groundFor(col: Column, wx: number, wz: number, h: number, slope: number, shore: boolean): Ground {
+    return this.rules.ground(col.biome, wx, wz, h, slope, shore, col.t ?? 0.5);
+  }
+
+  /** The water over a sunken column: the sea, with a sheet of ice on the frozen ones. */
+  protected fillSea(blocks: Uint16Array, lx: number, lz: number, wx: number, wz: number, h: number, col: Column): void {
+    for (let y = h + 1; y <= SEA_LEVEL; y++) blocks[blockIndex(lx, y, lz)] = B.WATER;
+    // The frozen seas and rivers wear a sheet of ice with a few cracks and floes of packed ice.
+    if (h < SEA_LEVEL && (col.biome === Biome.FROZEN_OCEAN || col.biome === Biome.FROZEN_RIVER)) {
+      const floe = hash2(this.seed + 312, wx >> 2, wz >> 2) < 0.1;
+      if (hash2(this.seed + 313, wx, wz) < 0.96) blocks[blockIndex(lx, SEA_LEVEL, lz)] = floe ? B.PACKED_ICE : B.ICE;
+    }
+  }
+
+  /** Extra work under the ground, after the caves are cut and dressed (nothing in the overworld). */
+  protected underground(_blocks: Uint16Array, _heights: Int16Array, _cx: number, _cz: number): void {}
+
+  /** Everything that stands on the ground: trees, plants, features, villages, castles. */
+  protected dress(blocks: Uint16Array, cx: number, cz: number): void {
     this.vegetation.placeTrees(blocks, cx, cz);
     this.vegetation.placeFeatures(blocks, cx, cz);
     this.vegetation.placePlants(blocks, cx, cz);
     this.villages.apply(blocks, cx, cz);
     // Castles last: they clear their own ground, so no tree or house is left standing through them.
     this.structures.applyCastles(blocks, cx, cz);
-    return blocks;
   }
 
   /**
@@ -581,7 +630,7 @@ export class WorldGenerator {
    * (there is no flowing water, so a hole would leave a wall of it hanging in the air), and the top
    * block under a possible tree is spared so trees never float over an entrance.
    */
-  private carve(blocks: Uint16Array, heights: Int16Array, cx: number, cz: number): void {
+  protected carve(blocks: Uint16Array, heights: Int16Array, cx: number, cz: number): void {
     const ox = cx * CHUNK_SIZE;
     const oz = cz * CHUNK_SIZE;
     const PAD = CHUNK_SIZE + 2;
@@ -624,7 +673,7 @@ export class WorldGenerator {
   }
 
   /** Round lumps of dirt, granite, diorite, andesite and (deep down) tuff replace stone. */
-  private placeBlobs(blocks: Uint16Array, cx: number, cz: number): void {
+  protected placeBlobs(blocks: Uint16Array, cx: number, cz: number): void {
     const rand = mulberry32(Math.imul(cx, 83492791) ^ Math.imul(cz, 41729957) ^ (this.seed + 5));
     for (const blob of BLOBS) {
       for (let n = 0; n < blob.count; n++) {
@@ -650,7 +699,7 @@ export class WorldGenerator {
     }
   }
 
-  private placeOres(blocks: Uint16Array, cx: number, cz: number): void {
+  protected placeOres(blocks: Uint16Array, cx: number, cz: number): void {
     const rand = mulberry32(Math.imul(cx, 73856093) ^ Math.imul(cz, 19349663) ^ this.seed);
     for (const ore of ORES) {
       for (let v = 0; v < ore.veins; v++) {
@@ -788,7 +837,7 @@ export class WorldGenerator {
     return best && { ...best };
   }
 
-  private placeLakes(blocks: Uint16Array, cx: number, cz: number): void {
+  protected placeLakes(blocks: Uint16Array, cx: number, cz: number): void {
     const ox = cx * CHUNK_SIZE;
     const oz = cz * CHUNK_SIZE;
     for (let dz = -1; dz <= 1; dz++) {

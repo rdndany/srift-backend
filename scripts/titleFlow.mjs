@@ -1,5 +1,5 @@
-// Shared by the title-screen suites: a mock Wallet Standard wallet, and the "who goes there?" step
-// (guest or wallet, then name and character) that comes between the front page and the play page.
+// Shared by the title-screen suites: a mock Wallet Standard wallet, and the game page (/game) helpers: open it,
+// choose who plays (guest or wallet, name, class) and press Play.
 import { generateKeyPairSync, sign } from 'node:crypto';
 
 const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
@@ -61,49 +61,47 @@ export async function installWallet(page) {
   return { address };
 }
 
-/** From the front page (the PLAY GAME button is showing) to the play page: single player or multiplayer, then a mode or a realm. */
-export async function openPlay(page, { timeout = 30000 } = {}) {
-  await page.waitForSelector('.wow-play', { timeout });
-  await page.click('.wow-play');
-  await page.waitForSelector('#home .mode-card', { timeout });
+/**
+ * Onto the game page, /game: from the front page (the PLAY GAME button is showing) through its dialog (single player or
+ * multiplayer, and for single player the `mode`), or when the page is already there.
+ */
+export async function openPlay(page, { timeout = 30000, way = 'single', mode = 'survival' } = {}) {
+  await page.waitForSelector('.wow-play, #play-go', { timeout });
+  if (!(await page.$('#play-go'))) {
+    await page.click('.wow-play');
+    await page.click(`#pick-${way}`, { timeout });
+    if (way === 'single') await page.click(`#pick-mode-${mode}`, { timeout });
+    await page.waitForSelector('#play-go', { timeout });
+  }
+  await page.waitForSelector(way === 'multi' ? '#multi-panel' : '#single-panel', { timeout });
 }
 
 /**
- * The character step, which comes last (after single player / multiplayer and the mode or realm are chosen) and leads
- * straight into the game. `as` is 'guest' or 'wallet' (a wallet is signed in on the way when the session is not there yet).
+ * Who plays, then Play: the last thing before the game. `as` is 'guest' or 'wallet' (a wallet is signed in on the way
+ * when the session is not there yet, and a new account makes its character: permanent, so it asks twice).
  * `name` replaces the suggested name, `classId` is the class picked.
  */
 export async function chooseCharacter(page, as, { name, classId = 'warrior', timeout = 30000 } = {}) {
   if (as === 'guest') {
-    await page.waitForSelector('#who-guest', { timeout });
     await page.click('#who-guest');
   } else {
-    await page.waitForSelector('#who-wallet-continue, #who-wallet', { timeout });
-    if (await page.isVisible('#who-wallet-continue')) await page.click('#who-wallet-continue');
-    else {
-      // Signing in takes the player straight on to the character step.
-      await page.click('#who-wallet');
-      await page.click('.wallet-pick');
-    }
+    await page.click('#who-wallet');
+    await page.waitForSelector('#who-account, .wallet-pick', { timeout });
+    if (!(await page.isVisible('#who-account'))) await page.click('.wallet-pick');
   }
-  // A new wallet account makes its character here (permanent, so it asks twice); an existing one is only shown.
   await page.waitForSelector('#char-name, #char-name-fixed', { timeout });
-  if (await page.isVisible('#char-name')) {
+  const making = await page.isVisible('#char-name');
+  if (making) {
     if (name !== undefined) await page.fill('#char-name', name);
-    await page.click('#who-continue');
-    // Then the class (a wallet character is permanent, so it asks twice).
-    await page.waitForSelector('#class-cards', { timeout });
-    await page.click(`.cls-card[data-class="${classId}"]`);
-    await page.click('#class-confirm');
-    if (as === 'wallet') await page.click('#class-confirm');
-  } else {
-    await page.click('#who-continue');
+    await page.click(`#class-cards [data-class="${classId}"]`);
   }
+  await page.click('#play-go');
+  // A new wallet character is permanent: the first click asks, the second creates it.
+  if (making && as === 'wallet') await page.click('#play-go');
 }
 
-/** Front page to the game: a new single-player world (the mode picked on the play page, a random seed), then the character. */
+/** Front page to the game: a new single-player world (the mode picked on the page, a random seed), then the character. */
 export async function enterAs(page, as, opts = {}) {
   await openPlay(page, opts);
-  await page.click('#single-panel button.new-world');
   await chooseCharacter(page, as, opts);
 }

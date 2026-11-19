@@ -118,7 +118,7 @@ describe('an Adventure room', () => {
     p.quests!.done.add(FIRST_QUEST);
     ticks(room, 30);
     const npcs = c.snap.mobs.filter((m) => m.kind === 'npc');
-    expect(npcs.map((m) => m.variant).sort()).toEqual(NPCS.map((_, i) => i));
+    expect(npcs.map((m) => m.variant).sort((a, b) => a - b)).toEqual(NPCS.map((_, i) => i));
 
     const maren = NPCS.find((n) => n.id === 'maren')!;
     p.teleport(maren.x, generator.hubY + 1, maren.z + 2, 0, 0);

@@ -58,6 +58,8 @@ import {
   type SocialView,
   type TradeAct,
   type TradeView,
+  type BobberDraw,
+  type BobberMode,
   mountOfItem,
 } from '@solrift/shared';
 import type { AimTarget, ArrowLike, ClientSession, DropLike, MobLike, VehicleLike, XpOrbLike } from './clientSession';
@@ -161,7 +163,10 @@ export class RemoteSession implements ClientSession {
   readonly weather = new Weather();
   readonly mobs: { mobs: MobLike[]; arrows: ArrowLike[] } = { mobs: [], arrows: [] };
   readonly drops: { drops: DropLike[]; count: number } = { drops: [], count: 0 };
+  /** Food sitting on campfires near this player, from the latest snapshot. */
+  campfires: { x: number; y: number; z: number; slots: number[] }[] = [];
   readonly xpOrbs: { orbs: XpOrbLike[] } = { orbs: [] };
+  readonly bobbers: { bobbers: BobberDraw[] } = { bobbers: [] };
   vehicles: VehicleLike[] = [];
   riding: { id: number } | null = null;
   /** The mount ridden (1 + its place in MOUNTS, 0: none) and the cooldowns of its skills, as the server says. */
@@ -180,6 +185,8 @@ export class RemoteSession implements ClientSession {
   emberProgress = 0;
   aimsAtTalker = false;
   burning = false;
+  poison = 0;
+  foodSick = 0;
   /** The bed this player lies in (only the way it points matters to the client), or null. */
   sleeping: { dir: number } | null = null;
   defense = 0;
@@ -424,12 +431,16 @@ export class RemoteSession implements ClientSession {
     this.yaw = f.yaw;
     this.pitch = f.pitch;
     this.sneaking = f.sneak;
-    if (!this.ready || !(f.locked || this.screen !== 'none')) {
+    if (!this.ready) {
       this.acc = 0;
       this.markPrev();
       this.blend = 1;
       return;
     }
+    // The menu (Esc) is not a pause: the realm goes on, and so does the character in it (cooldowns, hunger, a fight, the weather).
+    // Without the mouse the body stands with its hands off the keys, but the steps are still sent: the server only moves a player
+    // on what it is sent.
+    if (!f.locked && this.screen === 'none') f = { ...f, forward: 0, strafe: 0, jump: false, sprint: false, sneak: false, left: false, right: false };
     this.acc += f.dt;
     const out: NetInput[] = [];
     while (this.acc >= STEP) {
@@ -559,7 +570,7 @@ export class RemoteSession implements ClientSession {
           // Sounds and the like are not worth keeping while the world loads, but the quest log and the place you
           // spawned in (the server says both at once, on joining) are: the latest of each waits for the world.
           for (const e of this.heldEvents) {
-            if (e.t !== 'quests' && e.t !== 'zone' && e.t !== 'party') continue;
+            if (e.t !== 'quests' && e.t !== 'zone' && e.t !== 'party' && e.t !== 'inv') continue;
             this.carried = this.carried.filter((c) => c.t !== e.t);
             this.carried.push(e);
           }
@@ -624,6 +635,8 @@ export class RemoteSession implements ClientSession {
     this.emberProgress = y.emb ?? 0;
     this.aimsAtTalker = !!y.talk;
     this.burning = y.burning;
+    this.poison = y.poison ?? 0;
+    this.foodSick = y.foodSick ?? 0;
     this.sleeping = y.sleeping > 0 ? { dir: y.sleeping - 1 } : null;
     this.riding = y.riding > 0 ? { id: y.riding } : null;
     this.mountIdx = y.mount ?? 0;
@@ -650,6 +663,9 @@ export class RemoteSession implements ClientSession {
   private applyInventory(inv: InventoryView): void {
     for (let i = 0; i < BAG_SLOTS; i++) this.bags.set(i, stackOf(inv.bags?.[i] ?? null));
     for (let i = 0; i < this.inventory.size; i++) this.inventory.set(i, stackOf(inv.slots[i] ?? null));
+    if (inv.armor) for (let i = 0; i < this.armor.size; i++) this.armor.set(i, stackOf(inv.armor[i] ?? null));
+    // Tell the screen to read them again, also when this came before the world was ready (see `handle`).
+    this.heldEvents.push({ t: 'inv' });
     const mv = inv.menu;
     if (!mv) {
       this.menu = null;
@@ -758,7 +774,7 @@ export class RemoteSession implements ClientSession {
       seen.add(v.id);
       let t = this.mobTargets.get(v.id);
       if (!t) {
-        const obj: MobLike = { id: v.id, kind: v.kind, body: { x: v.x, y: v.y, z: v.z }, yaw: v.yaw, walkPhase: v.walk, speedNow: v.speed, hurtTime: v.hurt, attackTime: v.atk ?? 99, dead: v.dead, deathTime: v.deathTime, burning: v.burning, fuse: v.fuse, fuseFraction: 0, size: v.size ?? 1, variant: v.variant ?? 0, baby: false, sheared: false, love: 0 };
+        const obj: MobLike = { id: v.id, kind: v.kind, body: { x: v.x, y: v.y, z: v.z }, yaw: v.yaw, walkPhase: v.walk, speedNow: v.speed, hurtTime: v.hurt, attackTime: v.atk ?? 99, dead: v.dead, deathTime: v.deathTime, burning: v.burning, fuse: v.fuse, fuseFraction: 0, size: v.size ?? 1, variant: v.variant ?? 0, baby: false, sheared: false, love: 0, gear: v.gear };
         t = { obj, x: v.x, y: v.y, z: v.z, yaw: v.yaw };
         this.mobTargets.set(v.id, t);
       }
@@ -781,6 +797,7 @@ export class RemoteSession implements ClientSession {
       o.baby = v.baby === 1;
       o.sheared = v.sheared === 1;
       o.love = v.love === 1 ? 1 : 0;
+      o.gear = v.gear;
       o.fuse = v.fuse;
       o.fuseFraction = v.fuse < 0 ? 0 : Math.min(1, v.fuse / 1.5);
       list.push(o);
@@ -816,7 +833,16 @@ export class RemoteSession implements ClientSession {
     for (const d of s.drops) drops.push({ id: d.id, stack: { id: d.item, count: d.count, damage: d.damage, ...(d.name ? { name: d.name } : {}), ...(d.ench ? { ench: d.ench } : {}), ...(d.g ? { gear: d.g } : {}) }, x: d.x, y: d.y, z: d.z, age: d.age, phase: d.phase });
     this.drops.drops = drops;
     this.drops.count = drops.length;
+    const fires = s.fires ?? [];
+    const campfires: { x: number; y: number; z: number; slots: number[] }[] = [];
+    for (let i = 0; i + 6 < fires.length; i += 7) {
+      campfires.push({ x: fires[i], y: fires[i + 1], z: fires[i + 2], slots: [fires[i + 3], fires[i + 4], fires[i + 5], fires[i + 6]] });
+    }
+    this.campfires = campfires;
     this.xpOrbs.orbs = (s.orbs ?? []).map((o) => ({ id: o.id, value: o.v, x: o.x, y: o.y, z: o.z, age: o.age, phase: o.phase }));
-
+    this.bobbers.bobbers = (s.bobbers ?? []).map((b) => {
+      const who = this.others.get(b.o);
+      return { id: b.id, x: b.x, y: b.y, z: b.z, mode: b.m as BobberMode, own: !!b.own, owner: b.own || !who ? null : { x: who.x, y: who.y, z: who.z, yaw: who.yaw } };
+    });
   }
 }

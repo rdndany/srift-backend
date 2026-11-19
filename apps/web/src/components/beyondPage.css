@@ -1,0 +1,898 @@
+/*
+ * The page about the World Beyond (/beyond): the top with a dissolving set of captures, the lands by family, the ten realms,
+ * the places, the underground, the sky, the Codex and how to begin. It rides on the class pages' styles (classPage.css:
+ * the hero, the two columns, the notes, the steps), which ride on the front page's; everything here starts with `.bp`.
+ * `--c` is the page's colour (set on the page), `--r` the colour of a rarity.
+ */
+
+#home .fp.bp {
+  --r-common: #9aa7b4;
+  --r-uncommon: #7fd26a;
+  --r-rare: #5aa9ff;
+  --r-very-rare: #c78bff;
+  --r-legendary: #ffb340;
+}
+#home .fp.bp .r-common {
+  --r: var(--r-common);
+}
+#home .fp.bp .r-uncommon {
+  --r: var(--r-uncommon);
+}
+#home .fp.bp .r-rare {
+  --r: var(--r-rare);
+}
+#home .fp.bp .r-very-rare {
+  --r: var(--r-very-rare);
+}
+#home .fp.bp .r-legendary {
+  --r: var(--r-legendary);
+}
+
+/* ---------- the top ---------- */
+#home .fp.bp .bp-name {
+  font-size: clamp(44px, 7.4vw, 96px);
+}
+#home .fp.bp .bp-name em {
+  display: block;
+  font-style: normal;
+  color: #fff;
+  text-shadow:
+    0 5px 0 rgba(0, 0, 0, 0.6),
+    0 0 46px color-mix(in srgb, var(--c) 80%, transparent);
+}
+#home .fp.bp .cp-hero-in {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 1.02fr);
+}
+#home .fp.bp .cp-wash {
+  background:
+    linear-gradient(rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0.3)),
+    radial-gradient(ellipse 55% 70% at 74% 50%, color-mix(in srgb, var(--c) 22%, transparent), transparent 72%),
+    linear-gradient(90deg, rgba(7, 5, 13, 0.84) 0%, rgba(7, 5, 13, 0.42) 50%, rgba(7, 5, 13, 0.1) 100%),
+    linear-gradient(transparent 62%, var(--bg));
+}
+
+#home .fp.bp .bp-stage {
+  position: relative;
+  margin: 0;
+  animation: fp-rise 0.9s 0.25s both cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+#home .fp.bp .bp-stage .cp-aura {
+  bottom: -8%;
+  height: 90%;
+}
+#home .fp.bp .bp-stage-frame {
+  --s: 6px;
+  --e: 3px;
+  --edge: linear-gradient(135deg, color-mix(in srgb, var(--c) 80%, #fff), rgba(255, 255, 255, 0.18) 50%, color-mix(in srgb, var(--c) 60%, #000));
+  --fill: #05030a;
+  aspect-ratio: 16 / 9;
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.6);
+}
+#home .fp.bp .bp-stage-pics {
+  position: absolute;
+  inset: var(--e);
+  overflow: hidden;
+}
+#home .fp.bp .bp-stage-pics img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transform: scale(1.04);
+  transition:
+    opacity 1.1s ease,
+    transform 7s ease-out;
+}
+#home .fp.bp .bp-stage-pics img.on {
+  opacity: 1;
+  transform: scale(1);
+}
+#home .fp.bp .bp-stage-open {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border: none;
+  background: none;
+  cursor: zoom-in;
+}
+#home .fp.bp .bp-stage figcaption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 36px 20px 14px;
+  background: linear-gradient(transparent, rgba(5, 3, 10, 0.88));
+  pointer-events: none;
+}
+#home .fp.bp .bp-stage figcaption b {
+  font-size: 14px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #fff;
+}
+#home .fp.bp .bp-stage figcaption span {
+  font-family: var(--body);
+  font-size: 13px;
+  color: var(--soft);
+}
+#home .fp.bp .bp-dots {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 0;
+  list-style: none;
+}
+#home .fp.bp .bp-dots button {
+  width: 22px;
+  height: 8px;
+  padding: 0;
+  border: none;
+  background: rgba(255, 255, 255, 0.22);
+  transition:
+    background 0.15s,
+    width 0.2s;
+}
+#home .fp.bp .bp-dots button:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+#home .fp.bp .bp-dots button.on {
+  width: 38px;
+  background: var(--c);
+  box-shadow: 0 0 10px var(--c);
+}
+
+/* ---------- the numbers ---------- */
+#home .fp.bp .bp-counts {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0;
+  width: min(1160px, 100%);
+  margin: 0 auto;
+  padding: 0;
+  list-style: none;
+  background: rgba(12, 8, 22, 0.72);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+#home .fp.bp .bp-counts li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 22px 8px;
+  text-align: center;
+}
+#home .fp.bp .bp-counts li + li {
+  box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.1);
+}
+#home .fp.bp .bp-counts b {
+  font-size: 40px;
+  line-height: 1;
+  color: var(--soft-c);
+  text-shadow: 0 0 22px color-mix(in srgb, var(--c) 60%, transparent);
+}
+#home .fp.bp .bp-counts span {
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* ---------- a capture ---------- */
+#home .fp.bp .bp-shot {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+}
+#home .fp.bp .bp-shot > button {
+  --s: 4px;
+  --e: 2px;
+  --fill: #05030a;
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  padding: 0;
+  border: none;
+  cursor: zoom-in;
+}
+#home .fp.bp .bp-shot img {
+  position: absolute;
+  inset: var(--e);
+  width: calc(100% - var(--e) * 2);
+  height: calc(100% - var(--e) * 2);
+  object-fit: cover;
+  background: #0b0716;
+  transition: transform 0.5s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+#home .fp.bp .bp-shot > button {
+  overflow: hidden;
+}
+#home .fp.bp .bp-shot > button:hover img,
+#home .fp.bp .bp-shot > button:focus-visible img {
+  transform: scale(1.04);
+}
+#home .fp.bp .bp-shot > button:focus-visible {
+  outline: 2px solid var(--c);
+  outline-offset: 3px;
+}
+#home .fp.bp .bp-zoom {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  width: 30px;
+  height: 30px;
+  background: rgba(8, 5, 16, 0.7);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.3);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+#home .fp.bp .bp-zoom::before,
+#home .fp.bp .bp-zoom::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  background: #fff;
+  transform: translate(-50%, -50%);
+}
+#home .fp.bp .bp-zoom::before {
+  width: 12px;
+  height: 2px;
+}
+#home .fp.bp .bp-zoom::after {
+  width: 2px;
+  height: 12px;
+}
+#home .fp.bp .bp-shot > button:hover .bp-zoom,
+#home .fp.bp .bp-shot > button:focus-visible .bp-zoom {
+  opacity: 1;
+}
+#home .fp.bp .bp-shot figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+#home .fp.bp .bp-shot figcaption b {
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #fff;
+}
+#home .fp.bp .bp-shot figcaption span {
+  flex-basis: 100%;
+  order: 3;
+  font-family: var(--body);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+#home .fp.bp .bp-rar {
+  font-style: normal;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--r);
+}
+
+/* ---------- the big view of a capture ---------- */
+.bp-lb {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 40px 72px;
+  background: rgba(4, 2, 9, 0.92);
+  backdrop-filter: blur(6px);
+  animation: bp-lb-in 0.18s ease-out;
+  cursor: zoom-out;
+}
+@keyframes bp-lb-in {
+  from {
+    opacity: 0;
+  }
+}
+.bp-lb figure {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: min(1600px, 100%);
+  max-height: 100%;
+  margin: 0;
+  cursor: default;
+}
+.bp-lb img {
+  display: block;
+  max-width: 100%;
+  max-height: calc(100svh - 150px);
+  object-fit: contain;
+  box-shadow:
+    0 0 0 3px rgba(255, 255, 255, 0.2),
+    0 30px 90px rgba(0, 0, 0, 0.8);
+}
+.bp-lb figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  color: #d9d0ea;
+}
+.bp-lb figcaption b {
+  font-size: 15px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #fff;
+}
+.bp-lb figcaption span {
+  font-size: 14px;
+  color: #b6abca;
+}
+.bp-lb figcaption small {
+  margin-left: auto;
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  color: #8a7fa1;
+}
+.bp-lb-x,
+.bp-lb-n {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: rgba(20, 14, 34, 0.9);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.bp-lb-x:hover,
+.bp-lb-n:hover {
+  background: rgba(79, 224, 192, 0.35);
+}
+.bp-lb-x {
+  top: 18px;
+  right: 22px;
+  width: 44px;
+  height: 44px;
+  font-size: 28px;
+  line-height: 1;
+}
+.bp-lb-n {
+  top: 50%;
+  width: 48px;
+  height: 72px;
+  font-size: 40px;
+  line-height: 1;
+  transform: translateY(-50%);
+}
+.bp-lb-n.prev {
+  left: 14px;
+}
+.bp-lb-n.next {
+  right: 14px;
+}
+
+/* ---------- the world ---------- */
+#home .fp.bp .bp-side {
+  position: sticky;
+  top: 96px;
+}
+#home .fp.bp .bp-rules {
+  margin-top: 36px;
+  padding: 0;
+  list-style: none;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+/* ---------- the lands ---------- */
+#home .fp.bp .bp-rarity ol {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0 0 32px;
+  padding: 0;
+}
+#home .fp.bp .bp-rarity li {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px 16px;
+  background: rgba(12, 8, 22, 0.72);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1),
+    inset 0 3px 0 var(--r);
+}
+#home .fp.bp .bp-rarity b {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--r);
+}
+#home .fp.bp .bp-rarity b i {
+  width: 9px;
+  height: 9px;
+  background: var(--r);
+  box-shadow: 0 0 10px var(--r);
+}
+#home .fp.bp .bp-rarity b small {
+  margin-left: auto;
+  padding: 1px 7px;
+  background: rgba(255, 255, 255, 0.09);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: #fff;
+}
+#home .fp.bp .bp-rarity span {
+  font-family: var(--body);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+#home .fp.bp .bp-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 22px;
+}
+#home .fp.bp .bp-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border: none;
+  background: rgba(12, 8, 22, 0.72);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #d9d0ea;
+  transition:
+    background 0.12s,
+    box-shadow 0.12s,
+    color 0.12s;
+}
+#home .fp.bp .bp-tabs button small {
+  padding: 1px 6px;
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 10px;
+  letter-spacing: 0;
+  color: #fff;
+}
+#home .fp.bp .bp-tabs button:hover,
+#home .fp.bp .bp-tabs button:focus-visible {
+  background: color-mix(in srgb, var(--c) 22%, #0c0817);
+  box-shadow: inset 0 0 0 1px var(--c);
+  color: #fff;
+  outline: none;
+}
+#home .fp.bp .bp-tabs button.on {
+  background: color-mix(in srgb, var(--c) 36%, #0c0817);
+  box-shadow:
+    inset 0 0 0 1px var(--c),
+    0 0 18px color-mix(in srgb, var(--c) 35%, transparent);
+  color: #fff;
+}
+
+#home .fp.bp .bp-family {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+  gap: 28px;
+  align-items: start;
+  animation: fp-rise 0.45s both cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+#home .fp.bp .bp-family-text {
+  margin-bottom: 18px;
+  font-family: var(--body);
+  font-size: 16px;
+  line-height: 1.7;
+  color: var(--soft);
+}
+#home .fp.bp .bp-family-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+#home .fp.bp .bp-family-grid[data-n='1'] {
+  grid-template-columns: 1fr;
+}
+#home .fp.bp .bp-family-grid[data-n='3'] .bp-shot:first-child {
+  grid-column: 1 / -1;
+}
+#home .fp.bp .bp-biomes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 640px;
+  margin: 0;
+  padding: 0 6px 0 0;
+  overflow-y: auto;
+  list-style: none;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--c) 60%, #000) transparent;
+}
+#home .fp.bp .bp-biomes li,
+#home .fp.bp .bp-place-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  padding: 12px 14px;
+  background: rgba(12, 8, 22, 0.72);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1),
+    inset 3px 0 0 var(--r);
+}
+#home .fp.bp .bp-biomes b,
+#home .fp.bp .bp-place-list b {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  letter-spacing: 0.05em;
+  color: #fff;
+}
+#home .fp.bp .bp-biomes b i,
+#home .fp.bp .bp-place-list b i {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  background: var(--r);
+  box-shadow: 0 0 8px var(--r);
+}
+#home .fp.bp .bp-biomes em,
+#home .fp.bp .bp-place-list em {
+  align-self: center;
+  font-style: normal;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--r);
+}
+#home .fp.bp .bp-biomes span,
+#home .fp.bp .bp-place-list span {
+  grid-column: 1 / -1;
+  font-family: var(--body);
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+#home .fp.bp .bp-wall {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px 20px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* ---------- the realms ---------- */
+#home .fp.bp .bp-realms {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+#home .fp.bp .bp-realm {
+  --edge: linear-gradient(135deg, rgba(255, 179, 64, 0.7), rgba(255, 255, 255, 0.12) 45%, rgba(79, 224, 192, 0.45));
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.75fr);
+  gap: 28px;
+  align-items: center;
+  padding: 22px;
+}
+#home .fp.bp .flip .bp-realm {
+  grid-template-columns: minmax(0, 0.75fr) minmax(0, 1.25fr);
+}
+#home .fp.bp .flip .bp-realm-pics {
+  order: 2;
+}
+#home .fp.bp .bp-realm-pics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+#home .fp.bp .bp-realm-pics[data-n='1'] {
+  grid-template-columns: 1fr;
+}
+#home .fp.bp .bp-realm-pics[data-n='0'] {
+  display: none;
+}
+#home .fp.bp .bp-realm-text {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+#home .fp.bp .bp-realm-text small {
+  color: var(--r-legendary);
+}
+#home .fp.bp .bp-realm-text h3 {
+  font-size: 26px;
+  line-height: 1.15;
+}
+#home .fp.bp .bp-realm-text p {
+  font-size: 15.5px;
+}
+#home .fp.bp .bp-realm-text .bp-quote {
+  padding-left: 14px;
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--c) 70%, transparent);
+  font-size: 13.5px;
+  font-style: italic;
+  color: var(--muted);
+}
+
+/* ---------- the places ---------- */
+#home .fp.bp .bp-place-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+#home .fp.bp .bp-places-wall {
+  margin-top: 36px;
+}
+
+/* ---------- below ---------- */
+#home .fp.bp .bp-layers {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+#home .fp.bp .bp-layers small {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--soft-c);
+}
+#home .fp.bp .bp-rock {
+  margin: 26px 0 0;
+}
+#home .fp.bp .bp-caves {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+#home .fp.bp .bp-caves li:first-child {
+  grid-column: 1 / -1;
+}
+#home .fp.bp .bp-cave {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  height: 100%;
+  padding: 16px 16px 20px;
+}
+#home .fp.bp .bp-caves li:first-child .bp-cave {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 0.7fr);
+  gap: 24px;
+  align-items: center;
+}
+#home .fp.bp .bp-cave h4 {
+  margin-bottom: 8px;
+  font-size: 18px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #fff;
+}
+#home .fp.bp .bp-cave p {
+  font-family: var(--body);
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--soft);
+}
+#home .fp.bp .bp-cave .bp-shot figcaption {
+  display: none;
+}
+#home .fp.bp .bp-ores {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+#home .fp.bp .bp-ores li {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  background: rgba(12, 8, 22, 0.72);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1),
+    inset 0 -3px 0 color-mix(in srgb, var(--c) 70%, transparent);
+}
+#home .fp.bp .bp-ores b {
+  font-size: 14px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #fff;
+}
+#home .fp.bp .bp-ores span {
+  font-family: var(--body);
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* ---------- the air ---------- */
+#home .fp.bp .bp-air-two {
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+}
+#home .fp.bp .bp-air-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+#home .fp.bp .bp-air-list li {
+  padding: 18px 20px;
+  background: rgba(12, 8, 22, 0.72);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1),
+    inset 4px 0 0 var(--c);
+}
+#home .fp.bp .bp-air-list h3 {
+  margin-bottom: 8px;
+  font-size: 15px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #fff;
+}
+#home .fp.bp .bp-air-list p {
+  font-family: var(--body);
+  font-size: 14.5px;
+  line-height: 1.65;
+  color: var(--soft);
+}
+#home .fp.bp .bp-air-pics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* ---------- the Codex ---------- */
+#home .fp.bp .bp-deeds {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+#home .fp.bp .bp-deeds li {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px 14px 18px;
+  background: rgba(12, 8, 22, 0.72);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1),
+    inset 3px 0 0 var(--r-legendary);
+}
+#home .fp.bp .bp-deeds b {
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--r-legendary);
+}
+#home .fp.bp .bp-deeds span {
+  font-family: var(--body);
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--soft);
+}
+
+#home .fp.bp .bp-link {
+  margin-top: 24px;
+}
+#home .fp.bp .bp-link p {
+  font-family: var(--body);
+  font-size: 15px;
+  color: var(--muted);
+}
+#home .fp.bp .bp-link code {
+  padding: 2px 8px;
+  background: rgba(8, 5, 16, 0.8);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+  font-family: var(--pixel);
+  font-size: 12px;
+  color: #fff;
+}
+
+/* ---------- narrower ---------- */
+@media (max-width: 1100px) {
+  #home .fp.bp .bp-counts {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  #home .fp.bp .bp-counts li:nth-child(n + 4) {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  }
+  #home .fp.bp .bp-rarity ol {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  #home .fp.bp .bp-rules {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  #home .fp.bp .bp-wall {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 900px) {
+  #home .fp.bp .cp-hero-in,
+  #home .fp.bp .bp-family,
+  #home .fp.bp .bp-realm,
+  #home .fp.bp .flip .bp-realm,
+  #home .fp.bp .bp-air-two,
+  #home .fp.bp .bp-caves li:first-child .bp-cave {
+    grid-template-columns: 1fr;
+  }
+  #home .fp.bp .flip .bp-realm-pics {
+    order: 0;
+  }
+  #home .fp.bp .bp-side {
+    position: static;
+  }
+  #home .fp.bp .bp-layers,
+  #home .fp.bp .bp-caves {
+    grid-template-columns: 1fr;
+  }
+  #home .fp.bp .bp-biomes {
+    max-height: none;
+  }
+  .bp-lb {
+    padding: 56px 12px 24px;
+  }
+  .bp-lb-n {
+    width: 38px;
+    height: 56px;
+  }
+}
+@media (max-width: 600px) {
+  #home .fp.bp .bp-counts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  #home .fp.bp .bp-rarity ol,
+  #home .fp.bp .bp-rules,
+  #home .fp.bp .bp-wall,
+  #home .fp.bp .bp-air-pics,
+  #home .fp.bp .bp-realm-pics,
+  #home .fp.bp .bp-family-grid {
+    grid-template-columns: 1fr;
+  }
+  #home .fp.bp .bp-place-list {
+    grid-template-columns: 1fr;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #home .fp.bp .bp-stage-pics img {
+    transition: opacity 0.2s;
+    transform: none;
+  }
+  #home .fp.bp .bp-family {
+    animation: none;
+  }
+}

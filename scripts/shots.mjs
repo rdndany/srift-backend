@@ -1,14 +1,14 @@
 // Marketing screenshots of the game for the home page (clean: no HUD, no hand). 1920x1080 JPEGs.
 // Usage: node scripts/shots.mjs [url] [outDir] [scene,scene...]
 import { mkdirSync } from 'node:fs';
-import { chromium } from 'playwright';
+import { launchBrowser } from './browser.mjs';
 
 const url = process.argv[2] ?? 'http://localhost:3000';
 const outDir = process.argv[3] ?? 'tmp-shots/cand';
 const only = process.argv[4]?.split(',');
 mkdirSync(outDir, { recursive: true });
 
-const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl'] });
+const browser = await launchBrowser();
 const W = 1920;
 const H = 1080;
 
@@ -17,7 +17,7 @@ async function open(seed) {
   const page = await browser.newPage({ viewport: { width: W, height: H } });
   page.on('pageerror', (e) => console.log('[pageerror]', e.message));
   page.on('console', (m) => m.type() === 'error' && console.log('[err]', m.text().slice(0, 300)));
-  await page.goto(`${url}/?seed=${seed}&debug&nomobs&mode=creative&shadows=4096`, { waitUntil: 'load' });
+  await page.goto(`${url}/?seed=${seed}&debug&nomobs&mode=creative&shadows=4096&postfx`, { waitUntil: 'load' });
   await page.waitForFunction(() => window.__solrift?.isReady?.(), undefined, { timeout: 240000 });
   await page.evaluate(() => {
     for (const id of ['overlay', 'hud-bottom', 'crosshair', 'debug', 'net', 'item-name', 'vignette']) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isPlayPath, nameFromPath, paramsFor, playPath, prettyAddress, titleAddress } from './route';
+import { gamePath, isGamePath, isPlayPath, nameFromPath, paramsFor, playPath, prettyAddress, titleAddress } from './route';
 
 const at = (pathname: string, search = '') => ({ pathname, search });
 
@@ -57,5 +57,15 @@ describe('friendly addresses', () => {
   it('goes back to the front page from a play address', () => {
     expect(titleAddress('/play/rdNeu')).toBe('/');
     expect(titleAddress('/')).toBe('/');
+    expect(titleAddress('/game')).toBe('/');
+  });
+
+  it('knows the game page, and keeps the other parameters on the way there', () => {
+    expect(isGamePath('/game')).toBe(true);
+    expect(isGamePath('/game/')).toBe(true);
+    expect(isGamePath('/games')).toBe(false);
+    expect(isGamePath('/')).toBe(false);
+    expect(gamePath('')).toBe('/game');
+    expect(gamePath('?home&debug')).toBe('/game?home&debug');
   });
 });

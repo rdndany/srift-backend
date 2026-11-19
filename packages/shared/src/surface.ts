@@ -18,6 +18,9 @@ export interface Ground {
   sandy: boolean;
   /** Layers of coloured clay below the top (the badlands). */
   strata: boolean;
+  /** What the sand layers are (default sand, or red sand over red sandstone). */
+  sandTop?: number;
+  sandRock?: number;
 }
 
 const cache = new Map<string, Ground>();

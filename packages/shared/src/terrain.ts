@@ -95,10 +95,25 @@ export interface ColumnData {
   river: number;
   /** Mountain weight 0..1. */
   mm: number;
+  /** Continentalness (-1 deep sea .. 1 far inland), erosion (-1 rugged .. 1 flat) and the crest of the mountain ridges (0..1). */
+  cont: number;
+  ero: number;
+  crest: number;
+  /** The height of the land before rivers, lakes and the swamp flattened it. */
+  raw: number;
+  /** The detailed biome of The World Beyond and its water level; both 0 in the other worlds. */
+  sub: number;
+  water: number;
 }
 
 export function newColumnData(): ColumnData {
-  return { height: 0, biome: Biome.PLAINS, heat: 2, wet: 1, t: 0.5, h: 0.5, river: 0, mm: 0 };
+  return { height: 0, biome: Biome.PLAINS, heat: 2, wet: 1, t: 0.5, h: 0.5, river: 0, mm: 0, cont: 0, ero: 0, crest: 0, raw: 64, sub: 0, water: 0 };
+}
+
+/** What the world generator needs from a terrain: a column's land and the climate over it (the overworld's, or The World Beyond's). */
+export interface TerrainSource {
+  sample(wx: number, wz: number, out: ColumnData): void;
+  climate(wx: number, wz: number, out: { t: number; h: number }): void;
 }
 
 export class Terrain {
@@ -199,6 +214,8 @@ export class Terrain {
       h = lerp(h, terraced, bad);
     }
 
+    const rawHeight = h;
+
     // Rivers: valleys where a slow field crosses zero. Floodplain first, then the channel, cut to below the sea.
     const rv = Math.abs(this.nRiver.fbm2(wx / 560, wz / 560, 2));
     const cutMask = (1 - mm * 0.85) * smooth(-0.1, 0.0, c) * (1 - smooth(SEA_LEVEL + 22, SEA_LEVEL + 48, h));
@@ -286,5 +303,11 @@ export class Terrain {
     o.h = humid;
     o.river = river;
     o.mm = mm;
+    o.cont = c;
+    o.ero = e;
+    o.crest = crest;
+    o.raw = rawHeight;
+    o.sub = 0;
+    o.water = 0;
   }
 }

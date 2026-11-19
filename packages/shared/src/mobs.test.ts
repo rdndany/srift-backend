@@ -211,7 +211,9 @@ describe('combat', () => {
         for (const d of h.log.drops) seen.add(d.id);
       }
     }
-    expect(seen).toEqual(new Set([I.ROTTEN_FLESH, I.BONE, I.ARROW, I.GUNPOWDER, I.STRING]));
+    const usual: number[] = [I.ROTTEN_FLESH, I.BONE, I.ARROW, I.GUNPOWDER, I.STRING];
+    for (const id of usual) expect(seen.has(id)).toBe(true);
+    for (const id of seen) expect(usual.includes(id) || id === I.POTATO || id === I.CARROT).toBe(true);
   });
 
   it('raycast finds the nearest mob in front of the player', () => {

@@ -83,7 +83,7 @@ describe('unlocking', () => {
     expect(book.list(3, false)).toEqual([]);
     expect(book.observe([B.LOG])).toBe(true);
     const names = book.list(3, false).map((i) => RECIPES[i].result.id);
-    expect(names).toEqual([B.PLANKS]);
+    expect(names).toContain(B.PLANKS);
     expect(book.unlocked(RECIPES[indexOf(B.PLANKS, 1)])).toBe(false); // birch planks need a birch log
     expect(book.observe([B.LOG])).toBe(false);
     book.observe([B.PLANKS]);
@@ -95,13 +95,13 @@ describe('unlocking', () => {
   it('learn() names the recipes an item newly unlocked, once', () => {
     const book = new RecipeBook();
     const first = book.learn([B.LOG]);
-    expect(first.map((i) => RECIPES[i].result.id)).toEqual([B.PLANKS]);
+    expect(first.map((i) => RECIPES[i].result.id)).toContain(B.PLANKS);
     expect(book.learn([B.LOG])).toEqual([]); // nothing new the second time
     const next = book.learn([B.PLANKS, B.LOG]).map((i) => RECIPES[i].result.id);
     expect(next).toContain(I.STICK);
     expect(next).not.toContain(B.PLANKS);
-    expect(book.learn([B.DIRT])).toEqual([]); // an item no recipe uses is still remembered, but says nothing
-    expect(book.seen.has(B.DIRT)).toBe(true);
+    expect(book.learn([B.BEDROCK])).toEqual([]); // an item no recipe uses is still remembered, but says nothing
+    expect(book.seen.has(B.BEDROCK)).toBe(true);
   });
 
   it('the creative list is everything, and the 2x2 list is a subset', () => {

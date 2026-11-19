@@ -36,8 +36,8 @@ describe('expansions', () => {
   });
 
   it('finds what is playable and what comes next', () => {
-    expect(liveExpansions().map((e) => e.id)).toEqual(['core']);
-    expect(nextExpansion()?.status).toBe('in-development');
+    expect(liveExpansions().map((e) => e.id)).toEqual(['core', 'hollow-king']);
+    expect(nextExpansion()?.id).toBe('drowned-throne');
     expect(expansionById('nope')).toBeUndefined();
   });
 });

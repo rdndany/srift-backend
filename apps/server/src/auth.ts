@@ -1,7 +1,7 @@
 import { createHash, createPublicKey, randomBytes, verify as edVerify } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { ClassId } from '@solrift/shared';
-import { SiwsError, addressToPublicKey, cleanPlayerName, formatSignInMessage, isClassId, parseLookCode, parseSignInMessage, playerNameProblem } from '@solrift/shared';
+import type { ClassId, PlayerSave } from '@solrift/shared';
+import { SiwsError, addressToPublicKey, cleanPlayerName, formatSignInMessage, isClassId, parseLookCode, parseSignInMessage, playerNameProblem, briefOfSheet, sheetOfSave, type CharacterBrief, type StashView } from '@solrift/shared';
 import { CharacterLimitError, MAX_CHARACTERS, NameTakenError, type Account, type Repo } from './db';
 
 /** DER prefix of an ed25519 SubjectPublicKeyInfo; the 32-byte key follows it. */
@@ -274,6 +274,10 @@ export interface RouterOptions {
   rateLimitPerMinute: number;
   /** Whether an account's character is in the game right now (deleting it then is refused). */
   isPlaying?: (accountId: string) => boolean;
+  /** The saved record of an account's character in the realm (null: it never played there), for its character sheet. */
+  saveOf?: (accountId: string) => PlayerSave | null;
+  /** What a wallet's Stash holds (shared by its characters), for the lobby. */
+  stashOf?: (wallet: string) => StashView;
 }
 
 /** Returns a handler that serves `/auth/*`. It returns false when the URL is not an auth route. */
@@ -301,6 +305,28 @@ export function createAuthRouter(auth: AuthService, opts: RouterOptions) {
       if (req.method === 'GET' && url.pathname === '/auth/me') {
         const account = auth.resolve(token);
         json(res, 200, { account: account ? auth.view(account) : null });
+        return true;
+      }
+      if (req.method === 'GET' && url.pathname === '/auth/sheet') {
+        const account = auth.resolve(token);
+        if (!account) throw new AuthError(401, 'sign in first');
+        let save: PlayerSave | null = null;
+        try {
+          save = account.look === null ? null : (opts.saveOf?.(account.id) ?? null);
+        } catch {
+          /* a record from a newer game version: no sheet, never an error page */
+        }
+        // Every character of the wallet in short, for its slot (level, coins) and for finding where an item is.
+        const briefs: CharacterBrief[] = [];
+        for (const c of auth.view(account).characters) {
+          try {
+            const s = opts.saveOf?.(c.id) ?? null;
+            if (s) briefs.push(briefOfSheet(c.id, sheetOfSave(s, c.class)));
+          } catch {
+            /* a record from a newer game version: no brief */
+          }
+        }
+        json(res, 200, { sheet: save ? sheetOfSave(save, account.class) : null, stash: opts.stashOf?.(account.wallet) ?? null, briefs });
         return true;
       }
       if (req.method !== 'POST') throw new AuthError(405, 'method not allowed');

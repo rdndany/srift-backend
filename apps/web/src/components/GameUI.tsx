@@ -9,12 +9,12 @@ import { MenuScreen } from './MenuScreen';
 import { QuestUI } from './QuestUI';
 import { PartyUI } from './PartyUI';
 import { SocialUI } from './SocialUI';
+import { CodexUI } from './CodexUI';
 import { TradeUI } from './TradeUI';
 import { PlayerUI } from './PlayerUI';
 import { PickupFeed } from './PickupFeed';
 import { RecipeToast } from './RecipeToast';
 import { PlayerFrame } from './PlayerFrame';
-import { MountSlot } from './MountUI';
 import { AirBubbles } from './Vitals';
 
 function DeathScreen() {
@@ -102,7 +102,6 @@ export function GameUI() {
         <Hotbar />
       </div>
       <PlayerFrame />
-      <MountSlot />
       <MenuScreen />
       <DeathScreen />
       <SpectatorBanner />
@@ -113,6 +112,7 @@ export function GameUI() {
       <QuestUI />
       <PartyUI />
       <SocialUI />
+      <CodexUI />
       <PlayerUI />
       <TradeUI />
       <MiniMap />

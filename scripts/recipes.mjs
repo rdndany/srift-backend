@@ -82,7 +82,7 @@ await page.screenshot({ path: `${outDir}/recipes-empty.png` });
 
 console.log('recipes appear with ingredients');
 await sc(page, (id) => window.__solrift.give(id, 3), LOG);
-check(await until(async () => (await recipes(page).count()) === 1), 'one log unlocks the one recipe that uses it (planks)');
+check(await until(async () => (await recipes(page).count()) >= 1) && (await recipes(page).first().getAttribute('data-name'))?.startsWith('planks'), 'a log unlocks the recipes that use it, planks first (and the joinery woods)');
 check(await until(async () => (await page.locator('[data-testid="recipe-toast"]').count()) === 1), 'a "New Recipes Unlocked!" card slides in');
 check((await page.locator('#recipe-toast').innerText()).includes('New Recipes Unlocked!'), 'and says so');
 await sleep(500); // let it finish sliding in
@@ -90,7 +90,7 @@ await page.screenshot({ path: `${outDir}/recipes-toast.png` });
 await sc(page, (id) => window.__solrift.give(id, 1), LOG);
 await sleep(300);
 check((await page.locator('[data-testid="recipe-toast"]').count()) === 1, 'more of the same item does not announce anything again');
-check(await until(async () => (await page.locator('.rb-item.can').count()) === 1), 'it is lit as makeable');
+check(await until(async () => (await page.locator('.rb-item.can').count()) >= 1), 'it is lit as makeable');
 
 console.log('a click fills the grid');
 await recipes(page).first().hover();

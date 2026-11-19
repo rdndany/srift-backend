@@ -1,4 +1,4 @@
-import type { Body, ClassView, Container, Fx, GearRoll, ItemStack, Menu, MobKind, SessionScreen, WeatherKind } from '@solrift/shared';
+import type { BobberDraw, Body, ClassView, Container, Fx, GearRoll, ItemStack, Menu, MobKind, SessionScreen, WeatherKind } from '@solrift/shared';
 import type { MountView, SaveMode } from '@solrift/shared';
 
 /** A mob as the renderer needs it. The shared `Mob` fits, and so does an interpolated network copy. */
@@ -23,6 +23,8 @@ export interface MobLike {
   baby?: boolean;
   sheared?: boolean;
   love?: number;
+  /** An armor stand's worn item ids: helmet, chestplate, leggings, boots, hand. */
+  gear?: readonly number[];
 }
 
 export interface ArrowLike {
@@ -100,6 +102,8 @@ export interface ClientSession {
   readonly drops: { readonly drops: readonly DropLike[]; readonly count: number };
   /** The experience orbs about. */
   readonly xpOrbs: { readonly orbs: readonly XpOrbLike[] };
+  /** The fishing lines out: where each float is, and whose hand the line comes from. */
+  readonly bobbers: { readonly bobbers: readonly BobberDraw[] };
   readonly vehicles: readonly VehicleLike[];
   /** The minecart or boat you sit in, or null on foot. */
   readonly riding: { readonly id: number } | null;
@@ -124,6 +128,10 @@ export interface ClientSession {
   readonly aimsAtTalker: boolean;
   /** On fire (flames on the HUD). */
   readonly burning: boolean;
+  /** Seconds of the Poison status effect left (0 when it is clear). */
+  readonly poison: number;
+  /** Seconds of the Hunger sickness status effect left (0 when it is clear). */
+  readonly foodSick: number;
   /** The bed being slept in (dir = the way it points, see BED_DIRS), or null when awake. */
   readonly sleeping: { readonly dir: number } | null;
   readonly sneaking: boolean;

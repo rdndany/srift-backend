@@ -176,6 +176,10 @@ export class Sky {
   /** 0 = sunrise, 0.25 = noon, 0.5 = sunset, 0.75 = midnight. Set by the game each frame. */
   time = 0.2;
   brightness = 1;
+  /** Show or hide the clouds (for pictures taken among them). */
+  setCloudsVisible(v: boolean): void {
+    this.clouds.visible = v;
+  }
   /** Weather inputs, set by the game each frame: 0..1 rain amount, sky dimming, lightning flash. */
   rain = 0;
   dim = 0;

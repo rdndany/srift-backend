@@ -7,17 +7,32 @@ import {
   BLOCKS,
   BUILDING_ITEM,
   DYE_NAMES,
+  IS_LEAVES,
   LANTERN_LIGHT,
   LEAF_BLOCKS,
   SOUL_LANTERN_LIGHT,
   bedInfo,
   NO_ITEM_BLOCKS,
   doorInfo,
+  doorKind,
   gateId,
   lanternInfo,
+  joineryDoorItems,
+  joineryFuel15,
+  joineryIcons,
+  groveLeaves,
+  leafSapling,
+  DRESS,
+  candleInfo,
+  candleItem,
+  potInfo,
+  masonryWoodItems,
   slabId,
   stairId,
   trapdoorId,
+  cakeId,
+  cocoaId,
+  cocoaInfo,
   ladderId,
   wireId,
   TOOL_KINDS,
@@ -124,6 +139,57 @@ export const I = {
   MOUNT_BASE: 440,
   /** The clothes of the classes (460 + class * 4 + slot, see `outfitId`): worn in the armor slots, and taken off like armor. */
   OUTFIT_BASE: 460,
+  /** A raw potato. Eaten as it is; the same hunger as in Minecraft. */
+  POTATO: 472,
+  BAKED_POTATO: 473,
+  POISONOUS_POTATO: 474,
+  MELON_SLICE: 475,
+  SUGAR: 476,
+  EGG: 477,
+  PUMPKIN_PIE: 478,
+  /** A carrot. Eaten as it is; the same hunger as in Minecraft. Planted on farmland. */
+  CARROT: 479,
+  /** Planted on farmland. A grown stem sprouts a melon beside it. One melon slice makes one. */
+  MELON_SEEDS: 480,
+  /** Planted on farmland. A grown stem sprouts a pumpkin beside it. One pumpkin makes four. */
+  PUMPKIN_SEEDS: 481,
+  /** Plants a beetroot. The root is the food; the seeds go back in the ground. */
+  BEETROOT_SEEDS: 482,
+  /** A raw beetroot. One hunger, the same as in Minecraft. */
+  BEETROOT: 483,
+  /** Three planks. Soup is eaten out of one, and the bowl stays. */
+  BOWL: 484,
+  /** Six beetroots in a bowl. Eating it leaves the bowl. */
+  BEETROOT_SOUP: 485,
+  /** Planted on the side of a jungle log. A ripe pod drops three. Also the brown dye. */
+  COCOA_BEANS: 486,
+  /** One wheat and one cocoa bean make eight. Two hunger each. */
+  COOKIE: 487,
+  /** Set it down and eat it in seven bites. Three milk, three wheat, an egg and two sugar. */
+  CAKE: 488,
+  /** A bucket of milk. Drink it to clear status effects. A cow fills an empty bucket. */
+  MILK_BUCKET: 489,
+  /** Planted on grass or dirt. A ripe bush is picked by hand, and the bush stays. Two hunger each. */
+  SWEET_BERRIES: 490,
+  /** Picked from a glowing cave vine. The vine stays. Planted on a ceiling, it hangs a new vine. Two hunger each. */
+  GLOW_BERRIES: 491,
+  /** A red mushroom and a brown one in a bowl. Eating it leaves the bowl. */
+  MUSHROOM_STEW: 492,
+  /** A bowl, a baked potato, a carrot, cooked rabbit and a brown mushroom. Eating it leaves the bowl. */
+  RABBIT_STEW: 493,
+  /** Set it on the ground and dress it. Right-click with armor to put a piece on; sneak and right-click to change its pose. */
+  ARMOR_STAND: 494,
+  /** Right-click to cast the bobber into water, right-click again to reel in (see fishing.ts). Three sticks and two string. */
+  FISHING_ROD: 495,
+  /** What the fishes of the water are, caught or killed. Cooked in a furnace or on a campfire. */
+  RAW_COD: 496,
+  COOKED_COD: 497,
+  RAW_SALMON: 498,
+  COOKED_SALMON: 499,
+  /** Eaten raw only: it is not cooked. */
+  TROPICAL_FISH: 500,
+  /** Eating it poisons and sickens you, as in the original. */
+  PUFFERFISH: 501,
 } as const;
 
 /** The classes a skill book can be for (the same ids as `ClassId`, written out so that this file need not import classes). */
@@ -295,6 +361,16 @@ export interface WeaponDef {
 export interface FoodDef {
   hunger: number;
   saturation: number;
+  /** Can be eaten on a full stomach (the poisonous potato). */
+  always?: boolean;
+  /** The Poison status effect. `chance` is 0 to 1; `seconds` is how long it lasts. */
+  poison?: { chance: number; seconds: number };
+  /** The Hunger sickness status effect. Drains hunger while it lasts. Same shape as `poison`. */
+  sickness?: { chance: number; seconds: number };
+  /** Put back in the hand after eating. Soup leaves its bowl, milk leaves its bucket. */
+  leaves?: number;
+  /** Clears status effects. Milk does. */
+  clears?: boolean;
 }
 
 /**
@@ -307,6 +383,8 @@ export type ItemUse =
   | 'xp_bottle' // thrown: it breaks into experience
   | 'pearl' // thrown: you go where it lands
   | 'vehicle' // put on a rail or on the water, to ride
+  | 'armor_stand' // set down, then dressed with armor
+  | 'fishing_rod' // cast onto the water, and reeled in
   | 'emberstone' // held: it takes you home
   | 'bow' // held to draw, let go to shoot
   | 'crossbow' // held to wind, shoots when it is wound all the way
@@ -435,7 +513,32 @@ const NOT_ITEMS = new Set<number>([
   B.WHEAT_1,
   B.WHEAT_2,
   B.WHEAT_3,
+  B.POTATO_0,
+  B.POTATO_1,
+  B.POTATO_2,
+  B.POTATO_3,
+  B.CARROT_0,
+  B.CARROT_1,
+  B.CARROT_2,
+  B.CARROT_3,
+  B.MELON_STEM_0,
+  B.MELON_STEM_1,
+  B.MELON_STEM_2,
+  B.MELON_STEM_3,
+  B.PUMPKIN_STEM_0,
+  B.PUMPKIN_STEM_1,
+  B.PUMPKIN_STEM_2,
+  B.PUMPKIN_STEM_3,
+  B.BEETROOT_0,
+  B.BEETROOT_1,
+  B.BEETROOT_2,
+  B.BEETROOT_3,
 ]);
+for (let i = 0; i < 12; i++) NOT_ITEMS.add(B.COCOA_BASE + i);
+for (let i = 0; i < 7; i++) NOT_ITEMS.add(cakeId(i));
+for (const id of [B.SWEET_BERRY_0, B.SWEET_BERRY_1, B.SWEET_BERRY_2, B.SWEET_BERRY_3]) NOT_ITEMS.add(id);
+NOT_ITEMS.add(B.CAVE_VINES);
+NOT_ITEMS.add(B.CAVE_VINES_BERRIES);
 /** Blocks whose item looks different from their side texture (fences would just be a plank). */
 const ITEM_ICON: Record<number, number> = {
   [B.FENCE]: tileIndex('fence'),
@@ -443,8 +546,9 @@ const ITEM_ICON: Record<number, number> = {
   [B.LANTERN]: tileIndex('lantern_item'),
   [B.SOUL_LANTERN]: tileIndex('soul_lantern_item'),
   [B.CHAIN]: tileIndex('chain_item'),
+  [DRESS.pot]: tileIndex('flower_pot_item'),
 };
-const WOODEN_FUEL = [slabId(0, false), stairId(0, false, 0), trapdoorId(false, false, 0), B.FENCE, gateId(false, 0)];
+const WOODEN_FUEL = [slabId(0, false), stairId(0, false, 0), trapdoorId(false, false, 0), B.FENCE, gateId(false, 0), ...masonryWoodItems(), ...joineryFuel15()];
 const BLOCK_FUEL: Record<number, number> = {
   ...Object.fromEntries(WOODEN_FUEL.map((id) => [id, 15])),
   [ladderId(0)]: 5, [B.LOG]: 15, [B.BIRCH_LOG]: 15, [B.SPRUCE_LOG]: 15, [B.ACACIA_LOG]: 15, [B.JUNGLE_LOG]: 15, [B.DARK_OAK_LOG]: 15, [B.CHERRY_LOG]: 15, [B.PLANKS]: 15, [B.CRAFTING_TABLE]: 15, [B.CHEST]: 15 };
@@ -455,6 +559,16 @@ for (const b of BLOCKS) {
   const carried: Partial<ItemDef> = lantern ? { carry: 'hang', heldLight: lantern.soul ? { r: 0.3, g: 0.62, b: 1, level: SOUL_LANTERN_LIGHT - 0.5 } : { r: 1, g: 0.7, b: 0.38, level: LANTERN_LIGHT - 1 } } : {};
   add({ id: b.id, name: b.name, tile: ITEM_ICON[b.id] ?? b.tiles.side, block: b.id, fuel: BLOCK_FUEL[b.id] ?? 0, ...carried });
 }
+for (const door of joineryDoorItems()) {
+  const item = ITEMS.get(door.id);
+  if (!item) continue;
+  item.use = 'door';
+  item.fuel = door.fuel;
+}
+for (const icon of joineryIcons()) {
+  const item = ITEMS.get(icon.id);
+  if (item) item.tile = tileIndex(icon.tile);
+}
 
 add({ id: I.STICK, name: 'stick', tile: tileIndex('stick'), fuel: 5 });
 add({ id: I.COAL, name: 'coal', tile: tileIndex('coal'), fuel: 80 });
@@ -462,9 +576,31 @@ add({ id: I.IRON_INGOT, name: 'iron_ingot', tile: tileIndex('iron_ingot') });
 add({ id: I.GOLD_INGOT, name: 'gold_ingot', tile: tileIndex('gold_ingot') });
 add({ id: I.DIAMOND, name: 'diamond', tile: tileIndex('diamond') });
 add({ id: I.APPLE, name: 'apple', tile: tileIndex('apple'), food: { hunger: 4, saturation: 2.4 } });
+add({ id: I.POTATO, name: 'potato', tile: tileIndex('potato'), block: B.POTATO_0, food: { hunger: 1, saturation: 0.6 } });
+add({ id: I.BAKED_POTATO, name: 'baked_potato', tile: tileIndex('baked_potato'), food: { hunger: 5, saturation: 6 } });
+add({ id: I.POISONOUS_POTATO, name: 'poisonous_potato', tile: tileIndex('poisonous_potato'), food: { hunger: 2, saturation: 1.2, always: true, poison: { chance: 0.6, seconds: 5 } } });
+add({ id: I.MELON_SLICE, name: 'melon_slice', tile: tileIndex('melon_slice'), food: { hunger: 2, saturation: 1.2 } });
+add({ id: I.SUGAR, name: 'sugar', tile: tileIndex('sugar') });
+add({ id: I.EGG, name: 'egg', tile: tileIndex('egg') });
+add({ id: I.PUMPKIN_PIE, name: 'pumpkin_pie', tile: tileIndex('pumpkin_pie'), food: { hunger: 8, saturation: 4.8 } });
+add({ id: I.CARROT, name: 'carrot', tile: tileIndex('carrot'), block: B.CARROT_0, food: { hunger: 3, saturation: 3.6 } });
+add({ id: I.MELON_SEEDS, name: 'melon_seeds', tile: tileIndex('melon_seeds'), block: B.MELON_STEM_0 });
+add({ id: I.PUMPKIN_SEEDS, name: 'pumpkin_seeds', tile: tileIndex('pumpkin_seeds'), block: B.PUMPKIN_STEM_0 });
+add({ id: I.BEETROOT_SEEDS, name: 'beetroot_seeds', tile: tileIndex('beetroot_seeds'), block: B.BEETROOT_0 });
+add({ id: I.BEETROOT, name: 'beetroot', tile: tileIndex('beetroot'), food: { hunger: 1, saturation: 1.2 } });
+add({ id: I.BOWL, name: 'bowl', tile: tileIndex('bowl'), kind: 'Item' });
+add({ id: I.BEETROOT_SOUP, name: 'beetroot_soup', tile: tileIndex('beetroot_soup'), maxStack: 1, food: { hunger: 6, saturation: 7.2, leaves: I.BOWL } });
+add({ id: I.COCOA_BEANS, name: 'cocoa_beans', tile: tileIndex('cocoa_beans'), block: cocoaId(0, 0) });
+add({ id: I.COOKIE, name: 'cookie', tile: tileIndex('cookie'), food: { hunger: 2, saturation: 0.4 } });
+add({ id: I.CAKE, name: 'cake', tile: tileIndex('cake'), maxStack: 1, block: cakeId(0) });
+add({ id: I.MILK_BUCKET, name: 'milk_bucket', tile: tileIndex('milk_bucket'), maxStack: 1, food: { hunger: 0, saturation: 0, always: true, leaves: I.BUCKET, clears: true } });
+add({ id: I.SWEET_BERRIES, name: 'sweet_berries', tile: tileIndex('sweet_berries'), block: B.SWEET_BERRY_0, food: { hunger: 2, saturation: 0.4 } });
+add({ id: I.GLOW_BERRIES, name: 'glow_berries', tile: tileIndex('glow_berries'), block: B.CAVE_VINES, food: { hunger: 2, saturation: 0.4 } });
+add({ id: I.MUSHROOM_STEW, name: 'mushroom_stew', tile: tileIndex('mushroom_stew'), maxStack: 1, food: { hunger: 6, saturation: 7.2, leaves: I.BOWL } });
+add({ id: I.RABBIT_STEW, name: 'rabbit_stew', tile: tileIndex('rabbit_stew'), maxStack: 1, food: { hunger: 10, saturation: 12, leaves: I.BOWL } });
 add({ id: I.RAW_MEAT, name: 'raw_meat', tile: tileIndex('raw_meat'), food: { hunger: 3, saturation: 1.8 } });
 add({ id: I.COOKED_MEAT, name: 'cooked_meat', tile: tileIndex('cooked_meat'), food: { hunger: 8, saturation: 12.8 } });
-add({ id: I.ROTTEN_FLESH, name: 'rotten_flesh', tile: tileIndex('rotten_flesh'), food: { hunger: 4, saturation: 0.8 } });
+add({ id: I.ROTTEN_FLESH, name: 'rotten_flesh', tile: tileIndex('rotten_flesh'), food: { hunger: 4, saturation: 0.8, sickness: { chance: 0.8, seconds: 30 } } });
 add({ id: I.BONE, name: 'bone', tile: tileIndex('bone') });
 add({ id: I.ARROW, name: 'arrow', tile: tileIndex('arrow') });
 add({ id: I.GUNPOWDER, name: 'gunpowder', tile: tileIndex('gunpowder') });
@@ -484,14 +620,14 @@ add({ id: I.LAVA_BUCKET, name: 'lava_bucket', tile: tileIndex('lava_bucket'), ma
 add({ id: I.FEATHER, name: 'feather', tile: tileIndex('feather') });
 add({ id: I.MUTTON, name: 'mutton', tile: tileIndex('mutton'), food: { hunger: 2, saturation: 1.2 } });
 add({ id: I.COOKED_MUTTON, name: 'cooked_mutton', tile: tileIndex('cooked_mutton'), food: { hunger: 6, saturation: 9.6 } });
-add({ id: I.CHICKEN, name: 'chicken', tile: tileIndex('chicken'), food: { hunger: 2, saturation: 1.2 } });
+add({ id: I.CHICKEN, name: 'chicken', tile: tileIndex('chicken'), food: { hunger: 2, saturation: 1.2, sickness: { chance: 0.3, seconds: 30 } } });
 add({ id: I.COOKED_CHICKEN, name: 'cooked_chicken', tile: tileIndex('cooked_chicken'), food: { hunger: 6, saturation: 7.2 } });
 add({ id: I.RABBIT, name: 'rabbit', tile: tileIndex('rabbit'), food: { hunger: 3, saturation: 1.8 } });
 add({ id: I.COOKED_RABBIT, name: 'cooked_rabbit', tile: tileIndex('cooked_rabbit'), food: { hunger: 5, saturation: 6 } });
 add({ id: I.INK_SAC, name: 'ink_sac', tile: tileIndex('ink_sac') });
 add({ id: I.SLIMEBALL, name: 'slimeball', tile: tileIndex('slimeball') });
 add({ id: I.ENDER_PEARL, name: 'ender_pearl', tile: tileIndex('ender_pearl'), maxStack: 16, use: 'pearl' });
-add({ id: I.SPIDER_EYE, name: 'spider_eye', tile: tileIndex('spider_eye'), food: { hunger: 2, saturation: 3.2 } });
+add({ id: I.SPIDER_EYE, name: 'spider_eye', tile: tileIndex('spider_eye'), food: { hunger: 2, saturation: 3.2, poison: { chance: 1, seconds: 4 } } });
 add({ id: I.SHIELD, name: 'shield', tile: tileIndex('shield'), maxStack: 1, durability: SHIELD_DURABILITY, shield: true, offhand: true });
 DYE_NAMES.forEach((n, c) => add({ id: bedItemId(c), name: c === BED_RED ? 'bed' : `${n}_bed`, tile: tileIndex(c === BED_RED ? 'bed' : `bed_${n}`), maxStack: 1, fuel: 15, use: 'bed', kind: 'Item' }));
 add({ id: I.DOOR, name: 'wooden_door', tile: tileIndex('door'), fuel: 10, use: 'door', kind: 'Item' });
@@ -503,12 +639,26 @@ add({ id: I.BOOK, name: 'book', tile: tileIndex('book') });
 add({ id: I.ENCHANTED_BOOK, name: 'enchanted_book', tile: tileIndex('enchanted_book'), maxStack: 1, storesEnchants: true, kind: 'Enchanted Book' });
 add({ id: I.FLINT_AND_STEEL, name: 'flint_and_steel', tile: tileIndex('flint_and_steel'), maxStack: 1, durability: 64, use: 'flint', kind: 'Item' });
 add({ id: I.LAPIS_LAZULI, name: 'lapis_lazuli', tile: tileIndex('lapis_lazuli') });
-add({ id: I.EXPERIENCE_BOTTLE, name: 'bottle_o_enchanting', tile: tileIndex('experience_bottle'), use: 'xp_bottle' });
+/** Experience a thrown bottle o' enchanting breaks into, inclusive. */
+export const BOTTLE_XP_MIN = 3;
+export const BOTTLE_XP_MAX = 11;
+
+add({ id: I.EXPERIENCE_BOTTLE, name: 'bottle_o_enchanting', tile: tileIndex('experience_bottle'), use: 'xp_bottle', kind: 'Item' });
 add({ id: I.SHEARS, name: 'shears', tile: tileIndex('shears'), maxStack: 1, durability: 238, shears: true, kind: 'Item' });
 add({ id: I.REDSTONE, name: 'redstone', tile: tileIndex('redstone'), block: wireId(0), kind: 'Material' }); // (the dust is laid down, but it is an ingredient first)
 add({ id: I.MINECART, name: 'minecart', tile: tileIndex('minecart'), maxStack: 1, use: 'vehicle', kind: 'Item' });
 add({ id: I.BOAT, name: 'boat', tile: tileIndex('boat'), maxStack: 1, fuel: 60, use: 'vehicle', kind: 'Item' });
 add({ id: I.MAP, name: 'map', tile: tileIndex('map'), maxStack: 1, use: 'map', undroppable: true, kind: 'Special' });
+add({ id: I.ARMOR_STAND, name: 'armor_stand', tile: tileIndex('armor_stand'), maxStack: 16, use: 'armor_stand', kind: 'Item' });
+/** Uses of a fishing rod before it breaks (the original's). */
+export const FISHING_ROD_DURABILITY = 64;
+add({ id: I.FISHING_ROD, name: 'fishing_rod', tile: tileIndex('fishing_rod'), maxStack: 1, durability: FISHING_ROD_DURABILITY, use: 'fishing_rod', kind: 'Item' });
+add({ id: I.RAW_COD, name: 'raw_cod', tile: tileIndex('raw_cod'), food: { hunger: 2, saturation: 0.4 } });
+add({ id: I.COOKED_COD, name: 'cooked_cod', tile: tileIndex('cooked_cod'), food: { hunger: 5, saturation: 6 } });
+add({ id: I.RAW_SALMON, name: 'raw_salmon', tile: tileIndex('raw_salmon'), food: { hunger: 2, saturation: 0.4 } });
+add({ id: I.COOKED_SALMON, name: 'cooked_salmon', tile: tileIndex('cooked_salmon'), food: { hunger: 6, saturation: 9.6 } });
+add({ id: I.TROPICAL_FISH, name: 'tropical_fish', tile: tileIndex('tropical_fish'), food: { hunger: 1, saturation: 0.2 } });
+add({ id: I.PUFFERFISH, name: 'pufferfish', tile: tileIndex('pufferfish'), food: { hunger: 1, saturation: 0.2, poison: { chance: 1, seconds: 15 }, sickness: { chance: 1, seconds: 15 } } });
 /** Items a character keeps for good: they cannot be thrown on the ground (the Emberstone and the map). */
 export const isUndroppable = (id: number): boolean => getItem(id).undroppable;
 /** What the off hand takes: a shield, an orb, a dagger, and the map (held open in that hand, so it can be read at a glance). */
@@ -630,11 +780,11 @@ export function fortuneMultiplier(level: number, rand: () => number): number {
 }
 
 /** Blocks Silk Touch keeps whole, and the ores Fortune multiplies. */
-const SILK_BLOCKS = new Set<number>([B.STONE, B.GRASS, B.ICE, B.GLASS, B.PANE, B.COBWEB, ...LEAF_BLOCKS, B.COAL_ORE, B.IRON_ORE, B.GOLD_ORE, B.DIAMOND_ORE, B.LAPIS_ORE, B.EMERALD_ORE, B.REDSTONE_ORE, B.LAMP_ON, B.BOOKSHELF, B.SANDSTONE, B.RED_SANDSTONE, B.PACKED_ICE, B.DEEPSLATE, B.MYCELIUM, B.MUSHROOM_STEM]);
+const SILK_BLOCKS = new Set<number>([B.STONE, B.GRASS, B.ICE, B.GLASS, B.PANE, B.COBWEB, ...LEAF_BLOCKS, B.COAL_ORE, B.IRON_ORE, B.GOLD_ORE, B.DIAMOND_ORE, B.LAPIS_ORE, B.EMERALD_ORE, B.REDSTONE_ORE, B.LAMP_ON, B.BOOKSHELF, B.SANDSTONE, B.RED_SANDSTONE, B.PACKED_ICE, B.DEEPSLATE, B.MYCELIUM, B.MUSHROOM_STEM, B.MELON]);
 const FORTUNE_BLOCKS = new Set<number>([B.COAL_ORE, B.IRON_ORE, B.GOLD_ORE, B.DIAMOND_ORE, B.LAPIS_ORE, B.EMERALD_ORE, B.REDSTONE_ORE]);
 
 /** What shears cut quickly and leave whole. */
-export const SHEARED_BLOCKS: ReadonlySet<number> = new Set<number>([...LEAF_BLOCKS, B.COBWEB, B.WOOL, ...DYE_NAMES.slice(1).map((_, i) => B.WOOL_COLOR_BASE + i)]);
+export const SHEARED_BLOCKS: ReadonlySet<number> = new Set<number>([...LEAF_BLOCKS, ...groveLeaves(), B.COBWEB, B.WOOL, ...DYE_NAMES.slice(1).map((_, i) => B.WOOL_COLOR_BASE + i)]);
 
 /** Does Silk Touch make this block drop itself? */
 export function silkKeeps(id: number): boolean {
@@ -652,11 +802,17 @@ export function blockDrop(block: BlockDef, tool: ToolDef | null, rand: () => num
 }
 
 function baseDrop(block: BlockDef, rand: () => number): Drop | null {
+  const candle = candleInfo(block.id);
+  if (candle) return { id: candleItem(candle.color), count: candle.count };
   // Slabs, stairs, trapdoors, ladders and gates drop their one item whatever way up or open they are.
   const built = BUILDING_ITEM[block.id];
   if (built) return { id: built, count: 1 };
   const door = doorInfo(block.id);
-  if (door) return door.upper ? null : { id: I.DOOR, count: 1 };
+  if (door) {
+    if (door.upper) return null;
+    if (doorKind(block.id) === 0) return { id: I.DOOR, count: 1 };
+    return { id: BUILDING_ITEM[block.id] || block.id, count: 1 };
+  }
   // A bed is one item and its foot half carries the colour, so breaking either half yields exactly one bed.
   const bed = bedInfo(block.id);
   if (bed) return bed.head ? null : { id: bedItemId(bed.color), count: 1 };
@@ -681,6 +837,35 @@ function baseDrop(block: BlockDef, rand: () => number): Drop | null {
       return { id: I.WHEAT_SEEDS, count: 1 };
     case B.WHEAT_3:
       return { id: I.WHEAT, count: 1 };
+    case B.POTATO_0:
+    case B.POTATO_1:
+    case B.POTATO_2:
+      return { id: I.POTATO, count: 1 };
+    case B.CARROT_0:
+    case B.CARROT_1:
+    case B.CARROT_2:
+      return { id: I.CARROT, count: 1 };
+    case B.MELON_STEM_0:
+    case B.MELON_STEM_1:
+    case B.MELON_STEM_2:
+      return { id: I.MELON_SEEDS, count: 1 };
+    case B.PUMPKIN_STEM_0:
+    case B.PUMPKIN_STEM_1:
+    case B.PUMPKIN_STEM_2:
+      return { id: I.PUMPKIN_SEEDS, count: 1 };
+    case B.BEETROOT_0:
+    case B.BEETROOT_1:
+    case B.BEETROOT_2:
+      return { id: I.BEETROOT_SEEDS, count: 1 };
+    case B.SWEET_BERRY_0:
+    case B.SWEET_BERRY_1:
+    case B.SWEET_BERRY_2:
+      return { id: I.SWEET_BERRIES, count: 1 };
+    case B.SWEET_BERRY_3:
+      return { id: I.SWEET_BERRIES, count: 2 + Math.floor(rand() * 2) };
+    case B.CAVE_VINES:
+    case B.CAVE_VINES_BERRIES:
+      return { id: I.GLOW_BERRIES, count: 1 };
     case B.REDSTONE_ORE:
       return { id: I.REDSTONE, count: 4 + Math.floor(rand() * 2) };
     case B.LAPIS_ORE:
@@ -731,6 +916,8 @@ function baseDrop(block: BlockDef, rand: () => number): Drop | null {
       return null;
     case B.GRAVEL:
       return rand() < 0.1 ? { id: I.FLINT, count: 1 } : { id: B.GRAVEL, count: 1 };
+    case B.MELON:
+      return { id: I.MELON_SLICE, count: 3 + Math.floor(rand() * 5) };
     case B.DEAD_BUSH: {
       const n = Math.floor(rand() * 3);
       return n > 0 ? { id: I.STICK, count: n } : null;
@@ -744,17 +931,49 @@ function baseDrop(block: BlockDef, rand: () => number): Drop | null {
     case B.PORTAL:
     case B.WAYSTONE:
       return null;
-    default:
+    default: {
+      const sap = leafSapling(block.id);
+      if (sap) return rand() < 0.05 ? { id: sap, count: 1 } : null;
+      // Leaves with no sapling of their own (the foliage of The World Beyond) shed the odd stick.
+      if (IS_LEAVES[block.id]) return rand() < 0.04 ? { id: I.STICK, count: 1 } : null;
+      const pod = cocoaInfo(block.id);
+      if (pod) return { id: I.COCOA_BEANS, count: pod.stage === 2 ? 3 : 1 };
       return ITEMS.has(block.id) ? { id: block.id, count: 1 } : null;
+    }
   }
 }
 
-/** Like `blockDrop`, but for blocks that can drop several different items (ripe wheat). */
+/** Like `blockDrop`, but for blocks that can drop several different items (ripe wheat, a ripe potato, a ripe carrot). */
 export function blockDrops(block: BlockDef, tool: ToolDef | null, rand: () => number = Math.random, ench?: DropEnchants): Drop[] {
+  const pot = potInfo(block.id);
+  if (pot && pot.plant) {
+    if (!canHarvest(block, tool)) return [];
+    const drops: Drop[] = [{ id: DRESS.pot, count: 1 }];
+    if (ITEMS.has(pot.plant)) drops.push({ id: pot.plant, count: 1 });
+    return drops;
+  }
   if (block.id === B.WHEAT_3) {
     return [
       { id: I.WHEAT, count: 1 },
       { id: I.WHEAT_SEEDS, count: 1 + Math.floor(rand() * 3) },
+    ];
+  }
+  // A ripe potato is its own seed: two to five of them, and now and then a poisonous one.
+  if (block.id === B.POTATO_3) {
+    const drops: Drop[] = [{ id: I.POTATO, count: 2 + Math.floor(rand() * 4) }];
+    if (rand() < 0.02) drops.push({ id: I.POISONOUS_POTATO, count: 1 });
+    return drops;
+  }
+  // A ripe carrot is its own seed: one to four of them.
+  if (block.id === B.CARROT_3) return [{ id: I.CARROT, count: 1 + Math.floor(rand() * 4) }];
+  // A ripe stem gives back one to three seeds. The fruit beside it is its own block.
+  if (block.id === B.MELON_STEM_3) return [{ id: I.MELON_SEEDS, count: 1 + Math.floor(rand() * 3) }];
+  if (block.id === B.PUMPKIN_STEM_3) return [{ id: I.PUMPKIN_SEEDS, count: 1 + Math.floor(rand() * 3) }];
+  // A ripe beetroot gives the root and one to three seeds, the same split as wheat.
+  if (block.id === B.BEETROOT_3) {
+    return [
+      { id: I.BEETROOT, count: 1 },
+      { id: I.BEETROOT_SEEDS, count: 1 + Math.floor(rand() * 3) },
     ];
   }
   const d = blockDrop(block, tool, rand, ench);

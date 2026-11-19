@@ -1,5 +1,5 @@
 import { B, IS_LIQUID, IS_PARTIAL, IS_SOLID, ladderInfo } from './blocks';
-import { collisionBoxes, isTallShape } from './shapes';
+import { collisionBoxes, isTallShape, seatDrop, seatedBox } from './shapes';
 import { FLUID_KIND, FLUID_WATER, isLavaId } from './fluids';
 
 export interface BlockReader {
@@ -90,24 +90,37 @@ export function collides(
     for (let bz = z0; bz <= z1; bz++) {
       for (let bx = x0; bx <= x1; bx++) {
         const id = world.getBlock(bx, by, bz);
+        const hits = (ox: number, oy: number, oz: number, q: readonly number[]): boolean =>
+          ox + q[0] < x + HW - EPS &&
+          ox + q[3] > x - HW + EPS &&
+          oy + q[1] < y + height - EPS &&
+          oy + q[4] > y + EPS &&
+          oz + q[2] < z + HW - EPS &&
+          oz + q[5] > z - HW + EPS;
+        // A cube standing on a short block hangs down into this cell. Test it even when this cell is air.
+        const above = world.getBlock(bx, by + 1, bz);
+        const aboveDrop = seatDrop(above, (dy) => world.getBlock(bx, by + 1 - dy, bz));
+        // A lowered cube is not a full cell: its top sits partway up, so a full-cell snap would throw the body up.
+        if (aboveDrop > 0 && !fullOnly && hits(bx, by + 1, bz, seatedBox(aboveDrop))) return true;
         if (!IS_SOLID[id]) continue;
         if (!IS_PARTIAL[id]) {
+          const drop = seatDrop(id, (dy) => world.getBlock(bx, by - dy, bz));
+          if (drop > 0) {
+            if (!fullOnly && hits(bx, by, bz, seatedBox(drop))) return true;
+            continue;
+          }
           if (by >= y0) return true;
           continue;
         }
         if (fullOnly) continue;
         if (by < y0 && !isTallShape(id)) continue;
-        const boxes = collisionBoxes(id, (dx, dz) => world.getBlock(bx + dx, by, bz + dz));
+        const boxes = collisionBoxes(
+          id,
+          (dx, dz) => world.getBlock(bx + dx, by, bz + dz),
+          (dx, dy, dz) => world.getBlock(bx + dx, by + dy, bz + dz),
+        );
         for (const q of boxes) {
-          if (
-            bx + q[0] < x + HW - EPS &&
-            bx + q[3] > x - HW + EPS &&
-            by + q[1] < y + height - EPS &&
-            by + q[4] > y + EPS &&
-            bz + q[2] < z + HW - EPS &&
-            bz + q[5] > z - HW + EPS
-          )
-            return true;
+          if (hits(bx, by, bz, q)) return true;
         }
       }
     }

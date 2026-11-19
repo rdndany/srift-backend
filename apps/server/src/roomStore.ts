@@ -12,6 +12,8 @@ export interface RoomStore {
   getJson(key: string): unknown | null;
   setJson(key: string, value: unknown): void;
   deleteJson(key: string): void;
+  /** Write several records as one: all of them are kept or none (an item that moves between a player and a stash must not be lost or made twice). */
+  setJsonBatch?(entries: [key: string, value: unknown][]): void;
 }
 
 export class MemoryRoomStore implements RoomStore {
@@ -46,6 +48,11 @@ export class MemoryRoomStore implements RoomStore {
 
   deleteJson(key: string): void {
     this.kv.delete(key);
+  }
+
+  setJsonBatch(entries: [string, unknown][]): void {
+    const text = entries.map(([k, v]) => [k, JSON.stringify(v)] as const);
+    for (const [k, v] of text) this.kv.set(k, v);
   }
 }
 
@@ -112,5 +119,18 @@ export class SqliteRoomStore implements RoomStore {
 
   deleteJson(key: string): void {
     this.db.prepare('DELETE FROM room_kv WHERE key = ?').run(key);
+  }
+
+  setJsonBatch(entries: [string, unknown][]): void {
+    const stmt = this.db.prepare('INSERT INTO room_kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
+    const text = entries.map(([k, v]) => [k, JSON.stringify(v)] as const);
+    this.db.exec('BEGIN');
+    try {
+      for (const [k, v] of text) stmt.run(k, v);
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
   }
 }

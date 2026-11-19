@@ -1,12 +1,18 @@
 import * as THREE from 'three';
-import { ATLAS_COLS, TILE_PX } from '@solrift/shared';
+import { ATLAS_COLS, ATLAS_ROWS, TILE_PX } from '@solrift/shared';
 
 const MAX = 512;
+/** Chips of a broken or placed block. A separate pool, so smoke and sparks keep their own. */
+const CHIPS = 384;
+/** A chip shows a 4×4 piece of the block's 16×16 tile, the way Minecraft's break dust does. */
+const CROP = 4;
 const WHITE = new THREE.Color(1, 1, 1);
 
 /** Block-break debris: small tumbling cubes coloured from the block's texture. */
 export class Particles {
   readonly mesh: THREE.InstancedMesh;
+  /** Flat chips of a block's texture. They face the camera. */
+  readonly debris: THREE.InstancedMesh;
   private px = new Float32Array(MAX);
   private py = new Float32Array(MAX);
   private pz = new Float32Array(MAX);
@@ -27,8 +33,23 @@ export class Particles {
   private s = new THREE.Vector3();
   private p = new THREE.Vector3();
   private color = new THREE.Color();
+  private cx = new Float32Array(CHIPS);
+  private cy = new Float32Array(CHIPS);
+  private cz = new Float32Array(CHIPS);
+  private cvx = new Float32Array(CHIPS);
+  private cvy = new Float32Array(CHIPS);
+  private cvz = new Float32Array(CHIPS);
+  private clife = new Float32Array(CHIPS);
+  private cmax = new Float32Array(CHIPS);
+  private csize = new Float32Array(CHIPS);
+  private cgrav = new Float32Array(CHIPS);
+  private cnext = 0;
+  private cany = false;
+  private uvRect: THREE.InstancedBufferAttribute;
+  private fade: THREE.InstancedBufferAttribute;
+  private debrisMat: THREE.ShaderMaterial;
 
-  constructor(private readonly atlas: HTMLCanvasElement) {
+  constructor(private readonly atlas: HTMLCanvasElement, texture: THREE.Texture) {
     this.material = new THREE.MeshBasicMaterial({ color: 0xffffff });
     this.mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), this.material, MAX);
     this.mesh.frustumCulled = false;
@@ -38,6 +59,49 @@ export class Particles {
       this.mesh.setMatrixAt(i, zero);
       this.mesh.setColorAt(i, this.color.setRGB(1, 1, 1));
     }
+    const geo = new THREE.PlaneGeometry(1, 1);
+    this.uvRect = new THREE.InstancedBufferAttribute(new Float32Array(CHIPS * 4), 4);
+    this.fade = new THREE.InstancedBufferAttribute(new Float32Array(CHIPS), 1);
+    geo.setAttribute('uvRect', this.uvRect);
+    geo.setAttribute('fade', this.fade);
+    this.debrisMat = new THREE.ShaderMaterial({
+      uniforms: { map: { value: texture }, brightness: { value: 1 } },
+      transparent: true,
+      depthWrite: false,
+      toneMapped: false,
+      vertexShader: /* glsl */ `
+        attribute vec4 uvRect;
+        attribute float fade;
+        varying vec2 vUv;
+        varying float vFade;
+        void main() {
+          vUv = uvRect.xy + uv * uvRect.zw;
+          vFade = fade;
+          vec3 origin = instanceMatrix[3].xyz;
+          float s = length(instanceMatrix[0].xyz);
+          vec3 right = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
+          vec3 up = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
+          vec3 world = origin + (position.x * right + position.y * up) * s;
+          gl_Position = projectionMatrix * viewMatrix * vec4(world, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform sampler2D map;
+        uniform float brightness;
+        varying vec2 vUv;
+        varying float vFade;
+        void main() {
+          vec4 tex = texture2D(map, vUv);
+          if (tex.a < 0.04) discard;
+          gl_FragColor = vec4(tex.rgb * brightness * 0.82, tex.a * vFade);
+          #include <colorspace_fragment>
+        }
+      `,
+    });
+    this.debris = new THREE.InstancedMesh(geo, this.debrisMat, CHIPS);
+    this.debris.frustumCulled = false;
+    this.debris.count = CHIPS;
+    for (let i = 0; i < CHIPS; i++) this.debris.setMatrixAt(i, zero);
   }
 
   private pixels(tile: number): Uint8ClampedArray {
@@ -50,30 +114,84 @@ export class Particles {
     return px;
   }
 
+  /** One tile, the break puff. Footsteps and sparks stay coloured cubes. */
   burst(x: number, y: number, z: number, tile: number, count = 16): void {
-    const px = this.pixels(tile);
-    for (let n = 0; n < count; n++) {
-      const i = this.next++ % MAX;
-      this.px[i] = x + 0.15 + Math.random() * 0.7;
-      this.py[i] = y + 0.15 + Math.random() * 0.7;
-      this.pz[i] = z + 0.15 + Math.random() * 0.7;
-      this.vx[i] = (Math.random() - 0.5) * 3.4;
-      this.vy[i] = Math.random() * 3.6 + 0.6;
-      this.vz[i] = (Math.random() - 0.5) * 3.4;
-      this.maxLife[i] = this.life[i] = 0.55 + Math.random() * 0.6;
-      this.size[i] = 0.07 + Math.random() * 0.07;
-      this.grav[i] = 16;
+    this.chips(x, y, z, [tile], count, false);
+  }
 
-      // Sample a random opaque pixel from the block's texture.
-      let o = 0;
-      for (let tries = 0; tries < 6; tries++) {
-        o = Math.floor(Math.random() * TILE_PX * TILE_PX) * 4;
-        if (px[o + 3] > 128) break;
+  /**
+   * Chips cut from the block's own tiles. A break fills the block, flies outward and falls.
+   * A placement (`soft`) is a few chips that only drift off the faces, and they are gone quickly.
+   */
+  chips(x: number, y: number, z: number, tiles: number[], count: number, soft: boolean): void {
+    const use = tiles.length > 0 ? tiles : [0];
+    for (let n = 0; n < count; n++) {
+      const i = this.cnext++ % CHIPS;
+      this.stamp(i, use[Math.floor(Math.random() * use.length)]);
+      if (soft) {
+        const face = Math.floor(Math.random() * 6);
+        const u = Math.random();
+        const v = Math.random();
+        let ox = u;
+        let oy = v;
+        let oz = Math.random();
+        let nx = 0;
+        let ny = 0;
+        let nz = 0;
+        if (face < 2) {
+          ox = face === 0 ? 1 : 0;
+          oy = u;
+          oz = v;
+          nx = face === 0 ? 1 : -1;
+        } else if (face < 4) {
+          oy = face === 2 ? 1 : 0;
+          ox = u;
+          oz = v;
+          ny = face === 2 ? 1 : -1;
+        } else {
+          oz = face === 4 ? 1 : 0;
+          ox = u;
+          oy = v;
+          nz = face === 4 ? 1 : -1;
+        }
+        const sp = 0.45 + Math.random() * 0.7;
+        this.cx[i] = x + ox;
+        this.cy[i] = y + oy;
+        this.cz[i] = z + oz;
+        this.cvx[i] = nx * sp + (Math.random() - 0.5) * 0.25;
+        this.cvy[i] = ny * sp + 0.2 + Math.random() * 0.35;
+        this.cvz[i] = nz * sp + (Math.random() - 0.5) * 0.25;
+        this.cmax[i] = this.clife[i] = 0.12 + Math.random() * 0.14;
+        this.csize[i] = 0.055 + Math.random() * 0.03;
+        this.cgrav[i] = 5;
+      } else {
+        const u = Math.random();
+        const v = Math.random();
+        const w = Math.random();
+        this.cx[i] = x + 0.12 + u * 0.76;
+        this.cy[i] = y + 0.12 + v * 0.76;
+        this.cz[i] = z + 0.12 + w * 0.76;
+        this.cvx[i] = (u - 0.5) * 2.6 + (Math.random() - 0.5) * 0.5;
+        this.cvy[i] = (v - 0.5) * 2.2 + 1.2 + Math.random() * 0.8;
+        this.cvz[i] = (w - 0.5) * 2.6 + (Math.random() - 0.5) * 0.5;
+        this.cmax[i] = this.clife[i] = 0.38 + Math.random() * 0.42;
+        this.csize[i] = 0.08 + Math.random() * 0.05;
+        this.cgrav[i] = 8;
       }
-      this.color.setRGB(px[o] / 255, px[o + 1] / 255, px[o + 2] / 255, THREE.SRGBColorSpace);
-      this.mesh.setColorAt(i, this.color);
     }
-    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+    this.cany = true;
+  }
+
+  /** Point one chip at a random 4×4 of a tile. The atlas is stored with its top at v = 1. */
+  private stamp(i: number, tile: number): void {
+    const ox = Math.floor(Math.random() * (TILE_PX - CROP + 1));
+    const oy = Math.floor(Math.random() * (TILE_PX - CROP + 1));
+    const col = tile % ATLAS_COLS;
+    const row = Math.floor(tile / ATLAS_COLS);
+    const w = ATLAS_COLS * TILE_PX;
+    const h = ATLAS_ROWS * TILE_PX;
+    this.uvRect.setXYZW(i, (col * TILE_PX + ox) / w, 1 - (row * TILE_PX + oy + CROP) / h, CROP / w, CROP / h);
+    this.uvRect.needsUpdate = true;
   }
 
   /**
@@ -104,6 +222,41 @@ export class Particles {
       this.color.setRGB(px[o] / 255, px[o + 1] / 255, px[o + 2] / 255, THREE.SRGBColorSpace).lerp(WHITE, 0.3);
       this.mesh.setColorAt(i, this.color);
     }
+    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+  }
+
+  /** A puff of campfire smoke: a grey fleck that drifts up and thins out. */
+  smoke(x: number, y: number, z: number): void {
+    const i = this.next++ % MAX;
+    this.px[i] = x + (Math.random() - 0.5) * 0.2;
+    this.py[i] = y;
+    this.pz[i] = z + (Math.random() - 0.5) * 0.2;
+    this.vx[i] = (Math.random() - 0.5) * 0.15;
+    this.vz[i] = (Math.random() - 0.5) * 0.15;
+    this.vy[i] = 0.55 + Math.random() * 0.35;
+    this.grav[i] = -0.35;
+    this.maxLife[i] = this.life[i] = 1.3 + Math.random() * 0.7;
+    this.size[i] = 0.1 + Math.random() * 0.06;
+    const g = 0.45 + Math.random() * 0.15;
+    this.color.setRGB(g, g, g, THREE.SRGBColorSpace);
+    this.mesh.setColorAt(i, this.color);
+    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+  }
+
+  /** One mote of a place's air (pollen, spores, ash, embers, sand...): where it starts, how it drifts and falls, its life, size and colour. */
+  mote(x: number, y: number, z: number, vx: number, vy: number, vz: number, fall: number, life: number, size: number, r: number, g: number, b: number): void {
+    const i = this.next++ % MAX;
+    this.px[i] = x;
+    this.py[i] = y;
+    this.pz[i] = z;
+    this.vx[i] = vx;
+    this.vy[i] = vy;
+    this.vz[i] = vz;
+    this.grav[i] = fall;
+    this.maxLife[i] = this.life[i] = life;
+    this.size[i] = size;
+    this.color.setRGB(r, g, b, THREE.SRGBColorSpace);
+    this.mesh.setColorAt(i, this.color);
     if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
   }
 
@@ -148,15 +301,46 @@ export class Particles {
       this.mesh.setMatrixAt(i, this.m4);
     }
     if (any) this.mesh.instanceMatrix.needsUpdate = true;
+    this.updateChips(dt);
+  }
+
+  private updateChips(dt: number): void {
+    if (!this.cany) return;
+    this.q.identity();
+    let any = false;
+    for (let i = 0; i < CHIPS; i++) {
+      if (this.clife[i] <= 0) continue;
+      any = true;
+      this.clife[i] -= dt;
+      this.cvy[i] -= this.cgrav[i] * dt;
+      this.cx[i] += this.cvx[i] * dt;
+      this.cy[i] += this.cvy[i] * dt;
+      this.cz[i] += this.cvz[i] * dt;
+      const k = Math.max(0, this.clife[i] / this.cmax[i]);
+      this.fade.setX(i, k * k);
+      const sz = this.clife[i] > 0 ? this.csize[i] * (0.35 + 0.65 * k) : 0;
+      this.p.set(this.cx[i], this.cy[i], this.cz[i]);
+      this.s.set(sz, sz, sz);
+      this.m4.compose(this.p, this.q, this.s);
+      this.debris.setMatrixAt(i, this.m4);
+    }
+    this.debris.instanceMatrix.needsUpdate = true;
+    this.fade.needsUpdate = true;
+    this.cany = any;
   }
 
   setBrightness(b: number): void {
-    this.material.color.setScalar(Math.max(0.25, b));
+    const k = Math.max(0.25, b);
+    this.material.color.setScalar(k);
+    this.debrisMat.uniforms.brightness.value = k;
   }
 
   dispose(): void {
     this.mesh.geometry.dispose();
     this.material.dispose();
     this.mesh.dispose();
+    this.debris.geometry.dispose();
+    this.debrisMat.dispose();
+    this.debris.dispose();
   }
 }

@@ -1,12 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import { B, WORLD_HEIGHT, WorldGenerator, packWaterDepth } from '@solrift/shared';
-import { REGION, assembleRegion, meshChunk, regionIndex, type MeshData } from './mesher';
+import { B, BB, BLOCKS, DRESS, MASONRY, WORLD_HEIGHT, WorldGenerator, campfireId, packWaterDepth, placementFor, slabId, stairId } from '@solrift/shared';
+import { REGION, TILE_EXTRA, assembleRegion, meshChunk, regionIndex, type MeshData } from './mesher';
 
 function emptyRegion(): Uint16Array {
   return new Uint16Array(REGION * WORLD_HEIGHT * REGION);
 }
 
 const quads = (m: MeshData | null) => (m ? m.indices.length / 6 : 0);
+
+function eachQuad(m: MeshData, fn: (verts: number[]) => void): void {
+  for (let i = 0; i < m.indices.length; i += 6) {
+    const ids = new Set<number>();
+    for (let k = 0; k < 6; k++) ids.add(m.indices[i + k]!);
+    fn([...ids]);
+  }
+}
+
+function corner(m: MeshData, v: number): [number, number, number] {
+  return [m.positions[v * 3]!, m.positions[v * 3 + 1]!, m.positions[v * 3 + 2]!];
+}
 
 function assertValid(m: MeshData): void {
   const verts = m.positions.length / 3;
@@ -80,12 +92,43 @@ describe('mesher', () => {
     expect(quads(r.opaque)).toBe(5);
   });
 
+  it('draws glass and its panes clear, and keeps iron bars solid', () => {
+    const glass = emptyRegion();
+    glass[regionIndex(5, 10, 5)] = B.GLASS;
+    glass[regionIndex(6, 10, 5)] = B.GLASS;
+    const g = meshChunk(glass);
+    // The face between two blocks of glass is hidden, and the outside faces join into one sheet.
+    expect(g.opaque).toBeNull();
+    expect(quads(g.translucent)).toBe(6);
+    assertValid(g.translucent!);
+
+    const pane = emptyRegion();
+    pane[regionIndex(5, 10, 5)] = B.PANE;
+    const p = meshChunk(pane);
+    expect(p.opaque).toBeNull();
+    expect(quads(p.translucent)).toBeGreaterThan(0);
+
+    const stained = emptyRegion();
+    stained[regionIndex(5, 10, 5)] = DRESS.glass;
+    stained[regionIndex(5, 11, 5)] = DRESS.pane;
+    const s = meshChunk(stained);
+    expect(s.opaque).toBeNull();
+    expect(s.translucent).not.toBeNull();
+
+    const bars = emptyRegion();
+    bars[regionIndex(5, 10, 5)] = DRESS.ironBars;
+    const b = meshChunk(bars);
+    expect(b.translucent).toBeNull();
+    expect(quads(b.opaque)).toBeGreaterThan(0);
+  });
+
   it('puts water in the translucent mesh and merges its surface', () => {
     const p = emptyRegion();
     for (let x = 2; x < 8; x++) p[regionIndex(x, 3, 2)] = B.WATER;
     const r = meshChunk(p);
     expect(r.opaque).toBeNull();
-    expect(quads(r.translucent)).toBe(6);
+    // The surface is cut where its shore sides change: the two ends and the strip between them (the flags the shader draws foam by).
+    expect(quads(r.translucent)).toBe(8);
     // A source's surface sits 2/16 below the block top.
     const ys = Array.from(r.translucent!.positions).filter((_, i) => i % 3 === 1);
     expect(Math.max(...ys)).toBeCloseTo(4 - 2 / 16, 5);
@@ -132,23 +175,37 @@ describe('mesher', () => {
     expect(quads(r.opaque)).toBe(6 + 4);
   });
 
-  it('meshes a torch as a thin post that glows at full brightness', () => {
+  it('meshes a torch as a thin post with a flame on top, at full brightness', () => {
     const p = emptyRegion();
     p[regionIndex(5, 10, 5)] = B.TORCH;
     const r = meshChunk(p);
-    expect(quads(r.opaque)).toBe(5);
+    // Five faces of the post, plus two crossed planes of flame, each drawn from both sides.
+    expect(quads(r.opaque)).toBe(9);
     const xs = Array.from(r.opaque!.positions).filter((_, i) => i % 3 === 0);
-    expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(2 / 16, 5);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(8 / 16, 5);
     const ys = Array.from(r.opaque!.positions).filter((_, i) => i % 3 === 1);
-    expect(Math.max(...ys) - Math.min(...ys)).toBeCloseTo(10 / 16, 5);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeCloseTo(15 / 16, 5);
     for (let i = 2; i < r.opaque!.light.length; i += 4) expect(r.opaque!.light[i]).toBe(255);
+  });
+
+  it('meshes a campfire as four logs, and a flame only while it is lit', () => {
+    const lit = emptyRegion();
+    lit[regionIndex(5, 10, 5)] = campfireId(2, true);
+    const burning = meshChunk(lit);
+    expect(quads(burning.opaque)).toBe(28);
+    assertValid(burning.opaque!);
+    const ys = Array.from(burning.opaque!.positions).filter((_, i) => i % 3 === 1);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeCloseTo(14 / 16, 5);
+    const out = emptyRegion();
+    out[regionIndex(5, 10, 5)] = campfireId(2, false);
+    expect(quads(meshChunk(out).opaque)).toBe(24);
   });
 
   it('shifts wall torches towards their support', () => {
     const p = emptyRegion();
     p[regionIndex(5, 10, 5)] = B.TORCH_PX; // supported by the block at +x
     const xs = Array.from(meshChunk(p).opaque!.positions).filter((_, i) => i % 3 === 0);
-    expect(Math.min(...xs)).toBeGreaterThan(5.7);
+    expect(Math.min(...xs)).toBeGreaterThan(5.5);
   });
 
   it('lowers flowing water with its level', () => {
@@ -168,14 +225,107 @@ describe('mesher', () => {
     const level = emptyRegion();
     level[regionIndex(5, 10, 5)] = B.WATER;
     level[regionIndex(6, 10, 5)] = B.WATER;
-    // Same height: the faces between them vanish.
-    expect(quads(meshChunk(level).translucent)).toBe(6);
+    // Same height: the faces between them vanish (the surface is two quads: each cell has its own shore sides).
+    expect(quads(meshChunk(level).translucent)).toBe(7);
 
     const step = emptyRegion();
     step[regionIndex(5, 10, 5)] = B.WATER;
     step[regionIndex(6, 10, 5)] = B.WATER_7;
     // The tall one shows a side above the short one's surface; the short one's side is hidden.
     expect(quads(meshChunk(step).translucent)).toBe(11);
+  });
+
+  it('tells water where its shore is and a floor how deep the water over it is', () => {
+    const p = emptyRegion();
+    // A pond of 3 x 3 on a stone floor, two deep in the middle.
+    for (let x = 4; x <= 6; x++) {
+      for (let z = 4; z <= 6; z++) {
+        p[regionIndex(x, 2, z)] = B.STONE;
+        p[regionIndex(x, 3, z)] = B.WATER;
+      }
+    }
+    p[regionIndex(5, 2, 5)] = B.AIR;
+    p[regionIndex(5, 1, 5)] = B.STONE;
+    p[regionIndex(5, 2, 5)] = B.WATER;
+    const r = meshChunk(p);
+    // Water faces and floor faces are told apart by the tint byte: the water's surface carries its shore as flags above the tile.
+    const flags = (m: { tiles: ArrayLike<number> } | null): number[] => Array.from(m!.tiles, (t) => Math.floor(t / TILE_EXTRA));
+    const water = flags(r.translucent);
+    expect(Math.max(...water)).toBeLessThanOrEqual(15);
+    // The corner cells meet land on two sides, the middle one on none: so more than one kind of surface exists.
+    expect(new Set(water).size).toBeGreaterThan(2);
+    // The opaque floor faces that look at water are flagged 1 + the depth class (1: a block of water; 2: two or three).
+    const floor = new Set(flags(r.opaque));
+    expect(floor.has(1)).toBe(true);
+    expect(floor.has(2)).toBe(true);
+  });
+
+  it('draws water around and over a plant standing in it as if the plant were not there', () => {
+    const pond = (mid: number): ReturnType<typeof meshChunk> => {
+      const p = emptyRegion();
+      for (let x = 3; x <= 7; x++) {
+        for (let z = 3; z <= 7; z++) {
+          p[regionIndex(x, 2, z)] = B.STONE;
+          for (let y = 3; y <= 5; y++) p[regionIndex(x, y, z)] = B.WATER;
+        }
+      }
+      // A stalk two cells tall, with one cell of water over it.
+      if (mid !== B.WATER) p[regionIndex(5, 3, 5)] = p[regionIndex(5, 4, 5)] = mid;
+      return meshChunk(p);
+    };
+    const plain = pond(B.WATER);
+    const planted = pond(B.TALL_GRASS);
+    // No hole in the surface, no wall round the plant: the same water faces, the same flags.
+    expect(quads(planted.translucent)).toBe(quads(plain.translucent));
+    const flags = (m: { tiles: ArrayLike<number> } | null): number[] => Array.from(m!.tiles, (t) => Math.floor(t / TILE_EXTRA));
+    expect(flags(planted.translucent).sort()).toEqual(flags(plain.translucent).sort());
+    // The floor under the plant is told it is under water, like the floor round it.
+    expect(new Set(flags(planted.opaque))).toEqual(new Set(flags(plain.opaque)));
+  });
+
+  it('does not cut a hole in the surface where a plant stands in the top layer of the water', () => {
+    const pond = (plant: boolean): ReturnType<typeof meshChunk> => {
+      const p = emptyRegion();
+      for (let x = 3; x <= 7; x++) {
+        for (let z = 3; z <= 7; z++) {
+          p[regionIndex(x, 2, z)] = B.STONE;
+          for (let y = 3; y <= 4; y++) p[regionIndex(x, y, z)] = B.WATER;
+        }
+      }
+      p[regionIndex(5, 4, 5)] = plant ? BB.seagrass : B.WATER;
+      return meshChunk(p);
+    };
+    expect(quads(pond(true).translucent)).toBe(quads(pond(false).translucent));
+  });
+
+  it('never takes the plants of a meadow for water (no blue blocks in the grass)', () => {
+    const p = emptyRegion();
+    for (let x = 2; x <= 9; x++) {
+      for (let z = 2; z <= 9; z++) {
+        p[regionIndex(x, 10, z)] = B.GRASS;
+        p[regionIndex(x, 11, z)] = (x + z) % 3 === 0 ? B.TALL_GRASS : B.FERN;
+      }
+    }
+    // A flower with grass on all four sides and a puddle's worth of water on three of the sides of another.
+    p[regionIndex(5, 11, 5)] = B.TALL_GRASS;
+    p[regionIndex(6, 11, 6)] = B.FERN;
+    p[regionIndex(5, 11, 6)] = B.WATER;
+    p[regionIndex(7, 11, 6)] = B.WATER;
+    p[regionIndex(6, 11, 7)] = B.WATER;
+    expect(meshChunk(p).translucent).not.toBeNull();
+    const water = quads(meshChunk(p).translucent);
+    // Only the three real blocks of water are drawn: five faces each at most, none for the plants.
+    expect(water).toBeLessThanOrEqual(3 * 5);
+  });
+
+  it('hides the water faces that would touch ice or glass', () => {
+    const p = emptyRegion();
+    p[regionIndex(5, 10, 5)] = B.WATER;
+    const alone = quads(meshChunk(p).translucent);
+    p[regionIndex(6, 10, 5)] = B.ICE;
+    const withIce = meshChunk(p);
+    // The water gives up its face towards the ice (the ice keeps its own six, seen through the water).
+    expect(quads(withIce.translucent)).toBe(alone - 1 + 6);
   });
 
   it('keeps lava out of the translucent mesh and lowers it too', () => {
@@ -274,5 +424,173 @@ describe('mesher', () => {
     assertValid(r.opaque!);
     if (r.translucent) assertValid(r.translucent);
     expect(ms).toBeLessThan(1500);
+  });
+
+  it('draws a block on a slab half a block lower, with the same tile and the same daylight', () => {
+    const side = BLOCKS[B.STONE_BRICKS].tiles.side;
+    const top = BLOCKS[B.STONE_BRICKS].tiles.top;
+    const seated = emptyRegion();
+    seated[regionIndex(5, 9, 5)] = slabId(4, false);
+    seated[regionIndex(5, 10, 5)] = B.STONE_BRICKS;
+    const plain = emptyRegion();
+    plain[regionIndex(5, 10, 5)] = B.STONE_BRICKS;
+    const a = meshChunk(seated).opaque!;
+    const b = meshChunk(plain).opaque!;
+    assertValid(a);
+
+    let minY = Infinity;
+    let maxY = -Infinity;
+    const tiles = new Set<number>();
+    let sky = 0;
+    let uvs: number[] = [];
+    eachQuad(a, (verts) => {
+      const ys = verts.map((v) => corner(a, v)[1]);
+      if (Math.max(...ys) <= 9.6) return;
+      minY = Math.min(minY, ...ys);
+      maxY = Math.max(maxY, ...ys);
+      tiles.add(a.tiles[verts[0]!]!);
+      const xs = verts.map((v) => corner(a, v)[0]);
+      if (xs.every((x) => Math.abs(x - 5) < 1e-4)) {
+        sky = a.light[verts[0]! * 4 + 1]!;
+        uvs = verts.flatMap((v) => [a.uvs[v * 2]!, a.uvs[v * 2 + 1]!]);
+      }
+    });
+    expect(minY).toBeCloseTo(9.5, 5);
+    expect(maxY).toBeCloseTo(10.5, 5);
+    expect(tiles).toEqual(new Set([side, top]));
+
+    let plainSky = 0;
+    let plainUvs: number[] = [];
+    eachQuad(b, (verts) => {
+      const xs = verts.map((v) => corner(b, v)[0]);
+      if (!xs.every((x) => Math.abs(x - 5) < 1e-4)) return;
+      plainSky = b.light[verts[0]! * 4 + 1]!;
+      plainUvs = verts.flatMap((v) => [b.uvs[v * 2]!, b.uvs[v * 2 + 1]!]);
+    });
+    expect(sky).toBe(plainSky);
+    expect(sky).toBe(255);
+    expect(uvs).toEqual(plainUvs);
+
+    // A top slab already meets the block above it, so that block stays in its cell.
+    const upper = emptyRegion();
+    upper[regionIndex(5, 9, 5)] = slabId(4, true);
+    upper[regionIndex(5, 10, 5)] = B.STONE_BRICKS;
+    const high = meshChunk(upper).opaque!;
+    let topMost = 0;
+    eachQuad(high, (verts) => {
+      topMost = Math.max(topMost, ...verts.map((v) => corner(high, v)[1]));
+    });
+    expect(topMost).toBeCloseTo(11, 5);
+  });
+
+  it('keeps the hanging side of a lowered block beside a normal block', () => {
+    const p = emptyRegion();
+    p[regionIndex(5, 9, 5)] = slabId(4, false);
+    p[regionIndex(5, 10, 5)] = B.STONE_BRICKS;
+    p[regionIndex(6, 10, 5)] = B.STONE_BRICKS;
+    const m = meshChunk(p).opaque!;
+    let hanging = false;
+    eachQuad(m, (verts) => {
+      const xs = verts.map((v) => corner(m, v)[0]);
+      const ys = verts.map((v) => corner(m, v)[1]);
+      if (xs.every((x) => Math.abs(x - 6) < 1e-4) && Math.min(...ys) < 9.6 && Math.max(...ys) > 10.4) hanging = true;
+    });
+    expect(hanging).toBe(true);
+  });
+
+  it('sits a block on a carpet, one pixel above the floor', () => {
+    const p = emptyRegion();
+    p[regionIndex(5, 9, 5)] = DRESS.carpet;
+    p[regionIndex(5, 10, 5)] = B.STONE_BRICKS;
+    const m = meshChunk(p).opaque!;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    eachQuad(m, (verts) => {
+      const ys = verts.map((v) => corner(m, v)[1]);
+      if (Math.max(...ys) <= 9.5) return;
+      minY = Math.min(minY, ...ys);
+      maxY = Math.max(maxY, ...ys);
+    });
+    expect(minY).toBeCloseTo(9 + 1 / 16, 5);
+    expect(maxY).toBeCloseTo(10 + 1 / 16, 5);
+  });
+
+  it('draws a straight wall as a low beam and a lone wall with its post', () => {
+    const wall = MASONRY.find((row) => row.spec.name === 'stone_brick')!.wallId;
+    const run = emptyRegion();
+    run[regionIndex(5, 10, 4)] = wall;
+    run[regionIndex(5, 10, 5)] = wall;
+    run[regionIndex(5, 10, 6)] = wall;
+    const beam = meshChunk(run).opaque!;
+    let beamTop = 0;
+    eachQuad(beam, (verts) => {
+      const pts = verts.map((v) => corner(beam, v));
+      const inMiddle = pts.every((p) => p[0] >= 5 - 1e-4 && p[0] <= 6 + 1e-4 && p[2] >= 5 - 1e-4 && p[2] <= 6 + 1e-4);
+      if (inMiddle) beamTop = Math.max(beamTop, ...pts.map((p) => p[1]));
+    });
+    expect(beamTop).toBeCloseTo(10 + 14 / 16, 5);
+
+    const lone = emptyRegion();
+    lone[regionIndex(5, 10, 5)] = wall;
+    const post = meshChunk(lone).opaque!;
+    let postTop = 0;
+    eachQuad(post, (verts) => {
+      postTop = Math.max(postTop, ...verts.map((v) => corner(post, v)[1]));
+    });
+    expect(postTop).toBeCloseTo(11.5, 5);
+  });
+
+  it('shows the rings on the ends of a log laid on its side', () => {
+    const east = placementFor(B.LOG, 1, 0, 0)!;
+    const p = emptyRegion();
+    p[regionIndex(5, 10, 5)] = east;
+    const m = meshChunk(p).opaque!;
+    const rings = BLOCKS[east].tiles.top;
+    const bark = BLOCKS[east].tiles.side;
+    let ends = 0;
+    let sides = 0;
+    eachQuad(m, (verts) => {
+      const xs = verts.map((v) => corner(m, v)[0]);
+      const tile = m.tiles[verts[0]!]!;
+      const cap = xs.every((x) => Math.abs(x - 5) < 1e-4) || xs.every((x) => Math.abs(x - 6) < 1e-4);
+      if (cap) {
+        expect(tile).toBe(rings);
+        ends++;
+      } else {
+        expect(tile).toBe(bark);
+        sides++;
+      }
+    });
+    expect(ends).toBe(2);
+    expect(sides).toBe(4);
+
+    const upright = emptyRegion();
+    upright[regionIndex(5, 10, 5)] = B.LOG;
+    const u = meshChunk(upright).opaque!;
+    let tops = 0;
+    eachQuad(u, (verts) => {
+      const ys = verts.map((v) => corner(u, v)[1]);
+      if (Math.max(...ys) - Math.min(...ys) < 1e-4) {
+        expect(u.tiles[verts[0]!]!).toBe(BLOCKS[B.LOG].tiles.top);
+        tops++;
+      }
+    });
+    expect(tops).toBe(2);
+  });
+
+  it('cuts the tall part of a stair back when the neighbour turns the corner', () => {
+    const p = emptyRegion();
+    p[regionIndex(5, 10, 5)] = stairId(4, false, 0);
+    p[regionIndex(6, 10, 5)] = stairId(4, false, 2);
+    const m = meshChunk(p).opaque!;
+    const high: number[] = [];
+    eachQuad(m, (verts) => {
+      for (const v of verts) {
+        const [x, y, z] = corner(m, v);
+        if (y > 10.7 && x >= 5 && x <= 6 && z >= 5 && z <= 6) high.push(z);
+      }
+    });
+    expect(high.length).toBeGreaterThan(0);
+    expect(Math.min(...high)).toBeGreaterThanOrEqual(5.5 - 1e-4);
   });
 });
