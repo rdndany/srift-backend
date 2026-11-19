@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 
 /**
- * The presentation page: what `toklytest.site` shows (see the host rewrite in `next.config.ts`). The game itself
+ * The presentation page: what `solrift.io` shows (see the host rewrite in `next.config.ts`). The game itself
  * lives on the play address. Reachable on any host as `/welcome`.
  */
 export const metadata: Metadata = {
@@ -10,7 +10,7 @@ export const metadata: Metadata = {
 };
 
 /** Where the "Play" buttons go: the game's own address online, the local game page in development. */
-const PLAY_URL = process.env.NEXT_PUBLIC_PLAY_URL ?? (process.env.NODE_ENV === 'production' ? 'https://play.toklytest.site' : '/play');
+const PLAY_URL = process.env.NEXT_PUBLIC_PLAY_URL ?? (process.env.NODE_ENV === 'production' ? 'https://play.solrift.io' : '/play');
 
 const FEATURES: { title: string; text: string }[] = [
   { title: 'An endless world', text: 'Seven biomes, caves, ores and forests, generated as far as you walk. Every seed is a different world.' },

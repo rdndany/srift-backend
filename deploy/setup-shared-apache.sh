@@ -2,7 +2,7 @@
 # Setup for a droplet that ALREADY runs other things (Apache on port 80, other Node versions, a firewall in use).
 # Unlike setup-droplet.sh it installs no Caddy, leaves the system Node and the firewall alone, and only ADDS to Apache:
 # one new site for the api domain (a reverse proxy, with WebSocket) and a certificate for it through certbot.
-#   bash setup-shared-apache.sh https://github.com/rdndany/srift-backend.git api.toklytest.site
+#   bash setup-shared-apache.sh https://github.com/rdndany/srift-backend.git api.solrift.io
 # Node 24 goes to /opt/node24 (the game server uses node:sqlite, which needs Node 22.13+), used only by the game's service.
 # Safe to run again.
 set -euo pipefail

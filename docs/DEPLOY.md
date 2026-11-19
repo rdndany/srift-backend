@@ -1,13 +1,13 @@
 # Putting SolRift online
 
 The page (Next.js) runs on **Vercel**; the game server (WebSocket, sign-in, cloud saves, the world) runs on a **DigitalOcean Ubuntu droplet**.
-Two names of one domain you own (here `toklytest.site`):
+Two names of one domain you own (here `solrift.io`):
 
 | Name | What | Where |
 |---|---|---|
-| `toklytest.site` (and `www`) | the presentation page (the `/welcome` page, chosen by the host in `next.config.ts`) | Vercel, same project |
-| `play.toklytest.site` | the game page | Vercel |
-| `api.toklytest.site` | the game server (`https://` and `wss://`) | the droplet, behind Caddy |
+| `solrift.io` (and `www`) | the presentation page (the `/welcome` page, chosen by the host in `next.config.ts`) | Vercel, same project |
+| `play.solrift.io` | the game page | Vercel |
+| `api.solrift.io` | the game server (`https://` and `wss://`) | the droplet, behind Caddy |
 
 Both names must end in the same domain: the sign-in cookie is shared between them (`COOKIE_DOMAIN`),
 otherwise a signed-in wallet would play as a guest in the multiplayer realm (the browser does not send the page's cookie to another site's socket).
@@ -15,8 +15,8 @@ otherwise a signed-in wallet would play as a guest in the multiplayer realm (the
 How the pieces talk:
 
 ```
-browser ── https://play.toklytest.site ──► Vercel (page; /api/* is forwarded to https://api.toklytest.site/*, so sign-in cookies are same-origin)
-browser ── wss://api.toklytest.site ─────► Caddy (TLS) ──► game server :8787 (node + SQLite in /var/lib/solrift)
+browser ── https://play.solrift.io ──► Vercel (page; /api/* is forwarded to https://api.solrift.io/*, so sign-in cookies are same-origin)
+browser ── wss://api.solrift.io ─────► Caddy (TLS) ──► game server :8787 (node + SQLite in /var/lib/solrift)
 ```
 
 ## 1. The code on GitHub (done)
@@ -49,10 +49,10 @@ ssh root@DROPLET_IP
 On the droplet:
 
 ```bash
-bash setup-droplet.sh https://x-access-token:TOKEN@github.com/rdndany/srift-backend.git api.toklytest.site
-nano /etc/solrift.env          # AUTH_ORIGINS=https://play.toklytest.site   COOKIE_DOMAIN=toklytest.site   (the rest can stay)
+bash setup-droplet.sh https://x-access-token:TOKEN@github.com/rdndany/srift-backend.git api.solrift.io
+nano /etc/solrift.env          # AUTH_ORIGINS=https://play.solrift.io   COOKIE_DOMAIN=solrift.io   (the rest can stay)
 systemctl enable --now solrift-server
-curl https://api.toklytest.site/health      # {"ok":true,...}  (Caddy fetches the certificate on the first request; give it a few seconds)
+curl https://api.solrift.io/health      # {"ok":true,...}  (Caddy fetches the certificate on the first request; give it a few seconds)
 ```
 
 The script installs Node 24, Caddy and a firewall (ssh, 80, 443 only), makes the `solrift` user, fetches the code into `/opt/solrift`, installs only what the
@@ -64,15 +64,15 @@ server needs and sets up the service (`deploy/solrift-server.service`) and Caddy
 2. **Root Directory: `apps/web`** (leave "Include source files outside of the Root Directory" on: the page uses `packages/shared`). Framework: Next.js; Node 22 or newer
    (Settings, General).
 3. **Environment variables** (Production, and Preview if you use it):
-   - `NEXT_PUBLIC_SERVER_URL` = `wss://api.toklytest.site`
-   - `SERVER_ORIGIN` = `https://api.toklytest.site`
-4. Deploy, then **Settings, Domains**: add `play.toklytest.site` **and** `toklytest.site` (+ `www.toklytest.site`, redirect to the bare one) and make the DNS record Vercel shows (a CNAME `play` to `cname.vercel-dns.com`).
+   - `NEXT_PUBLIC_SERVER_URL` = `wss://api.solrift.io`
+   - `SERVER_ORIGIN` = `https://api.solrift.io`
+4. Deploy, then **Settings, Domains**: add `play.solrift.io` **and** `solrift.io` (+ `www.solrift.io`, redirect to the bare one) and make the DNS record Vercel shows (a CNAME `play` to `cname.vercel-dns.com`).
 
 Both variables are fixed at build time: change one and redeploy.
 
 ## 5. Try it
 
-Open `https://play.toklytest.site`, Play, Multiplayer: the realm shows its status ("Online 0 / 120"). Sign in with a wallet, make a character, enter. A second browser
+Open `https://play.solrift.io`, Play, Multiplayer: the realm shows its status ("Online 0 / 120"). Sign in with a wallet, make a character, enter. A second browser
 (or a phone) sees you.
 
 ## Updating
@@ -91,9 +91,9 @@ The world, accounts and characters are one SQLite database in `/var/lib/solrift`
 | Sign | Cause |
 |---|---|
 | The realm says offline; the browser console shows a failed `wss://` connection | DNS for `api` is not pointing at the droplet yet, Caddy has no certificate yet (`journalctl -u caddy`), or `NEXT_PUBLIC_SERVER_URL` is wrong or was set after the build (redeploy) |
-| Sign-in says `origin not allowed` | `AUTH_ORIGINS` is not exactly the page's address (`https://play.toklytest.site`, no slash, https). Restart the server after changing it |
+| Sign-in says `origin not allowed` | `AUTH_ORIGINS` is not exactly the page's address (`https://play.solrift.io`, no slash, https). Restart the server after changing it |
 | You sign in but play as a guest in the realm | `COOKIE_DOMAIN` is missing or is not the domain both names end in, or `COOKIE_SECURE=1` is missing. Sign out and in again after fixing it |
-| `/api/...` calls fail with 502 or 404 | `SERVER_ORIGIN` is wrong (it must be `https://api.toklytest.site`, no path) |
+| `/api/...` calls fail with 502 or 404 | `SERVER_ORIGIN` is wrong (it must be `https://api.solrift.io`, no path) |
 
 ## Limits to know
 

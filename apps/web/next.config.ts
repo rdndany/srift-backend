@@ -5,7 +5,7 @@ import type { NextConfig } from 'next';
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 /** The host of the presentation page (the game is on `play.<this>`); `SITE_HOST` overrides it at build time. */
-const SITE_HOST = (process.env.SITE_HOST ?? 'toklytest.site').replace(/\./g, '\\.');
+const SITE_HOST = (process.env.SITE_HOST ?? 'solrift.io').replace(/\./g, '\\.');
 const SITE_HOST_PATTERN = `(www\\.)?${SITE_HOST}`;
 
 const config: NextConfig = {
