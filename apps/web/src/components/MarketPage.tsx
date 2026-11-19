@@ -73,14 +73,14 @@ function useMarket(query: AuctionQuery, account: string | null) {
       const qs = new URLSearchParams({ q: query.q, cat: query.cat, sort: query.sort, desc: query.desc ? '1' : '0', page: String(query.page) });
       try {
         const res = await fetch(`/api/market?${qs}`, { credentials: 'same-origin', cache: 'no-store', signal: ctl.signal });
-        if (!res.ok) throw new Error(res.status === 429 ? 'Too many requests: wait a moment.' : `The market answered ${res.status}.`);
+        if (!res.ok) throw new Error(res.status === 429 ? 'Too many requests: wait a moment.' : res.status === 404 ? 'The game server is running an older version without the market. It needs to be updated.' : `The market answered ${res.status}.`);
         const body = (await res.json()) as MarketReply;
         if (!live) return;
         setReply(body);
         setError('');
       } catch (e) {
         if (!live || (e instanceof DOMException && e.name === 'AbortError')) return;
-        setError(e instanceof Error && e.message.startsWith('Too many') ? e.message : 'The market cannot be reached right now. The game server may be offline.');
+        setError(e instanceof Error && /^(Too many|The game server)/.test(e.message) ? e.message : 'The market cannot be reached right now. The game server may be offline.');
       }
     };
     void load();
