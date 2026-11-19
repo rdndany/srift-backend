@@ -50,7 +50,7 @@ On the droplet:
 
 ```bash
 bash setup-droplet.sh https://x-access-token:TOKEN@github.com/rdndany/srift-backend.git api.solrift.io
-nano /etc/solrift.env          # AUTH_ORIGINS=https://play.solrift.io   COOKIE_DOMAIN=solrift.io   (the rest can stay)
+nano /etc/solrift.env          # AUTH_ORIGINS=https://play.solrift.io,https://solrift.io,https://www.solrift.io   COOKIE_DOMAIN=solrift.io   (the rest can stay)
 systemctl enable --now solrift-server
 curl https://api.solrift.io/health      # {"ok":true,...}  (Caddy fetches the certificate on the first request; give it a few seconds)
 ```
