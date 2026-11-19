@@ -5,7 +5,7 @@ import { AccountPanel } from './AccountPanel';
 import { CloudPanel } from './CloudPanel';
 import { GameUI } from './GameUI';
 import { HomeScreen, type PlayChoice } from './HomeScreen';
-import { HANDOFF_KEYS, isPlayPath } from '../game/route';
+import { HANDOFF_KEYS, entryAllowed, gamePath, isPlayPath } from '../game/route';
 import { useProfile } from '../profile/store';
 import { useUi } from '../ui/store';
 import { WorldTools } from './WorldTools';
@@ -72,6 +72,8 @@ export default function GameView() {
   const identity = useProfile((s) => s.identity);
   const name = useProfile((s) => s.name);
   useEffect(() => {
+    // An id address (`play.solrift.io/<uid>`) opened on its own, not from the lobby's Play: go through the lobby first.
+    if (!entryAllowed(location.pathname)) return void location.replace(gamePath());
     const params = new URLSearchParams(location.search);
     // (What the website hands to the lobby, `?way=multi` and the like, is not a game parameter.)
     for (const k of HANDOFF_KEYS) params.delete(k);

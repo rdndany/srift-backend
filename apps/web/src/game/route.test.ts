@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { gamePath, isGamePath, isPlayPath, isUid, lobbyUrl, nameFromPath, newUid, paramsFor, playPath, prettyAddress, realmPath, siteUrl, titleAddress, uidFromPath, whereIs } from './route';
+import { afterEach, describe, expect, it } from 'vitest';
+import { entryAllowed, markEntry, gamePath, isGamePath, isPlayPath, isUid, lobbyUrl, nameFromPath, newUid, paramsFor, playPath, prettyAddress, realmPath, siteUrl, titleAddress, uidFromPath, whereIs } from './route';
 
 const at = (pathname: string, search = '') => ({ pathname, search });
 
@@ -131,5 +131,33 @@ describe('the website and the game on their own hosts', () => {
     expect(lobbyUrl({ way: 'multi' }, 'local')).toBe('/game');
     expect(titleAddress(`/${uid}`, 'play', 'solrift.io')).toBe('https://solrift.io/');
     expect(titleAddress('/', 'play', 'solrift.io')).toBe('https://solrift.io/');
+  });
+});
+
+describe('an id address is entered from the lobby, not opened on its own', () => {
+  const uid = '3f2b8c1e-5a47-4d1b-9c0e-7a1d2e3f4a5b';
+  const other = '7869570a-1c9d-421c-8aa3-5a7eadd0bc22';
+  const g = globalThis as { sessionStorage?: unknown };
+  afterEach(() => {
+    delete g.sessionStorage;
+  });
+  const fakeSession = () => {
+    const m = new Map<string, string>();
+    g.sessionStorage = { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) };
+  };
+
+  it('turns a pasted id address away, and lets the one Play opened in; the old addresses stay open', () => {
+    fakeSession();
+    expect(entryAllowed(`/${uid}`, 'play')).toBe(false);
+    markEntry(uid);
+    expect(entryAllowed(`/${uid}`, 'play')).toBe(true);
+    expect(entryAllowed(`/play/${uid}`, 'local')).toBe(true);
+    expect(entryAllowed(`/${other}`, 'play')).toBe(false);
+    expect(entryAllowed('/play/rdNeu', 'local')).toBe(true);
+    expect(entryAllowed('/', 'play')).toBe(true);
+  });
+
+  it('turns it away when there is no session to remember it', () => {
+    expect(entryAllowed(`/${uid}`, 'play')).toBe(false);
   });
 });

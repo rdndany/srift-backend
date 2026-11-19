@@ -37,7 +37,7 @@ import { bumpUi, showZone, useUi, type CodexView } from '../ui/store';
 import { BeyondClient } from './beyondClient';
 import { CampfireFood } from './campfireFood';
 import { Chat } from './chat';
-import { isPlayPath, newUid, paramsFor, prettyAddress, realmPath, uidFromPath } from './route';
+import { isPlayPath, markEntry, newUid, paramsFor, prettyAddress, realmPath, uidFromPath } from './route';
 import type { ClientSession } from './clientSession';
 import { GameAudio } from './audio';
 import { buildAtlas } from './atlas';
@@ -268,7 +268,11 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     localStorage.setItem('solrift-name', name);
     if (useProfile.getState().identity !== 'wallet') useProfile.getState().setName(name);
     // The realm's address is the character's id (`play.solrift.io/<uid>`), not a name: a name in the address becomes one.
-    if (isPlayPath(location.pathname) && !uidFromPath(location.pathname)) history.replaceState(null, '', `${realmPath(newUid())}${location.search}`);
+    if (isPlayPath(location.pathname) && !uidFromPath(location.pathname)) {
+      const uid = newUid();
+      markEntry(uid);
+      history.replaceState(null, '', `${realmPath(uid)}${location.search}`);
+    }
     statusEl.textContent = 'Connecting to the server...';
     setLoading('Connecting to the server...', 8);
     try {

@@ -8,7 +8,7 @@ import type { Way } from './WayDialog';
 import type { WorldKind } from '@solrift/shared';
 import { useProfile } from '../profile/store';
 import { LocalSaveStore } from '../game/storage';
-import { gamePath, isGamePath, lobbyUrl, newUid, realmPath, whereAmI } from '../game/route';
+import { gamePath, isGamePath, lobbyUrl, markEntry, newUid, realmPath, whereAmI } from '../game/route';
 import { useAuth } from '../auth/store';
 import { modeOfSave, startOptionsFor, type HomeMode } from './modes';
 
@@ -39,7 +39,9 @@ export function HomeScreen({ onPlay }: { onPlay: (choice: PlayChoice) => void })
     if (t.kind === 'multi') {
       // The realm is its own page, at the character's id (`play.solrift.io/<uid>`): a wallet character's own, a guest's made up. The name and look come from the profile.
       const account = useAuth.getState().account;
-      location.assign(realmPath(identity === 'wallet' && account ? account.id : newUid()));
+      const uid = identity === 'wallet' && account ? account.id : newUid();
+      markEntry(uid);
+      location.assign(realmPath(uid));
       return;
     }
     let mode = t.mode;

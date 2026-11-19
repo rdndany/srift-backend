@@ -357,6 +357,14 @@ const joined = await gp2.waitForURL((u) => /^\/play\/[0-9a-f]{8}(-[0-9a-f]{4}){3
 );
 check(joined, `a guest joins the realm at an id address, not a name (${new URL(gp2.url()).pathname})`);
 check(await until(async () => (await wp.evaluate(() => window.__solrift.others())).some((o) => o.name === 'Wanderer'), 40000), 'the id address joins under the character made in the lobby: the wallet player sees Wanderer');
+// The id address is not a door of its own: opened in a fresh browser (no Play behind it), it leads to the lobby.
+check(await (async () => {
+  const fresh = await (await browser.newContext()).newPage();
+  await fresh.goto(gp2.url(), { waitUntil: 'load' });
+  const lobby = await fresh.waitForURL((u) => u.pathname === '/game', { timeout: 30000 }).then(() => true, () => false);
+  await fresh.context().close();
+  return lobby;
+})(), 'a pasted id address goes to the lobby instead of into the realm');
 // (the same address with the test hooks switched on)
 await gp2.goto(`${url}/?online&debug&nomobs&noshadows&name=Wanderer`, { waitUntil: 'load' });
 await ready(gp2);

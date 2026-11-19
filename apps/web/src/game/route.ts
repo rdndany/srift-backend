@@ -98,6 +98,29 @@ export function titleAddress(pathname: string, where: Where = whereAmI(), root: 
   return isPlayPath(pathname, where) || isGamePath(pathname, where) ? '/' : pathname;
 }
 
+/**
+ * An id address is not a door of its own: the realm is entered from the lobby (sign in or guest, a character, Play).
+ * Play leaves this mark in the tab's session; an id address opened without it (a pasted link, a fresh private window)
+ * goes to the lobby instead. A reload in the same tab keeps the mark.
+ */
+const ENTRY_KEY = 'solrift-entered';
+export function markEntry(uid: string): void {
+  try {
+    sessionStorage.setItem(ENTRY_KEY, uid.toLowerCase());
+  } catch {
+    /* no storage: the id address will lead back to the lobby */
+  }
+}
+export function entryAllowed(pathname: string, where: Where = whereAmI()): boolean {
+  const uid = uidFromPath(pathname, where);
+  if (!uid) return true; // (`/play/Alice` and `?online` are the old, direct ways in, for tests and developers)
+  try {
+    return sessionStorage.getItem(ENTRY_KEY) === uid;
+  } catch {
+    return false;
+  }
+}
+
 /** The address of the online realm for a character: its id, on the game's host `/<uid>`. */
 export const realmPath = (uid: string, where: Where = whereAmI()): string => (where === 'play' ? `/${uid}` : `/play/${uid}`);
 
