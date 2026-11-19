@@ -8,7 +8,8 @@ import type { Way } from './WayDialog';
 import type { WorldKind } from '@solrift/shared';
 import { useProfile } from '../profile/store';
 import { LocalSaveStore } from '../game/storage';
-import { gamePath, isGamePath, playPath } from '../game/route';
+import { gamePath, isGamePath, lobbyUrl, newUid, realmPath, whereAmI } from '../game/route';
+import { useAuth } from '../auth/store';
 import { modeOfSave, startOptionsFor, type HomeMode } from './modes';
 
 export interface PlayChoice {
@@ -34,10 +35,11 @@ export function HomeScreen({ onPlay }: { onPlay: (choice: PlayChoice) => void })
 
   /** The character is ready: into the game. */
   const enter = async (t: PlayTarget) => {
-    const { identity, name } = useProfile.getState();
+    const { identity } = useProfile.getState();
     if (t.kind === 'multi') {
-      // The realm is its own page: `/play/<name>` joins it under the character's name.
-      location.assign(playPath(name));
+      // The realm is its own page, at the character's id (`play.solrift.io/<uid>`): a wallet character's own, a guest's made up. The name and look come from the profile.
+      const account = useAuth.getState().account;
+      location.assign(realmPath(identity === 'wallet' && account ? account.id : newUid()));
       return;
     }
     let mode = t.mode;
@@ -56,6 +58,8 @@ export function HomeScreen({ onPlay }: { onPlay: (choice: PlayChoice) => void })
   // (What PLAY's dialog chose goes to the game page through the session, so that is a plain address.)
   const toLobby = (way: Way, mode: HomeMode | null) => {
     saveLobbyChoice({ way, mode: mode ?? 'survival' });
+    // (The lobby may be on another host from this page: then what was chosen goes in the address, and the lobby hides it.)
+    if (whereAmI() === 'site') return void location.assign(lobbyUrl({ way, mode: mode ?? 'survival' }));
     location.assign(gamePath(location.search));
   };
 

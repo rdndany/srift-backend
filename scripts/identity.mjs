@@ -350,12 +350,13 @@ await pick(gp2, 'style', 2);
 await pick(gp2, 'shirt', 9);
 const wandererCode = codeOf(await picks(gp2));
 await playAs(gp2, 'warrior');
-// Play joins the realm under the chosen name: the game opens on /play/Wanderer.
-const joined = await gp2.waitForURL((u) => u.pathname === '/play/Wanderer', { timeout: 20000, waitUntil: 'commit' }).then(
+// Play joins the realm at an id of its own (not the name): the game opens on /play/<uid> (play.<site>/<uid> on the real hosts).
+const joined = await gp2.waitForURL((u) => /^\/play\/[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(u.pathname), { timeout: 20000, waitUntil: 'commit' }).then(
   () => true,
   () => false,
 );
-check(joined, `a guest joins the realm under the chosen name, at /play/Wanderer (${new URL(gp2.url()).pathname})`);
+check(joined, `a guest joins the realm at an id address, not a name (${new URL(gp2.url()).pathname})`);
+check(await until(async () => (await wp.evaluate(() => window.__solrift.others())).some((o) => o.name === 'Wanderer'), 40000), 'the id address joins under the character made in the lobby: the wallet player sees Wanderer');
 // (the same address with the test hooks switched on)
 await gp2.goto(`${url}/?online&debug&nomobs&noshadows&name=Wanderer`, { waitUntil: 'load' });
 await ready(gp2);

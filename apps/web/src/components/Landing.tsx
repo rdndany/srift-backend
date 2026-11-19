@@ -82,6 +82,9 @@ export function Landing({ onEnter }: { onEnter: (way: Way, mode: HomeMode | null
     } catch {
       /* no storage: the page just opens at the top */
     }
+    // (From the game's host the session does not reach this page, so the part comes in the address: `/?to=site-world`.)
+    const asked = new URLSearchParams(location.search).get('to');
+    if (!id && asked && /^[\w-]{1,40}$/.test(asked)) id = asked;
     if (!id) return;
     // (The key is taken once the page has scrolled: the development server runs this effect twice, and the first run is undone.)
     const t = window.setTimeout(() => {
@@ -89,6 +92,11 @@ export function Landing({ onEnter }: { onEnter: (way: Way, mode: HomeMode | null
         sessionStorage.removeItem(SCROLL_KEY);
       } catch {
         /* nothing to remove */
+      }
+      if (asked) {
+        const q = new URLSearchParams(location.search);
+        q.delete('to');
+        history.replaceState(null, '', `${location.pathname}${q.size ? `?${q}` : ''}${location.hash}`);
       }
       document.getElementById(id)?.scrollIntoView({ block: 'start' });
     }, 350);

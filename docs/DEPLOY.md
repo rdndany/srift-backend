@@ -5,8 +5,8 @@ Two names of one domain you own (here `solrift.io`):
 
 | Name | What | Where |
 |---|---|---|
-| `solrift.io` (and `www`) | the presentation page (the `/welcome` page, chosen by the host in `next.config.ts`) | Vercel, same project |
-| `play.solrift.io` | the game page | Vercel |
+| `solrift.io` (and `www`) | the website: front page, Market, World Beyond, classes | Vercel, same project |
+| `play.solrift.io` | the game: the character lobby at `/`, the online realm at `/<uid>` (the character's id) | Vercel, same project |
 | `api.solrift.io` | the game server (`https://` and `wss://`) | the droplet, behind Caddy |
 
 Both names must end in the same domain: the sign-in cookie is shared between them (`COOKIE_DOMAIN`),
@@ -66,13 +66,13 @@ server needs and sets up the service (`deploy/solrift-server.service`) and Caddy
 3. **Environment variables** (Production, and Preview if you use it):
    - `NEXT_PUBLIC_SERVER_URL` = `wss://api.solrift.io`
    - `SERVER_ORIGIN` = `https://api.solrift.io`
-4. Deploy, then **Settings, Domains**: add `play.solrift.io` **and** `solrift.io` (+ `www.solrift.io`, redirect to the bare one) and make the DNS record Vercel shows (a CNAME `play` to `cname.vercel-dns.com`).
+4. Deploy, then **Settings, Domains**: add `play.solrift.io` **and** `solrift.io` (+ `www.solrift.io`, redirect to the bare one). The host rules (which pages are on which host) are in `next.config.ts`; `NEXT_PUBLIC_SITE_HOST` (default `solrift.io`) sets the domain and make the DNS record Vercel shows (a CNAME `play` to `cname.vercel-dns.com`).
 
 Both variables are fixed at build time: change one and redeploy.
 
 ## 5. Try it
 
-Open `https://play.solrift.io`, Play, Multiplayer: the realm shows its status ("Online 0 / 120"). Sign in with a wallet, make a character, enter. A second browser
+Open `https://solrift.io`, Play (it leads to `https://play.solrift.io`), Multiplayer: the realm shows its status ("Online 0 / 120"). Sign in with a wallet, make a character, enter. A second browser
 (or a phone) sees you.
 
 ## Updating

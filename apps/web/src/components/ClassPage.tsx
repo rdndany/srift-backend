@@ -8,6 +8,7 @@ import { Blocks } from './BlockCube';
 import { CharacterPreview } from './CharacterPreview';
 import { ABILITY_GUIDE, ABILITY_KEY_LABELS, GUIDE, LEVEL_GAINS, abilityFacts, bookPrice, itemTitle, num, statRows, unlockSteps } from './classGuide';
 import { ClickSparks, Embers, Reveal, Spot, useFrontMotion } from './fx';
+import { lobbyUrl } from '../game/route';
 import { SCROLL_KEY, goMarket } from './frontNav';
 import { ART } from './homeAssets';
 import { ItemSprite } from './ItemSprite';
@@ -120,7 +121,7 @@ export function ClassPage({ id }: { id: ClassId }) {
   const play = (way: Way, mode: HomeMode | null) => {
     void import('./GameLobby').then(({ saveLobbyChoice }) => {
       saveLobbyChoice({ way, mode: mode ?? 'survival' });
-      location.assign('/game');
+      location.assign(lobbyUrl({ way, mode: mode ?? 'survival' }));
     });
   };
 

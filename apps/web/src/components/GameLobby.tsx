@@ -43,7 +43,8 @@ import { CharacterSheet } from './CharacterSheet';
 import { ClassSkills } from './ClassSkills';
 import { statLines } from './ClassPicker';
 import { ClickSparks, Embers, useFrontMotion } from './fx';
-import { FRONT_MENU, SCROLL_KEY, goMarket } from './frontNav';
+import { FRONT_MENU, SCROLL_KEY, frontUrl, goMarket } from './frontNav';
+import { HANDOFF_KEYS, siteUrl, whereAmI } from '../game/route';
 import { ART } from './homeAssets';
 import { ItemSprite } from './ItemSprite';
 import { CoinIcon } from './ShopUI';
@@ -74,6 +75,21 @@ export function saveLobbyChoice(c: LobbyChoice): void {
   }
 }
 function readLobbyChoice(): LobbyChoice {
+  try {
+    // The website is on another host, so what PLAY chose there comes in the address (`?way=multi&mode=survival`): keep it in the session, then hide it.
+    const q = new URLSearchParams(location.search);
+    if (q.has('way')) {
+      const way: Way = q.get('way') === 'multi' ? 'multi' : 'single';
+      const mode = MODES.find((m) => m.id === q.get('mode'))?.id ?? 'survival';
+      const choice: LobbyChoice = { way, mode, ...(q.get('world') === 'beyond' ? { world: 'beyond' as const } : {}) };
+      saveLobbyChoice(choice);
+      for (const k of HANDOFF_KEYS) q.delete(k);
+      history.replaceState(null, '', `${location.pathname}${q.size ? `?${q}` : ''}${location.hash}`);
+      return choice;
+    }
+  } catch {
+    /* no address to read: the session has it */
+  }
   try {
     const raw = JSON.parse(sessionStorage.getItem(CHOICE_KEY) ?? 'null');
     return { way: raw?.way === 'multi' ? 'multi' : 'single', mode: MODES.find((m) => m.id === raw?.mode)?.id ?? 'survival', ...(raw?.world === 'beyond' ? { world: 'beyond' as const } : {}) };
@@ -549,7 +565,7 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
   const label = starting ? 'One moment...' : creating ? (working ? 'Creating...' : who === 'wallet' && armed ? `Yes, create ${cleaned} for good` : 'Create') : 'Play';
   /** The one big button (and Enter): CREATE while the character is being made, PLAY once it exists. */
   const primary = () => (creating ? void create() : playNow());
-  const home = () => location.assign(`/${location.search}`);
+  const home = () => location.assign(`${siteUrl('/')}${location.search}`);
   /** A menu button of the front page: to the front page, at that part. */
   const toFront = (id: string) => {
     try {
@@ -557,6 +573,8 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
     } catch {
       /* no storage: the front page opens at the top */
     }
+    // (The front page is on another host from the game's: there the part goes in the address.)
+    if (whereAmI() === 'play') return void location.assign(frontUrl(id));
     home();
   };
 

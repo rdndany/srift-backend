@@ -7,6 +7,7 @@ import { Blocks } from './BlockCube';
 import { COPY, COUNTS, DEEDS, FAMILIES, PLACES, RARITY_LABEL, REALMS, CAVES, biomesIn, caveName, caveText, familyName, placeText, rarityCounts } from './beyondGuide';
 import { SHOTS, shotUrl, type Shot } from './beyondShots';
 import { ClickSparks, Embers, Reveal, Spot, useFrontMotion } from './fx';
+import { lobbyUrl } from '../game/route';
 import { SCROLL_KEY, goMarket } from './frontNav';
 import { ART } from './homeAssets';
 import { ItemSprite } from './ItemSprite';
@@ -176,7 +177,7 @@ export function BeyondPage() {
   const play = () => {
     void import('./GameLobby').then(({ saveLobbyChoice }) => {
       saveLobbyChoice({ way: 'single', mode: 'survival', world: 'beyond' });
-      location.assign('/game');
+      location.assign(lobbyUrl({ way: 'single', mode: 'survival', world: 'beyond' }));
     });
   };
 

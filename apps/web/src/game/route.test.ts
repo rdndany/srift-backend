@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { gamePath, isGamePath, isPlayPath, nameFromPath, paramsFor, playPath, prettyAddress, titleAddress } from './route';
+import { gamePath, isGamePath, isPlayPath, isUid, lobbyUrl, nameFromPath, newUid, paramsFor, playPath, prettyAddress, realmPath, siteUrl, titleAddress, uidFromPath, whereIs } from './route';
 
 const at = (pathname: string, search = '') => ({ pathname, search });
 
@@ -67,5 +67,69 @@ describe('friendly addresses', () => {
     expect(isGamePath('/')).toBe(false);
     expect(gamePath('')).toBe('/game');
     expect(gamePath('?home&debug')).toBe('/game?home&debug');
+  });
+});
+
+describe('the website and the game on their own hosts', () => {
+  const uid = '3f2b8c1e-5a47-4d1b-9c0e-7a1d2e3f4a5b';
+
+  it('tells the hosts apart', () => {
+    expect(whereIs('solrift.io', 'solrift.io')).toBe('site');
+    expect(whereIs('www.solrift.io', 'solrift.io')).toBe('site');
+    expect(whereIs('play.solrift.io', 'solrift.io')).toBe('play');
+    expect(whereIs('localhost', 'solrift.io')).toBe('local');
+    expect(whereIs('app-git-main.vercel.app', 'solrift.io')).toBe('local');
+    expect(whereIs('evil-solrift.io', 'solrift.io')).toBe('local');
+  });
+
+  it('makes ids that are ids', () => {
+    expect(isUid(uid)).toBe(true);
+    expect(isUid(newUid())).toBe(true);
+    expect(isUid('rdNeu')).toBe(false);
+    expect(isUid('')).toBe(false);
+    expect(newUid()).not.toBe(newUid());
+  });
+
+  it('puts the realm at /<uid> on the game host and /play/<uid> elsewhere', () => {
+    expect(realmPath(uid, 'play')).toBe(`/${uid}`);
+    expect(realmPath(uid, 'local')).toBe(`/play/${uid}`);
+    expect(uidFromPath(`/${uid}`, 'play')).toBe(uid);
+    expect(uidFromPath(`/${uid}/`, 'play')).toBe(uid);
+    expect(uidFromPath(`/play/${uid}`, 'play')).toBe(uid);
+    expect(uidFromPath(`/play/${uid}`, 'local')).toBe(uid);
+    expect(uidFromPath(`/${uid}`, 'local')).toBeNull();
+    expect(uidFromPath('/market', 'play')).toBeNull();
+    expect(uidFromPath('/play/rdNeu', 'play')).toBeNull();
+  });
+
+  it('counts the id address as the online realm, and the id is not a name', () => {
+    expect(isPlayPath(`/${uid}`, 'play')).toBe(true);
+    expect(isPlayPath(`/${uid}`, 'local')).toBe(false);
+    expect(isPlayPath('/market', 'play')).toBe(false);
+    expect(nameFromPath(`/play/${uid}`)).toBeNull();
+    const p = paramsFor(at(`/${uid}`), 'play');
+    expect(p.has('online')).toBe(true);
+    expect(p.has('name')).toBe(false);
+    expect(paramsFor(at(`/${uid}`), 'local').has('online')).toBe(false);
+    expect(prettyAddress(at(`/${uid}`, '?online'), 'play')).toBeNull();
+  });
+
+  it('has the lobby at the root of the game host', () => {
+    expect(isGamePath('/', 'play')).toBe(true);
+    expect(isGamePath('/', 'site')).toBe(false);
+    expect(isGamePath('/game', 'local')).toBe(true);
+    expect(gamePath('', 'play')).toBe('/');
+    expect(gamePath('?home', 'play')).toBe('/?home');
+    expect(gamePath('', 'local')).toBe('/game');
+  });
+
+  it('links between the hosts with absolute addresses, and stays put locally', () => {
+    expect(siteUrl('/market', 'play', 'solrift.io')).toBe('https://solrift.io/market');
+    expect(siteUrl('/market', 'local')).toBe('/market');
+    expect(lobbyUrl({ way: 'multi', mode: 'survival' }, 'site', 'solrift.io')).toBe('https://play.solrift.io/?way=multi&mode=survival');
+    expect(lobbyUrl({}, 'site', 'solrift.io')).toBe('https://play.solrift.io/');
+    expect(lobbyUrl({ way: 'multi' }, 'local')).toBe('/game');
+    expect(titleAddress(`/${uid}`, 'play', 'solrift.io')).toBe('https://solrift.io/');
+    expect(titleAddress('/', 'play', 'solrift.io')).toBe('https://solrift.io/');
   });
 });

@@ -26,6 +26,7 @@ import { AccountPanel } from './AccountPanel';
 import { Blocks } from './BlockCube';
 import { ItemPicture } from './CharacterSheet';
 import { ClickSparks, Embers, Reveal, useFrontMotion } from './fx';
+import { lobbyUrl } from '../game/route';
 import { SCROLL_KEY } from './frontNav';
 import { ART } from './homeAssets';
 import { ItemSprite } from './ItemSprite';
@@ -200,7 +201,7 @@ export function MarketPage() {
   const play = () => {
     void import('./GameLobby').then(({ saveLobbyChoice }) => {
       saveLobbyChoice({ way: 'multi', mode: 'survival' });
-      location.assign('/game');
+      location.assign(lobbyUrl({ way: 'multi', mode: 'survival' }));
     });
   };
 

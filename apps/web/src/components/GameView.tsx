@@ -5,7 +5,7 @@ import { AccountPanel } from './AccountPanel';
 import { CloudPanel } from './CloudPanel';
 import { GameUI } from './GameUI';
 import { HomeScreen, type PlayChoice } from './HomeScreen';
-import { isPlayPath } from '../game/route';
+import { HANDOFF_KEYS, isPlayPath } from '../game/route';
 import { useProfile } from '../profile/store';
 import { useUi } from '../ui/store';
 import { WorldTools } from './WorldTools';
@@ -73,6 +73,8 @@ export default function GameView() {
   const name = useProfile((s) => s.name);
   useEffect(() => {
     const params = new URLSearchParams(location.search);
+    // (What the website hands to the lobby, `?way=multi` and the like, is not a game parameter.)
+    for (const k of HANDOFF_KEYS) params.delete(k);
     setStart(!isPlayPath(location.pathname) && (params.size === 0 || params.has('home')) ? 'home' : 'direct');
   }, []);
 

@@ -37,7 +37,7 @@ import { bumpUi, showZone, useUi, type CodexView } from '../ui/store';
 import { BeyondClient } from './beyondClient';
 import { CampfireFood } from './campfireFood';
 import { Chat } from './chat';
-import { paramsFor, prettyAddress } from './route';
+import { isPlayPath, newUid, paramsFor, prettyAddress, realmPath, uidFromPath } from './route';
 import type { ClientSession } from './clientSession';
 import { GameAudio } from './audio';
 import { buildAtlas } from './atlas';
@@ -263,8 +263,12 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     const serverUrl = params.get('server') ?? process.env.NEXT_PUBLIC_SERVER_URL ?? `ws://${location.hostname}:8787`;
     const saved = localStorage.getItem('solrift-name');
     hydrateProfile();
-    const name = params.get('name') ?? saved ?? `player${Math.floor(Math.random() * 900 + 100)}`;
+    // The name: the address's (`?name=`, `/play/Alice`), else the character the lobby made (the profile), else the last one used here.
+    const name = params.get('name') || useProfile.getState().name || saved || `player${Math.floor(Math.random() * 900 + 100)}`;
     localStorage.setItem('solrift-name', name);
+    if (useProfile.getState().identity !== 'wallet') useProfile.getState().setName(name);
+    // The realm's address is the character's id (`play.solrift.io/<uid>`), not a name: a name in the address becomes one.
+    if (isPlayPath(location.pathname) && !uidFromPath(location.pathname)) history.replaceState(null, '', `${realmPath(newUid())}${location.search}`);
     statusEl.textContent = 'Connecting to the server...';
     setLoading('Connecting to the server...', 8);
     try {
