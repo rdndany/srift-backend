@@ -1,4 +1,5 @@
 import { DEFAULT_SERVER_PORT } from '@solrift/shared';
+import { parseIdList } from './admin';
 import { SqliteRepo } from './db';
 import { DEV_ORIGINS, createGameServer } from './server';
 
@@ -21,6 +22,9 @@ const server = createGameServer({
   room: {
     kind: WORLD_KIND,
     cheats: process.env.CHEATS === '1',
+    // Who may type /admin on: the wallets (and, optionally, single characters by id) the owner lists. Nobody by default.
+    admins: { wallets: parseIdList(process.env.ADMIN_WALLETS), accounts: parseIdList(process.env.ADMIN_ACCOUNTS) },
+    onAdmin: (e) => console.warn(`[solrift] ADMIN ${e.name} (${e.account ?? 'no account'}): ${e.action}${e.detail ? ` ${e.detail}` : ''}`),
     naturalSpawning: process.env.NO_MOBS !== '1',
     maxPlayers: process.env.MAX_PLAYERS ? Number(process.env.MAX_PLAYERS) : undefined,
     onViolation: (v) => console.warn(`[solrift] ${v.kicked ? 'KICK' : 'strike'} ${v.name}: ${v.reason} (score ${v.score.toFixed(1)})`),

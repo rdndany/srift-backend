@@ -1,0 +1,18 @@
+import { mkdirSync } from 'node:fs';
+import { launchBrowser } from './browser.mjs';
+mkdirSync('screenshots/craft-table', { recursive: true });
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const browser = await launchBrowser();
+const page = await (await browser.newContext({ viewport: { width: 1280, height: 800 } })).newPage();
+await page.goto('http://localhost:3000/game?seed=1337&debug&nomobs&class=warrior', { waitUntil: 'load' });
+await page.waitForFunction(() => window.__solrift?.isReady?.(), undefined, { timeout: 180000 });
+await page.evaluate(() => { document.getElementById('overlay')?.style && (document.getElementById('overlay').style.display = 'none'); window.__solrift.forceLock(); });
+await page.evaluate(() => { const s = window.__solrift; s.give(10, 16); s.give(256, 8); s.give(1, 20); });
+await page.evaluate(() => window.__solrift.openMenu('crafting'));
+await sleep(900);
+await page.mouse.move(100, 700);
+await page.screenshot({ path: 'screenshots/craft-table/table.png' });
+await page.locator('.cb-search').nth(0).fill('pickaxe').catch(() => {});
+await sleep(300);
+await page.screenshot({ path: 'screenshots/craft-table/search.png' });
+await browser.close();

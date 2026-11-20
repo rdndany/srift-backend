@@ -27,6 +27,21 @@ import { AXIS_X, AXIS_Y, AXIS_Z, DEG, REST_DEFAULT, type HandFrame, type HeldKit
 
 const Q = new THREE.Quaternion();
 
+/**
+ * `clone()` leaves out the render hooks, and those are what make a torch's flame flicker. Give every part of the copy the hooks
+ * of the same part of the original (the two trees are alike), so the off hand's copy animates as the one in the main hand does.
+ */
+function carryRenderHooks(from: THREE.Object3D, to: THREE.Object3D): void {
+  const a: THREE.Object3D[] = [];
+  const b: THREE.Object3D[] = [];
+  from.traverse((o) => a.push(o));
+  to.traverse((o) => b.push(o));
+  for (let i = 0; i < a.length && i < b.length; i++) {
+    if (a[i].onBeforeRender !== THREE.Object3D.prototype.onBeforeRender) b[i].onBeforeRender = a[i].onBeforeRender;
+    if (a[i].onAfterRender !== THREE.Object3D.prototype.onAfterRender) b[i].onAfterRender = a[i].onAfterRender;
+  }
+}
+
 export class HeldItem {
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(65, 16 / 9, 0.02, 10);
@@ -352,6 +367,7 @@ export class HeldItem {
     this.offView = view;
     // A clone, so the same shield can also be the one in the main hand; geometry and materials are shared.
     this.offObj = view.object.clone();
+    carryRenderHooks(view.object, this.offObj);
     if (!getItem(id).shield) {
       // Held up in the left hand: smaller than in the right, and mirrored so a blade leans toward the middle.
       const o = view.off ?? { scale: 0.32, lean: -0.2 };

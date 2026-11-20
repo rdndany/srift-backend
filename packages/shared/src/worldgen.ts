@@ -137,7 +137,7 @@ export class WorldGenerator {
   /** Villages: where they are and what they look like. */
   readonly villages: VillageGenerator;
   /** Which kind of world this makes ('square' is the flat platform of squareWorld.ts, 'adventure' the quest world of adventure.ts). */
-  readonly kind: 'overworld' | 'square' | 'adventure' | 'beyond' = 'overworld';
+  readonly kind: 'overworld' | 'square' | 'adventure' | 'beyond' | 'showcase' = 'overworld';
 
   /** The land of the world. The World Beyond makes its own (the constructor asks, before anything else is set up). */
   protected createTerrain(seed: number): TerrainSource {

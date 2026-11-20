@@ -31,8 +31,10 @@
 @import './styles/coins.css';             /* the purse and the coin counts */
 @import './styles/frame-window.css';      /* the bronze window of the inventory and the crafting table */
 @import './styles/frame-tabs.css';        /* its tabs, the character's numbers, the hotbar under the window */
+@import './styles/frame-menus.css';       /* furnace, chest, trades, enchanting table, anvil, grindstone in the same window */
 @import './styles/frame-hud.css';         /* the HUD in the same frame: hotbar, bars, character frame, minimap, quests, party */
-@import './styles/frame-recipe-book.css'; /* the recipe book, as the other half of the crafting window */
+@import './styles/frame-recipe-book.css'; /* the creative palette's tabs, search and list (the same pieces the recipe book once had) */
+@import './styles/crafting-book.css';      /* the Crafting tab: the grid, what a recipe needs, and the recipe book as a column */
 @import './styles/frame-dialogs.css';     /* party, quest log, quest dialog and shop as the same window */
 @import './styles/frame-quest-log.css';   /* the quest log made over: chapters, plates, the detail page */
 @import './styles/frame-quest-wells.css'; /* quest log and party with the studded frame and sunken wells */

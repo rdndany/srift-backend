@@ -6,8 +6,9 @@ import { CLASSES, offhandModifier, type ClassId } from './classes';
 import { formatEmberTime, EMBER_CAST, EMBER_COOLDOWN } from './emberstone';
 import { gearSuffix, optionStat, rarityDef, resourceNameOf, rolledStats, statLine } from './gear';
 import { forgeHint, jewelDef, jewelKind } from './jewels';
-import { BOTTLE_XP_MAX, BOTTLE_XP_MIN, I, bagSlotsOf, getItem, isUndroppable, mountOfItem, skillBookAbility, type ItemKind } from './items';
+import { BOTTLE_XP_MAX, BOTTLE_XP_MIN, I, PEARL_TRIP_DAMAGE, bagSlotsOf, getItem, isUndroppable, mountOfItem, skillBookAbility, type ItemKind } from './items';
 import { MOUNT_CAST, mountDef, mountSpeedText } from './mounts';
+import { abilityCost, castCost, scaled } from './tuning';
 
 /**
  * What the hover tooltip of an item says, as plain data (the web client colours and draws it): the name, what
@@ -83,6 +84,41 @@ function offhandBonusLines(id: number): string[] {
   if (m.resource) out.push(`+${num(m.resource)} Class Resource`);
   if (m.resourceRegen) out.push(`+${num(m.resourceRegen)} Resource per second`);
   return out;
+}
+
+/**
+ * What an item with a use of its own does, in words: the use itself in green ("Use: ..."), then how, in grey. The ones with
+ * a tooltip of their own above (the map, the compass, the Emberstone, a fishing rod, a bottle o' enchanting, horns, bags,
+ * jewels, skill books) are not here. Anything that is only an ingredient or that is eaten, worn or placed says so elsewhere.
+ */
+function useHelp(id: number, item: ReturnType<typeof getItem>): TipLine[] {
+  const use = (text: string, ...more: string[]): TipLine[] => [{ text: `Use: ${text}`, color: 'good' }, ...more.map((m): TipLine => ({ text: m, color: 'dim' }))];
+  switch (item.use) {
+    case 'pearl':
+      return use('throw it, and you are carried to where it lands', `The trip costs ${PEARL_TRIP_DAMAGE} health (nothing in creative)`, 'It does nothing if there is no room to stand where it lands', 'Right-click to throw it');
+    case 'bucket':
+      if (id === I.WATER_BUCKET) return use('pour out water, which spreads out from where you put it', 'Right-click a block to pour; right-click a lit campfire to put it out');
+      if (id === I.LAVA_BUCKET) return use('pour out lava, which spreads out from where you put it', 'Right-click a block to pour; stay well clear: it burns');
+      return use('scoop up the water or lava you point at', 'Right-click the source block of a pool to fill it');
+    case 'vehicle':
+      return id === I.BOAT
+        ? use('set it on the water, then right-click it to get in and ride')
+        : use('set it on a rail, then right-click it to get in and ride');
+    case 'armor_stand':
+      return use('set it down, then right-click it with a piece of armor to dress it', 'Right-click with an empty hand to take a piece back; sneak and right-click to change its pose');
+    case 'flint':
+      return use('right-click a block to light a fire on it', 'It also lights a campfire, and sets TNT off', 'Wears out a little with every use');
+    case 'bone_meal':
+      return use('right-click a crop or a plant to make it grow at once');
+    case 'bed':
+      return use('place it, then right-click it', 'It sets where you come back after a death, and where the Emberstone takes you', 'You can only sleep at night or in a thunderstorm: sleeping skips it');
+    case 'door':
+      return use('place it, then right-click it to open and close it');
+    default:
+  }
+  if (item.shears) return use('right-click a sheep to shear its wool', 'Cuts leaves, wool and cobwebs quickly, and they drop whole');
+  if (id === I.ARROW) return [{ text: 'Ammunition for a bow or a crossbow', color: 'dim' }, { text: 'Keep it in your inventory: every shot uses one', color: 'dim' }];
+  return [];
 }
 
 /** The name an item shows: the one an anvil gave it, or for an enchanted book what it holds ("Book of Sharpness"). */
@@ -166,7 +202,7 @@ export function tooltipLines(stack: ItemStack | null, viewerClass?: ClassId | nu
     lines.push({ text: 'Hold the right mouse button to use it', color: 'good' });
   }
   if (item.tool) {
-    lines.push({ text: `+${num(item.tool.damage)} Attack Damage`, color: 'stat' });
+    lines.push({ text: `+${num(scaled(item.tool.damage))} Attack Damage`, color: 'stat' });
     if (item.tool.kind !== 'sword') lines.push({ text: `${num(item.tool.speed)} Mining Speed`, color: 'stat' });
     lines.push({ text: `${title(item.tool.material)} Tier`, color: 'dim' });
   }
@@ -184,19 +220,27 @@ export function tooltipLines(stack: ItemStack | null, viewerClass?: ClassId | nu
     lines.push({ text: `Class: ${cls.name}`, color: wrongClass ? 'warn' : 'stat' });
     lines.push({ text: `Requires level ${ability.unlockLevel}`, color: 'stat' });
     lines.push({ text: ability.description, color: 'dim' });
-    lines.push({ text: `${ability.cost} ${cls.resource.name.toLowerCase()} - ${num(ability.cooldown)}s cooldown`, color: 'dim' });
+    lines.push({ text: `${abilityCost(ability.cost)} ${cls.resource.name.toLowerCase()} - ${num(ability.cooldown)}s cooldown`, color: 'dim' });
     lines.push({ text: 'Right-click to learn this ability', color: 'good' });
   }
   if (item.shield) lines.push({ text: 'Blocks hits from the front', color: 'stat' });
   if (item.weapon) {
-    lines.push({ text: `${num(item.weapon.damage)} ${title(item.weapon.kind)} Damage`, color: 'stat' });
-    if (item.weapon.cost > 0) lines.push({ text: `Costs ${num(item.weapon.cost)} per cast`, color: 'dim' });
+    lines.push({ text: `${num(scaled(item.weapon.damage))} ${title(item.weapon.kind)} Damage`, color: 'stat' });
+    if (item.weapon.cost > 0) lines.push({ text: `Costs ${num(viewerClass ? castCost(item.weapon.cost) : item.weapon.cost)} per cast`, color: 'dim' });
   }
   if (item.offhand && !item.shield) {
     lines.push({ text: 'Held in the off hand', color: 'dim' });
     for (const t of offhandBonusLines(stack.id)) lines.push({ text: t, color: 'good' });
   }
-  if (item.use === 'bow') lines.push({ text: 'Hold to draw, release to fire', color: 'dim' });
+  if (item.use === 'bow') {
+    lines.push({ text: 'Hold to draw, release to fire: a longer draw hits harder and flies farther', color: 'dim' });
+    lines.push({ text: 'Uses one arrow from your inventory for every shot', color: 'dim' });
+  }
+  if (item.use === 'crossbow') {
+    lines.push({ text: 'Hold to wind it all the way: it shoots when it is wound', color: 'dim' });
+    lines.push({ text: 'Uses one arrow from your inventory for every shot', color: 'dim' });
+  }
+  for (const help of useHelp(stack.id, item)) lines.push(help);
   if (item.use === 'fishing_rod') {
     lines.push({ text: 'Right-click to cast onto the water', color: 'good' });
     lines.push({ text: 'Right-click again when the float dips to reel in what bit', color: 'dim' });

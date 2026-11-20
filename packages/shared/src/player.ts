@@ -50,7 +50,7 @@ import { BAG_SLOTS, bagInventory, strandedSlots } from './bags';
 import { organizeInventory } from './organize';
 import { formatEmberTime, EMBER_CAST, EMBER_COOLDOWN, EMBER_MOVE_LIMIT } from './emberstone';import { MOUNTS, MOUNT_BITE, MOUNT_BLOCK_TEXT, MOUNT_HOWL, MOUNT_CAST, MOUNT_MOVE_LIMIT, MOUNT_STEP_HEIGHT, MOUNTED_EYE, RIDE_CHECK, RIDE_GRACE, mountBlocker, mountDef, rideEnclosed, mountSpeedText, type MountId, type MountView } from './mounts';
 import { Container, HOTBAR_SLOTS, PLAYER_SLOTS, cloneStack, makeStack, type ItemStack } from './inventory';
-import { I, bagSlotsOf, bedItemColor, blockDrops, breakTime, canHarvest, dyeColor, getItem, harvestHint, holdsInOffhand, isUndroppable, mountOfItem, outfitItems, silkKeeps, skillBookAbility, usedOnBlock, type ItemDef, type ItemUse, type WeaponDef } from './items';
+import { I, PEARL_TRIP_DAMAGE, bagSlotsOf, bedItemColor, blockDrops, breakTime, canHarvest, dyeColor, getItem, harvestHint, holdsInOffhand, isUndroppable, mountOfItem, outfitItems, silkKeeps, skillBookAbility, usedOnBlock, type ItemDef, type ItemUse, type WeaponDef } from './items';
 import { AnvilMenu, ChestMenu, CraftingMenu, EnchantMenu, CreativeMenu, FurnaceMenu, GrindstoneMenu, TradeMenu, type Menu } from './menu';
 import { tooltipName } from './tooltip';
 import { ARMOR_STAND_POSES, ARROW_GRAVITY, WOOL_REGROW, arrowSpeed, rayAabb, type Mob, type MobKind, type MobManager } from './mobs';
@@ -65,7 +65,7 @@ export const BASH_ANIM = 0.5;
 import { canStayAt, growColumn, growFruit, growVine, isTillable, isYoungCrop, lookDir, placementFor, placesUpper, ripeCrop, stemFruit } from './plants';
 import { seatDrop } from './shapes';
 import { FLUID_KIND, FLUID_WATER, isFluidSource } from './fluids';
-import { IS_LIQUID, IS_SOLID, cakeId, cakeInfo } from './blocks';
+import { IS_LIQUID, IS_LOG, IS_SOLID, cakeId, cakeInfo } from './blocks';
 import { isRail, railPlaced } from './rails';
 import { type Rider, type Vehicle, type VehicleKind } from './vehicles';
 import { raycast, type RayHit } from './raycast';
@@ -88,6 +88,8 @@ import { creativeGear } from './creative';
 import { canRollGear, cloneGear, gearKey, gearModifiers } from './gear';
 import { jewelKind, useJewel } from './jewels';
 import { CLASSES, offhandModifier, rollDamage, type ClassId, type DamageKind } from './classes';
+import { POINTS_PER_LEVEL, type AttrKey } from './statPoints';
+import { TUNING, castCost } from './tuning';
 
 /** Blocks per second under which a player counts as standing still (the speed dies away within a fifth of a second of letting go of the keys). */
 const STILL_SPEED = 0.3;
@@ -109,7 +111,7 @@ export const STEP = 1 / 60;
 /** Chance that one use of an anvil wears it down a step. */
 export const ANVIL_WEAR_CHANCE = 0.12;
 /** Points of damage an ender pearl's trip costs. */
-export const PEARL_DAMAGE = 5;
+export const PEARL_DAMAGE = PEARL_TRIP_DAMAGE;
 const EAT_TIME = 1.4;
 const BOW_FULL_DRAW = 1.0;
 /** A crossbow is drawn fully or not at all, and takes this long to. */
@@ -647,6 +649,18 @@ export class Player implements EffectOwner {
         this.emit({ t: 'inv' });
         return;
       }
+      case 'destroyCursor': {
+        // The trash of an open screen: what is on the cursor is destroyed (the Emberstone and the map are kept).
+        const m = this.menu;
+        const s = m?.cursor;
+        if (!m || !s) return;
+        if (this.keepsItem(s.id)) return;
+        const n = c.all ? s.count : 1;
+        s.count -= n;
+        if (s.count <= 0) m.cursor = null;
+        this.emit({ t: 'inv' });
+        return;
+      }
       case 'quest':
         this.questCommand(c);
         return;
@@ -665,6 +679,12 @@ export class Player implements EffectOwner {
         this.realm.parties.sync();
         return;
       }
+      case 'stat':
+        this.spendStatPoints(c.stat, c.n);
+        return;
+      case 'statReset':
+        this.resetStatPoints();
+        return;
       default:
     }
     // Everything else is something a player does while in control (and a spectator only watches).
@@ -1105,6 +1125,8 @@ export class Player implements EffectOwner {
       this.realm.emitNear(x, y, z, { t: 'fire', kind: 'hiss', vol: 0.5 });
     }
     this.realm.settleAround(x, y, z, this.mode === 'survival');
+    // The last log of a tree takes its leaves with it.
+    if (IS_LOG[id]) this.realm.treeCut(x, y, z, this.mode === 'survival');
     this.questEvent({ t: 'mine', block: id });
   }
 
@@ -1820,6 +1842,15 @@ export class Player implements EffectOwner {
       }
     }
 
+    // The off hand gets the click when the main hand has no use for it: a torch set down from the off hand, as in the original.
+    if (this.target && f.right && this.placeCooldown <= 0 && !this.mainHandOwnsUse(item) && this.offhandPlaceable()) {
+      this.placeCooldown = 0.22;
+      if (this.useOffhandOn(this.target)) {
+        this.eatTimer = 0;
+        return;
+      }
+    }
+
     // ---- eating ----
     // A poisonous potato can be eaten on a full stomach. Ordinary food cannot, even when it can make you sick.
     if (!plantSpot && item?.food && f.right && this.mode === 'survival' && (item.food.always || this.vitals.canEat())) {
@@ -2290,6 +2321,25 @@ export class Player implements EffectOwner {
     this.announceClassLevel(cls.raiseLevel(this.xp.level), announce);
   }
 
+  /** Spend stat points (the server's say alone: the client only asks). Health follows at once, a deeper pool stays as full as it was. */
+  private spendStatPoints(stat: AttrKey, n: number): void {
+    const cls = this.cls;
+    if (!cls || this.spectating || this.vitals.dead) return;
+    const full = cls.resource >= cls.stats.maxResource - 1e-6;
+    if (cls.spendPoints(stat, n) <= 0) return;
+    if (full) cls.resource = cls.stats.maxResource;
+    this.applyClassVitals(false);
+  }
+
+  /** Take back every stat point, to spend them again. */
+  private resetStatPoints(): void {
+    const cls = this.cls;
+    if (!cls || this.spectating || this.vitals.dead) return;
+    if (cls.resetPoints() <= 0) return;
+    this.applyClassVitals(false);
+    this.emit({ t: 'toast', text: `${cls.freePoints} stat points ready to spend again` });
+  }
+
   private announceClassLevel(gained: { levels: number }, announce: boolean): void {
     const cls = this.cls;
     if (!cls || gained.levels <= 0) return;
@@ -2304,7 +2354,7 @@ export class Player implements EffectOwner {
       const def = id ? ABILITY_BY_ID.get(id) : undefined;
       if (def && def.classId === cls.classId && !cls.unlocked.has(def.id) && def.unlockLevel <= cls.level && def.unlockLevel > cls.level - gained.levels) readable.push(def.name);
     }
-    this.emit({ t: 'toast', text: readable.length ? `You can now learn ${readable.join(', ')}: right-click the skill book` : `${CLASSES[cls.classId].name} grows stronger` });
+    this.emit({ t: 'toast', text: readable.length ? `You can now learn ${readable.join(', ')}: right-click the skill book` : `${CLASSES[cls.classId].name} grows stronger: ${gained.levels * POINTS_PER_LEVEL} stat points to spend` });
   }
 
   /**
@@ -2619,7 +2669,8 @@ export class Player implements EffectOwner {
       x: mob.body.x,
       y: mob.body.y + (mob.body.height ?? 1.8) + 0.25,
       z: mob.body.z,
-      amount: Math.round(amount * 10) / 10,
+      // The number is what the mob lost, in the game's own units (see tuning.ts): whole numbers once they are big.
+      amount: TUNING.damageScale > 1 ? Math.round(amount * TUNING.damageScale) : Math.round(amount * 10) / 10,
       ...(crit ? { crit: true } : {}),
       ...(how.arrow ? { arrow: true } : {}),
       ...(how.head ? { head: true } : {}),
@@ -3013,7 +3064,7 @@ export class Player implements EffectOwner {
     const eye = this.eye();
     if (this.mode === 'survival') {
       if (cls) {
-        if (!cls.spend(weapon.cost)) {
+        if (!cls.spend(castCost(weapon.cost))) {
           this.castCooldown = 0.5;
           this.emit({ t: 'toast', text: `Not enough ${CLASSES[cls.classId].resource.name.toLowerCase()}` });
           return;
@@ -3048,6 +3099,8 @@ export class Player implements EffectOwner {
       maxHealth: this.vitals.maxHealth,
       speedMul: cls.stats.moveSpeed,
       abilities: abilitiesOf(cls.classId).map((a) => ({ id: a.id, cd: Math.round(cls.cooldownLeft(a.id) * 10) / 10, unlocked: cls.unlocked.has(a.id) })),
+      pts: [...cls.points] as [number, number, number, number],
+      free: cls.freePoints,
       guard: Math.round(cls.reductionLeft * 10) / 10,
       shield: Math.round(cls.absorbAmount * 10) / 10,
       immune: Math.round(cls.immuneLeft * 10) / 10,
@@ -3088,6 +3141,38 @@ export class Player implements EffectOwner {
     if (item.armor || (item.use !== null && TAKES_THE_BUTTON.has(item.use))) return true;
     if (item.use === 'bow' && (this.mode === 'creative' || this.inventory.countOf(I.ARROW) > 0)) return true;
     return !!this.target && usedOnBlock(item);
+  }
+
+  /** Everything the main hand does with the use button, shield, horn, vehicle and spell included. What is left over goes to the off hand. */
+  private mainHandOwnsUse(item: ItemDef | null): boolean {
+    if (!item) return false;
+    return this.mainHandBusy(item) || item.shield || item.use === 'horn' || item.use === 'vehicle' || item.weapon?.kind === 'spell';
+  }
+
+  /** A stack of blocks in the off hand that a click can set down. */
+  private offhandPlaceable(): boolean {
+    const off = this.offhand.get(0);
+    return !!off && getItem(off.id).block != null;
+  }
+
+  /** Set down the block from the off hand. The stack trades places with the hand's slot for the placing, so every rule (reach, cost, sound, mode) is the hand's own, then it goes back. */
+  private useOffhandOn(t: Parameters<Player['useHeldOn']>[0]): boolean {
+    const off = this.offhand.get(0);
+    if (!off) return false;
+    const slot = this.selected;
+    const hand = this.inventory.get(slot);
+    this.inventory.set(slot, off);
+    this.offhand.set(0, null);
+    let placed = false;
+    try {
+      placed = this.useHeldOn(t);
+    } finally {
+      const left = this.inventory.get(slot);
+      this.offhand.set(0, left);
+      this.inventory.set(slot, hand);
+    }
+    if (placed) this.emit({ t: 'inv' });
+    return placed;
   }
 
   lowerShield(): void {
@@ -3132,12 +3217,12 @@ export class Player implements EffectOwner {
     return true;
   }
 
-  /** Swap the hand with the off hand. The off hand only takes a shield, an orb, a dagger or a map, so any other tool in hand stays put. */
+  /** Swap the hand with the off hand. The off hand only takes a shield, an orb, a dagger, a map or torches, so any other tool in hand stays put. */
   swapHands(): void {
     const held = this.held;
     const off = this.offhand.get(0);
     if (held && !holdsInOffhand(held.id)) {
-      this.emit({ t: 'toast', text: 'the off hand only holds a shield, an orb, a dagger or a map' });
+      this.emit({ t: 'toast', text: 'the off hand only holds a shield, an orb, a dagger, a map or torches' });
       return;
     }
     if (!held && !off) return;
@@ -3155,11 +3240,11 @@ export class Player implements EffectOwner {
     else if (s) s.count = 1;
   }
 
-  /** Keep only a single shield, orb, dagger or map in the off hand (a hostile or old save). */
+  /** Keep only what the off hand takes, one of each but torches, which stack (a hostile or old save). */
   private sanitizeOffhand(): void {
     const s = this.offhand.get(0);
     if (s && !holdsInOffhand(s.id)) this.offhand.set(0, null);
-    else if (s) s.count = 1;
+    else if (s) s.count = Math.max(1, Math.min(s.count, getItem(s.id).maxStack));
   }
 
   /** Only bags can be worn in a bag slot, one each (a hand-edited save could say otherwise). */
@@ -3266,6 +3351,14 @@ export class Player implements EffectOwner {
   /** Absorb experience (an orb reached you, or a cheat). Plays the pickup sound and announces new levels. */
   addXp(amount: number, orb = false): void {
     const gained = this.xp.add(this.mode === 'survival' ? this.mend(amount) : amount);
+    // At the level cap the surplus fills bottles o' enchanting, which are yours to keep, use or trade.
+    if (this.mode === 'survival') {
+      const bottles = this.xp.takeBottles();
+      if (bottles > 0) {
+        this.collectOrDrop(makeStack(I.EXPERIENCE_BOTTLE, bottles));
+        this.emit({ t: 'toast', text: bottles === 1 ? "Your surplus experience fills a Bottle o' Enchanting" : `Your surplus experience fills ${bottles} Bottles o' Enchanting` });
+      }
+    }
     // (An orb makes the sound only: a kill drops several, and a number over each would be noise.)
     this.emit(orb ? { t: 'xp' } : { t: 'xp', gain: Math.floor(amount) });
     if (gained > 0) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { B, BAG_SLOTS, bagId, bagInventory, bagRoom, bagSlotsOf, Container, HOTBAR_SLOTS, I, makeStack, organizeInventory, parseSessionMessage, PLAYER_SLOTS, toolId } from './index';
+import { B, BAG_SLOTS, bagId, bagInventory, bagRoom, Container, HOTBAR_SLOTS, I, makeStack, organizeInventory, parseSessionMessage, PLAYER_SLOTS, toolId } from './index';
 
 const SWORD = toolId('sword', 'iron');
 const PICK = toolId('pickaxe', 'iron');
@@ -44,22 +44,51 @@ describe('organize', () => {
     expect(inv.get(8)).toMatchObject({ id: I.APPLE, count: 3 });
   });
 
-  it('does not touch the worn bags or what is in them', () => {
+  it('treats the backpack and the bags as one store: a log in each becomes two logs', () => {
     const { bags, inv } = worn(0, 1);
-    inv.set(bagRoom(0), makeStack(I.GOLD_INGOT, 10));
-    inv.set(bagRoom(0) + 3, makeStack(I.GOLD_INGOT, 20));
-    inv.set(bagRoom(1) + 5, makeStack(I.APPLE, 2));
-    inv.set(20, makeStack(I.APPLE, 3));
-    inv.set(10, makeStack(I.APPLE, 4));
-    const bagSlots = [...Array(2).keys()].flatMap((b) => Array.from({ length: bagSlotsOf(bags.get(b)!.id) }, (_, k) => bagRoom(b) + k));
-    const before = bagSlots.map((i) => JSON.stringify(inv.get(i)));
-    organizeInventory(inv);
-    expect(bagSlots.map((i) => JSON.stringify(inv.get(i)))).toEqual(before);
+    inv.set(12, makeStack(B.LOG, 1));
+    inv.set(bagRoom(1) + 3, makeStack(B.LOG, 1));
+    expect(organizeInventory(inv)).toBe(true);
+    expect(inv.get(HOTBAR_SLOTS)).toMatchObject({ id: B.LOG, count: 2 });
+    expect(inv.countOf(B.LOG)).toBe(2);
+    expect(inv.get(bagRoom(1) + 3)).toBeNull();
     expect(bags.get(0)!.id).toBe(bagId(0));
     expect(bags.get(1)!.id).toBe(bagId(1));
-    // The backpack itself was merged: 3 + 4 apples are one stack, and the bag's apples are not added to it.
-    expect(inv.get(HOTBAR_SLOTS)).toMatchObject({ id: I.APPLE, count: 7 });
-    expect(inv.get(HOTBAR_SLOTS + 1)).toBeNull();
+  });
+
+  it('merges across the bags into full stacks, and fills the backpack before the bags', () => {
+    const { inv } = worn(0, 1);
+    inv.set(bagRoom(0), makeStack(I.GOLD_INGOT, 40));
+    inv.set(bagRoom(1) + 5, makeStack(I.GOLD_INGOT, 40));
+    inv.set(HOTBAR_SLOTS + 2, makeStack(I.GOLD_INGOT, 30));
+    organizeInventory(inv);
+    expect(inv.get(HOTBAR_SLOTS)).toMatchObject({ id: I.GOLD_INGOT, count: 64 });
+    expect(inv.get(HOTBAR_SLOTS + 1)).toMatchObject({ id: I.GOLD_INGOT, count: 46 });
+    expect(inv.get(HOTBAR_SLOTS + 2)).toBeNull();
+    expect(inv.countOf(I.GOLD_INGOT)).toBe(110);
+    expect(inv.get(bagRoom(0))).toBeNull();
+    expect(inv.get(bagRoom(1) + 5)).toBeNull();
+  });
+
+  it('spills into the bags, in order, once the backpack is full', () => {
+    const { inv } = worn(0);
+    // 27 tools of different wear fill the backpack; two more sit in the bag.
+    for (let i = HOTBAR_SLOTS; i < PLAYER_SLOTS; i++) inv.set(i, makeStack(SWORD, 1, i));
+    inv.set(bagRoom(0) + 3, makeStack(I.APPLE, 5));
+    inv.set(bagRoom(0) + 1, makeStack(PICK, 1));
+    organizeInventory(inv);
+    for (let i = HOTBAR_SLOTS; i < PLAYER_SLOTS; i++) expect(inv.get(i)).not.toBeNull();
+    // 28 equipment pieces and an apple stack: the backpack holds 27 of the 28 pieces first, then the bag begins with the last one.
+    expect(inv.get(bagRoom(0))).not.toBeNull();
+    expect(inv.countOf(I.APPLE)).toBe(5);
+    expect(inv.countOf(SWORD) + inv.countOf(PICK)).toBe(28);
+  });
+  it('never moves anything into a slot of a bag that is not worn', () => {
+    const { inv } = worn(0);
+    inv.set(bagRoom(0) + 4, makeStack(I.APPLE, 1));
+    organizeInventory(inv);
+    for (let b = 1; b < BAG_SLOTS; b++) for (let k = 0; k < 4; k++) expect(inv.slots[bagRoom(b) + k]).toBeNull();
+    expect(inv.countOf(I.APPLE)).toBe(1);
   });
 
   it('never loses an item and keeps the backpack within its 27 slots', () => {

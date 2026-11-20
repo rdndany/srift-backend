@@ -31,10 +31,6 @@
     inset 0 0 50px rgba(0, 0, 0, 0.55),
     0 24px 60px rgba(0, 0, 0, 0.7);
 }
-/* The window beside it loses its left edge, so the two read as one. */
-#menu-screen .panel.wow.with-book {
-  border-left-width: 0;
-}
 
 /* Tabs hang off the left edge; the chosen one is lit and reaches into the book. A gold dot says there is something to make. */
 #menu-screen .rb-tabs {

@@ -1,5 +1,7 @@
 import { CLASS_LEVELS, clampClassLevel, computeStats, damageAfterDefense, isClassId, type ClassId, type ClassStats, type DamageKind, type StatModifier } from './classes';
 import { I } from './items';
+import { TUNING, abilityCost } from './tuning';
+import { NO_POINTS, ATTR_KEYS, parseSpend, pointModifier, pointsForLevel, spentOf, type AttrKey, type AttrSpend } from './statPoints';
 
 /**
  * Class abilities: what each ability is (data, below) and the per-player state that gates them (`ClassState`:
@@ -259,6 +261,8 @@ export interface ClassSave {
   lvl: number;
   xp: number;
   unlocked: AbilityId[];
+  /** Stat points spent (Strength, Agility, Vitality, Energy); left out when nothing was. */
+  pts?: [number, number, number, number];
 }
 
 /** Read what was saved for a class. Anything malformed, or saved for another class, is ignored (null). */
@@ -269,7 +273,8 @@ export function parseClassSave(raw: unknown, classId: ClassId): ClassSave | null
   const lvl = typeof r.lvl === 'number' && Number.isFinite(r.lvl) ? clampClassLevel(r.lvl) : 1;
   const xp = typeof r.xp === 'number' && Number.isFinite(r.xp) && r.xp >= 0 ? Math.floor(r.xp) : 0;
   const unlocked = Array.isArray(r.unlocked) ? r.unlocked.filter((a): a is AbilityId => typeof a === 'string' && ABILITY_BY_ID.get(a as AbilityId)?.classId === classId) : [];
-  return { v: 1, id: classId, lvl, xp, unlocked };
+  const pts = parseSpend(r.pts, lvl);
+  return { v: 1, id: classId, lvl, xp, unlocked, ...(spentOf(pts) > 0 ? { pts: [...pts] as [number, number, number, number] } : {}) };
 }
 
 const MAX_ABSORB = 200;
@@ -283,6 +288,10 @@ export class ClassState {
   /** Points towards the next level. */
   xp = 0;
   resource: number;
+  /** Seconds since resource was last spent (regeneration waits for TUNING.regenDelay). */
+  private sinceSpend = Infinity;
+  /** How long that wait is: an ability holds it longer than a weapon bolt. */
+  private regenWait = 0;
   /** Abilities the character can use. */
   readonly unlocked = new Set<AbilityId>();
   /** Seconds left before each ability is ready again. */
@@ -298,6 +307,8 @@ export class ClassState {
   private offhandMod: StatModifier | null = null;
   /** What the worn and held gear adds (see gear.ts), kept apart from the other sources for the same reason. */
   private gearMods: StatModifier[] = [];
+  /** Stat points spent on Strength, Agility, Vitality and Energy. */
+  private spent: AttrSpend = NO_POINTS;
   private cached: ClassStats;
 
   constructor(readonly classId: ClassId) {
@@ -327,8 +338,41 @@ export class ClassState {
     this.recompute();
   }
 
+  /** Points spent on each stat (Strength, Agility, Vitality, Energy). */
+  get points(): AttrSpend {
+    return this.spent;
+  }
+
+  /** Points still to spend: what the level has given less what is spent. */
+  get freePoints(): number {
+    return Math.max(0, pointsForLevel(this.level) - spentOf(this.spent));
+  }
+
+  /** Spend `n` points on a stat (as many as there are, when fewer are left). Returns how many were spent. */
+  spendPoints(stat: AttrKey, n: number): number {
+    const i = ATTR_KEYS.indexOf(stat);
+    if (i < 0 || !Number.isFinite(n)) return 0;
+    const take = Math.min(Math.floor(n), this.freePoints);
+    if (take <= 0) return 0;
+    const next = [...this.spent] as [number, number, number, number];
+    next[i] += take;
+    this.spent = next;
+    this.recompute();
+    return take;
+  }
+
+  /** Take every point back, to be spent again. Returns how many were given back. */
+  resetPoints(): number {
+    const back = spentOf(this.spent);
+    if (back <= 0) return 0;
+    this.spent = NO_POINTS;
+    this.recompute();
+    return back;
+  }
+
   private recompute(): void {
-    this.cached = computeStats(this.classId, this.level, [...this.mods, ...this.gearMods, ...(this.offhandMod ? [this.offhandMod] : [])]);
+    const pm = pointModifier(this.spent);
+    this.cached = computeStats(this.classId, this.level, [...this.mods, ...this.gearMods, ...(this.offhandMod ? [this.offhandMod] : []), ...(pm ? [pm] : [])]);
     this.resource = Math.min(this.resource, this.cached.maxResource);
   }
 
@@ -396,7 +440,7 @@ export class ClassState {
     const def = ABILITY_BY_ID.get(id);
     if (!def || def.classId !== this.classId || !this.unlocked.has(id)) return 'locked';
     if (this.cooldownLeft(id) > 0) return 'cooldown';
-    if (this.resource < def.cost) return 'resource';
+    if (this.resource < abilityCost(def.cost)) return 'resource';
     return null;
   }
 
@@ -404,7 +448,8 @@ export class ClassState {
   commit(id: AbilityId): void {
     const def = ABILITY_BY_ID.get(id);
     if (!def) return;
-    this.resource = Math.max(0, this.resource - def.cost);
+    this.resource = Math.max(0, this.resource - abilityCost(def.cost));
+    this.holdRegen(TUNING.regenDelay);
     this.cooldowns.set(id, def.cooldown);
   }
 
@@ -413,7 +458,14 @@ export class ClassState {
     if (amount <= 0) return true;
     if (this.resource < amount) return false;
     this.resource -= amount;
+    this.holdRegen(TUNING.castRegenDelay);
     return true;
+  }
+
+  /** Keep the resource from refilling for wait seconds from now (never shortening a wait already running). */
+  private holdRegen(wait: number): void {
+    this.regenWait = Math.max(this.regenWait - this.sinceSpend, wait);
+    this.sinceSpend = 0;
   }
 
   /** Advance every timer by `dt` seconds. */
@@ -424,7 +476,9 @@ export class ClassState {
       if (next <= 0) this.cooldowns.delete(id);
       else this.cooldowns.set(id, next);
     }
-    this.resource = Math.min(this.cached.maxResource, this.resource + this.cached.resourceRegen * dt);
+    // The resource refills only once nothing has been spent for a moment (TUNING.regenDelay): spending without a stop does not pay for itself.
+    this.sinceSpend += dt;
+    if (this.sinceSpend >= this.regenWait) this.resource = Math.min(this.cached.maxResource, this.resource + this.cached.resourceRegen * dt);
     if (this.reduction.left > 0 && (this.reduction.left -= dt) <= 0) this.reduction = { mult: 1, left: 0 };
     if (this.absorb.left > 0 && (this.absorb.left -= dt) <= 0) this.absorb = { amount: 0, left: 0 };
     if (this.immune > 0) this.immune = Math.max(0, this.immune - dt);
@@ -433,6 +487,7 @@ export class ClassState {
   /** A fresh start after dying: full resource, no cooldowns, no temporary defenses. */
   resetCombat(): void {
     this.resource = this.cached.maxResource;
+    this.sinceSpend = Infinity;
     this.cooldowns.clear();
     this.reduction = { mult: 1, left: 0 };
     this.absorb = { amount: 0, left: 0 };
@@ -480,7 +535,7 @@ export class ClassState {
   }
 
   toJSON(): ClassSave {
-    return { v: 1, id: this.classId, lvl: this.level, xp: this.xp, unlocked: [...this.unlocked] };
+    return { v: 1, id: this.classId, lvl: this.level, xp: this.xp, unlocked: [...this.unlocked], ...(spentOf(this.spent) > 0 ? { pts: [...this.spent] as [number, number, number, number] } : {}) };
   }
 
   /** Restore what was saved (ignored when it belongs to another class). Resource and cooldowns start fresh. */
@@ -491,6 +546,7 @@ export class ClassState {
     this.xp = save.lvl >= CLASS_LEVELS.max ? 0 : Math.min(save.xp, Math.max(0, CLASS_LEVELS.toNext(save.lvl) - 1));
     this.unlocked.clear();
     for (const id of save.unlocked) this.unlocked.add(id);
+    this.spent = save.pts ?? NO_POINTS;
     this.recompute();
     this.resource = this.cached.maxResource;
   }

@@ -57,6 +57,8 @@ export function weaponView(item: ItemDef, kind: WeaponKind, kit: HeldKit): HeldV
     object: group,
     rest: new THREE.Vector3(...look.rest),
     swing: style,
+    // In the off hand the hilt leaves the view through the bottom corner, so the dagger is held and does not hang in the air.
+    ...(kind === 'dagger' ? { off: { scale: 0.5, at: [-0.02, -0.1, 0] as [number, number, number], lean: -0.15 } } : {}),
     /** Wind up, strike, follow through, settle: the keyframes of the swing, in place of the plain arc. */
     pose(f: HandFrame): void {
       const keys = style.variants[f.variant % style.variants.length];

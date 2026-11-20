@@ -70,6 +70,20 @@ server needs and sets up the service (`deploy/solrift-server.service`) and Caddy
 
 Both variables are fixed at build time: change one and redeploy.
 
+## Admin mode
+
+The owner's character can switch on admin tools in the realm with `/admin on` (and `/admin off`). Who counts as the owner is set only on the server, in `/etc/solrift.env`:
+
+```
+ADMIN_WALLETS=<your wallet address>        # every character of that wallet may use /admin
+ADMIN_ACCOUNTS=<character id>              # (optional) or only these characters; the id is the `id` field of /api/auth/me
+```
+
+Restart the server after changing it (`systemctl restart solrift-server`). The wallet is the one that signed in (the signature is checked by the server), so nobody can claim it; guests can never
+be admins, and for anyone not listed the commands simply do not exist. Admin mode is off every time you connect. While it is on you have `/time /weather /gamemode /tp /xp /coins` even though the server
+runs with cheats off, plus `/players /kick /ban /unban /bans /mute /unmute /tpto /bring /give /announce` (`/admin help` lists them). Creative mode ends with `/admin off`. Every admin act, and every try by
+someone who is not an admin, is written to the log: `journalctl -u solrift-server | grep ADMIN`. Bans (by wallet) are kept in the database.
+
 ## 5. Try it
 
 Open `https://solrift.io`, Play (it leads to `https://play.solrift.io`), Multiplayer: the realm shows its status ("Online 0 / 120"). Sign in with a wallet, make a character, enter. A second browser

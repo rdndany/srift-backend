@@ -155,11 +155,11 @@ describe('mesher', () => {
     expect(maxBlk).toBeGreaterThan(150);
   });
 
-  it('meshes flowers as two crossed double-sided planes and crops as four', () => {
+  it('meshes flowers as four double-sided planes in a star and crops as four', () => {
     const p = emptyRegion();
     p[regionIndex(5, 10, 5)] = B.ROSE;
     const r = meshChunk(p);
-    expect(quads(r.opaque)).toBe(4); // 2 planes x 2 sides
+    expect(quads(r.opaque)).toBe(8); // 4 planes x 2 sides
     assertValid(r.opaque!);
 
     const c = emptyRegion();
@@ -172,7 +172,7 @@ describe('mesher', () => {
     p[regionIndex(5, 10, 5)] = B.GRASS;
     p[regionIndex(5, 11, 5)] = B.TALL_GRASS;
     const r = meshChunk(p);
-    expect(quads(r.opaque)).toBe(6 + 4);
+    expect(quads(r.opaque)).toBe(6 + 8);
   });
 
   it('meshes a torch as a thin post with a flame on top, at full brightness', () => {

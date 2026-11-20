@@ -117,6 +117,8 @@ export interface RemoteCallbacks {
   onEvents(events: SessionEvent[]): void;
   onChat(from: string, text: string, ch?: ChatChannel, to?: string): void;
   onNotice(text: string): void;
+  /** The server turned your admin mode on or off. */
+  onAdmin?(on: boolean): void;
   /** The lists of the social window, and the answer to a look at a player (null: they are not here). */
   onSocial?(view: SocialView): void;
   onInspect?(name: string, view: InspectView | null): void;
@@ -601,6 +603,9 @@ export class RemoteSession implements ClientSession {
         return;
       case 'notice':
         this.cb.onNotice(msg.text);
+        return;
+      case 'admin':
+        this.cb.onAdmin?.(msg.on);
         return;
       default:
     }

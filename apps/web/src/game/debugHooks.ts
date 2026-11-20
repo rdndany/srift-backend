@@ -403,6 +403,7 @@ export function installDebugHooks(parts: DebugParts): void {
         x: m.body.x,
         y: m.body.y,
         z: m.body.z,
+        yaw: m.yaw,
         health: (m as { health?: number }).health ?? 0,
         dead: m.dead,
         variant: m.variant,

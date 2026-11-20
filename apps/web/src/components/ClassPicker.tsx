@@ -1,7 +1,7 @@
 'use client';
 
 import type { CSSProperties } from 'react';
-import { ABILITY_SLOTS, CLASSES, CLASS_IDS, CLASS_LEVELS, abilitiesOf, computeStats, getItem, type ClassId, type ClassStats } from '@solrift/shared';
+import { ABILITY_SLOTS, abilityCost, CLASSES, CLASS_IDS, CLASS_LEVELS, abilitiesOf, computeStats, getItem, type ClassId, type ClassStats } from '@solrift/shared';
 import { AbilityIcon } from './AbilityIcon';
 import { ItemSprite } from './ItemSprite';
 import './classPicker.css';
@@ -142,7 +142,7 @@ export function ClassDetails({ id }: { id: ClassId }) {
               <b>{a.name}</b>
               <small>{a.description}</small>
               <em>
-                {a.cost} {def.resource.name.toLowerCase()} &middot; {a.cooldown}s cooldown &middot; {a.unlockLevel <= 1 ? 'learned from its skill book' : `learned from its skill book at level ${a.unlockLevel}`}
+                {abilityCost(a.cost)} {def.resource.name.toLowerCase()} &middot; {a.cooldown}s cooldown &middot; {a.unlockLevel <= 1 ? 'learned from its skill book' : `learned from its skill book at level ${a.unlockLevel}`}
               </em>
             </span>
           </div>

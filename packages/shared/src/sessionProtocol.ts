@@ -2,6 +2,7 @@ import { ABILITY_SLOTS, type AbilityId } from './abilities';
 import { AUCTION_CATEGORIES, AUCTION_HOURS, AUCTION_SORTS, cleanQuery, type AuctionCommand, type AuctionHours, type AuctionView } from './auction';
 import type { SoundKind } from './blocks';
 import { STASH_SLOTS, type StashCommand, type StashView } from './stash';
+import { MAX_POINTS, ATTR_KEYS, type AttrKey } from './statPoints';
 import type { ClassId } from './classes';
 import { isCreativeAmount, validGearSpec, type CreativeAmount, type GearSpec } from './creative';
 import type { GearRoll } from './gear';
@@ -58,9 +59,11 @@ export type Command =
   | { t: 'drop'; all: boolean }
   /** Let go of the stack held on the cursor outside the open screen: all of it, or one. */
   | { t: 'dropCursor'; all: boolean }
+  /** Throw the stack held on the cursor in the trash of the open screen: it is gone for good (all of it, or one). */
+  | { t: 'destroyCursor'; all: boolean }
   | { t: 'click'; slot: number; button: 0 | 1 }
   | { t: 'shift'; slot: number }
-  /** The Organize button of the inventory: merge and sort the backpack (not the hotbar or the bags). */
+  /** The Organize button of the inventory: merge and sort the backpack and each worn bag (not the hotbar). */
   | { t: 'organize' }
   /** Recipe book: fill the crafting grid with recipe `index` (all = as many crafts as fit). */
   | { t: 'recipe'; index: number; all: boolean }
@@ -96,7 +99,10 @@ export type Command =
   /** Use the ability on a button of the ability bar (0..3). Only the button: what it does, to what and for how much is the server's to decide. */
   | { t: 'ability'; slot: number }
   /** The mount key: get off the mount you ride, or begin summoning the one whose horn is in the mount slot. */
-  | { t: 'mount' };
+  | { t: 'mount' }
+  /** Spend `n` of the stat points a level gives on a stat (see statPoints.ts), or take them all back to spend again. */
+  | { t: 'stat'; stat: AttrKey; n: number }
+  | { t: 'statReset' };
 
 /** What a class player's interface needs to know about their class (sent with every snapshot, so a cooldown on the bar is the server's). */
 export interface ClassView {
@@ -117,6 +123,9 @@ export interface ClassView {
   guard: number;
   shield: number;
   immune: number;
+  /** Stat points: spent on Strength, Agility, Vitality and Energy, and how many are left to spend. */
+  pts: [number, number, number, number];
+  free: number;
   /** Charging: which way (a yaw) and how fast. The client's own prediction runs the same way until it is over. */
   rush?: { yaw: number; speed: number; roll?: boolean };
   /** A Ground Slam: 1 crouching, 2 in the air, 3 down on the shield after the blow. Left out when none. */
@@ -344,6 +353,8 @@ export function parseSessionMessage(raw: unknown): SessionMessage | null {
       return typeof raw.all === 'boolean' ? { t: 'drop', all: raw.all } : null;
     case 'dropCursor':
       return typeof raw.all === 'boolean' ? { t: 'dropCursor', all: raw.all } : null;
+    case 'destroyCursor':
+      return typeof raw.all === 'boolean' ? { t: 'destroyCursor', all: raw.all } : null;
     case 'click': {
       const slot = num(raw.slot);
       if (slot === null || !Number.isInteger(slot) || slot < 0 || slot > 1023) return null;
@@ -402,6 +413,13 @@ export function parseSessionMessage(raw: unknown): SessionMessage | null {
     }
     case 'mount':
       return { t: 'mount' };
+    case 'stat': {
+      const stat = ATTR_KEYS.find((x) => x === raw.stat);
+      const n = whole(raw.n, 1, MAX_POINTS);
+      return stat && n !== null ? { t: 'stat', stat, n } : null;
+    }
+    case 'statReset':
+      return { t: 'statReset' };
     case 'party': {
       const a = PARTY_ACTIONS.find((x) => x === raw.a);
       if (!a) return null;

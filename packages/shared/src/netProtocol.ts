@@ -388,6 +388,8 @@ export type NetServerMessage =
   /** Somebody asks you to trade (null: the request is over). */
   | { t: 'tradeAsk'; from: string | null }
   | { t: 'notice'; text: string }
+  /** Admin mode went on or off for you (the server's word: it shows the admin's panel at the crosshair). */
+  | { t: 'admin'; on: boolean }
   | { t: 'kicked'; reason: string };
 
 const isObject = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);

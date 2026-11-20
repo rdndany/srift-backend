@@ -1,7 +1,7 @@
 'use client';
 
 import type { CSSProperties } from 'react';
-import { ABILITY_BY_ID, CLASSES, CraftingMenu, abilitiesOf, computeStats, gearModifiers, offhandModifier, xpToNext, type ItemStack } from '@solrift/shared';
+import { ABILITY_BY_ID, abilityCost, ATTR_INFO, ATTR_KEYS, CLASSES, CraftingMenu, POINTS_PER_LEVEL, abilitiesOf, computeStats, gearModifiers, offhandModifier, pointModifier, xpToNext, type ItemStack } from '@solrift/shared';
 import { useUi } from '../ui/store';
 import { AbilityIcon } from './AbilityIcon';
 import { StatBars, statLines } from './ClassPicker';
@@ -49,7 +49,7 @@ export function AbilityBar() {
           const ab = ABILITY_BY_ID.get(a.id);
           if (!ab) return null;
           const cooling = a.unlocked && a.cd > 0;
-          const poor = a.unlocked && !cooling && cls.resource < ab.cost;
+          const poor = a.unlocked && !cooling && cls.resource < abilityCost(ab.cost);
           return (
             <button
               key={a.id}
@@ -57,7 +57,7 @@ export function AbilityBar() {
               className={`cb-slot${cooling ? ' cooling' : ''}${poor ? ' poor' : ''}${a.unlocked ? '' : ' locked'}`}
               data-ability={a.id}
               data-slot={slot}
-              title={`${ab.name}: ${ab.description} (${ab.cost} ${def.resource.name.toLowerCase()}, ${ab.cooldown}s)${a.unlocked ? '' : ` \u2014 not learned: find or buy its skill book (level ${ab.unlockLevel})`}`}
+              title={`${ab.name}: ${ab.description} (${abilityCost(ab.cost)} ${def.resource.name.toLowerCase()}, ${ab.cooldown}s)${a.unlocked ? '' : ` \u2014 not learned: find or buy its skill book (level ${ab.unlockLevel})`}`}
               onPointerDown={(e) => {
                 e.preventDefault();
                 api.ability(slot);
@@ -100,10 +100,62 @@ export function ClassAttributes() {
   const worn: (ItemStack | null)[] = [api?.inventory.get(selected) ?? null, api?.offhand.get(0) ?? null];
   if (menu instanceof CraftingMenu && menu.armor) for (let i = 0; i < menu.armor.size; i++) worn.push(menu.armor.get(i));
   const gear = gearModifiers(worn, { id: cls.id, level: cls.level });
+  const spent = pointModifier(cls.pts);
   return (
     <div className="cs-attrs" data-testid="class-attributes">
-      <StatBars lines={statLines(computeStats(cls.id, cls.level, [...(bonus ? [bonus] : []), ...gear]), def.resource.name, armor)} />
+      <StatBars lines={statLines(computeStats(cls.id, cls.level, [...(bonus ? [bonus] : []), ...gear, ...(spent ? [spent] : [])]), def.resource.name, armor)} />
     </div>
+  );
+}
+
+/**
+ * The stat points (Strength, Agility, Vitality, Energy), under the character in the inventory window: every level gives five,
+ * and a click puts one on a stat (shift-click five). The server counts them; this only asks.
+ */
+export function AttrPoints() {
+  const cls = useUi((s) => s.cls);
+  const api = useUi((s) => s.api);
+  if (!cls) return null;
+  const anySpent = cls.pts.some((n) => n > 0);
+  const resource = CLASSES[cls.id].resource.name.toLowerCase();
+  const say = (s: string): string => s.replace(/\{resource\}/g, resource);
+  return (
+    <aside className="attr-points" data-testid="attr-points" aria-label="Stat points">
+      <div className="wow-head">
+        <span>Stat points</span>
+      </div>
+      <div className="attr-bank">
+        <span>To spend<small>{POINTS_PER_LEVEL} points per level</small></span>
+        <b data-testid="attr-free" data-has={cls.free > 0 ? '1' : undefined}>
+          {cls.free}
+        </b>
+      </div>
+      {ATTR_KEYS.map((k, i) => (
+        <div key={k} className="attr-card" data-attr={k} style={{ '--attr': ATTR_INFO[k].color } as CSSProperties}>
+          <div className="attr-top">
+            <span className="attr-name">{ATTR_INFO[k].name}</span>
+            <b className="attr-val" data-testid={`attr-val-${k}`}>
+              {cls.pts[i]}
+            </b>
+            <button
+              type="button"
+              className="attr-add"
+              data-testid={`attr-add-${k}`}
+              disabled={cls.free <= 0}
+              aria-label={`Add a point to ${ATTR_INFO[k].name}`}
+              title={`Add a point (Shift-click: ${POINTS_PER_LEVEL})`}
+              onClick={(e) => api?.spendStat(k, e.shiftKey ? POINTS_PER_LEVEL : 1)}
+            >
+              +
+            </button>
+          </div>
+          <p className="attr-blurb">{say(ATTR_INFO[k].blurb)}</p>
+        </div>
+      ))}
+      <button type="button" className="attr-reset" data-testid="attr-reset" disabled={!anySpent} title="Take every point back, to spend them again" onClick={() => api?.resetStats()}>
+        Reset points
+      </button>
+    </aside>
   );
 }
 
@@ -150,7 +202,7 @@ export function Spellbook() {
                 <small>{a.description}</small>
                 <div className="cs-meta">
                   <span style={{ color: def.resource.color }}>
-                    {a.cost} {def.resource.name.toLowerCase()}
+                    {abilityCost(a.cost)} {def.resource.name.toLowerCase()}
                   </span>
                   <span>{a.cooldown}s cooldown</span>
                 </div>

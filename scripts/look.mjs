@@ -1,7 +1,7 @@
 // Visual check: screenshots a handful of scenes (noon, sunset, night, forest, water, cave) so rendering
 // changes can be compared by eye. Usage: node scripts/look.mjs [url] [outDir] [prefix] [scene,scene...]
 import { mkdirSync } from 'node:fs';
-import { chromium } from 'playwright';
+import { launchBrowser } from './browser.mjs';
 
 const url = process.argv[2] ?? 'http://localhost:3100';
 const outDir = process.argv[3] ?? 'tmp-shots';
@@ -10,9 +10,7 @@ const only = process.argv[5]?.split(',');
 const extra = process.argv[6] ?? '';
 mkdirSync(outDir, { recursive: true });
 
-const browser = await chromium.launch({
-  args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl'],
-});
+const browser = await launchBrowser();
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const errors = [];
 page.on('console', (m) => {

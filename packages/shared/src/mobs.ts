@@ -8,6 +8,7 @@ import { findPath, type PathNode } from './pathfinding';
 import { createBody, stepPlayer, type BlockReader, type Body, type MoveInput } from './physics';
 import { raycast } from './raycast';
 import type { VillagerState } from './trading';
+import { TUNING } from './tuning';
 
 export type MobKind =
   | 'pig'
@@ -1079,7 +1080,8 @@ export class Mob {
     const scale = (kind === 'slime' ? this.size : 1) * (this.growTimer > 0 ? 0.5 : 1);
     this.width = this.def.width * scale;
     this.height = this.def.height * scale;
-    this.maxHealth = kind === 'slime' ? this.size * this.size : this.def.health;
+    // (Training dummies and armor stands are not made tougher: see tuning.ts.)
+    this.maxHealth = (kind === 'slime' ? this.size * this.size : this.def.health) * TUNING.damageScale * (kind === 'dummy' || kind === 'armor_stand' ? 1 : TUNING.mobToughness);
     this.body = createBody(x, y, z);
     this.body.width = this.width;
     this.body.height = this.height;
@@ -1323,7 +1325,7 @@ export class MobManager {
       mob.sincePlayerHit = 0;
       mob.aggro = true;
     }
-    mob.health -= amount;
+    mob.health -= amount * TUNING.damageScale;
     // A training dummy takes anything and starts over once it has taken all it has.
     if (mob.kind === 'dummy' && mob.health <= 0) mob.health = mob.maxHealth;
     mob.hurtTime = 0;
@@ -2296,6 +2298,7 @@ export class MobManager {
 
     if (los && dist < 16 && m.shootCooldown <= 0) {
       m.shootCooldown = 1.8 + env.rand() * 0.8;
+      m.attackTime = 0; // the string hand springs loose (shown on the bow)
       const ox = m.body.x;
       const oy = m.eyeY - 0.1;
       const oz = m.body.z;

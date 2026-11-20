@@ -388,6 +388,8 @@ export function meshChunk(region: Uint16Array, tint?: Uint8Array): MeshResult {
   let seen = region;
   const blockAt = (x: number, y: number, z: number): number => (y >= WORLD_HEIGHT ? 0 : seen[regionIndex(x, y, z)]);
   const isOpaque = (x: number, y: number, z: number): boolean => (y < 0 ? true : IS_OPAQUE[blockAt(x, y, z)] === 1);
+  /** A full block of another kind beside a tilled bed (see the farmland shading below). */
+  const isBedWall = (b: number): boolean => b !== B.FARMLAND && IS_OPAQUE[b] === 1 && BLOCKS[b].shape === 'cube';
   // Ice and glass lie in the water without cutting it: the water faces that would touch them are not drawn.
   const coversWater = (nid: number): boolean => nid !== 0 && FLUID_KIND[nid] === 0 && IS_OPAQUE[nid] === 0 && BLOCKS[nid].shape === 'cube' && BLOCKS[nid].render === 'translucent';
   const watery = (x: number, y: number, z: number): boolean => y >= 0 && FLUID_KIND[blockAt(x, y, z)] === FLUID_WATER;
@@ -539,6 +541,14 @@ export function meshChunk(region: Uint16Array, tint?: Uint8Array): MeshResult {
               aoV[c] = 3;
             } else {
               aoV[c] = o1 && o2 ? 0 : 3 - ((o1 ? 1 : 0) + (o2 ? 1 : 0) + (oc ? 1 : 0));
+              // A tilled bed sits in its surroundings: where a full block (grass, stone ...) stands beside it, the soil shades off
+              // towards that edge, so the bed does not end in a razor line against it. (A farmland neighbour is the same bed: no shade.)
+              if (id === B.FARMLAND && face.kind === 'top') {
+                const w1 = isBedWall(blockAt(x + ax, y, z + az));
+                const w2 = isBedWall(blockAt(x + bx, y, z + bz));
+                const wc = !w1 && !w2 && isBedWall(blockAt(x + ax + bx, y, z + az + bz));
+                aoV[c] = Math.max(0, aoV[c] - Math.min(3, (w1 ? 2 : 0) + (w2 ? 2 : 0) + (wc ? 1 : 0)));
+              }
             }
 
             const l1 = o1 ? centerL : lightAt(s1x, s1y, s1z);
@@ -698,8 +708,7 @@ export function meshChunk(region: Uint16Array, tint?: Uint8Array): MeshResult {
           pushQuad(opaqueB, [[x, fy + rise(0, 1), z + 1, u(0), w(0)], [x + 1, fy + rise(1, 1), z + 1, u(1), w(0)], [x + 1, fy + rise(1, 0), z, u(1), w(1)], [x, fy + rise(0, 0), z, u(0), w(1)]], tile, 0.95, sky, blk);
         } else if (def.shape === 'cross') {
           const tt = tint && IS_TINTED_PLANT[id] === 1 ? grassTint(tint[z * CHUNK_SIZE + x]) : 0;
-          emitPlane(opaqueB, x + 0.1, y, z + 0.1, x + 0.9, y, z + 0.9, 1, tile, sky, blk, tt);
-          emitPlane(opaqueB, x + 0.1, y, z + 0.9, x + 0.9, y, z + 0.1, 1, tile, sky, blk, tt);
+          emitCluster(opaqueB, x, y, z, tile, sky, blk, tt);
         } else if (def.shape === 'crop') {
           emitPlane(opaqueB, x + 0.25, y, z, x + 0.25, y, z + 1, 1, tile, sky, blk);
           emitPlane(opaqueB, x + 0.75, y, z, x + 0.75, y, z + 1, 1, tile, sky, blk);
@@ -774,6 +783,27 @@ export function meshChunk(region: Uint16Array, tint?: Uint8Array): MeshResult {
 }
 
 /** A vertical double-sided quad from (x0,z0) to (x1,z1), `h` tall, with the full tile mapped on it. */
+/**
+ * A plant on the ground: four planes crossing in a star, each block turned and nudged differently, so it has a body to walk round
+ * and look down on (two crossed planes are a pair of thin lines from above), and a meadow is a tangle and not a grid. The turn
+ * depends on where the block is in its column only (not its height), so a stack of sugar cane stays one stalk.
+ */
+function emitCluster(b: Builder, x: number, y: number, z: number, tile: number, sky: number, blk: number, tint: number): void {
+  let h = Math.imul(x * 73856093 ^ z * 19349663, 0x2545f491);
+  h ^= h >>> 15;
+  h = Math.imul(h, 0x9e3779b1);
+  h ^= h >>> 13;
+  const turn = ((h & 255) / 255) * (Math.PI / 4);
+  const cx = x + 0.5 + (((h >>> 8) & 255) / 255 - 0.5) * 0.1;
+  const cz = z + 0.5 + (((h >>> 16) & 255) / 255 - 0.5) * 0.1;
+  const half = 0.42;
+  for (let k = 0; k < 4; k++) {
+    const a = turn + (k * Math.PI) / 4;
+    const dx = Math.cos(a) * half;
+    const dz = Math.sin(a) * half;
+    emitPlane(b, cx - dx, y, cz - dz, cx + dx, y, cz + dz, 1, tile, sky, blk, tint);
+  }
+}
 function emitPlane(
   b: Builder,
   x0: number,

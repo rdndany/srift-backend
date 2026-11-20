@@ -1,0 +1,381 @@
+/* ---- The Crafting tab: the grid on the left, the recipe book as a column of the same window (as the stat points are in the Inventory) ---- */
+
+/* Same size as the Inventory tab, so the window does not jump when you change tab. */
+#menu-screen .panel.wow.with-recipes {
+  width: 826px;
+  min-height: 640px;
+  padding-right: 304px;
+}
+
+/* ---- the column ---- */
+#menu-screen .wow .cb {
+  position: absolute;
+  top: 38px;
+  right: 28px;
+  bottom: 20px;
+  box-sizing: border-box;
+  width: 262px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 30px 10px 10px;
+  color: var(--w-text);
+  background: rgba(0, 0, 0, 0.3);
+  border: 2px solid;
+  border-color: #000 #3d2c12 #3d2c12 #000;
+  box-shadow: inset 3px 3px 0 rgba(0, 0, 0, 0.45);
+}
+#menu-screen .wow .cb .cb-head {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  right: 10px;
+  margin: 0;
+}
+#menu-screen .wow .cb .cb-head::after {
+  order: 1;
+}
+#menu-screen .wow .cb-count {
+  order: 2;
+  font-style: normal;
+  letter-spacing: 1px;
+  color: var(--w-gold-hi);
+}
+
+/* The categories: a row of item icons; the chosen one is lit, a gold dot says there is something to make under it. */
+#menu-screen .wow .cb-tabs {
+  display: flex;
+  gap: 3px;
+}
+#menu-screen .wow .cb-tab {
+  position: relative;
+  flex: 1;
+  height: 34px;
+  padding: 0;
+  cursor: pointer;
+  background: linear-gradient(145deg, #2a241c, #0e0c09);
+  border: 2px solid #4f360f;
+  box-shadow: inset 0 0 0 1px #000;
+}
+#menu-screen .wow .cb-tab:hover {
+  border-color: var(--w-bronze-hi);
+}
+#menu-screen .wow .cb-tab.on {
+  background: linear-gradient(145deg, #4a3d28, #1e1810);
+  border-color: var(--w-gold);
+  box-shadow: inset 0 0 0 1px #000, 0 0 8px rgba(255, 208, 100, 0.45);
+}
+#menu-screen .wow .cb-tab .item-icon {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 22px;
+  height: 22px;
+  transform: translate(-50%, -50%);
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+#menu-screen .wow .cb-tab:not(.on) .item-icon {
+  opacity: 0.7;
+}
+#menu-screen .wow .cb-dot {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 6px;
+  height: 6px;
+  background: var(--w-gold);
+  border: 1px solid var(--w-edge);
+  border-radius: 50%;
+  box-shadow: 0 0 5px rgba(255, 208, 100, 0.9);
+}
+
+/* The search box is a sunken well; "Can make" is a switch beside it. */
+#menu-screen .wow .cb-top {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+#menu-screen .wow .cb-searchbox {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 7px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 2px solid;
+  border-color: #000 #6b4f1e #6b4f1e #000;
+  box-shadow: inset 2px 2px 0 rgba(0, 0, 0, 0.45);
+}
+#menu-screen .wow .cb-searchbox:focus-within {
+  border-color: #000 var(--w-gold) var(--w-gold) #000;
+}
+#menu-screen .wow .cb-mag {
+  flex: none;
+  position: relative;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--w-bronze-hi);
+  border-radius: 50%;
+}
+#menu-screen .wow .cb-mag::after {
+  content: '';
+  position: absolute;
+  right: -6px;
+  bottom: -7px;
+  width: 3px;
+  height: 6px;
+  background: var(--w-bronze-hi);
+  transform: rotate(-45deg);
+}
+#menu-screen .wow .cb-search {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 2px;
+  color: var(--w-text);
+  background: transparent;
+  border: 0;
+  outline: none;
+}
+#menu-screen .wow .cb-search::placeholder {
+  color: var(--w-dim);
+}
+#menu-screen .wow .cb-clear {
+  flex: none;
+  width: 20px;
+  align-self: stretch;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--w-dim);
+  background: transparent;
+  border: 0;
+}
+#menu-screen .wow .cb-clear:hover {
+  color: var(--w-gold-hi);
+}
+#menu-screen .wow .cb-only {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 0 7px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--w-dim);
+  text-shadow: 1px 1px 0 #000;
+  background: linear-gradient(145deg, #2a241c, #0e0c09);
+  border: 2px solid #6b4f1e;
+  box-shadow: inset 0 0 0 1px #000;
+}
+#menu-screen .wow .cb-only:hover,
+#menu-screen .wow .cb-only.on {
+  color: var(--w-gold-hi);
+  border-color: var(--w-gold);
+}
+#menu-screen .wow .cb-only.on {
+  background: linear-gradient(145deg, #4a3d28, #1e1810);
+}
+#menu-screen .wow .cb-check {
+  position: relative;
+  width: 11px;
+  height: 11px;
+  background: #0b0806;
+  border: 2px solid var(--w-bronze);
+}
+#menu-screen .wow .cb-only.on .cb-check::after {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  background: var(--w-gold);
+  box-shadow: 0 0 5px rgba(255, 208, 100, 0.8);
+}
+
+/* ---- the list: every recipe, five to a row, scrolling. Lit bronze for what can be made now, red where an item is missing, grey for what
+   needs the crafting table (marked with a little table in the corner). ---- */
+#menu-screen .wow .cb-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(5, 46px);
+  grid-auto-rows: 46px;
+  justify-content: center;
+  align-content: start;
+  gap: 2px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 2px 6px 2px 2px;
+  scrollbar-width: thin;
+  scrollbar-color: #8a6424 rgba(0, 0, 0, 0.45);
+}
+#menu-screen .wow .cb-grid::-webkit-scrollbar {
+  width: 8px;
+}
+#menu-screen .wow .cb-grid::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.45);
+}
+#menu-screen .wow .cb-grid::-webkit-scrollbar-thumb {
+  background: #8a6424;
+  border: 1px solid #000;
+}
+#menu-screen .wow .cb-item {
+  position: relative;
+  box-sizing: border-box;
+  width: 46px;
+  height: 46px;
+  cursor: pointer;
+  background: linear-gradient(145deg, #2a241c, #0e0c09);
+  border: 2px solid #b88a2e;
+  box-shadow: inset 0 0 0 1px #000, inset 3px 3px 7px rgba(0, 0, 0, 0.65);
+}
+#menu-screen .wow .cb-item.can:hover {
+  background: linear-gradient(145deg, #4a3d28, #1e1810);
+  border-color: var(--w-gold-hi);
+  box-shadow: inset 0 0 0 1px #000, 0 0 9px rgba(255, 208, 100, 0.6);
+  z-index: 1;
+}
+#menu-screen .wow .cb-item.cannot {
+  border-color: #5a2a22;
+}
+#menu-screen .wow .cb-item.table {
+  border-color: #3f3a33;
+}
+#menu-screen .wow .cb-item.cannot,
+#menu-screen .wow .cb-item.table {
+  cursor: default;
+}
+#menu-screen .wow .cb-item.cannot .item-icon,
+#menu-screen .wow .cb-item.table .item-icon {
+  opacity: 0.45;
+  filter: saturate(0.5);
+}
+#menu-screen .wow .cb-item.cannot:hover {
+  border-color: #a8483a;
+}
+#menu-screen .wow .cb-item.table:hover {
+  border-color: #8a7a62;
+}
+#menu-screen .wow .cb-item .item-icon {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+#menu-screen .wow .cb-item .count {
+  position: absolute;
+  right: 2px;
+  bottom: 0;
+  font-size: 11px;
+  font-weight: bold;
+  text-shadow: 2px 2px #000;
+  pointer-events: none;
+}
+/* The mark of a recipe that needs the crafting table: a small table (a top, and two legs). */
+#menu-screen .wow .cb-table {
+  position: absolute;
+  left: 2px;
+  bottom: 2px;
+  width: 11px;
+  height: 9px;
+  pointer-events: none;
+  background:
+    linear-gradient(#c79a56, #c79a56) 0 0 / 100% 3px no-repeat,
+    linear-gradient(#7a5630, #7a5630) 1px 3px / 2px 6px no-repeat,
+    linear-gradient(#7a5630, #7a5630) 8px 3px / 2px 6px no-repeat;
+  filter: drop-shadow(1px 1px 0 #000);
+}
+#menu-screen .wow .cb-empty {
+  grid-column: 1 / -1;
+  padding: 26px 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+  color: var(--w-dim);
+}
+
+/* ---- what the chosen recipe needs, under the grid ---- */
+#menu-screen .wow .craft-page .craft-row {
+  flex: 1;
+  margin: 0;
+}
+#menu-screen .wow .cd {
+  flex: none;
+  height: 108px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 2px solid;
+  border-color: #000 #3d2c12 #3d2c12 #000;
+  box-shadow: inset 3px 3px 0 rgba(0, 0, 0, 0.45);
+}
+#menu-screen .wow .cd-name {
+  font-size: 14px;
+  text-transform: capitalize;
+  color: var(--w-gold-hi);
+  text-shadow: 1px 1px 0 #000;
+}
+#menu-screen .wow .cd-name small {
+  font-size: 11px;
+  color: var(--w-dim);
+}
+#menu-screen .wow .cd-needs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+#menu-screen .wow .cd-need {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  text-shadow: 1px 1px 0 #000;
+}
+#menu-screen .wow .cd-need.ok {
+  color: #9fe08a;
+}
+#menu-screen .wow .cd-need.lack {
+  color: #f08070;
+}
+#menu-screen .wow .cd-need-icon {
+  position: relative;
+  display: block;
+  width: 26px;
+  height: 26px;
+}
+#menu-screen .wow .cd-need-icon .item-icon {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+}
+#menu-screen .wow .cd-hint {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--w-dim);
+  text-shadow: 1px 1px 0 #000;
+}
+#menu-screen .wow .cd-hint.ok {
+  color: var(--w-text);
+}
+#menu-screen .wow .cd-hint.lack {
+  color: #f08070;
+  text-transform: capitalize;
+}
+#menu-screen .wow .cd-hint.table {
+  color: #d8b878;
+}

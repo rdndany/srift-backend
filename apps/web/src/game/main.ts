@@ -30,6 +30,10 @@ import {
   IS_LIQUID,
   isWaterBlock,
   type SaveMode,
+  showcaseFind,
+  SHOWCASE_BOX,
+  SHOWCASE_FLOOR,
+  SHOWCASE_HEIGHT,
   type DiscoveryLog,
   type WorldState,
 } from '@solrift/shared';
@@ -64,6 +68,7 @@ import { Sky } from './sky';
 import { PostFx, type FxFlags } from './postfx';
 import { SunShadows } from './shadows';
 import { AdminBar, type AdminDetails } from './adminBar';
+import { blockInfoText } from './blockInfo';
 import { TorchGlow } from './torchGlow';
 import { CRACK_STAGES, makeCrackTexture, setCrackStage } from './breakCracks';
 import { XpOrbRenderer } from './xpOrbRenderer';
@@ -180,6 +185,9 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   const ac = new AbortController();
   const { signal } = ac;
 
+  // Painting the block pictures takes a few seconds and holds the page: let the loading screen show first.
+  setLoading('Painting the blocks...', 8);
+  await new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
   const atlas = buildAtlas();
   const icons = new ItemIcons(atlas.canvas);
   // Multisampling keeps the hard block edges and the texture-aliased far terrain from crawling.
@@ -229,20 +237,35 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
       else if (!open && session.ready) input.lock();
     },
   );
-  const worldName = (kind: WorldKind): string => (kind === 'square' ? 'square platform' : kind === 'beyond' ? 'World Beyond' : 'overworld');
+  const worldName = (kind: WorldKind): string => (kind === 'square' ? 'square platform' : kind === 'beyond' ? 'World Beyond' : kind === 'showcase' ? 'block showcase' : 'overworld');
   /** Single-player has no one to talk to, but `/` still takes the few cheats (they need creative mode). */
   function localCommand(text: string): void {
     const [name, arg] = text.replace(/^\//, '').trim().toLowerCase().split(/\s+/);
     if (!text.startsWith('/')) return;
     if (name === 'help') {
-      chat.add('Commands: /help /world [overworld|beyond|square]', 'notice');
+      chat.add('Commands: /help /world [overworld|beyond|square|showcase] /find <block> (in the showcase) /admin on|off (block details at the crosshair)', 'notice');
     } else if (name === 'world') {
       if (KIND === 'adventure') chat.add('Adventure is its own world: leave it from the pause menu and pick another from the title screen.', 'notice');
-      else if (!arg) chat.add(`You are in the ${worldName(KIND)}. Use /world overworld, /world beyond or /world square.`, 'notice');
-      else if (arg !== 'overworld' && arg !== 'square' && arg !== 'beyond') chat.add('Worlds: overworld, beyond, square.', 'notice');
+      else if (!arg) chat.add(`You are in the ${worldName(KIND)}. Use /world overworld, /world beyond, /world square or /world showcase.`, 'notice');
+      else if (arg !== 'overworld' && arg !== 'square' && arg !== 'beyond' && arg !== 'showcase') chat.add('Worlds: overworld, beyond, square, showcase.', 'notice');
       else if (session.mode !== 'creative') chat.add('Switching worlds is a cheat: it needs creative mode (F4).', 'notice');
       else if (arg === KIND) chat.add(`You are already in the ${worldName(arg)}.`, 'notice');
       else switchWorld(arg);
+    } else if (name === 'admin') {
+      // Your own world is yours: no list to check. (Online, the server decides and tells us through onAdmin.)
+      if (arg === 'on' || arg === 'off') {
+        adminMode = arg === 'on';
+        chat.add(adminMode ? 'Admin mode ON: the block under the crosshair is described beside it. /admin off to leave.' : 'Admin mode OFF.', 'notice');
+      } else chat.add(`Admin mode is ${adminMode ? 'on' : 'off'}. Use /admin on or /admin off.`, 'notice');
+    } else if (name === 'find') {
+      // The block showcase: stand beside the box of a block (/find grass, /find stone_bricks).
+      const box = KIND === 'showcase' && arg ? showcaseFind(arg) : null;
+      if (KIND !== 'showcase') chat.add('/find works in the block showcase: /world showcase, or open the game with ?world=showcase.', 'notice');
+      else if (!box) chat.add(arg ? `No block called "${arg}" here.` : 'Which block? For example /find grass.', 'notice');
+      else {
+        local?.teleport(box.x + SHOWCASE_BOX / 2, SHOWCASE_FLOOR + SHOWCASE_HEIGHT + 3, box.z - 4, 0, -0.5);
+        chat.add(`${box.name}: ten by ten blocks, four high.`, 'notice');
+      }
     } else {
       chat.add(`Unknown command: /${name}. Try /help.`, 'notice');
     }
@@ -254,6 +277,8 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     void (saveBridge.flush?.() ?? Promise.resolve()).finally(() => opts.switchWorld?.(kind, session.mode));
   }
   let remote: RemoteSession | null = null;
+  /** The server says admin mode is on: the block under the crosshair is described next to it. */
+  let adminMode = false;
   let onlineError: string | null = null;
   // The class this character plays: a wallet character's is on its account; a guest picked theirs on the title screen. ?class= is for tests and developers.
   hydrateProfile();
@@ -293,6 +318,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
         onTrade: (view) => showTrade(view),
         onTradeAsk: (from) => useUi.setState({ tradeAsk: from }),
         onNotice: (text) => chat.add(text, 'notice'),
+        onAdmin: (on) => (adminMode = on),
         onClose: (reason) => {
           onlineError = reason;
           hideLoading(); // the reason is on the pause screen
@@ -1406,6 +1432,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
 
     const stats = world.refreshStats();
     hud.tick(dt, debugText(stats));
+    updateBlockInfo();
     hitches.lap('things');
     const callsBefore = renderer.info.render.calls;
     const trisBefore = renderer.info.render.triangles;
@@ -1572,6 +1599,25 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     hud.setNet(remote.connected ? `online - ${remote.pingMs}ms - ${remote.others.size + 1} player(s)` : (onlineError ?? 'disconnected'), remote.connected);
   }
 
+  /** Admin mode: the block under the crosshair, described beside it (id, place, what it is, how it digs). */
+  const blockInfoEl = document.getElementById('block-info');
+  let blockInfoKey = '';
+  function updateBlockInfo(): void {
+    if (!blockInfoEl) return;
+    const t = adminMode && input.locked ? session.target : null;
+    if (!t) {
+      if (blockInfoKey) {
+        blockInfoKey = '';
+        blockInfoEl.style.display = 'none';
+      }
+      return;
+    }
+    const key = `${t.x},${t.y},${t.z},${t.id}`;
+    if (key === blockInfoKey) return;
+    blockInfoKey = key;
+    blockInfoEl.textContent = blockInfoText(t.x, t.y, t.z, t.id, BIOME_NAMES[session.generator.columnAt(t.x, t.z).biome]);
+    blockInfoEl.style.display = 'block';
+  }
   function debugText(stats: ReturnType<World['refreshStats']>): string {
     const col = session.generator.columnAt(Math.floor(body.x), Math.floor(body.z));
     const target = session.target;

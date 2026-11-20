@@ -1,3 +1,4 @@
+import { ICON_COLORS, OUTFIT_ICONS } from './outfitIcons';
 import { ARMOR_MATERIALS, ARMOR_SLOTS, OUTFIT_CLASSES, BED_RED, COMPASS_FRAMES, DYE_NAMES, DYE_RGB, TILE_PX, TOOL_KINDS, TOOL_MATERIALS, type ArmorMaterial, type ArmorSlot, type OutfitClass, type ToolKind, type ToolMaterial } from '@solrift/shared';
 
 /**
@@ -2619,122 +2620,19 @@ function hornGrid(armor: RGB, trim: RGB, glow: RGB): Cell[] {
 
 // ---- the clothes of the classes ------------------------------------------------------------------
 
-const OUTFIT_PALETTE: Record<OutfitClass, { main: RGB; dark: RGB; accent: RGB; trim: RGB }> = {
-  warrior: { main: [190, 197, 210], dark: [104, 110, 126], accent: [190, 52, 46], trim: [240, 196, 70] },
-  mage: { main: [112, 74, 192], dark: [58, 38, 118], accent: [196, 112, 44], trim: [238, 192, 72] },
-  ranger: { main: [78, 132, 68], dark: [44, 84, 46], accent: [118, 76, 42], trim: [232, 220, 176] },
-};
-
-/** The silhouettes that are not armor's: the wizard's hat with its brim, the ranger's hood, the flare of a robe's skirt. */
-const OUTFIT_SHAPE: Partial<Record<OutfitClass, Partial<Record<ArmorSlot, (x: number, y: number) => boolean>>>> = {
-  mage: {
-    helmet: (x, y) => {
-      if (y >= 1 && y <= 9) return Math.abs(x - 7.5) <= 0.9 + (y - 1) * 0.5;
-      if (y === 10) return x >= 1 && x <= 14;
-      if (y === 11) return x >= 2 && x <= 13;
-      return false;
-    },
-    leggings: (x, y) => {
-      if (y < 2 || y > 14) return false;
-      const half = 3.5 + Math.max(0, y - 4) * 0.4;
-      return Math.abs(x - 7.5) <= half && !(y > 8 && x >= 7 && x <= 8 && y % 3 === 0);
-    },
-  },
-  ranger: {
-    helmet: (x, y) => {
-      const dx = (x - 7.5) / 6;
-      const dy = (y - 6.5) / 5.3;
-      if (x >= 5 && x <= 10 && y >= 7 && y <= 11) return false;
-      if (x >= 11 && x <= 13 && y >= 1 && y <= 3 && x - 11 <= 3 - y + 1) return true;
-      return dx * dx + dy * dy <= 1;
-    },
-  },
-};
-
+/** A class's clothes are painted by hand, pixel by pixel (see outfitIcons.ts). */
 function outfitGrid(cls: OutfitClass, slotIndex: number): Cell[] {
-  const slot = ARMOR_SLOTS[slotIndex];
-  const p = OUTFIT_PALETTE[cls];
+  const rows = OUTFIT_ICONS[`${cls}_${ARMOR_SLOTS[slotIndex]}`];
+  const colors = ICON_COLORS[cls];
   const g = blank();
-  const inside = OUTFIT_SHAPE[cls]?.[slot] ?? ARMOR_SHAPE[slot];
-  fillShape(g, inside, (x, y) => {
-    // (Leather boots for the cloth and the hunter's classes.)
-    let c = shade(slot === 'boots' && cls !== 'warrior' ? [112, 74, 44] : p.main, Math.floor(hashPx(x, y) * 14) - 7);
-    // Cloth folds for the robe and the skirt, a stitched seam for leather and a brushed shine for steel.
-    if (cls === 'mage' && slot !== 'boots' && x % 4 === 0) c = shade(c, -14);
-    if (cls === 'warrior' && (x * 3 + y * 5) % 11 === 0) c = shade(c, -34);
-    if (cls === 'ranger' && slot !== 'boots' && (x + y) % 4 === 0) c = shade(c, -18);
-    return c;
-  });
-  const set = (x: number, y: number, c: RGB): void => {
-    if (x >= 0 && y >= 0 && x < N && y < N && g[y * N + x]) g[y * N + x] = c;
-  };
-  const rect = (x0: number, y0: number, x1: number, y1: number, c: RGB): void => {
-    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) set(x, y, c);
-  };
-  if (slot === 'helmet') {
-    if (cls === 'warrior') {
-      rect(7, 1, 8, 4, p.accent); // the crest
-      rect(7, 5, 8, 8, p.dark); // the nose guard
-      set(7, 4, p.trim);
-      for (let x = 3; x <= 12; x++) set(x, 5, p.dark); // the rim
-    } else if (cls === 'mage') {
-      rect(5, 8, 10, 9, p.accent); // the band
-      set(7, 4, p.trim);
-      set(8, 5, p.trim);
-      for (let x = 2; x <= 13; x++) set(x, 11, p.dark);
-    } else {
-      rect(10, 3, 12, 4, [214, 60, 52]); // a feather
-      rect(11, 5, 12, 6, p.trim);
-      for (let x = 4; x <= 11; x++) set(x, 6, p.dark); // the edge at the brow
-    }
-  } else if (slot === 'chestplate') {
-    if (cls === 'warrior') {
-      rect(7, 4, 8, 11, p.trim); // a gold cross
-      rect(5, 6, 10, 7, p.trim);
-      rect(1, 3, 3, 6, p.accent); // crimson sleeves
-      rect(12, 3, 14, 6, p.accent);
-      rect(4, 12, 11, 12, p.dark); // the belt
-    } else if (cls === 'mage') {
-      rect(7, 3, 8, 12, p.trim); // a stripe down the front
-      rect(4, 11, 11, 11, p.accent); // the belt
-      set(6, 6, [150, 220, 255]);
-      set(9, 6, [150, 220, 255]);
-    } else {
-      for (let i = 0; i < 7; i++) set(4 + i, 4 + i, p.accent); // the bandolier
-      rect(7, 3, 8, 13, p.dark);
-      for (let y = 5; y <= 11; y += 2) set(7, y, p.trim); // the lacing
-      rect(4, 12, 11, 12, p.accent);
-    }
-  } else if (slot === 'leggings') {
-    if (cls === 'warrior') {
-      rect(3, 2, 12, 3, p.dark);
-      rect(3, 4, 12, 4, p.trim);
-      set(4, 9, p.trim);
-      set(11, 9, p.trim);
-    } else if (cls === 'mage') {
-      rect(3, 2, 12, 3, p.accent);
-      rect(2, 14, 13, 14, p.trim); // a gold hem
-    } else {
-      rect(3, 2, 12, 3, p.dark);
-      rect(3, 5, 12, 5, p.accent);
-    }
-  } else {
-    // Boots: a darker sole and a cuff.
-    rect(1, 12, 14, 13, cls === 'warrior' ? p.dark : [58, 38, 22]);
-    if (cls === 'warrior') rect(2, 4, 13, 5, p.trim);
-    else if (cls === 'mage') {
-      rect(2, 4, 13, 5, p.trim);
-      for (let y = 6; y <= 11; y++) {
-        set(3, y, p.dark);
-        set(10, y, p.dark);
-      }
-    } else {
-      rect(2, 4, 13, 5, [236, 228, 200]); // a fur top
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const ch = rows?.[y]?.[x];
+      if (ch && ch !== '.') g[y * N + x] = colors[ch] ?? null;
     }
   }
-  return outline(bevel(g));
+  return outline(g);
 }
-
 // ---- lanterns and chains --------------------------------------------------------------------------------
 
 interface LanternPalette {

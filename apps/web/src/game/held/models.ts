@@ -304,10 +304,14 @@ export class ItemModels {
       const tile = base + frame;
       const col = tile % ATLAS_COLS;
       const row = Math.floor(tile / ATLAS_COLS);
-      const u0 = col / ATLAS_COLS;
-      const u1 = (col + 1) / ATLAS_COLS;
-      const v0 = 1 - (row + 1) / ATLAS_ROWS;
-      const v1 = 1 - row / ATLAS_ROWS;
+      // The picture is taken a little inside its tile: at the very rim the sampler reaches into the neighbouring tiles and draws a
+      // dotted outline round each plane (it showed as a frame of fine lines round the flame, most in the off hand).
+      const eu = 0.75 / (ATLAS_COLS * TILE_PX);
+      const ev = 0.75 / (ATLAS_ROWS * TILE_PX);
+      const u0 = col / ATLAS_COLS + eu;
+      const u1 = (col + 1) / ATLAS_COLS - eu;
+      const v0 = 1 - (row + 1) / ATLAS_ROWS + ev;
+      const v1 = 1 - row / ATLAS_ROWS - ev;
       uv.setXY(0, u0, v0);
       uv.setXY(1, u1, v0);
       uv.setXY(2, u1, v1);

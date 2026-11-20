@@ -1,4 +1,4 @@
-import { B, BLOCKS, FALLS, SOUL_WARD_HEIGHT, SOUL_WARD_RADIUS, chestId, chestInfo, chestPartnerPos, doorId, doorInfo, doorKind, isAnvil, isChest } from './blocks';
+import { B, BLOCKS, FALLS, IS_LEAVES, IS_LOG, SOUL_WARD_HEIGHT, SOUL_WARD_RADIUS, chestId, chestInfo, chestPartnerPos, doorId, doorInfo, doorKind, isAnvil, isChest } from './blocks';
 import { WORLD_HEIGHT } from './chunk';
 import { LOOT_TABLES, positionRand, rollChest, spawnerKind } from './loot';
 import { bodyOverlapsBlock } from './physics';
@@ -36,6 +36,11 @@ import { folkFromJSON, folkToJSON, makeRecord, professionFor, villagerVariant, t
 import { restock } from './trading';
 import { SAFE_BUFFER, WorldGenerator } from './worldgen';
 
+/** How many steps (through leaves) from a log a leaf still counts as part of its tree. */
+const LEAF_REACH = 7;
+/** The most leaves one felled log sets falling (a very big tree gets the rest on the next cut), and how many go in one tick. */
+const LEAF_BATCH = 1500;
+const LEAF_PER_TICK = 24;
 const NEIGHBOURS: [number, number, number][] = [
   [0, 1, 0],
   [0, -1, 0],
@@ -184,6 +189,8 @@ export class Realm {
   private falling: { x: number; y: number; z: number; t: number; dist: number }[] = [];
   /** TNT with a burning fuse: where, and seconds left. */
   private lit: { x: number; y: number; z: number; t: number }[] = [];
+  /** Leaves of a felled tree, waiting to fall away one by one. */
+  private fading: { x: number; y: number; z: number; t: number; drops: boolean }[] = [];
   private spawnerScan = 0;
   /** The soul lanterns found around the players (rescanned now and then), whose ward keeps monsters off. */
   private wards: { x: number; y: number; z: number }[] = [];
@@ -256,6 +263,7 @@ export class Realm {
         for (const s of this.takeBlock(x, y, z, id)) this.drops.spawnAtBlock(s, x, y, z);
         this.emitNear(x, y, z, { t: 'burst', id, x, y, z, count: 8 });
         this.settleAround(x, y, z, false);
+        if (IS_LOG[id]) this.treeCut(x, y, z, true);
       },
       rainsOn: (x, y, z) => this.weather.kind !== 'clear' && y > this.world.surfaceY(x, z),
       active: (x, y, z) => this.players.some((p) => !p.spectating && Math.hypot(p.body.x - x, p.body.z - z) < FIRE_RANGE),
@@ -442,6 +450,7 @@ export class Realm {
     this.fire.update(dt);
     this.redstone.update(dt);
     this.updateTnt(dt);
+    this.updateLeafDecay(dt);
     this.updateVehicles(dt, active);
 
     const collectors: (DropCollector & { player: Player; got: Map<string, PickedUp> })[] = active.map((p) => {
@@ -1247,6 +1256,94 @@ export class Realm {
     }
   }
 
+  // ---- leaves ----------------------------------------------------------------
+
+  /**
+   * A log was removed here. Every leaf in reach that has no log within `LEAF_REACH` steps (through leaves) is now cut off from its
+   * tree, and fades away over the next few seconds, dropping what leaves drop: a sapling, a stick, now and then an apple. Leaves that
+   * another tree still holds stay, and so do leaves a long way off. (Only the region round the cut is looked at, once per log.)
+   */
+  treeCut(x: number, y: number, z: number, withDrops: boolean): void {
+    const HR = 8;
+    const DOWN = 6;
+    const UP = 26;
+    const M = LEAF_REACH;
+    const x0 = x - HR - M;
+    const y0 = Math.max(0, y - DOWN - M);
+    const z0 = z - HR - M;
+    const sx = 2 * (HR + M) + 1;
+    const sy = Math.min(WORLD_HEIGHT, y + UP + M + 1) - y0;
+    const sz = sx;
+    const dist = new Uint8Array(sx * sy * sz).fill(255);
+    const queue: number[] = [];
+    const at = (ix: number, iy: number, iz: number): number => (iy * sz + iz) * sx + ix;
+    for (let iy = 0; iy < sy; iy++)
+      for (let iz = 0; iz < sz; iz++)
+        for (let ix = 0; ix < sx; ix++) {
+          if (IS_LOG[this.world.getBlock(x0 + ix, y0 + iy, z0 + iz)]) {
+            dist[at(ix, iy, iz)] = 0;
+            queue.push(at(ix, iy, iz));
+          }
+        }
+    // Spread from the logs through the leaves, one step at a time.
+    for (let head = 0; head < queue.length; head++) {
+      const cell = queue[head];
+      const d = dist[cell];
+      if (d >= M) continue;
+      const ix = cell % sx;
+      const iz = Math.floor(cell / sx) % sz;
+      const iy = Math.floor(cell / (sx * sz));
+      for (const [dx, dy, dz] of NEIGHBOURS) {
+        const nx = ix + dx;
+        const ny = iy + dy;
+        const nz = iz + dz;
+        if (nx < 0 || ny < 0 || nz < 0 || nx >= sx || ny >= sy || nz >= sz) continue;
+        const n = at(nx, ny, nz);
+        if (dist[n] !== 255 || !IS_LEAVES[this.world.getBlock(x0 + nx, y0 + ny, z0 + nz)]) continue;
+        dist[n] = d + 1;
+        queue.push(n);
+      }
+    }
+    // The leaves in the middle part of the box that nothing holds.
+    const queued = new Set(this.fading.map((f) => (f.y * 65536 + f.x) * 65536 + f.z));
+    let found = 0;
+    for (let iy = M; iy < sy - M && found < LEAF_BATCH; iy++)
+      for (let iz = M; iz < sz - M && found < LEAF_BATCH; iz++)
+        for (let ix = M; ix < sx - M && found < LEAF_BATCH; ix++) {
+          if (dist[at(ix, iy, iz)] !== 255) continue;
+          const wx = x0 + ix;
+          const wy = y0 + iy;
+          const wz = z0 + iz;
+          if (!IS_LEAVES[this.world.getBlock(wx, wy, wz)] || queued.has((wy * 65536 + wx) * 65536 + wz)) continue;
+          if (this.isProtected(wx, wy, wz)) continue;
+          this.fading.push({ x: wx, y: wy, z: wz, t: 0.4 + this.rand() * 4.6, drops: withDrops });
+          found++;
+        }
+  }
+
+  private updateLeafDecay(dt: number): void {
+    if (this.fading.length === 0) return;
+    let done = 0;
+    const keep: typeof this.fading = [];
+    for (const f of this.fading) {
+      f.t -= dt;
+      if (f.t > 0 || done >= LEAF_PER_TICK) {
+        keep.push(f);
+        continue;
+      }
+      const id = this.world.getBlock(f.x, f.y, f.z);
+      if (!IS_LEAVES[id]) continue;
+      done++;
+      const def = BLOCKS[id];
+      this.world.setBlock(f.x, f.y, f.z, B.AIR);
+      this.emitNear(f.x, f.y, f.z, { t: 'burst', id, x: f.x, y: f.y, z: f.z, count: 10 });
+      this.emitNear(f.x, f.y, f.z, { t: 'sound', sound: def.sound, action: 'break', vol: 0.4 });
+      if (f.drops) for (const d of blockDrops(def, null, this.rand)) this.drops.spawnAtBlock(makeStack(d.id, d.count), f.x, f.y, f.z);
+      this.blockChanged(f.x, f.y, f.z);
+    }
+    this.fading = keep;
+  }
+
   /** Light the fuse of the TNT at a cell (it blows up when the fuse runs out, even if the block is gone by then). */
   primeTnt(x: number, y: number, z: number, fuse = TNT_FUSE): void {
     if (this.lit.some((l) => l.x === x && l.y === y && l.z === z)) return;
@@ -1331,6 +1428,7 @@ export class Realm {
             for (const drop of blockDrops(def, DIAMOND_PICK, rand)) this.drops.spawnAtBlock(makeStack(drop.id, drop.count), bx, by, bz);
           }
           this.settleAround(bx, by, bz, true);
+          if (IS_LOG[id]) this.treeCut(bx, by, bz, true);
         }
     for (let i = 0; i < 10; i++) {
       const bx = cx + Math.floor(rand() * 5) - 2;

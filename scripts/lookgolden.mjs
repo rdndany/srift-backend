@@ -1,6 +1,6 @@
 // Golden hour, moonlight and torch glow. Usage: node scripts/lookgolden.mjs [url] [outDir] [prefix] [scene,scene...] [extraQuery]
 import { mkdirSync } from 'node:fs';
-import { chromium } from 'playwright';
+import { launchBrowser } from './browser.mjs';
 
 const url = process.argv[2] ?? 'http://localhost:3000';
 const outDir = process.argv[3] ?? 'tmp-shots';
@@ -8,7 +8,7 @@ const prefix = process.argv[4] ?? 'gold';
 const only = process.argv[5]?.split(',');
 const extra = process.argv[6] ?? '';
 mkdirSync(outDir, { recursive: true });
-const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl'] });
+const browser = await launchBrowser();
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));
 page.on('console', (m) => m.type() === 'error' && console.log('[err]', m.text().slice(0, 300)));

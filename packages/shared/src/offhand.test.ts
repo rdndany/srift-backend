@@ -186,7 +186,7 @@ describe('tooltips', () => {
     expect(orb).toContain('+12% Spell Damage');
     expect(orb).toContain('Held in the off hand');
     expect(orb).not.toContain('Material');
-    expect(tooltipLines(makeStack(I.WAND)).map((l) => l.text)).toContain('3 Spell Damage');
+    expect(tooltipLines(makeStack(I.WAND)).map((l) => l.text)).toContain('1.6 Spell Damage');
     expect(tooltipLines(makeStack(I.DAGGER)).map((l) => l.text)).toContain('+5% Critical Chance');
     expect(kind(I.DIAMOND)).toMatchObject({ text: 'Material' });
   });

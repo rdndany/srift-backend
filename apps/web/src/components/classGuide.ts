@@ -1,4 +1,4 @@
-import { ABILITIES, ABILITY_BY_ID, CLASSES, CLASS_BALANCE, CLASS_IDS, CLASS_LEVELS, LEVEL_SCALING, abilitiesOf, computeStats, skillBookPrice, type AbilityDef, type AbilityId, type ClassId } from '@solrift/shared';
+import { ABILITIES, ABILITY_BY_ID, CLASSES, CLASS_BALANCE, CLASS_IDS, CLASS_LEVELS, LEVEL_SCALING, abilitiesOf, computeStats, scaled, skillBookPrice, type AbilityDef, type AbilityId, type ClassId } from '@solrift/shared';
 
 /**
  * What the class pages (`/classes/<id>`) say. The numbers come from the game's own data (classes.ts, abilities.ts), so a
@@ -161,7 +161,7 @@ const seconds = (n: number): string => `${Math.round(n * 100) / 100} s`;
 
 /** The damage of an ability's own base number for a class at a level: the class's multiplier for its kind, times its growth. */
 export function damageAt(a: AbilityDef, base: number, level: number): number {
-  return computeStats(a.classId, level).damage[a.kind] * base;
+  return scaled(computeStats(a.classId, level).damage[a.kind] * base);
 }
 
 /** The base damage in an ability's effect (0 when it deals none). */

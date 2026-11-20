@@ -83,6 +83,7 @@ import {
 
 import { cleanQuery, type AuctionQuery, type AuctionView } from '@solrift/shared';
 import type { RoomStore } from './roomStore';
+import { BANS_KEY, findItem, isAdminIdentity, itemMatches, parseBans, type AdminEvent, type AdminOptions, type Bans } from './admin';
 import { entryOf, findMember, inspectView, socialView, splitTarget } from './social';
 import { GuildRegistry } from './guilds';
 
@@ -120,7 +121,12 @@ export interface RoomOptions {
   naturalSpawning?: boolean;
   /** Allow cheat commands in chat (/time, /weather, /gamemode, /tp). Off on shared servers. */
   cheats?: boolean;
+  /** Who may switch on admin mode with `/admin on` (see `admin.ts`). Nobody, when absent. */
+  admins?: AdminOptions;
+  /** Called for every admin act (and every refused try at `/admin`), for the log. */
+  onAdmin?: (e: AdminEvent) => void;
   rand?: () => number;
+
   /** Where the world and signed-in players' progress are kept. Without it nothing survives a restart. */
   store?: RoomStore;
   /** Seconds between automatic saves. */
@@ -164,6 +170,14 @@ interface Member {
   look: number;
   /** Account the progress belongs to (guests have none, so nothing of theirs is stored). */
   key: string | null;
+  /** True when this character is on the server's admin list. Decided once, at join, from the signed-in wallet and character: never from anything the client sends. */
+  admin: boolean;
+  /** The wallet that signed in (null for a guest). */
+  wallet: string | null;
+  /** Admin mode is on (`/admin on`). Always off at join, and only ever turned on for an `admin`. */
+  adminOn: boolean;
+  /** The tick until which they may not chat (`/mute`). */
+  mutedUntil: number;
   player: Player;
   conn: RoomConnection;
   queue: QueueItem[];
@@ -198,6 +212,11 @@ interface Member {
   /** The ability effects this player has been sent in full, and where (a client keeps what it was told: later snapshots only name them, see `snapshot`). */
   fxSent: Map<number, string>;
 }
+
+/** The commands of admin mode (`/admin` itself is handled with them). Anyone else who types one is told it does not exist. */
+const ADMIN_COMMANDS = new Set(['players', 'kick', 'ban', 'unban', 'bans', 'mute', 'unmute', 'tpto', 'bring', 'give', 'announce']);
+/** What a muted player may not say. */
+const CHAT_COMMANDS = new Set(['w', 'whisper', 'tell', 'r', 'reply', 'g', 'p', 'me', 'emote']);
 
 /** Most input a player may bank while the network stalls, in seconds. */
 const MAX_BUDGET = 0.25;
@@ -441,6 +460,16 @@ export class GameRoom {
   /** Add a player. Returns null (after telling the connection why) when the room is full. */
   join(conn: RoomConnection, wantedName: string, accountId: string | null = null, wantedLook: number | null = null, classId: ClassId | null = null, wallet: string | null = null): number | null {
     const key = accountId && this.opts.store ? accountId : null;
+    const admin = isAdminIdentity(this.opts.admins, accountId, wallet);
+    // A banned wallet or character does not get in (an admin cannot be banned: the list is the owner's word).
+    if (!admin && this.opts.store && (accountId || wallet)) {
+      const bans = this.bans();
+      const ban = (wallet ? bans[wallet] : undefined) ?? (accountId ? bans[accountId] : undefined);
+      if (ban) {
+        conn.send({ t: 'kicked', reason: ban.reason ? `banned: ${ban.reason}` : 'banned' });
+        return null;
+      }
+    }
     // The Stash belongs to the wallet, so every character of it opens the same one (and nobody else's: a guest has none).
     const stashOwner = key ? wallet : null;
     // One body per account, or the same items could be carried by two players. Signing in again (a reload before the old connection has been
@@ -461,11 +490,14 @@ export class GameRoom {
     if (stashOwner) this.realm.stashes.load(stashOwner, this.opts.store!.getJson(`stash:${stashOwner}`));
     const saved = key ? parsePlayerSave(this.opts.store!.getJson(`player:${key}`)) : null;
     if (saved) player.loadPlayer(saved);
+    // Creative mode is a cheat: a character saved in it (an admin who logged out with admin mode on) comes back in the server's own mode.
+    const startMode = this.opts.mode ?? 'survival';
+    if (!this.opts.cheats && player.mode !== startMode) player.setMode(startMode);
     player.finishLoading();
     const id = this.nextId++;
     // A look nobody chose (an old client, a bot) is made from the name, so players still tell apart.
     const look = parseLookCode(wantedLook) ? (wantedLook as number) : lookCode(lookFromName(name));
-    const m: Member = { id, name, look, key, player, conn, queue: [], budget: 0, ack: 0, lastSeq: 0, invDirty: true, chatTokens: 5, socialTokens: SOCIAL_BURST, book: key && this.opts.store ? parseSocialBook(this.opts.store.getJson(`social:${key}`)) : new SocialBook(), replyTo: null, guildInvite: null, trade: null, tradeAsk: null, tradeTokens: TRADE_BURST, cmdTokens: CMD_BURST, score: 0, warned: false, messages: 0, fxSent: new Map() };
+    const m: Member = { id, name, look, key, admin, wallet, adminOn: false, mutedUntil: 0, player, conn, queue: [], budget: 0, ack: 0, lastSeq: 0, invDirty: true, chatTokens: 5, socialTokens: SOCIAL_BURST, book: key && this.opts.store ? parseSocialBook(this.opts.store.getJson(`social:${key}`)) : new SocialBook(), replyTo: null, guildInvite: null, trade: null, tradeAsk: null, tradeTokens: TRADE_BURST, cmdTokens: CMD_BURST, score: 0, warned: false, messages: 0, fxSent: new Map() };
     this.members.set(id, m);
 
     conn.send({ t: 'joined', id, name, look, seed: this.seed, kind: this.kind, tickHz: this.tickHz, time: this.realm.time });
@@ -554,7 +586,7 @@ export class GameRoom {
         return;
       case 'cmd':
         // Switching to creative is a cheat; only the server's rules may allow it.
-        if (msg.c.t === 'mode' && !this.opts.cheats) {
+        if (msg.c.t === 'mode' && !this.cheatsFor(m)) {
           this.tell(m, 'Cheats are off on this server');
           this.strike(m, STRIKES.forbidden, 'creative switch without cheats');
           return;
@@ -604,6 +636,7 @@ export class GameRoom {
       this.command(m, text.slice(1));
       return;
     }
+    if (this.muted(m)) return this.tell(m, 'You are muted.');
     this.say(m, { t: 'chat', from: m.name, text, ch: 'say' });
   }
 
@@ -968,9 +1001,12 @@ export class GameRoom {
   private command(m: Member, line: string): void {
     const [name, ...args] = line.trim().split(/\s+/);
     const p = m.player;
-    switch ((name ?? '').toLowerCase()) {
+    const cmd = (name ?? '').toLowerCase();
+    if (cmd === 'admin' || ADMIN_COMMANDS.has(cmd)) return this.adminCommand(m, cmd, args);
+    if (CHAT_COMMANDS.has(cmd) && this.muted(m)) return this.tell(m, 'You are muted.');
+    switch (cmd) {
       case 'help':
-        this.tell(m, `Commands: /help /who /home /w /r /me /friend /ignore /inspect /trade /guild /g /party /p${this.opts.cheats ? ' /time /weather /gamemode /tp /xp /coins' : ''}`);
+        this.tell(m, `Commands: /help /who /home /w /r /me /friend /ignore /inspect /trade /guild /g /party /p${this.cheatsFor(m) ? ' /time /weather /gamemode /tp /xp /coins' : ''}${m.adminOn ? ' (admin: /admin help)' : m.admin ? ' /admin' : ''}`);
         return;
       case 'who':
         this.tell(m, `Online (${this.members.size}): ${[...this.members.values()].map((x) => x.name).join(', ')}`);
@@ -1054,15 +1090,205 @@ export class GameRoom {
       case 'tp':
       case 'xp':
       case 'coins':
-        if (!this.opts.cheats) {
+        if (!this.cheatsFor(m)) {
           this.tell(m, 'Cheats are off on this server');
           this.strike(m, STRIKES.forbidden, 'cheat command without cheats');
           return;
         }
+        if (m.adminOn) this.audit(m, cmd, args.join(' '));
         this.cheat(m, name.toLowerCase(), args);
         return;
       default:
         this.tell(m, `Unknown command: /${name ?? ''}`);
+    }
+  }
+
+  // ---- admin mode ----------------------------------------------------------------
+
+  /** Cheats are allowed on the whole server (CHEATS=1) or for an admin who has switched admin mode on. */
+  private cheatsFor(m: Member): boolean {
+    return !!this.opts.cheats || m.adminOn;
+  }
+
+  private muted(m: Member): boolean {
+    return this.tickCount < m.mutedUntil;
+  }
+
+  private bans(): Bans {
+    return parseBans(this.opts.store?.getJson(BANS_KEY));
+  }
+
+  private audit(m: Member, action: string, detail = ''): void {
+    this.opts.onAdmin?.({ name: m.name, account: m.key, action, detail });
+  }
+
+  /**
+   * `/admin on|off|status|help` and the admin's tools. Every check is made here on the server from `m.admin`, which was decided at join from the
+   * signed-in wallet: a client cannot say it is an admin, and anyone not on the list is told the command does not exist (and noted in the log).
+   */
+  private adminCommand(m: Member, cmd: string, args: string[]): void {
+    if (!m.admin) {
+      this.audit(m, 'refused', `/${cmd} ${args.join(' ')}`.trim());
+      this.strike(m, STRIKES.forbidden, 'admin command without being an admin');
+      return this.tell(m, `Unknown command: /${cmd}`);
+    }
+    const p = m.player;
+    if (cmd === 'admin') {
+      const sub = (args[0] ?? 'status').toLowerCase();
+      if (sub === 'on') {
+        if (m.adminOn) return this.tell(m, 'Admin mode is already on.');
+        m.adminOn = true;
+        this.audit(m, 'on');
+        m.conn.send({ t: 'admin', on: true });
+        return this.tell(m, 'Admin mode ON. /admin help lists your commands; /admin off to leave.');
+      }
+      if (sub === 'off') {
+        if (!m.adminOn) return this.tell(m, 'Admin mode is already off.');
+        m.adminOn = false;
+        // Creative mode was a gift of admin mode: it ends with it.
+        const own = this.opts.mode ?? 'survival';
+        if (!this.opts.cheats && p.mode !== own) p.setMode(own);
+        this.audit(m, 'off');
+        m.conn.send({ t: 'admin', on: false });
+        return this.tell(m, 'Admin mode OFF.');
+      }
+      if (sub === 'help') {
+        return this.tell(
+          m,
+          'Admin: /admin on|off  /players  /kick <player> [reason]  /ban <player> [reason]  /unban <name>  /bans  /mute <player> [minutes]  /unmute <player>  /tpto <player>  /bring <player>  /give <item> [count]  /announce <text>  and /time /weather /gamemode /tp /xp /coins',
+        );
+      }
+      if (sub === 'status') return this.tell(m, `Admin mode is ${m.adminOn ? 'on' : 'off'}.`);
+      return this.tell(m, 'Usage: /admin on|off|status|help');
+    }
+    if (!m.adminOn) return this.tell(m, 'Admin mode is off. Type /admin on.');
+
+    const rest = args.join(' ');
+    /** The player a command names (names may hold spaces) and what follows the name; tells the admin when there is none or it may not be touched. */
+    const target = (touch: boolean): { who: Member; text: string } | null => {
+      const hit = splitTarget(this.members.values(), rest);
+      if (!hit) {
+        this.tell(m, rest ? `No player called "${args[0]}" is online.` : `Usage: /${cmd} <player>`);
+        return null;
+      }
+      if (touch && (hit.target === m || hit.target.admin)) {
+        this.tell(m, 'You cannot do that to an admin (or to yourself).');
+        return null;
+      }
+      return { who: hit.target, text: hit.text };
+    };
+
+    switch (cmd) {
+      case 'players': {
+        const rows = [...this.members.values()].map((x) => `${x.name}${x.admin ? '*' : ''} L${x.player.cls?.level ?? '-'} ${Math.round(x.player.body.x)},${Math.round(x.player.body.y)},${Math.round(x.player.body.z)}${x.key ? '' : ' (guest)'}`);
+        this.tell(m, `Players (${rows.length}): ${rows.slice(0, 25).join(' | ')}${rows.length > 25 ? ' | ...' : ''}`);
+        return;
+      }
+      case 'kick': {
+        const t = target(true);
+        if (!t) return;
+        this.audit(m, 'kick', `${t.who.name} ${t.text}`.trim());
+        this.tell(m, `Kicked ${t.who.name}.`);
+        this.kick(t.who.id, t.text ? `kicked by an admin: ${t.text.slice(0, 80)}` : 'kicked by an admin');
+        return;
+      }
+      case 'ban': {
+        if (!this.opts.store) return this.tell(m, 'Bans need the server database.');
+        const t = target(true);
+        if (!t) return;
+        // The wallet is banned when there is one (so none of its characters gets back in), else the character.
+        const id = t.who.wallet ?? t.who.key;
+        if (!id) return this.tell(m, `${t.who.name} is a guest and cannot be banned: use /kick.`);
+        const bans = this.bans();
+        bans[id] = { name: t.who.name, by: m.name, reason: t.text.slice(0, 80), at: Date.now() };
+        this.opts.store.setJson(BANS_KEY, bans);
+        this.audit(m, 'ban', `${t.who.name} (${id}) ${t.text}`.trim());
+        this.tell(m, `Banned ${t.who.name}.`);
+        this.kick(t.who.id, t.text ? `banned: ${t.text.slice(0, 80)}` : 'banned');
+        return;
+      }
+      case 'unban': {
+        if (!this.opts.store) return this.tell(m, 'Bans need the server database.');
+        const want = rest.trim().toLowerCase();
+        const bans = this.bans();
+        const id = want ? Object.keys(bans).find((k) => bans[k].name.toLowerCase() === want) : undefined;
+        if (!id) return this.tell(m, want ? `Nobody called "${rest}" is banned.` : 'Usage: /unban <name>');
+        const name = bans[id].name;
+        delete bans[id];
+        this.opts.store.setJson(BANS_KEY, bans);
+        this.audit(m, 'unban', name);
+        this.tell(m, `${name} is no longer banned.`);
+        return;
+      }
+      case 'bans': {
+        const all = Object.values(this.bans());
+        this.tell(m, all.length === 0 ? 'Nobody is banned.' : `Banned: ${all.map((b) => (b.reason ? `${b.name} (${b.reason})` : b.name)).join(', ')}`);
+        return;
+      }
+      case 'mute': {
+        const t = target(true);
+        if (!t) return;
+        const minutes = Math.max(1, Math.min(1440, Math.floor(Number(t.text) || 10)));
+        t.who.mutedUntil = this.tickCount + minutes * 60 * this.tickHz;
+        this.audit(m, 'mute', `${t.who.name} ${minutes} min`);
+        this.tell(m, `${t.who.name} is muted for ${minutes} minutes.`);
+        this.tell(t.who, `You have been muted for ${minutes} minutes.`);
+        return;
+      }
+      case 'unmute': {
+        const t = target(false);
+        if (!t) return;
+        t.who.mutedUntil = 0;
+        this.audit(m, 'unmute', t.who.name);
+        this.tell(m, `${t.who.name} can chat again.`);
+        this.tell(t.who, 'You can chat again.');
+        return;
+      }
+      case 'tpto': {
+        const t = target(false);
+        if (!t) return;
+        p.teleport(t.who.player.body.x, t.who.player.body.y, t.who.player.body.z);
+        this.audit(m, 'tpto', t.who.name);
+        return;
+      }
+      case 'bring': {
+        const t = target(true);
+        if (!t) return;
+        t.who.player.teleport(p.body.x, p.body.y, p.body.z);
+        this.audit(m, 'bring', t.who.name);
+        this.tell(m, `${t.who.name} is with you.`);
+        return;
+      }
+      case 'give': {
+        const last = args[args.length - 1];
+        const hasCount = args.length > 1 && /^\d{1,5}$/.test(last);
+        const count = hasCount ? Number(last) : 1;
+        const query = (hasCount ? args.slice(0, -1) : args).join(' ');
+        const item = findItem(query);
+        if (!item) {
+          const near = itemMatches(query);
+          return this.tell(m, query ? (near.length ? `Which one? ${near.join(', ')}` : `No item called "${query}".`) : 'Usage: /give <item> [count]');
+        }
+        let left = Math.max(1, Math.min(2304, count));
+        const total = left;
+        while (left > 0) {
+          const n = Math.min(left, Math.max(1, item.maxStack));
+          p.giveItem(item.id, n);
+          left -= n;
+        }
+        this.audit(m, 'give', `${item.name} x${total}`);
+        this.tell(m, `Given ${total} ${item.name}.`);
+        return;
+      }
+      case 'announce': {
+        const text = rest.slice(0, 200).trim();
+        if (!text) return this.tell(m, 'Usage: /announce <text>');
+        this.audit(m, 'announce', text);
+        this.broadcast({ t: 'notice', text: `[Admin] ${text}` });
+        return;
+      }
+      default:
+        this.tell(m, `Unknown command: /${cmd}`);
     }
   }
 

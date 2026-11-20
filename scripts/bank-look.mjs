@@ -1,0 +1,17 @@
+import { mkdirSync } from 'node:fs';
+import { launchBrowser } from './browser.mjs';
+mkdirSync('screenshots/bank', { recursive: true });
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const browser = await launchBrowser();
+const page = await (await browser.newContext({ viewport: { width: 1280, height: 800 } })).newPage();
+await page.goto('http://localhost:3000/game?seed=1337&debug&nomobs&class=warrior', { waitUntil: 'load' });
+await page.waitForFunction(() => window.__solrift?.isReady?.(), undefined, { timeout: 180000 });
+await page.evaluate(() => { const o = document.getElementById('overlay'); if (o) o.style.display = 'none'; window.__solrift.forceLock(); });
+await page.keyboard.press('KeyE');
+await sleep(1000);
+const shot = async (name) => { const el = await page.$('#menu-screen .wow .attr-points'); const boxes = await page.$$('#menu-screen .wow .attr-points'); for (const b of boxes) { const bb = await b.boundingBox(); if (bb && bb.y > 0) { await page.screenshot({ path: `screenshots/bank/${name}.png`, clip: { x: bb.x - 10, y: bb.y - 10, width: bb.width + 20, height: 200 } }); return; } } };
+await shot('zero');
+await page.evaluate(() => window.__solrift.addXp?.(500));
+await sleep(800);
+await shot('points');
+await browser.close();

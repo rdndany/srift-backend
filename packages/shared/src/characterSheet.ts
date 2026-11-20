@@ -3,6 +3,7 @@ import { BAG_SLOTS, bagInventory, bagOf } from './bags';
 import { CLASSES, CLASS_LEVELS, computeStats, isClassId, type ClassId } from './classes';
 import { Experience, xpToNext } from './experience';
 import { ARMOR_SLOTS } from './armor';
+import { NO_POINTS, pointModifier } from './statPoints';
 import { Container, HOTBAR_SLOTS, PLAYER_SLOTS, makeStack, type ItemStack } from './inventory';
 import { I, outfitItems } from './items';
 import { QUESTS } from './quests';
@@ -78,7 +79,8 @@ export function sheetOfSave(save: PlayerSave, classId: ClassId | null = null): C
     return { bag, items };
   });
 
-  const stats = id && cs ? computeStats(id, cs.lvl) : null;
+  const spent = pointModifier(cs?.pts ?? NO_POINTS);
+  const stats = id && cs ? computeStats(id, cs.lvl, spent ? [spent] : []) : null;
   const vit = (save.vitals ?? {}) as { h?: unknown; f?: unknown };
   const maxHealth = stats ? Math.round(stats.maxHealth) : MAX_HEALTH;
   const num = (v: unknown, fallback: number): number => (typeof v === 'number' && Number.isFinite(v) ? v : fallback);

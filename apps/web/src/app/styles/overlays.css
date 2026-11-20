@@ -50,6 +50,8 @@
   text-shadow: 2px 2px #000;
   transition: opacity 0.5s;
   pointer-events: none;
+  /* Above the shaded, blurred backdrop of a window (a shop, the inventory), so a message such as "your bags are full" stays readable there. */
+  z-index: 1;
 }
 
 #break-progress {

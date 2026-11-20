@@ -319,7 +319,7 @@ export class PlayerRenderer {
       c.root.visible = true;
       // A mage's hat is tall: the name tag rides above it.
       const tallHat = p.armor[0] ? getItem(p.armor[0]).armor?.outfit === 'mage' : false;
-      if (f.label) f.label.position.y = p.sleeping > 0 ? 0.9 : tallHat ? NAME_Y + 0.3 + lift : NAME_Y + lift;
+      if (f.label) f.label.position.y = p.sleeping > 0 ? 0.9 : tallHat ? NAME_Y + 0.45 + lift : NAME_Y + lift;
       if (p.sleeping > 0) {
         f.rig?.update(dt, null, 0, 0, 0, false);
         c.settle();

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
-import { CLASSES, STASH_SLOTS, STASHKEEPER, NPCS, briefOfSheet, getItem, tooltipLines, type CharacterSheet as Sheet, type CharacterBrief, type ItemStack, type StashView, type TipLine } from '@solrift/shared';
+import { CLASSES, MAX_LEVEL, STASH_SLOTS, STASHKEEPER, NPCS, briefOfSheet, getItem, tooltipLines, type CharacterSheet as Sheet, type CharacterBrief, type ItemStack, type StashView, type TipLine } from '@solrift/shared';
 import { lobbyIcons } from '../game/lobbyIcons';
 import { Tip } from './ItemView';
 import { timeAgo } from './modes';
@@ -186,7 +186,7 @@ export function CharacterSheet({ sheet, source, empty, stash, showStash, briefs 
         </div>
         <div className="cs-bars">
           {sheet.cls && <Bar id="class-xp" label={`${CLASSES[sheet.cls.id].name} XP`} value={sheet.cls.next === 0 ? 1 : sheet.cls.xp} max={sheet.cls.next === 0 ? 1 : sheet.cls.next} text={sheet.cls.next === 0 ? 'Max' : `${sheet.cls.xp} / ${sheet.cls.next}`} tone={`linear-gradient(90deg, color-mix(in srgb, ${color} 55%, #000), ${color})`} glow={`color-mix(in srgb, ${color} 70%, transparent)`} />}
-          <Bar id="xp" label={`Experience ${sheet.xp.level}`} value={sheet.xp.points} max={sheet.xp.next} text={`${sheet.xp.points} / ${sheet.xp.next}`} tone="linear-gradient(90deg, #2f8f2f, #7bff3a)" glow="rgba(123, 255, 58, 0.6)" />
+          <Bar id="xp" label={`Experience ${sheet.xp.level}`} value={sheet.xp.level >= MAX_LEVEL ? 1 : sheet.xp.points} max={sheet.xp.level >= MAX_LEVEL ? 1 : sheet.xp.next} text={sheet.xp.level >= MAX_LEVEL ? 'Max' : `${sheet.xp.points} / ${sheet.xp.next}`} tone={sheet.xp.level >= MAX_LEVEL ? 'linear-gradient(90deg, #6a6a6a, #cfcfcf)' : 'linear-gradient(90deg, #2f8f2f, #7bff3a)'} glow={sheet.xp.level >= MAX_LEVEL ? 'rgba(210, 210, 210, 0.5)' : 'rgba(123, 255, 58, 0.6)'} />
           <Bar id="health" label="Health" value={sheet.health} max={sheet.maxHealth} text={`${sheet.health} / ${sheet.maxHealth}`} tone="linear-gradient(90deg, #8f1b1b, #ff4a4a)" glow="rgba(255, 74, 74, 0.6)" />
           <Bar id="food" label="Food" value={sheet.hunger} max={sheet.maxHunger} text={`${sheet.hunger} / ${sheet.maxHunger}`} tone="linear-gradient(90deg, #a35a14, #ffb04a)" glow="rgba(255, 176, 74, 0.6)" />
         </div>

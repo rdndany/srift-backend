@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { B, isLantern, lanternInfo } from '@solrift/shared';
 
 /**
- * A warm halo around the torches nearest the player. A fixed pool of additive sprites (never more than 24), re-aimed a
+ * A warm halo around the lanterns nearest the player (a bare torch has none). A fixed pool of additive sprites (never more than 24), re-aimed a
  * couple of times a second from a small scan of the blocks around the camera, so the cost does not grow with how many
  * torches there are in the world. The ground's own torch light comes from the baked block light; this is the glow in the air.
  */
@@ -61,6 +61,8 @@ export class TorchGlow {
   private readonly texture = glowTexture();
   private readonly soulTexture = glowTexture(true);
   private spots: Spot[] = [];
+  /** The spots that get a halo: only the lanterns (a bare torch has none; its light is the ground's own and the block draws the flame). */
+  private halos: Spot[] = [];
   /** The nearest soul lanterns, whether or not they made the pool of halos. */
   private souls: Spot[] = [];
   private scanTimer = 0;
@@ -107,7 +109,7 @@ export class TorchGlow {
     const strength = 0.5 + 0.5 * (1 - Math.min(1, brightness * 1.1));
     for (let i = 0; i < MAX; i++) {
       const s = this.sprites[i];
-      const spot = this.spots[i];
+      const spot = this.halos[i];
       if (!spot) {
         s.visible = false;
         continue;
@@ -165,6 +167,7 @@ export class TorchGlow {
     }
     found.sort((a, b) => a.d - b.d);
     this.spots = found.slice(0, MAX);
+    this.halos = found.filter((f) => f.cage).slice(0, MAX);
     this.souls = found.filter((f) => f.soul).slice(0, 6);
   }
 

@@ -49,9 +49,9 @@ import { useUi } from '../ui/store';
 import { CharacterPreview } from './CharacterPreview';
 import { Galactic } from './Galactic';
 import { ItemView, Tip } from './ItemView';
-import { ClassAttributes, Spellbook } from './ClassUI';
+import { AttrPoints, ClassAttributes, Spellbook } from './ClassUI';
 import { CreativePanel } from './CreativePanel';
-import { RecipeBookPanel } from './RecipeBookPanel';
+import { RecipeBookPanel, RecipeDetail } from './RecipeBookPanel';
 import { CoinPurse } from './ShopUI';
 
 type InvTab = 'inventory' | 'crafting' | 'spells';
@@ -214,38 +214,40 @@ function BagHud({ onHover }: { onHover: (i: number | null) => void }) {
   );
 }
 
-function PlayerInventory({ onHover, hotbarOnly, wow }: { onHover: (i: number | null) => void; hotbarOnly?: boolean; wow?: boolean }) {
+function PlayerInventory({ onHover }: { onHover: (i: number | null) => void }) {
   const api = useUi((s) => s.api)!;
-  // The inventory screen has its own heading, keeps the money in its footer and leaves the hotbar where it is, on the screen (see .wow).
-  if (wow) {
-    return (
-      <>
-        <div className="wow-head">
-          <span>Backpack</span>
-          <button type="button" className="organize-btn" data-testid="organize" title="Merge stacks and sort the backpack" onClick={() => api.organize()}>
-            Organize
-          </button>
-        </div>
-        <Grid indices={range(HOTBAR_SLOTS, PLAYER_SLOTS)} cols={9} onHover={onHover} />
-      </>
-    );
-  }
+  // Every window has the inventory's own heading, keeps the money in its footer (see Backpack) and leaves the hotbar where it is, on the screen (see .wow).
   return (
     <>
-      {!hotbarOnly && (
-        <>
-          <div className="label inv-label">
-            <span>Inventory</span>
-            <CoinPurse />
-          </div>
-          <Grid indices={range(HOTBAR_SLOTS, PLAYER_SLOTS)} cols={9} onHover={onHover} />
-        </>
-      )}
-      <Grid indices={range(0, HOTBAR_SLOTS)} cols={9} onHover={onHover} className="hotbar-row" />
+      <div className="wow-head">
+        <span>Backpack</span>
+        <button type="button" className="organize-btn" data-testid="organize" title="Merge stacks and sort the backpack and your bags" onClick={() => api.organize()}>
+          Organize
+        </button>
+      </div>
+      <Grid indices={range(HOTBAR_SLOTS, PLAYER_SLOTS)} cols={9} onHover={onHover} />
     </>
   );
 }
 
+/** Your bags under any window: the backpack and the money bar (the hotbar is the one under the window). */
+function Backpack({ onHover }: { onHover: (i: number | null) => void }) {
+  return (
+    <>
+      <PlayerInventory onHover={onHover} />
+      <div className="wow-foot">
+        <CoinPurse always />
+      </div>
+    </>
+  );
+}
+
+/** A heading in the window's gold lettering. */
+const Head = ({ children }: { children: ReactNode }) => (
+  <div className="wow-head">
+    <span>{children}</span>
+  </div>
+);
 /** Where the arrow is when the grid holds something to craft: the button that starts it (the forge for a piece with its jewels), with the chance, and the bar of the crafting at work. */
 function ForgeButton({ menu }: { menu: CraftingMenu }) {
   const api = useUi((s) => s.api)!;
@@ -278,24 +280,38 @@ function ForgeButton({ menu }: { menu: CraftingMenu }) {
   );
 }
 
-/** The green book left of the crafting grid: opens and closes the recipe book. */
-function BookButton({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+/** The inventory / crafting table / furnace / chest / creative screen. */
+/**
+ * The trash: while a stack is held on the cursor, a place at the right of the window, level with its bottom edge, where it can be thrown away for good. Click to destroy all of
+ * it, right-click to destroy one. (A click anywhere else outside the screen drops it on the ground instead.)
+ */
+function Trash({ stack }: { stack: ItemStack }) {
+  const api = useUi((s) => s.api)!;
   return (
-    <button
-      className={`book-btn ${open ? 'on' : ''}`}
-      data-testid="book-button"
-      title="Recipe book"
+    <div
+      id="menu-trash"
+      data-testid="menu-trash"
       onMouseDown={(e) => {
+        if (e.button !== 0 && e.button !== 2) return;
         e.preventDefault();
-        onToggle();
+        e.stopPropagation();
+        api.destroyCursor(e.button === 0);
       }}
     >
-      <span className="book-cover" />
-    </button>
+      <svg className="trash-icon" viewBox="0 0 16 16" width="44" height="44" shapeRendering="crispEdges" aria-hidden="true">
+        <path d="M6 1h4v1h4v2H2V2h4z" fill="#c9b79a" />
+        <path d="M3 5h10l-1 10H4z" fill="#8a7a62" />
+        <path d="M3 5h10v1H3z" fill="#b6a486" />
+        <path d="M6 7h1v6H6zm3 0h1v6H9z" fill="#3a3226" />
+      </svg>
+      <div className="trash-title">Destroy</div>
+      <div className="trash-what">{stack.count > 1 ? `${stack.count} × ` : ''}{tooltipName(stack)}</div>
+      <div className="trash-hint">Click: destroy it</div>
+      {stack.count > 1 && <div className="trash-hint">Right-click: destroy one</div>}
+    </div>
   );
 }
 
-/** The inventory / crafting table / furnace / chest / creative screen. */
 export function MenuScreen() {
   const screen = useUi((s) => s.screen);
   useUi((s) => s.version);
@@ -312,14 +328,8 @@ export function MenuScreen() {
   const [typed, setTyped] = useState<{ key: string; text: string } | null>(null);
   // The recipe the pointer is on in the book: its ingredients show as ghosts in the grid.
   const [preview, setPreview] = useState<number | null>(null);
-  // The recipe book is open or shut while the window is up (it shuts with the window, and stays shut on the next visit).
-  const [bookOpen, setBookOpen] = useState(() => typeof localStorage !== 'undefined' && localStorage.getItem('solrift-recipebook') === '1');
-  const toggleBook = () => {
-    setBookOpen((v) => {
-      localStorage.setItem('solrift-recipebook', v ? '0' : '1');
-      return !v;
-    });
-  };
+  // The recipe last clicked in the book: it stays described under the grid when the pointer is not on one.
+  const [picked, setPicked] = useState<number | null>(null);
   const cursorRef = useRef<HTMLDivElement>(null);
   const tipRef = useRef<HTMLDivElement>(null);
   const warmMenu = useUi((s) => s.warmMenu);
@@ -332,9 +342,7 @@ export function MenuScreen() {
     if (open) wasOpen.current = true;
     else if (wasOpen.current) {
       wasOpen.current = false;
-      // The recipe book closes with the window.
-      localStorage.setItem('solrift-recipebook', '0');
-      setBookOpen(false);
+      setPicked(null);
       useUi.setState({ invTab: 'inventory' });
     }
   }, [open]);
@@ -399,7 +407,9 @@ export function MenuScreen() {
   const craftReady = menu instanceof CraftingMenu ? menu.craftReady() : null;
   const forgeCore = menu instanceof CraftingMenu && forgeAt ? menu.grid.slots.indexOf(forgeAt.piece) : -1;
 
-  const wowScreen = menu instanceof CraftingMenu || menu instanceof CreativeMenu;
+  // Every window is the inventory's bronze frame; kind lets the narrower ones (everything but the crafting grid and the creative palette) size themselves.
+  const wowScreen = true;
+  const kind = menu instanceof CraftingMenu ? 'crafting' : menu instanceof CreativeMenu ? 'creative' : menu instanceof FurnaceMenu ? 'furnace' : menu instanceof ChestMenu ? 'chest' : menu instanceof TradeMenu ? 'trade' : menu instanceof EnchantMenu ? 'enchant' : menu instanceof AnvilMenu ? 'anvil' : 'grindstone';
   let title = 'Crafting';
   let body: ReactNode;
   // The inventory (E) has three tabs, as the windows of World of Warcraft do: the bags with the character, the crafting grid,
@@ -473,7 +483,6 @@ export function MenuScreen() {
               </div>
             )}
             <div className="craft-row">
-              <BookButton open={bookOpen} onToggle={toggleBook} />
               <Grid
                 indices={range(menu.gridStart, menu.gridStart + n * n)}
                 cols={n}
@@ -485,15 +494,13 @@ export function MenuScreen() {
               {forgeReady || craftReady || menu.forging ? <ForgeButton menu={menu} /> : <div className="arrow">&#10140;</div>}
               <Grid indices={[menu.resultSlot]} cols={1} onHover={setHover} className="big" previews={forgePreview ? [forgePreview] : null} />
             </div>
+            <RecipeDetail menu={menu} index={preview ?? picked} />
           </div>
         )}
         {tab === 'spells' && <Spellbook />}
         {tab !== 'spells' && (
           <>
-            <PlayerInventory onHover={setHover} wow />
-            <div className="wow-foot">
-              <CoinPurse always />
-            </div>
+            <Backpack onHover={setHover} />
           </>
         )}
         {wornMenu && (
@@ -522,7 +529,8 @@ export function MenuScreen() {
     const f = api.furnaceState();
     body = (
       <>
-        <div className="furnace-row">
+        <Head>Smelting</Head>
+        <div className="furnace-row wow-well">
           <div className="furnace-col">
             <Grid indices={[menu.inputSlot]} cols={1} onHover={setHover} />
             <div className="flame">
@@ -535,15 +543,16 @@ export function MenuScreen() {
           </div>
           <Grid indices={[menu.outputSlot]} cols={1} onHover={setHover} className="big" />
         </div>
-        <PlayerInventory onHover={setHover} />
+        <Backpack onHover={setHover} />
       </>
     );
   } else if (menu instanceof ChestMenu) {
     title = menu.chest.size > 27 ? 'Large Chest' : 'Chest';
     body = (
       <>
+        <Head>Storage</Head>
         <Grid indices={range(menu.chestStart, menu.chestStart + menu.chest.size)} cols={9} onHover={setHover} />
-        <PlayerInventory onHover={setHover} />
+        <Backpack onHover={setHover} />
       </>
     );
   } else if (menu instanceof TradeMenu) {
@@ -589,13 +598,14 @@ export function MenuScreen() {
           ))}
         </div>
         <div className="trade-side">
-          <div className="craft-row">
+          <Head>Trade</Head>
+          <div className="craft-row wow-well">
             <Grid indices={[menu.paymentStart, menu.paymentStart + 1]} cols={2} onHover={setHover} />
             <div className="arrow">&#10140;</div>
             <Grid indices={[menu.resultSlot]} cols={1} onHover={setHover} className="big" />
           </div>
           <div className="label">{menu.offer && !canTradeOffer(menu.offer) ? 'Out of stock - come back later' : 'Choose a trade, then take the result'}</div>
-          <PlayerInventory onHover={setHover} />
+          <Backpack onHover={setHover} />
         </div>
       </div>
     );
@@ -604,7 +614,8 @@ export function MenuScreen() {
     const lapis = menu.lapis?.count ?? 0;
     body = (
       <>
-        <div className="ench-row">
+        <Head>Enchanting</Head>
+        <div className="ench-row wow-well">
           <div className="ench-slots">
             <Grid indices={[menu.itemSlot]} cols={1} onHover={setHover} />
             <Grid indices={[menu.lapisSlot]} cols={1} onHover={setHover} ghosts={[LAPIS]} />
@@ -668,7 +679,7 @@ export function MenuScreen() {
             })()}
           </div>
         </div>
-        <PlayerInventory onHover={setHover} />
+        <Backpack onHover={setHover} />
       </>
     );
   } else if (menu instanceof AnvilMenu) {
@@ -686,6 +697,7 @@ export function MenuScreen() {
           : 'Add a second item to repair or combine, or type a new name.';
     body = (
       <>
+        <Head>Anvil</Head>
         <input
           className="anvil-name"
           data-testid="anvil-name"
@@ -701,7 +713,7 @@ export function MenuScreen() {
             api.anvilName(e.target.value);
           }}
         />
-        <div className="craft-row">
+        <div className="craft-row wow-well">
           <Grid indices={[menu.leftSlot, menu.rightSlot]} cols={2} onHover={setHover} />
           <div className="arrow">&#10140;</div>
           <Grid indices={[menu.resultSlot]} cols={1} onHover={setHover} className="big" />
@@ -714,7 +726,7 @@ export function MenuScreen() {
             Not enough levels: it costs {menu.cost}, you have {level}.
           </div>
         )}
-        <PlayerInventory onHover={setHover} />
+        <Backpack onHover={setHover} />
       </>
     );
   } else if (menu instanceof GrindstoneMenu) {
@@ -722,7 +734,8 @@ export function MenuScreen() {
     const has = !!menu.input.get(0) || !!menu.input.get(1);
     body = (
       <>
-        <div className="craft-row">
+        <Head>Grindstone</Head>
+        <div className="craft-row wow-well">
           <Grid indices={[menu.topSlot, menu.bottomSlot]} cols={1} onHover={setHover} />
           <div className="arrow">&#10140;</div>
           <Grid indices={[menu.resultSlot]} cols={1} onHover={setHover} className="big" />
@@ -734,7 +747,7 @@ export function MenuScreen() {
               ? 'Nothing to take off. Put in an enchanted item, or two of the same worn item.'
               : 'Put an enchanted item in to take its enchantments off for experience.'}
         </div>
-        <PlayerInventory onHover={setHover} />
+        <Backpack onHover={setHover} />
       </>
     );
   } else if (menu instanceof CreativeMenu) {
@@ -748,6 +761,9 @@ export function MenuScreen() {
     );
   }
 
+  // The stat points are a column of the Inventory tab, inside the same frame.
+  const withPoints = wornMenu && tab === 'inventory' && !!cls && mode !== 'creative';
+
   return (
     <div
       id="menu-screen"
@@ -755,15 +771,14 @@ export function MenuScreen() {
       onContextMenu={(e) => e.preventDefault()}
       onMouseDown={(e) => {
         // A click beside the screen with something on the cursor puts it on the ground (left: all of it, right: one).
-        if (menu.cursor && (e.button === 0 || e.button === 2) && !(e.target as HTMLElement).closest('.menu-wrap, #menu-hotbar, #bag-hud')) {
+        if (menu.cursor && (e.button === 0 || e.button === 2) && !(e.target as HTMLElement).closest('.menu-wrap, #menu-hotbar, #bag-hud, #menu-trash')) {
           e.preventDefault();
           api.dropCursor(e.button === 0);
         }
       }}
     >
       <div className="menu-wrap">
-        {menu instanceof CraftingMenu && bookOpen && tab === 'crafting' && <RecipeBookPanel menu={menu} onPreview={setPreview} />}
-        <div className={`panel ${menu instanceof CraftingMenu && bookOpen && tab === 'crafting' ? 'with-book' : ''} ${wowScreen ? 'wow' : ''}`}>
+        <div className={`panel ${menu instanceof CraftingMenu && tab === 'crafting' ? 'with-recipes' : ''} ${withPoints ? 'with-points' : ''} ${wowScreen ? 'wow' : ''} menu-${kind}`}>
           <div className="title">{title}</div>
           {wowScreen && (
             <button className="wow-close" data-testid="menu-close" aria-label="Close" onMouseDown={(e) => { e.preventDefault(); api.close(); }}>
@@ -771,7 +786,10 @@ export function MenuScreen() {
             </button>
           )}
           {body}
+          {withPoints && <AttrPoints />}
+          {menu instanceof CraftingMenu && tab === 'crafting' && <RecipeBookPanel menu={menu} onPreview={setPreview} onPick={setPicked} />}
         </div>
+        {menu.cursor && <Trash stack={menu.cursor} />}
       </div>
       {wowScreen && (
         <div id="menu-hotbar" className="wow" data-testid="menu-hotbar">

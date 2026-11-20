@@ -1,12 +1,13 @@
-import { RECIPES, RecipeBook } from '@solrift/shared';
-import { bumpUi, pushRecipeToast } from '../ui/store';
+import { RecipeBook } from '@solrift/shared';
+import { bumpUi } from '../ui/store';
 import type { ClientSession } from './clientSession';
 
-/** The recipe book: remembers which items this player has held (per world, on this device). */
+/**
+ * The recipe book's memory: which items this player has held (per world, on this device). The book lists every recipe whether or not it has been found,
+ * so nothing is announced as unlocked; what is remembered only says which recipes the player has met.
+ */
 export class RecipeMemory {
   readonly book = new RecipeBook();
-  /** What you already carry when the world opens is learned quietly; only later finds make an announcement. */
-  private primed = false;
 
   /** `key` is where the browser keeps it; a guest's (`kept` false) is neither read nor written. */
   constructor(
@@ -21,17 +22,14 @@ export class RecipeMemory {
     }
   }
 
-  /** Learns what is carried now, and says so when that opens new recipes. */
+  /** Learns what is carried now. */
   observe(): void {
     const ids: number[] = [];
     for (const s of this.session.inventory.slots) if (s) ids.push(s.id);
     for (const s of this.session.armor.slots) if (s) ids.push(s.id);
     const known = this.book.seen.size;
-    const fresh = this.book.learn(ids);
-    const quiet = !this.primed;
-    this.primed = true;
+    this.book.observe(ids);
     if (this.book.seen.size === known) return;
-    if (!quiet && fresh.length > 0) pushRecipeToast([...new Set(fresh.map((i) => RECIPES[i].result.id))]);
     try {
       if (this.kept) localStorage.setItem(this.key, JSON.stringify(this.book.toJSON()));
     } catch {

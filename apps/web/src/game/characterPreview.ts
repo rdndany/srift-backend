@@ -125,15 +125,15 @@ export class CharacterPreview {
   private frame(): void {
     const tall = this.tall;
     if (this.grounded) {
-      const span = tall ? 3.8 : 3.1; // world units from the soles up, to a little above the head or hat
+      const span = tall ? 4.0 : 3.1; // world units from the soles up, to a little above the head or hat
       const dist = span / 2 / Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
       const y = -1.0 + span / 2 - 0.07; // (the boots reach out a little toward the camera: lower on screen than the soles' centre)
       this.camera.position.set(0, y, dist);
       this.camera.lookAt(0, y, 0);
       return;
     }
-    this.camera.position.set(0, tall ? 0.2 : 0.05, tall ? 5.3 : 4.9);
-    this.camera.lookAt(0, tall ? 0.15 : 0, 0);
+    this.camera.position.set(0, tall ? 0.28 : 0.05, tall ? 5.6 : 4.9);
+    this.camera.lookAt(0, tall ? 0.22 : 0, 0);
   }
 
   /** Turn the figure slowly all the way round (so the back, where a cape hangs, shows too). */

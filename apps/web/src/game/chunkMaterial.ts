@@ -14,10 +14,17 @@ import type { Atlas } from './atlas';
  * no remeshing is needed.
  */
 
+import { LEAF_TILES, FIELD_HERO, FIELD_TILES, HERO_COLS, HERO_PX, HERO_ROWS, HERO_TILES, ORE_HERO, SEAMLESS_HERO, heroSlot } from './heroTiles';
+
 const tiles = (...names: string[]): string => names.map((n) => `t == ${tileIndex(n)}.0`).join(' || ');
-const LEAF_TEST = tiles('leaves', 'birch_leaves', 'spruce_leaves', 'acacia_leaves', 'jungle_leaves', 'dark_oak_leaves', 'cherry_leaves');
+const LEAF_TEST = tiles(...LEAF_TILES);
+/** The cube-by-cube look of the blocks (creases, lip, grain, see the fragment shader): on, unless the address has ?blocklook=0 (to compare). */
+const BLOCK_LOOK = typeof location !== 'undefined' && new URLSearchParams(location.search).get('blocklook') === '0' ? 0 : 1;
 const LEAF_TEST_FRAG = LEAF_TEST.replaceAll('t ==', 'tile ==');
 const PLANT_TEST = tiles('tall_grass', 'rose', 'dandelion', 'sapling', 'birch_sapling', 'spruce_sapling', 'acacia_sapling', 'jungle_sapling', 'dark_oak_sapling', 'cherry_sapling', 'pale_oak_sapling', 'mangrove_propagule', 'azalea', 'flowering_azalea', 'fern', 'tulip_red', 'tulip_orange', 'tulip_white', 'tulip_pink', 'oxeye_daisy', 'cornflower', 'allium', 'azure_bluet', 'blue_orchid', 'sugar_cane', 'wheat_0', 'wheat_1', 'wheat_2', 'wheat_3', 'candle', ...DYE_NAMES.map((n) => `candle_${n}`), ...DYE_NAMES.map((n) => `banner_${n}`));
+const PLANT_TEST_FRAG = PLANT_TEST.replaceAll('t ==', 'tile ==');
+/** Plants that do not sway (a mushroom, a dead bush, a berry bush) but are as little a cube as the others: the cube-by-cube look leaves them alone. */
+const STILL_PLANT_FRAG = tiles('dead_bush', 'brown_mushroom', 'red_mushroom', 'sweet_berry_0', 'sweet_berry_1', 'sweet_berry_2', 'sweet_berry_3').replaceAll('t ==', 'tile ==');
 
 /**
  * The air: the sky's colour in a direction, and how much of it a thing at a distance is lost in.
@@ -105,6 +112,8 @@ void main() {
 const fragmentShader = /* glsl */ `
 uniform sampler2D map;
 uniform sampler2D uAux;
+uniform sampler2D uHero;
+uniform sampler2D uHeroAux;
 uniform float uDay;
 uniform float uTime;
 ${FOG_GLSL}
@@ -117,6 +126,7 @@ uniform vec3 uAmbient;
 uniform vec3 uSun;
 uniform vec3 uLightDir;
 uniform float uWind;
+uniform float uBlockLook;
 uniform vec3 uSkyReflect;
 uniform float uGlint;
 uniform sampler2D uShadowMap;
@@ -159,6 +169,14 @@ const float ROWS = ${ATLAS_ROWS}.0;
 // Fire is four tiles in a row; every flame shows the same frame, a few times a second.
 const float FIRE0 = ${tileIndex('fire_0')}.0;
 const float FLAME0 = ${tileIndex('torch_flame_0')}.0;
+// The hero tiles (heroTiles.ts) are drawn from a texture of their own, side by side: HK of them, HPX pixels each.
+const float HCOLS = ${HERO_COLS}.0;
+const float HROWS = ${HERO_ROWS}.0;
+const float HPX = ${HERO_PX}.0;
+/** Where in the grid of hero pictures (see atlas.ts) the picture numbered idx is, at f (0..1 across it, f.y up). */
+vec2 heroUv(float idx, vec2 f) {
+  return vec2((mod(idx, HCOLS) + f.x) / HCOLS, (HROWS - 1.0 - floor(idx / HCOLS) + f.y) / HROWS);
+}
 const float LAVA = ${tileIndex('lava')}.0;
 
 float hash12(vec2 p) {
@@ -316,21 +334,9 @@ void main() {
   float row = floor(tile / COLS);
   vec2 f = clamp(fract(vUv), 0.0005, 0.9995);
   bool leaf = ${LEAF_TEST_FRAG};
-  // Foliage never repeats: every block of leaves lays its tile down its own way (mirrored, and slid round by a whole number
-  // of texels, which the tile allows as it wraps), and the colour drifts in slow clumps across the whole crown.
   float leafVar = 0.5;
   float leafHash = 0.0;
-  if (leaf) {
-    vec3 an = abs(normalize(cross(dFdx(vWorld), dFdy(vWorld))));
-    vec3 cell = mix(floor(vWorld), floor(vWorld + 0.5), step(vec3(0.5), an));
-    float hv = hash12(vec2(cell.x * 17.0 + cell.z * 31.0, cell.y * 13.0 + cell.z * 7.0) + 7.0);
-    leafHash = hv;
-    if (hv > 0.5) f.x = 1.0 - f.x;
-    if (fract(hv * 7.31) > 0.5) f.y = 1.0 - f.y;
-    vec2 slide = floor(vec2(fract(hv * 13.7), fract(hv * 29.3)) * 16.0) / 16.0;
-    f = clamp(fract(f + slide), 0.0005, 0.9995);
-    leafVar = vnoise3(vWorld * 0.42) * 0.6 + vnoise3(vWorld * vec3(1.1, 1.4, 1.1) + 11.0) * 0.4;
-  }
+  vec2 leafUv = vec2(0.0);
   vec2 auv = vec2((col + f.x) / COLS, 1.0 - (row + 1.0 - f.y) / ROWS);
 
   // Mip-map level from the un-wrapped coordinates, capped at one texel per tile so tiles never bleed into each other.
@@ -345,21 +351,80 @@ void main() {
     gx *= 16.0 / foot;
     gy *= 16.0 / foot;
   }
-  vec4 tex = textureGrad(map, auv, gx, gy);
-  vec4 aux = textureGrad(uAux, auv, gx, gy);
-
+  // The hero tiles: the same, from their own texture (the footprint is worked out outside the branch, as derivatives must be).
   // The face's own orientation, from screen-space derivatives (always turned towards the viewer).
   vec3 toCam = cameraPosition - vWorld;
   vec3 n = normalize(cross(dFdx(vWorld), dFdy(vWorld)));
   if (dot(n, toCam) < 0.0) n = -n;
+  // The block this face belongs to: a point a little behind the face (a face lies exactly on a whole number, where a floor would flip from pixel to pixel).
+  vec3 hcell = floor(vWorld - n * 0.137);
+  float hero = -1.0;
+${HERO_TILES.map((n) => {
+  const { first, count } = heroSlot(n);
+  // (A tile with several pictures shows a different one in every block, picked by where the block stands.)
+  return `  if (tile == ${tileIndex(n)}.0) hero = ${first}.0${count > 1 && !FIELD_TILES.has(n) ? ` + min(floor(whash(vec2(hcell.x + (abs(n.y) > 0.5 ? 0.0 : 17.0 * hcell.y), hcell.z) + 5.0) * ${count}.0), ${count - 1}.0)` : ''};`;
+}).join('\n')}
+  // Foliage and the fields (stone, sand, snow...) are one carpet: the picture (two blocks wide) is laid over the world, not block by
+  // block, so there are no seams between blocks; it is drifted by a slow warp so it never visibly repeats. A field has two pictures,
+  // and the world drifts between them. Foliage colour wanders in clumps across the whole crown.
+  bool field = hero >= ${FIELD_HERO.first}.0 && hero < ${FIELD_HERO.end}.0;
+  float pic = 1.0;
+  float hmix = 0.0;
+  if (leaf || field) {
+    pic = 0.5;
+    vec3 an = abs(n);
+    leafUv = an.y > 0.5 ? vWorld.xz : (an.x > 0.5 ? vWorld.zy : vWorld.xy);
+    leafHash = an.y > 0.5 ? 0.0 : (an.x > 0.5 ? 0.31 : 0.67);
+    vec2 warp = vec2(wnoise3(vWorld * 0.33 + 3.0), wnoise3(vWorld * 0.33 + 19.0)) - 0.5;
+    f = clamp(fract((leafUv + warp * (leaf ? 1.1 : 0.9)) * 0.5), 0.0005, 0.9995);
+    if (leaf) leafVar = vnoise3(vWorld * 0.42) * 0.6 + vnoise3(vWorld * vec3(1.1, 1.4, 1.1) + 11.0) * 0.4;
+    else hmix = smoothstep(0.34, 0.66, wnoise3(vWorld * 0.19 + vec3(5.0, 1.0, 9.0)) * 0.65 + wnoise3(vWorld * 0.43 + vec3(2.0, 8.0, 4.0)) * 0.35);
+  }
+  vec2 hx = dFdx(vUv) * vec2(1.0 / HCOLS, 1.0 / HROWS) * 0.55 * pic;
+  vec2 hy = dFdy(vUv) * vec2(1.0 / HCOLS, 1.0 / HROWS) * 0.55 * pic;
+  float hfoot = max(length(hx * vec2(HCOLS * HPX, HROWS * HPX)), length(hy * vec2(HCOLS * HPX, HROWS * HPX)));
+  if (hfoot > HPX) {
+    hx *= HPX / hfoot;
+    hy *= HPX / hfoot;
+  }
+  vec4 tex;
+  vec4 aux;
+  if (hero > -0.5) {
+    vec2 huv = heroUv(hero, f);
+    tex = textureGrad(uHero, huv, hx, hy);
+    aux = textureGrad(uHeroAux, huv, hx, hy);
+    if (field) {
+      vec2 huv2 = heroUv(hero + 1.0, f);
+      tex = mix(tex, textureGrad(uHero, huv2, hx, hy), hmix);
+      aux = mix(aux, textureGrad(uHeroAux, huv2, hx, hy), hmix);
+    }
+  } else {
+    tex = textureGrad(map, auv, gx, gy);
+    aux = textureGrad(uAux, auv, gx, gy);
+  }
+  // An ore is only the ore: where its picture says "stone" (aux.a below the ore's 1.0) the stone of the world is shown, the same
+  // field the plain stone blocks show, so the ore sits in the rock with no frame, and in the shade the picture gives it.
+  if (hero >= ${ORE_HERO.first}.0 && hero < ${ORE_HERO.end}.0) {
+    vec3 oan = abs(n);
+    vec2 oUv = oan.y > 0.5 ? vWorld.xz : (oan.x > 0.5 ? vWorld.zy : vWorld.xy);
+    vec2 oWarp = vec2(wnoise3(vWorld * 0.33 + 3.0), wnoise3(vWorld * 0.33 + 19.0)) - 0.5;
+    vec2 oF = clamp(fract((oUv + oWarp * 0.9) * 0.5), 0.0005, 0.9995);
+    float oMix = smoothstep(0.34, 0.66, wnoise3(vWorld * 0.19 + vec3(5.0, 1.0, 9.0)) * 0.65 + wnoise3(vWorld * 0.43 + vec3(2.0, 8.0, 4.0)) * 0.35);
+    vec2 ohx = hx * 0.5;
+    vec2 ohy = hy * 0.5;
+    vec4 rock = mix(textureGrad(uHero, heroUv(${heroSlot('stone').first}.0, oF), ohx, ohy), textureGrad(uHero, heroUv(${heroSlot('stone').first + 1}.0, oF), ohx, ohy), oMix);
+    float inRock = 1.0 - smoothstep(0.52, 0.8, aux.a);
+    tex.rgb = mix(tex.rgb, rock.rgb * min(1.0, aux.a * 2.0), inRock);
+    tex.a = 1.0;
+  }
   float ndl = dot(n, uLightDir);
 
   if (tex.a < uAlphaTest) discard;
 
   if (vShell > 0.5) {
     // The fuzz around a crown: only scattered little groups of leaves are there, so the edge is feathery.
-    vec2 tp = floor(f * 16.0);
-    if (hash12(floor(tp * 0.5) * 1.7 + leafHash * 41.0 + 5.0) > 0.42 || hash12(tp * 0.9 + leafHash * 17.0) > 0.88) discard;
+    vec2 tp = floor(leafUv * 16.0);
+    if (whash(floor(tp * 0.5) * 1.7 + leafHash * 41.0 + 5.0) > 0.42 || whash(tp * 0.9 + leafHash * 17.0) > 0.88) discard;
     tex.rgb *= 1.1;
   }
 
@@ -383,6 +448,31 @@ void main() {
 
   // Clumps of foliage: some lighter and yellower, some deep and cool, in patches of a block or two.
   if (leaf) tex.rgb *= mix(vec3(0.8, 0.9, 0.84), vec3(1.1, 1.06, 0.88), smoothstep(0.15, 0.85, leafVar));
+
+  // ---- the look of a block ----
+  // Every block is a little cube of its own: a dark crease where it meets the next, a lit lip along its top edge, and a grain laid over
+  // the 16 pixels of the tile (twice as fine, new for every block), so a wall of stone reads as stones and not as one painted sheet.
+  // It fades out where a block is only a few pixels wide (it would only shimmer), and leaves out water, glass, fire, lava, plants and leaves.
+  if (uBlockLook > 0.0 && tex.a > 0.99 && !water && !leaf && vShell < 0.5 && aux.b < 0.5 && tile != LAVA && !(${PLANT_TEST_FRAG}) && !(${STILL_PLANT_FRAG}) && !(tile >= FIRE0 && tile < FIRE0 + 4.0) && !(tile >= FLAME0 && tile < FLAME0 + 4.0)) {
+    float px = max(length(dFdx(vUv)), length(dFdy(vUv)));
+    float near = (1.0 - smoothstep(0.05, 0.16, px)) * uBlockLook * (1.0 - aux.g);
+    vec3 an2 = abs(n);
+    vec3 cell = mix(floor(vWorld), floor(vWorld + 0.5), step(vec3(0.5), an2));
+    float bh = whash(cell.xy * 1.7 + cell.z * 31.0 + 3.0);
+    vec2 gcell = floor(f * 32.0);
+    float gr = floor(whash(gcell + bh * 61.0 + cell.xz * 0.37) * 4.0) / 3.0 - 0.5;
+    float e = min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y));
+    float crease = 1.0 - smoothstep(0.0, 0.1, e);
+    float up = step(0.5, n.y);
+    float lip = smoothstep(0.1, 0.14, e) * (1.0 - smoothstep(0.14, 0.22, e)) * up;
+    float topEdge = smoothstep(0.86, 0.93, f.y) * (1.0 - up) * (1.0 - crease);
+    // A lawn is one carpet: no creases, lip or per-block tint on a hero tile's top, so the blocks run into each other.
+    // Stonework (the hero cobblestone) runs on across every face the same way.
+    bool seam = hero >= ${SEAMLESS_HERO.first}.0 && hero < ${SEAMLESS_HERO.end}.0;
+    float carpet = (hero > -0.5 && (up > 0.5 || seam)) ? 0.0 : 1.0;
+    float look = 1.0 + gr * 0.34 * (hero > -0.5 ? 0.0 : 1.0) + (bh - 0.5) * 0.14 * carpet - 0.4 * crease * carpet + 0.1 * lip * carpet + 0.16 * topEdge * (seam ? 0.0 : 1.0);
+    tex.rgb *= mix(1.0, look, near);
+  }
 
   float alpha = tex.a;
   vec3 V = normalize(toCam);
@@ -425,7 +515,14 @@ void main() {
     // depth classes are kept small, so the blocks of the sea floor do not show through as squares.
     float deep = mix(0.9, 1.0, wdepth / 3.0);
     deep *= mix(0.7, 1.0, smoothstep(0.0, 0.6, edgeD));
-    tex.rgb *= mix(vec3(0.46, 0.64, 0.68), vec3(0.15, 0.24, 0.4), deep);
+    // Under rock (little sky): the water is clearer and teal instead of a deep navy, which in the dark was one flat blue square.
+    float cave = 1.0 - smoothstep(0.15, 0.75, vLight.g);
+    tex.rgb *= mix(vec3(0.46, 0.64, 0.68), mix(vec3(0.15, 0.24, 0.4), vec3(0.3, 0.52, 0.62), cave), deep);
+    // A slow drifting dapple through the whole body (in 3D, so the sides and the top of a pool all have it and no face is a plain tile).
+    if (cave > 0.0) {
+      float dap = wnoise3(vWorld * vec3(1.6, 2.2, 1.6) + vec3(tm * 0.25, -tm * 0.18, tm * 0.2)) * 0.6 + wnoise3(vWorld * 3.7 + vec3(-tm * 0.3, tm * 0.2, 4.0)) * 0.4;
+      tex.rgb *= 1.0 + cave * (dap - 0.5) * 0.9;
+    }
     // The light sinks into the swells: troughs a little darker, crests a little brighter.
     tex.rgb *= 1.0 + wh * 0.03 * top;
     tex.rgb += vec3(0.0, 0.035, 0.03) * smoothstep(0.7, 1.4, wh) * top * (0.4 + 0.6 * deep);
@@ -436,17 +533,20 @@ void main() {
     vec3 R = reflect(-V, nw);
     R.y = abs(R.y);
     vec3 mirror = mix(uSkyReflect, skyAtSoft(normalize(R)), 0.75);
-    tex.rgb = mix(tex.rgb, mirror * 0.8, fres * 0.7);
+    // (No sky to mirror under rock.)
+    tex.rgb = mix(tex.rgb, mirror * 0.8, fres * 0.7 * (1.0 - 0.85 * cave));
     // Nearly solid: the bottom only hints through, more where it is shallow.
     // (Not less near the shore: the sand under the shallows would show through as pale grains and streaks along the edge.)
     alpha = mix(0.99, 0.998, deep);
-    alpha = mix(alpha, 1.0, fres);
+    // Under rock it is see-through: the floor and walls of the pool show inside it.
+    alpha = mix(alpha, mix(0.62, 0.78, deep), cave);
+    alpha = mix(alpha, 1.0, fres * (1.0 - 0.6 * cave));
 
     // (No foam line along the shore: any bright band there flickers and shows the edges of the blocks. The shore is only a lighter, greener shallow, see edgeD above.)
 
     // Glints: a hard shine where the swells mirror the sun and a broad soft glow around it.
     float sp = max(dot(R, uLightDir), 0.0);
-    tex.rgb += uSun * (pow(sp, 40.0) * 1.0 + pow(sp, 14.0) * 0.1) * uGlint * top;
+    tex.rgb += uSun * (pow(sp, 40.0) * 1.0 + pow(sp, 14.0) * 0.1) * uGlint * top * (1.0 - cave);
 
     // From underneath, the surface is a mirror of the bottom except in a round window straight up that shows the sky.
     if (cameraPosition.y < vWorld.y && top > 0.5) {
@@ -522,7 +622,7 @@ void main() {
   }
   // Lit ground glows: sunlit colour is pushed towards richer saturation while the shade stays cool and calm.
   float lum = dot(rgb, vec3(0.299, 0.587, 0.114));
-  rgb = mix(vec3(lum), rgb, 1.0 + 0.3 * sunTerm * smoothstep(0.0, 0.12, uSun.r));
+  rgb = mix(vec3(lum), rgb, 1.0 + 0.2 * uBlockLook + 0.3 * sunTerm * smoothstep(0.0, 0.12, uSun.r));
 
   // ---- fog: the colour of the sky in this direction, so far hills melt into it ----
   float fog = fogAmount(vDepth, vWorld.y);
@@ -644,12 +744,15 @@ export function createChunkMaterials(atlas: Atlas): ChunkMaterials {
   const shared = {
     map: { value: atlas.chunkColor },
     uAux: { value: atlas.chunkAux },
+    uHero: { value: atlas.chunkHero },
+    uHeroAux: { value: atlas.chunkHeroAux },
     uPalette: { value: palette },
     uBaseGrass: { value: linear(GRASS_BASE) },
     uBaseWater: { value: linear(WATER_BASE) },
     uDay: { value: 1 },
     uTime: { value: 0 },
     uWind: { value: 1 },
+    uBlockLook: { value: BLOCK_LOOK },
     uFogColor: { value: new THREE.Color(0x8fc4ff) },
     uFogZenith: { value: new THREE.Color(0x3a76d6) },
     uFogNear: { value: 60 },

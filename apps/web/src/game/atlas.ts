@@ -1,4 +1,7 @@
 import * as THREE from 'three';
+import { EMISSIVE_ORES } from './heroOre';
+import { HERO_COLS, HERO_PX, HERO_ROWS, HERO_STRIP, HERO_TILES, ORE_TILES, heroDownsample, heroPixels } from './heroTiles';
+import { PLANT_TILES } from './heroPlants';
 import { ATLAS_COLS, ATLAS_ROWS, BED_RED, DRESS_TILE_RGB, DYE_NAMES, DYE_RGB, GROVE_TILE_RGB, JOINERY_TILE_RGB, MASONRY_TILE_RGB, TILE_NAMES, TILE_PX, bedTileName, type BedPart } from '@solrift/shared';
 import { spritePainter } from './sprites';
 import { beyondBeveledTiles, beyondEmissiveTiles, beyondPainters, beyondUngradedTiles } from './beyondTiles';
@@ -1564,6 +1567,14 @@ Object.assign(PAINTERS, beyondPainters());
 for (const name of beyondBeveledTiles()) BEVELED_TILES.add(name);
 for (const name of beyondUngradedTiles()) UNGRADED_TILES.add(name);
 
+// The hero tiles (grass and the earth under it, see heroTiles.ts) are drawn large for the terrain shader; the 16 x 16 atlas holds them boxed down.
+for (const name of HERO_TILES) {
+  // (the plants are drawn large for the world only: the hotbar, the particles and the plant in the hand keep their 16 x 16 pictures)
+  if (PLANT_TILES.has(name)) continue;
+  PAINTERS[name] = (x, y) => heroDownsample(name, x, y);
+  UNGRADED_TILES.add(name);
+}
+
 export function paintTile(ctx: CanvasRenderingContext2D, name: string, index: number): void {
   const col = index % ATLAS_COLS;
   const row = Math.floor(index / ATLAS_COLS);
@@ -1618,6 +1629,9 @@ export interface Atlas {
   chunkColor: THREE.DataTexture;
   /** Per-texel material data for the terrain shader: r = biome-tint amount, g = emissive (glows in the dark). */
   chunkAux: THREE.DataTexture;
+  /** The hero tiles at full size, side by side in the order of HERO_STRIP (see heroTiles.ts), with their tint masks. */
+  chunkHero: THREE.DataTexture;
+  chunkHeroAux: THREE.DataTexture;
   dispose(): void;
 }
 
@@ -1690,6 +1704,68 @@ function buildChunkTextures(canvas: HTMLCanvasElement): { color: THREE.DataTextu
   return { color: make(color, true), aux: make(aux, false) };
 }
 
+/** The hero tiles in a strip, for the terrain shader: colour, and the biome-tint mask (r) the same way the atlas has them. */
+function buildHeroTextures(): { color: THREE.DataTexture; aux: THREE.DataTexture } {
+  const w = HERO_PX * HERO_COLS;
+  const h = HERO_PX * HERO_ROWS;
+  const color = new Uint8Array(w * h * 4);
+  const aux = new Uint8Array(w * h * 4);
+  HERO_STRIP.forEach(({ key, tile }, i) => {
+    const emissive = EMISSIVE_TILES.has(tile) || EMISSIVE_ORES.has(tile) ? 255 : 0;
+    const ore = ORE_TILES.has(tile);
+    const px = heroPixels(key);
+    // Gaps in foliage (alpha 0) take the picture's average colour, so mip-maps do not blend black into the leaves.
+    let sr = 0;
+    let sg = 0;
+    let sb = 0;
+    let sn = 0;
+    for (let s = 0; s < px.length; s += 4) {
+      if (px[s + 3] === 0) continue;
+      sr += px[s];
+      sg += px[s + 1];
+      sb += px[s + 2];
+      sn++;
+    }
+    const gx = (i % HERO_COLS) * HERO_PX;
+    const gy = Math.floor(i / HERO_COLS) * HERO_PX;
+    for (let y = 0; y < HERO_PX; y++) {
+      for (let x = 0; x < HERO_PX; x++) {
+        const s = (y * HERO_PX + x) * 4;
+        // WebGL's texture rows run bottom to top.
+        const d = ((h - 1 - (gy + y)) * w + gx + x) * 4;
+        const gap = !ore && px[s + 3] === 0;
+        color[d] = gap ? sr / Math.max(1, sn) : px[s];
+        color[d + 1] = gap ? sg / Math.max(1, sn) : px[s + 1];
+        color[d + 2] = gap ? sb / Math.max(1, sn) : px[s + 2];
+        color[d + 3] = gap ? 0 : 255;
+        if (ore) {
+          // An ore: alpha 255 is the ore (it glows if the ore does), less is the stone of the world showing through, with the shade it
+          // is in as the fraction of 254; the shader reads that from aux.a, 255 for the ore and half the shade for the stone.
+          const isOre = px[s + 3] === 255;
+          aux[d] = 0;
+          aux[d + 1] = isOre ? emissive : 0;
+          aux[d + 3] = isOre ? 255 : Math.round((px[s + 3] / 254) * 127.5);
+        } else {
+          aux[d] = !gap && px[s + 3] < 255 ? 255 : 0;
+          aux[d + 1] = emissive;
+          aux[d + 3] = 255;
+        }
+      }
+    }
+  });
+  const make = (data: Uint8Array<ArrayBuffer>, srgb: boolean): THREE.DataTexture => {
+    const t = new THREE.DataTexture(data, w, h, THREE.RGBAFormat);
+    t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+    t.magFilter = THREE.NearestFilter;
+    t.minFilter = THREE.NearestMipmapLinearFilter;
+    t.generateMipmaps = true;
+    t.anisotropy = 8;
+    t.needsUpdate = true;
+    return t;
+  };
+  return { color: make(color, true), aux: make(aux, false) };
+}
+
 export function buildAtlas(): Atlas {
   const canvas = document.createElement('canvas');
   canvas.width = ATLAS_COLS * TILE_PX;
@@ -1703,15 +1779,20 @@ export function buildAtlas(): Atlas {
   texture.generateMipmaps = false;
   texture.colorSpace = THREE.SRGBColorSpace;
   const { color, aux } = buildChunkTextures(canvas);
+  const hero = buildHeroTextures();
   return {
     canvas,
     texture,
     chunkColor: color,
     chunkAux: aux,
+    chunkHero: hero.color,
+    chunkHeroAux: hero.aux,
     dispose() {
       texture.dispose();
       color.dispose();
       aux.dispose();
+      hero.color.dispose();
+      hero.aux.dispose();
     },
   };
 }

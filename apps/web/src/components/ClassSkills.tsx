@@ -1,6 +1,6 @@
 'use client';
 
-import { CLASSES, abilitiesOf, type AbilityDef, type ClassId, type TipLine } from '@solrift/shared';
+import { CLASSES, abilitiesOf, abilityCost, type AbilityDef, type ClassId, type TipLine } from '@solrift/shared';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AbilityIcon } from './AbilityIcon';
@@ -16,7 +16,7 @@ function abilityLines(a: AbilityDef): TipLine[] {
     { text: `Class: ${cls.name}`, color: 'stat' },
     { text: `Requires level ${a.unlockLevel}`, color: 'stat' },
     { text: a.description, color: 'dim' },
-    { text: `${a.cost} ${cls.resource.name.toLowerCase()} - ${num(a.cooldown)}s cooldown`, color: 'dim' },
+    { text: `${abilityCost(a.cost)} ${cls.resource.name.toLowerCase()} - ${num(a.cooldown)}s cooldown`, color: 'dim' },
   ];
 }
 

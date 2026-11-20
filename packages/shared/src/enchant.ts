@@ -1,4 +1,5 @@
 import { B } from './blocks';
+import { MAX_LEVEL } from './experience';
 import type { ItemStack } from './inventory';
 import { I, getItem, type ItemDef } from './items';
 import { mulberry32 } from './noise';
@@ -367,8 +368,8 @@ export function protectionFactor(points: number): number {
 
 // ---- the anvil -------------------------------------------------------------------------------------------------------
 
-/** Most levels an anvil will charge; beyond it the work is "too expensive". */
-export const ANVIL_MAX_COST = 39;
+/** Most levels an anvil will charge; beyond it the work is "too expensive". It is the level cap: a price above it could never be paid. */
+export const ANVIL_MAX_COST = MAX_LEVEL;
 
 /** What mends an item at the anvil: planks for wood, cobblestone for stone, an ingot or the gem for the rest. */
 export function repairMaterial(id: number): number {

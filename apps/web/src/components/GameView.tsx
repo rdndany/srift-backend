@@ -131,6 +131,7 @@ export default function GameView() {
       <GameUI />
       <div id="debug" />
       <div id="admin-bar" />
+      <div id="block-info" />
       {start !== null && start !== 'home' && <LoadingScreen />}
       {(start === null || start === 'home') && (
         <div id="home-layer">{start === 'home' && <HomeScreen onPlay={setStart} />}</div>

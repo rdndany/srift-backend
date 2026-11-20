@@ -25,7 +25,7 @@ import {
 } from './enchant';
 import type { CreativeAmount } from './creative';
 import { canRollGear } from './gear';
-import { I, allItems, bagSlotsOf, getItem, holdsInOffhand, mountOfItem } from './items';
+import { I, allItems, bagSlotsOf, getItem, holdsInOffhand, mountOfItem, prefersOffhand } from './items';
 import { FORGE_CHANCE, FORGE_TIME, canForge, forgeCells, forgeCost, forgeLayout, forgeOutcome, forgePiece, forgeTarget, jewelKind, useJewel, type ForgeOutcome } from './jewels';
 import { FURNACE_FUEL, FURNACE_INPUT, FURNACE_OUTPUT, SMELTING, isFuel, type Furnace } from './smelting';
 import { addVillagerXp, canTradeOffer, type Offer, type TradeBook } from './trading';
@@ -361,7 +361,7 @@ export class CraftingMenu extends Menu {
   protected override quickTargets(from: number, stack: ItemStack): number[] {
     const def = getItem(stack.id).armor;
     if (def && this.armorStart >= 0 && from < PLAYER_SLOTS && !this.armor!.get(def.slotIndex)) return [this.armorStart + def.slotIndex];
-    if (holdsInOffhand(stack.id) && this.offhandSlot >= 0 && from < PLAYER_SLOTS && !this.offhand!.get(0)) return [this.offhandSlot];
+    if (prefersOffhand(stack.id) && this.offhandSlot >= 0 && from < PLAYER_SLOTS && !this.offhand!.get(0)) return [this.offhandSlot];
     if (mountOfItem(stack.id) !== null && this.mountSlot >= 0 && from < PLAYER_SLOTS && !this.mount!.get(0)) return [this.mountSlot];
     return super.quickTargets(from, stack);
   }

@@ -7,22 +7,8 @@ import type { SpellKit } from './spellFx';
 import { FireballBoltView } from './fireballFx';
 import { StaffBoltView } from './staffFx';
 import { WandBoltView } from './wandFx';
-
-type RGB = [number, number, number];
-type Painter = (x: number, y: number) => RGB;
-
-function hash(x: number, y: number, s = 0): number {
-  let h = (x * 374761393 + y * 668265263 + s * 2246822519) | 0;
-  h = (h ^ (h >>> 13)) * 1274126177;
-  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
-}
-
-const jit = (c: RGB, amt: number, x: number, y: number, s: number): RGB => {
-  const d = (hash(x, y, s) - 0.5) * 2 * amt;
-  return [c[0] + d, c[1] + d, c[2] + d];
-};
-
-const rect = (x: number, y: number, x0: number, y0: number, x1: number, y1: number) => x >= x0 && x <= x1 && y >= y0 && y <= y1;
+import { batRig, creeperRig, endermanRig, HOSTILE_SKINS, slimeRig, spiderRig, undeadRig } from './mobHostile';
+import { eyes, hash, jit, mix, mul, plain, rect, withFeatures, type Feature, type Painter, type Part, type RGB } from './mobPaint';
 
 // ---- skins ---------------------------------------------------------------------
 const SKINS: Record<string, Painter> = {
@@ -39,39 +25,7 @@ const SKINS: Record<string, Painter> = {
     return jit([88, 58, 40], 12, x, y, 3);
   },
   cow_horn: (x, y) => jit([226, 222, 200], 8, x, y, 6),
-  zombie_skin: (x, y) => jit([94, 142, 90], 12, x, y, 7),
-  zombie_face: (x, y) => {
-    if (rect(x, y, 3, 6, 5, 7) || rect(x, y, 10, 6, 12, 7)) return [18, 36, 44];
-    if (rect(x, y, 5, 11, 10, 12)) return [60, 90, 56];
-    return jit([94, 142, 90], 12, x, y, 7);
-  },
-  zombie_shirt: (x, y) => jit([52, 140, 172], 12, x, y, 8),
-  zombie_pants: (x, y) => jit([52, 52, 150], 10, x, y, 9),
-  skeleton_bone: (x, y) => jit([214, 214, 204], 10, x, y, 10),
-  skeleton_face: (x, y) => {
-    if (rect(x, y, 3, 5, 5, 7) || rect(x, y, 10, 5, 12, 7)) return [26, 26, 28];
-    if (rect(x, y, 5, 11, 10, 11) || rect(x, y, 6, 12, 6, 12) || rect(x, y, 9, 12, 9, 12)) return [70, 70, 70];
-    return jit([214, 214, 204], 10, x, y, 10);
-  },
-  skeleton_ribs: (x, y) => (y % 4 === 2 ? [96, 96, 92] : jit([214, 214, 204], 10, x, y, 11)),
-  creeper_skin: (x, y) => (hash(x >> 1, y >> 1, 12) > 0.6 ? jit([40, 120, 44], 10, x, y, 12) : jit([78, 176, 66], 12, x, y, 12)),
-  creeper_face: (x, y) => {
-    if (rect(x, y, 3, 4, 5, 6) || rect(x, y, 10, 4, 12, 6)) return [14, 20, 14];
-    if (rect(x, y, 6, 8, 9, 10) || rect(x, y, 5, 10, 6, 13) || rect(x, y, 9, 10, 10, 13)) return [14, 20, 14];
-    return hash(x >> 1, y >> 1, 12) > 0.6 ? jit([40, 120, 44], 10, x, y, 12) : jit([78, 176, 66], 12, x, y, 12);
-  },
 };
-
-type Feature = [number, number, number, number, RGB];
-const plain = (c: RGB, amt: number, s: number): Painter => (x, y) => jit(c, amt, x, y, s);
-const withFeatures = (base: Painter, feats: Feature[]): Painter => (x, y) => {
-  for (const [a, b, c, d, col] of feats) if (rect(x, y, a, b, c, d)) return col;
-  return base(x, y);
-};
-const eyes = (y0: number, y1: number, col: RGB, x0 = 3, x1 = 5): Feature[] => [
-  [x0, y0, x1, y1, col],
-  [15 - x1, y0, 15 - x0, y1, col],
-];
 
 const rabbitSkin = (name: string, base: RGB, s: number) => ({
   [`rabbit_${name}`]: plain(base, 10, s),
@@ -95,31 +49,6 @@ const EXTRA_SKINS: Record<string, Painter> = {
   squid_body: plain([62, 86, 126], 10, 31),
   squid_face: withFeatures(plain([62, 86, 126], 10, 31), [...eyes(6, 9, [220, 230, 240], 2, 5), ...eyes(7, 8, [10, 10, 20], 3, 4)]),
   squid_tent: plain([52, 74, 112], 10, 32),
-  bat_body: plain([84, 62, 44], 10, 33),
-  bat_face: withFeatures(plain([84, 62, 44], 10, 33), [...eyes(5, 6, [230, 200, 80], 3, 4), [7, 9, 8, 10, [30, 20, 16]]]),
-  bat_wing: plain([60, 44, 32], 8, 34),
-  spider_body: (x, y) => jit(hash(x >> 1, y >> 1, 35) > 0.7 ? [74, 56, 44] : [44, 36, 34], 8, x, y, 35),
-  spider_face: withFeatures(plain([44, 36, 34], 8, 35), [[2, 4, 5, 6, [190, 20, 20]], [10, 4, 13, 6, [190, 20, 20]], [4, 8, 11, 10, [120, 30, 30]], [6, 7, 9, 7, [18, 14, 14]]]),
-  spider_leg: plain([34, 28, 28], 6, 36),
-  cave_spider_body: plain([22, 78, 86], 10, 37),
-  cave_spider_face: withFeatures(plain([22, 78, 86], 10, 37), [[2, 4, 5, 6, [220, 30, 30]], [10, 4, 13, 6, [220, 30, 30]], [4, 8, 11, 10, [30, 50, 56]]]),
-  cave_spider_leg: plain([16, 58, 66], 6, 38),
-  slime_core: plain([70, 150, 64], 14, 39),
-  slime_face: withFeatures(plain([70, 150, 64], 14, 39), [[3, 5, 5, 8, [20, 50, 24]], [10, 5, 12, 8, [20, 50, 24]], [7, 11, 8, 12, [20, 50, 24]]]),
-  slime_outer: plain([110, 200, 100], 12, 40),
-  enderman_skin: plain([22, 18, 28], 5, 41),
-  enderman_face: withFeatures(plain([22, 18, 28], 5, 41), [[2, 7, 5, 8, [200, 80, 240]], [10, 7, 13, 8, [200, 80, 240]]]),
-  husk_skin: plain([168, 150, 104], 12, 42),
-  husk_face: withFeatures(plain([168, 150, 104], 12, 42), [...eyes(6, 7, [40, 32, 20], 3, 5), [5, 11, 10, 12, [110, 92, 60]]]),
-  husk_shirt: plain([150, 120, 84], 12, 43),
-  husk_pants: plain([120, 100, 70], 10, 44),
-  stray_bone: plain([186, 212, 222], 10, 45),
-  stray_face: withFeatures(plain([186, 212, 222], 10, 45), [...eyes(5, 7, [26, 40, 60]), [5, 11, 10, 11, [70, 90, 110]]]),
-  stray_ribs: (x, y) => (y % 4 === 2 ? [90, 120, 140] : jit([186, 212, 222], 10, x, y, 46)),
-  drowned_skin: plain([96, 156, 150], 12, 47),
-  drowned_face: withFeatures(plain([96, 156, 150], 12, 47), [...eyes(6, 7, [20, 50, 60], 3, 5), [5, 11, 10, 12, [60, 100, 100]]]),
-  drowned_shirt: plain([54, 116, 128], 12, 48),
-  drowned_pants: plain([46, 70, 112], 10, 49),
 };
 // A sheep's wool in every dye colour (sheep_wool is white).
 DYE_RGB.forEach((c, i) => {
@@ -127,7 +56,67 @@ DYE_RGB.forEach((c, i) => {
   const lo: [number, number, number] = [c[0] * 0.93, c[1] * 0.93, c[2] * 0.93];
   EXTRA_SKINS[`sheep_wool_${i}`] = (x, y) => jit(hash(x >> 1, y >> 1, 21) > 0.5 ? [c[0], c[1], c[2]] : lo, 6, x, y, 21);
 });
-Object.assign(SKINS, EXTRA_SKINS);
+Object.assign(SKINS, EXTRA_SKINS, HOSTILE_SKINS);
+
+// Skeletons (and the stray, which is the same in ice): bone shaded from its lit top-left corner to its shadowed edge, yellowed
+// in patches and cracked here and there; a skull with hollow sockets and a glint in them; a bow of wood, a leather quiver.
+function boneSkins(p: string, base: RGB, stain: RGB, glint: RGB, wood: RGB, seed: number): Record<string, Painter> {
+  const bone: Painter = (x, y) => {
+    const lit = 1.06 - ((x + y) / 30) * 0.2 - (y > 12 ? 0.07 : 0);
+    const patch = hash(x >> 2, y >> 2, seed) > 0.72 ? 0.55 : 0;
+    const c = mix(mul(base, lit), stain, patch * 0.5);
+    return jit(c, 7, x, y, seed + 1);
+  };
+  const skull: Painter = (x, y) => {
+    if ((x === 12 && y >= 1 && y <= 3) || (x === 11 && y === 3) || (x === 11 && y === 4) || (x === 10 && y === 5 && hash(x, y, seed) > 0.5)) return mul(base, 0.5);
+    return bone(x, y);
+  };
+  const face: Painter = (x, y) => {
+    // The sockets: deep, with a bone rim, and a small glint in each.
+    if (rect(x, y, 3, 5, 5, 8) || rect(x, y, 10, 5, 12, 8)) {
+      if ((x === 4 || x === 11) && y === 7) return glint;
+      return [14, 14, 18];
+    }
+    if (rect(x, y, 2, 4, 6, 4) || rect(x, y, 9, 4, 13, 4)) return mul(base, 1.08);
+    if (rect(x, y, 2, 5, 2, 8) || rect(x, y, 13, 5, 13, 8)) return mul(base, 0.8);
+    // The nose: an upside-down heart of dark.
+    if (rect(x, y, 7, 9, 8, 10) || (y === 9 && (x === 6 || x === 9))) return [28, 26, 30];
+    // The teeth, in a dark mouth.
+    if (rect(x, y, 3, 12, 12, 14)) {
+      if (y === 14) return [30, 28, 30];
+      return x % 2 === 0 ? mix(base, [255, 255, 245], 0.35) : [28, 26, 28];
+    }
+    // Cheek hollows.
+    if ((x <= 2 || x >= 13) && y >= 9 && y <= 12) return mul(base, 0.74);
+    return skull(x, y);
+  };
+  const spine: Painter = (x, y) => (y % 4 === 3 ? mul(base, 0.62) : x % 5 === 0 ? mul(base, 0.84) : bone(x, y));
+  const rib: Painter = (x, y) => (y >= 12 ? mul(base, 0.7) : y <= 2 ? mul(base, 1.1) : bone(x, y));
+  const joint: Painter = (x, y) => jit(mul(base, 0.84 + 0.1 * hash(x >> 1, y >> 1, seed + 4)), 6, x, y, seed + 5);
+  return {
+    [`${p}_bone`]: bone,
+    [`${p}_skull`]: skull,
+    [`${p}_face`]: face,
+    [`${p}_spine`]: spine,
+    [`${p}_rib`]: rib,
+    [`${p}_joint`]: joint,
+    [`${p}_bow`]: (x, y) => jit(hash(x, y >> 2, seed + 6) > 0.6 ? mul(wood, 0.78) : wood, 8, x, y, seed + 7),
+  };
+}
+Object.assign(
+  SKINS,
+  boneSkins('skeleton', [226, 225, 214], [176, 160, 118], [196, 44, 30], [128, 86, 48], 10),
+  boneSkins('stray', [190, 214, 224], [138, 170, 188], [90, 200, 240], [150, 156, 150], 45),
+  {
+    bow_dark: plain([62, 44, 32], 8, 140),
+    bow_string: plain([226, 224, 214], 6, 141),
+    quiver: (x: number, y: number) => (y < 2 ? [46, 32, 24] : jit(x % 5 === 0 ? [82, 56, 36] : [104, 72, 46], 8, x, y, 142)),
+    strap: (x: number, y: number) => (x % 7 === 0 ? [60, 40, 28] : jit([96, 66, 42], 8, x, y, 143)),
+    arrow_shaft: plain([176, 140, 92], 8, 144),
+    arrow_head: plain([150, 154, 164], 8, 145),
+    fletch: (x: number, y: number) => (y % 3 === 0 ? [236, 236, 228] : jit([200, 56, 48], 8, x, y, 146)),
+  } as Record<string, Painter>,
+);
 
 // Villagers: a robe in the colour of the trade, a pale-green-brown face with a long nose, and a belt that shows the level.
 const ROBES: Record<Profession, RGB> = {
@@ -217,30 +206,26 @@ function skin(name: string): THREE.CanvasTexture {
 
 // ---- rigs ----------------------------------------------------------------------
 
-interface Part {
-  /** Box size (w, h, d). */
-  size: [number, number, number];
-  /** Joint position in model space; the box hangs from here by `hang` (down) or is centered when hang is false. */
-  at: [number, number, number];
-  skin: string;
-  /** Face texture for the -Z side (the front). */
-  front?: string;
-  /** The box pivots at its top (limbs) instead of its centre. */
-  hang?: boolean;
-  /** Walk-cycle swing: amplitude sign (+1 / -1), or 0 for none. */
-  swing?: number;
-  rotX?: number;
-  rotY?: number;
-  rotZ?: number;
-  isHead?: boolean;
-  /** Wing flap: rotation about Z swings by this much (radians) around rotZ. */
-  flap?: number;
-  /** Walk swing applied about Y instead of X (spider legs). */
-  swingY?: number;
-  /** Translucent shell opacity. */
-  alpha?: number;
-  /** An arm that comes down in the mob's melee swing (this much of the swing; see `strikeArm`). */
-  strike?: number;
+// How an archer holds its bow: the arm with the bow reaches straight out, the string arm is bent to the string.
+const ARM_UP = 0.38;
+const ARM_FORE = 0.4;
+const SHOULDER_X = 0.32;
+const BOW_YAW = 0.28;
+/**
+ * The string arm, as two bones that meet at the string: `pull` is 0 with the string loose and 1 drawn. Returns the turn of
+ * the upper arm about the up axis and the bend of the elbow (radians), with the elbow out to the side.
+ */
+function drawArm(pull: number): { up: number; fore: number } {
+  const tx = SHOULDER_X - (ARM_UP + ARM_FORE - 0.02) * Math.sin(BOW_YAW);
+  const tz = -0.58 + 0.34 * pull;
+  const dx = tx + SHOULDER_X;
+  const d = Math.min(Math.hypot(dx, tz), ARM_UP + ARM_FORE - 0.01);
+  const aim = Math.atan2(-dx, -tz);
+  const a = Math.acos(Math.max(-1, Math.min(1, (ARM_UP * ARM_UP + d * d - ARM_FORE * ARM_FORE) / (2 * ARM_UP * d))));
+  const up = aim + a;
+  const ex = -SHOULDER_X - Math.sin(up) * ARM_UP;
+  const ez = -Math.cos(up) * ARM_UP;
+  return { up, fore: up - Math.atan2(-(tx - ex), -(tz - ez)) };
 }
 
 /**
@@ -254,39 +239,73 @@ const strikeArm = (k: number): number => {
   return -1.1 * (1 - (k - 0.55) / 0.45);
 };
 
-const humanoid = (shirt: string, pants: string, skinName: string, face: string, armRot: number, ribs?: string): Part[] => [
-  { size: [0.5, 0.5, 0.5], at: [0, 1.55, 0], skin: skinName, front: face, isHead: true },
-  { size: [0.5, 0.75, 0.25], at: [0, 1.15, 0], skin: ribs ?? shirt },
-  { size: [0.25, 0.75, 0.25], at: [-0.125, 0.75, 0], skin: pants, hang: true, swing: 1 },
-  { size: [0.25, 0.75, 0.25], at: [0.125, 0.75, 0], skin: pants, hang: true, swing: -1 },
-  { size: [0.25, 0.75, 0.25], at: [-0.375, 1.5, 0], skin: skinName, hang: true, swing: -0.5, rotX: armRot, strike: 1 },
-  { size: [0.25, 0.75, 0.25], at: [0.375, 1.5, 0], skin: skinName, hang: true, swing: 0.5, rotX: armRot, strike: 1 },
-];
+/**
+ * An archer's bones: a skull, a spine with a ribcage of separate ribs and a pelvis, thin limbs that bend at the knee and
+ * the elbow, a bow in the right hand (drawn, with an arrow on it) and a quiver on the back. `p` names the skins.
+ */
+const skeletonRig = (p: string): Part[] => {
+  const rig: Part[] = [];
+  const add = (part: Part): number => rig.push(part) - 1;
+  const bone = `${p}_bone`;
+  const joint = `${p}_joint`;
+  add({ size: [0.5, 0.5, 0.5], at: [0, 1.6, 0], skin: `${p}_skull`, front: `${p}_face`, isHead: true });
+  // Spine, ribs, collar, pelvis.
+  add({ size: [0.09, 0.64, 0.09], at: [0, 1.2, 0.09], skin: `${p}_spine`, flat: true });
+  [0.46, 0.46, 0.44, 0.4, 0.34].forEach((w, i) => add({ size: [w, 0.055, 0.26], at: [0, 1.4 - i * 0.1, 0], skin: `${p}_rib`, flat: true }));
+  add({ size: [0.07, 0.4, 0.05], at: [0, 1.2, -0.14], skin: `${p}_rib`, flat: true });
+  add({ size: [0.54, 0.07, 0.15], at: [0, 1.47, -0.01], skin: bone, flat: true });
+  add({ size: [0.38, 0.13, 0.2], at: [0, 0.9, 0.02], skin: bone, flat: true });
+  add({ size: [0.08, 0.1, 0.08], at: [0, 0.97, 0.05], skin: joint, flat: true });
+  // Legs: thigh, knee, shin and foot.
+  for (const s of [-1, 1]) {
+    const thigh = add({ size: [0.12, 0.42, 0.12], at: [s * 0.1, 0.84, 0], skin: bone, hang: true, swing: s });
+    add({ size: [0.16, 0.12, 0.16], at: [0, -0.42, 0], skin: joint, of: thigh, flat: true });
+    const shin = add({ size: [0.1, 0.4, 0.1], at: [0, -0.42, 0], skin: bone, hang: true, of: thigh, flat: true });
+    add({ size: [0.14, 0.08, 0.26], at: [0, -0.38, -0.05], skin: joint, of: shin, flat: true });
+  }
+  // The quiver on the back, with arrows in it, and a strap across the chest.
+  const quiver = add({ size: [0.14, 0.42, 0.12], at: [0.1, 1.2, 0.2], skin: 'quiver', rotZ: 0.22, flat: true });
+  [-0.04, 0.01, 0.05].forEach((x, i) => {
+    add({ size: [0.025, 0.2, 0.025], at: [x, 0.3 + i * 0.01, (i - 1) * 0.03], skin: 'arrow_shaft', of: quiver, flat: true });
+    add({ size: [0.05, 0.07, 0.012], at: [x, 0.37 + i * 0.01, (i - 1) * 0.03], skin: 'fletch', of: quiver, flat: true });
+  });
+  add({ size: [0.06, 0.62, 0.02], at: [0, 1.17, -0.135], skin: 'strap', rotZ: 0.62, flat: true });
+  // Shoulders, and the two arms.
+  for (const s of [-1, 1]) add({ size: [0.16, 0.16, 0.16], at: [s * SHOULDER_X, 1.46, 0], skin: joint, flat: true });
+  const arm = (side: 1 | -1, role: 'bow' | 'draw'): number => {
+    const upper = add({ size: [0.1, ARM_UP, 0.1], at: [side * SHOULDER_X, 1.46, 0], skin: bone, hang: true, order: 'YXZ', rotX: Math.PI / 2, arm: role });
+    add({ size: [0.13, 0.13, 0.13], at: [0, -ARM_UP, 0], skin: joint, of: upper, flat: true });
+    const fore = add({ size: [0.09, ARM_FORE - 0.04, 0.09], at: [0, -ARM_UP, 0], skin: bone, hang: true, of: upper, flat: true, ...(role === 'draw' ? { arm: 'drawFore' as const } : {}) });
+    return add({ size: [0.11, 0.11, 0.11], at: [0, -ARM_FORE, 0], skin: joint, of: fore, flat: true });
+  };
+  arm(-1, 'draw');
+  const hand = arm(1, 'bow');
+  // The bow, in bow space (up is +y, the archer is at +z): a grip, limbs that curve back toward the string, the string, and an arrow.
+  const bow = add({ size: [0.01, 0.01, 0.01], at: [0, 0, 0], skin: 'bow_dark', of: hand, rotX: -Math.PI / 2, flat: true });
+  add({ size: [0.06, 0.16, 0.07], at: [0, 0, 0], skin: 'bow_dark', of: bow, flat: true });
+  const pts: [number, number][] = [[0.08, 0], [0.22, 0.04], [0.36, 0.11], [0.46, 0.2]];
+  for (const s of [-1, 1])
+    for (let i = 0; i < pts.length - 1; i++) {
+      const [y0, z0] = pts[i];
+      const [y1, z1] = pts[i + 1];
+      add({
+        size: [0.05, Math.hypot(y1 - y0, z1 - z0) + 0.015, 0.05],
+        at: [0, (s * (y0 + y1)) / 2, (z0 + z1) / 2],
+        skin: `${p}_bow`,
+        of: bow,
+        rotX: s * Math.atan2(z1 - z0, y1 - y0),
+        flat: true,
+      });
+    }
+  add({ size: [0.012, 0.92, 0.012], at: [0, 0, 0.2], skin: 'bow_string', of: bow, flat: true });
+  add({ size: [0.025, 0.025, 0.7], at: [0, 0.01, -0.15], skin: 'arrow_shaft', of: bow, nock: true, flat: true });
+  add({ size: [0.05, 0.05, 0.08], at: [0, 0.01, -0.52], skin: 'arrow_head', of: bow, nock: true, flat: true });
+  add({ size: [0.06, 0.012, 0.1], at: [0, 0.01, 0.15], skin: 'fletch', of: bow, nock: true, flat: true });
+  return rig;
+};
 
 const scaleRig = (parts: Part[], s: number): Part[] =>
   parts.map((p) => ({ ...p, size: p.size.map((v) => v * s) as [number, number, number], at: p.at.map((v) => v * s) as [number, number, number] }));
-
-const spiderRig = (body: string, face: string, leg: string): Part[] => {
-  const parts: Part[] = [
-    { size: [0.45, 0.4, 0.45], at: [0, 0.5, -0.55], skin: body, front: face, isHead: true },
-    { size: [0.4, 0.35, 0.4], at: [0, 0.5, -0.15], skin: body },
-    { size: [0.65, 0.5, 0.75], at: [0, 0.5, 0.4], skin: body },
-  ];
-  const fan = [0.7, 0.25, -0.25, -0.7];
-  for (let i = 0; i < 4; i++) {
-    for (const side of [-1, 1]) {
-      parts.push({
-        size: [0.85, 0.07, 0.07],
-        at: [side * 0.55, 0.42, -0.3 + i * 0.22],
-        skin: leg,
-        rotZ: -side * 0.55,
-        rotY: side * fan[i] * 0.55,
-        swingY: (i % 2 === 0 ? 1 : -1) * side * 0.35,
-      });
-    }
-  }
-  return parts;
-};
 
 const rabbitRig = (coat: string): Part[] => [
   { size: [0.25, 0.25, 0.25], at: [0, 0.42, -0.28], skin: `rabbit_${coat}`, front: `rabbit_${coat}_face`, isHead: true },
@@ -574,41 +593,17 @@ const RIGS: Record<MobKind, Part[]> = {
   ],
   rabbit: rabbitRig('brown'),
   squid: squidRig(),
-  bat: [
-    { size: [0.25, 0.25, 0.25], at: [0, 0.7, 0], skin: 'bat_body', front: 'bat_face', isHead: true },
-    { size: [0.08, 0.12, 0.04], at: [-0.08, 0.89, 0], skin: 'bat_body' },
-    { size: [0.08, 0.12, 0.04], at: [0.08, 0.89, 0], skin: 'bat_body' },
-    { size: [0.25, 0.4, 0.2], at: [0, 0.42, 0.02], skin: 'bat_body' },
-    { size: [0.5, 0.4, 0.04], at: [-0.37, 0.5, 0.05], skin: 'bat_wing', flap: 0.9 },
-    { size: [0.5, 0.4, 0.04], at: [0.37, 0.5, 0.05], skin: 'bat_wing', flap: -0.9 },
-  ],
-  spider: spiderRig('spider_body', 'spider_face', 'spider_leg'),
-  cave_spider: scaleRig(spiderRig('cave_spider_body', 'cave_spider_face', 'cave_spider_leg'), 0.6),
-  slime: [
-    { size: [0.3, 0.3, 0.3], at: [0, 0.2, 0], skin: 'slime_core', front: 'slime_face', isHead: true },
-    { size: [0.5, 0.5, 0.5], at: [0, 0.25, 0], skin: 'slime_outer', alpha: 0.55 },
-  ],
-  enderman: [
-    { size: [0.5, 0.5, 0.5], at: [0, 2.65, 0], skin: 'enderman_skin', front: 'enderman_face', isHead: true },
-    { size: [0.5, 0.9, 0.25], at: [0, 1.9, 0], skin: 'enderman_skin' },
-    { size: [0.18, 1.45, 0.18], at: [-0.12, 1.45, 0], skin: 'enderman_skin', hang: true, swing: 1 },
-    { size: [0.18, 1.45, 0.18], at: [0.12, 1.45, 0], skin: 'enderman_skin', hang: true, swing: -1 },
-    { size: [0.14, 1.3, 0.14], at: [-0.34, 2.3, 0], skin: 'enderman_skin', hang: true, swing: -0.5, strike: 1 },
-    { size: [0.14, 1.3, 0.14], at: [0.34, 2.3, 0], skin: 'enderman_skin', hang: true, swing: 0.5, strike: 1 },
-  ],
-  husk: humanoid('husk_shirt', 'husk_pants', 'husk_skin', 'husk_face', Math.PI / 2.1),
-  stray: humanoid('stray_bone', 'stray_bone', 'stray_bone', 'stray_face', Math.PI / 4, 'stray_ribs'),
-  drowned: humanoid('drowned_shirt', 'drowned_pants', 'drowned_skin', 'drowned_face', Math.PI / 2.1),
-  zombie: humanoid('zombie_shirt', 'zombie_pants', 'zombie_skin', 'zombie_face', Math.PI / 2.1),
-  skeleton: humanoid('skeleton_bone', 'skeleton_bone', 'skeleton_bone', 'skeleton_face', Math.PI / 4, 'skeleton_ribs'),
-  creeper: [
-    { size: [0.5, 0.5, 0.5], at: [0, 1.45, 0], skin: 'creeper_skin', front: 'creeper_face', isHead: true },
-    { size: [0.5, 0.75, 0.25], at: [0, 0.82, 0], skin: 'creeper_skin' },
-    { size: [0.25, 0.45, 0.25], at: [-0.13, 0.45, -0.2], skin: 'creeper_skin', hang: true, swing: 1 },
-    { size: [0.25, 0.45, 0.25], at: [0.13, 0.45, -0.2], skin: 'creeper_skin', hang: true, swing: -1 },
-    { size: [0.25, 0.45, 0.25], at: [-0.13, 0.45, 0.2], skin: 'creeper_skin', hang: true, swing: -1 },
-    { size: [0.25, 0.45, 0.25], at: [0.13, 0.45, 0.2], skin: 'creeper_skin', hang: true, swing: 1 },
-  ],
+  bat: batRig(),
+  spider: spiderRig('spider'),
+  cave_spider: scaleRig(spiderRig('cave_spider'), 0.6),
+  slime: slimeRig(),
+  enderman: endermanRig(),
+  husk: undeadRig({ p: 'husk', wrap: true }),
+  stray: skeletonRig('stray'),
+  drowned: undeadRig({ p: 'drowned', hair: true, weed: true, glow: 'glow_cyan' }),
+  zombie: undeadRig({ p: 'zombie', hair: true }),
+  skeleton: skeletonRig('skeleton'),
+  creeper: creeperRig(),
   pig: [
     { size: [0.5, 0.5, 0.5], at: [0, 0.68, -0.6], skin: 'pig_body', front: 'pig_face', isHead: true },
     { size: [0.62, 0.5, 0.95], at: [0, 0.6, 0.05], skin: 'pig_body' },
@@ -805,13 +800,14 @@ function buildView(kind: MobKind, key: number, gear: readonly number[] = []): Vi
     const base = skin(kind === 'sheep' && def.skin === 'sheep_wool' ? (shorn ? 'sheep_shorn' : variant > 0 ? `sheep_wool_${variant}` : def.skin) : def.skin);
     const mk = (map: THREE.Texture) => (def.alpha ? new THREE.MeshBasicMaterial({ map, transparent: true, opacity: def.alpha, depthWrite: false }) : new THREE.MeshBasicMaterial({ map }));
     // BoxGeometry face order: +x, -x, +y, -y, +z, -z. The mob faces -Z, so the face goes on index 5.
-    const mats = [0, 1, 2, 3, 4, 5].map((i) => mk(i === 5 && def.front ? skin(def.front) : base));
-    const mesh = new THREE.Mesh(boxGeo(def.size, !!def.hang), mats);
+    const mats = def.flat ? [mk(base)] : [0, 1, 2, 3, 4, 5].map((i) => mk(i === 5 && def.front ? skin(def.front) : base));
+    const mesh = new THREE.Mesh(boxGeo(def.size, !!def.hang), def.flat ? mats[0] : mats);
     mesh.position.set(...def.at);
+    if (def.order) mesh.rotation.order = def.order;
     mesh.rotation.x = def.rotX ?? 0;
     mesh.rotation.y = def.rotY ?? 0;
     mesh.rotation.z = def.rotZ ?? 0;
-    group.add(mesh);
+    (def.of !== undefined ? parts[def.of].mesh : group).add(mesh);
     parts.push({ mesh, def, mats });
   }
   const heart = new THREE.Mesh(heartGeo, heartMat);
@@ -991,18 +987,26 @@ export class MobRenderer {
       // A melee swing (it plays whether or not the blow lands: a raised shield stops the damage, not the attack):
       // the body lunges the way it faces and the arms come down.
       const swingK = !m.dead && m.attackTime !== undefined && m.attackTime >= 0 && m.attackTime < ATTACK_ANIM ? m.attackTime / ATTACK_ANIM : -1;
-      if (swingK >= 0) {
+      // An archer does not lunge: the swing is its shot (the string hand springs forward and draws again, see below).
+      const archer = m.kind === 'skeleton' || m.kind === 'stray';
+      if (swingK >= 0 && !archer) {
         const lunge = 0.38 * Math.sin(Math.PI * Math.min(1, swingK * 1.25)) * (m.kind === 'slime' ? 1.3 : 1);
         g.position.x -= Math.sin(g.rotation.y) * lunge;
         g.position.z -= Math.cos(g.rotation.y) * lunge;
       }
       const armTurn = swingK >= 0 ? strikeArm(swingK) : 0;
+      // The string is drawn at rest and springs loose when the arrow leaves, then is drawn again.
+      const pull = swingK >= 0 ? Math.min(1, swingK * 1.15) ** 1.5 * 0.95 : 1;
+      const bend = archer ? drawArm(pull) : null;
+      const kick = swingK >= 0 ? 0.22 * (1 - swingK) ** 2 : 0;
 
       // Death: tip over. Creeper: swell while the fuse burns.
       g.rotation.z = m.dead ? (Math.PI / 2) * Math.min(1, m.deathTime / 0.35) : 0;
       const swell = 1 + m.fuseFraction * 0.3;
       const big = (m.kind === 'slime' ? m.size : 1) * (m.baby ? 0.5 : 1);
-      g.scale.set(swell * big, (1 + m.fuseFraction * 0.12) * big, swell * big);
+      // A slime wobbles as it sits and squashes and stretches as it hops.
+      const jelly = m.kind === 'slime' && !m.dead ? Math.sin(this.time * 5 + m.id) * 0.04 + Math.min(1, m.speedNow / 1.2) * Math.sin(this.time * 9 + m.id) * 0.12 : 0;
+      g.scale.set(swell * big * (1 - jelly * 0.6), (1 + m.fuseFraction * 0.12) * big * (1 + jelly), swell * big * (1 - jelly * 0.6));
 
       v.heart.visible = !m.dead && (m.love ?? 0) > 0;
       if (v.heart.visible) {
@@ -1052,8 +1056,35 @@ export class MobRenderer {
         if (d.swing) p.mesh.rotation.x = (d.rotX ?? 0) + swing * d.swing + (d.strike ? armTurn * d.strike : 0);
         if (d.swingY) p.mesh.rotation.y = (d.rotY ?? 0) + swing * d.swingY;
         if (d.flap) p.mesh.rotation.z = (d.rotZ ?? 0) + Math.sin(this.time * (m.kind === 'bat' ? 22 : 14) + m.id) * d.flap * (m.kind === 'bat' ? 1 : 0.3 + moving);
+        // A knee or an elbow folds back as the limb it hangs from swings back.
+        if (d.bend !== undefined && d.of !== undefined) p.mesh.rotation.x = (d.rotX ?? 0) + d.bend * Math.min(0, v.parts[d.of].mesh.rotation.x);
         if (d.isHead) p.mesh.rotation.y = Math.sin(this.time * 0.9 + m.id * 3) * 0.12 * (1 - moving);
         p.mesh.position.y = d.at[1] + (d.isHead ? bob : 0);
+        if (bend) {
+          if (d.arm === 'bow') p.mesh.rotation.set(Math.PI / 2 - 0.03 + kick + Math.sin(this.time * 1.3 + m.id) * 0.015, BOW_YAW, 0);
+          else if (d.arm === 'draw') p.mesh.rotation.set(Math.PI / 2, bend.up, 0);
+          else if (d.arm === 'drawFore') p.mesh.rotation.z = bend.fore;
+          if (d.nock) p.mesh.visible = pull > 0.6;
+        }
+        if (d.glow) {
+          // Eyes shine in the dark: the world's light does not dim them (a hurt flash still shows).
+          p.mats[0].color.setRGB(kr, kg, kb);
+          continue;
+        }
+        if (p.mats.length === 1) {
+          // A small part has one material: the mean of the light on its sides.
+          let r = 0;
+          let gr = 0;
+          let b = 0;
+          for (let i = 0; i < 6; i++) {
+            r += faceR[i * 3];
+            gr += faceR[i * 3 + 1];
+            b += faceR[i * 3 + 2];
+          }
+          if (fuseFlash) p.mats[0].color.setRGB(1.7, 1.7, 1.7);
+          else p.mats[0].color.setRGB((r / 6) * kr, (gr / 6) * kg, (b / 6) * kb);
+          continue;
+        }
         for (let i = 0; i < 6; i++) {
           if (fuseFlash) p.mats[i].color.setRGB(1.7, 1.7, 1.7);
           else p.mats[i].color.setRGB(faceR[i * 3] * kr, faceR[i * 3 + 1] * kg, faceR[i * 3 + 2] * kb);

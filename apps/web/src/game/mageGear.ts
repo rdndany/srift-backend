@@ -45,6 +45,15 @@ export function noise(x: number, y: number, seed: number): number {
 }
 const clamp = (v: number): number => Math.max(0, Math.min(255, Math.round(v)));
 export const tone = (c: RGB, d: number): string => `rgb(${clamp(c[0] + d)},${clamp(c[1] + d)},${clamp(c[2] + d)})`;
+/** A colour as the picture's pixel wants it. */
+export const rgbs = (c: RGB): string => `rgb(${clamp(c[0])},${clamp(c[1])},${clamp(c[2])})`;
+/** Between two colours (`t` 0 is the first, 1 the second): how shadows lean toward one hue and lights toward another. */
+export const lerp = (a: RGB, b: RGB, t: number): RGB => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+/** A colour with a little grain: `amount` is the whole width of it. */
+export const jitter = (c: RGB, x: number, y: number, seed: number, amount: number): RGB => {
+  const d = (noise(x, y, seed) - 0.5) * amount;
+  return [c[0] + d, c[1] + d, c[2] + d];
+};
 
 type TexKey = 'robe' | 'hat' | 'cape' | 'lining' | 'trim';
 
@@ -52,33 +61,42 @@ type TexKey = 'robe' | 'hat' | 'cape' | 'lining' | 'trim';
 export const PLEAT = [-20, -8, 5, 12];
 
 const PAINT: Record<TexKey, (x: number, y: number) => string> = {
+  // Silk-like cloth: folds a dark crease and then lighter and lighter toward the next, shadows leaning to indigo and lights to lilac; arcane specks.
   robe: (x, y) => {
-    const base: RGB = [98, 62, 178];
-    let d = PLEAT[x % 4] + (noise(x, y, 3) - 0.5) * 9;
-    if ((x === 5 && y === 3) || (x === 10 && y === 8) || (x === 2 && y === 11) || (x === 13 && y === 13)) return tone([176, 140, 255], 0); // faint arcane specks
-    if ((x + y) % 8 === 0) d -= 6;
-    return tone(base, d);
+    const f = [0, 0.3, 0.62, 0.92][x % 4];
+    let c = lerp([52, 30, 124], [144, 106, 234], f);
+    if ((x + y) % 8 === 0) c = lerp(c, [30, 16, 80], 0.18);
+    if ((x === 5 && y === 3) || (x === 10 && y === 8) || (x === 2 && y === 11) || (x === 13 && y === 13)) return rgbs([204, 178, 255]);
+    if ((x === 6 && y === 3) || (x === 11 && y === 8) || (x === 3 && y === 11) || (x === 14 && y === 13)) c = lerp(c, [176, 140, 255], 0.35);
+    return rgbs(jitter(c, x, y, 3, 8));
   },
+  // Felt: a deep purple with a soft grain and a stitched edge.
   hat: (x, y) => {
-    // Felt: a deep purple with a soft grain, no pattern.
-    const base: RGB = [82, 50, 150];
-    return tone(base, (noise(x, y, 5) - 0.5) * 12 + ((x + y) % 7 === 0 ? -5 : 0));
+    let c = lerp([62, 36, 126], [100, 66, 176], noise(x >> 1, y, 5));
+    if ((x + y) % 7 === 0) c = lerp(c, [36, 20, 84], 0.25);
+    return rgbs(jitter(c, x, y, 6, 8));
   },
+  // The cape's back: a deep indigo with folds, and stars.
   cape: (x, y) => {
-    const base: RGB = [42, 32, 112];
-    if ((x === 4 && y === 4) || (x === 11 && y === 10) || (x === 7 && y === 14)) return tone([140, 118, 230], 0);
-    return tone(base, PLEAT[x % 4] * 1.1 + (noise(x, y, 7) - 0.5) * 8);
+    const f = [0, 0.3, 0.64, 0.9][x % 4];
+    let c = lerp([24, 18, 82], [90, 70, 184], f);
+    if ((x === 4 && y === 4) || (x === 11 && y === 10) || (x === 7 && y === 14) || (x === 14 && y === 2) || (x === 1 && y === 9)) return rgbs([196, 176, 255]);
+    if ((x === 5 && y === 4) || (x === 12 && y === 10) || (x === 8 && y === 14)) c = lerp(c, [170, 146, 250], 0.4);
+    return rgbs(jitter(c, x, y, 7, 7));
   },
   lining: (x, y) => {
-    const base: RGB = [150, 104, 224];
-    return tone(base, ((x + y) % 6 === 0 ? 12 : 0) + (noise(x, y, 9) - 0.5) * 8 - (y % 8 === 7 ? 8 : 0));
+    const f = [0, 0.3, 0.64, 0.9][x % 4];
+    let c = lerp([116, 76, 196], [194, 152, 246], f);
+    if (y % 8 === 7) c = lerp(c, [74, 44, 140], 0.3);
+    return rgbs(jitter(c, x, y, 9, 7));
   },
+  // Gold: engraved lines every four pixels in a deep amber, glints in a pale yellow.
   trim: (x, y) => {
-    const base: RGB = [226, 180, 64];
-    let d = (noise(x, y, 11) - 0.5) * 10;
-    if (x % 4 === 0) d -= 24; // engraved lines
-    if ((x * 3 + y * 5) % 11 === 0) d += 28; // glints
-    return tone(base, d);
+    let c: RGB = [232, 186, 70];
+    if (x % 4 === 0) c = [196, 136, 44];
+    else if (x % 4 === 1) c = [246, 206, 96];
+    if ((x * 3 + y * 5) % 11 === 0) c = [255, 238, 156];
+    return rgbs(jitter(c, x, y, 11, 8));
   },
 };
 
@@ -204,6 +222,8 @@ export function dressMage(ctx: GearCtx): MageRig {
   const bandEdge = flat('hatBandEdge', 0x7d4219);
   const gem = glow('gem', 0xb48cff);
   const vial = glow('vial', 0x78e6ff);
+  const star = glow('hatStar', 0xffe48a);
+  const rune = glow('rune', 0xd6bcff);
   // A trim is one band of the picture (not a stripe of it): slide it so it shows the plain gold.
   const gold: [number, number] = [0.25, 0.4];
 
@@ -220,10 +240,11 @@ export function dressMage(ctx: GearCtx): MageRig {
   put(h, band, [0.55, 0.075, 0.55], [0, 0.43, 0]);
   put(h, bandEdge, [0.56, 0.015, 0.56], [0, 0.4, 0]);
   put(h, bandEdge, [0.56, 0.015, 0.56], [0, 0.462, 0]);
-  put(h, hatCloth, [0.5, 0.13, 0.5], [0, 0.512, 0]);
-  put(h, hatCloth, [0.43, 0.12, 0.43], [0, 0.628, 0.01]);
-  put(h, hatCloth, [0.35, 0.1, 0.35], [0, 0.735, 0.025]);
-  put(h, hatCloth, [0.22, 0.05, 0.3], [0, 0.805, 0.03]); // the pinch along the top
+  // The crown rises in steps that narrow and lean back, bends over at the top and droops down the back to a little gold bell.
+  for (const [w, ht, cy, cz] of [[0.5, 0.12, 0.512, 0], [0.44, 0.11, 0.627, 0.005], [0.38, 0.1, 0.73, 0.015], [0.32, 0.1, 0.83, 0.035], [0.26, 0.09, 0.92, 0.065], [0.21, 0.09, 0.965, 0.12], [0.17, 0.08, 0.93, 0.19], [0.13, 0.08, 0.87, 0.255], [0.1, 0.08, 0.8, 0.3]] as const) put(h, hatCloth, [w, ht, w], [0, cy, cz]);
+  put(h, trim, [0.075, 0.07, 0.075], [0, 0.735, 0.31], gold);  // A gold buckle on the band with a star in it.
+  put(h, trim, [0.14, 0.1, 0.02], [0, 0.43, -0.285], gold);
+  put(h, star, [0.05, 0.05, 0.02], [0, 0.43, -0.296]);
 
   // ---- the robe: the body, a gold stripe down the front, a cowl round the neck over a gold ring, a belt with a pouch and a vial.
   slot = 'chest';
@@ -256,7 +277,8 @@ export function dressMage(ctx: GearCtx): MageRig {
     put(arm, robe, [0.3, 0.3, 0.3], [0, -0.14, 0]);
     put(arm, robe, [0.33, 0.24, 0.33], [0, -0.41, 0]);
     put(arm, trim, [0.355, 0.05, 0.355], [0, -0.555, 0], gold);
-    put(arm, robe, [0.32, 0.07, 0.32], [s * 0.005, 0.02, 0]);
+    put(arm, robe, [0.37, 0.09, 0.37], [s * 0.025, 0.03, 0]); // a mantle over the shoulder, edged in gold
+    put(arm, trim, [0.375, 0.02, 0.375], [s * 0.025, -0.02, 0], gold);
   }
 
   // ---- the skirts: one half on each leg, so they swing apart as the legs do and never cut through them; a gold hem.
@@ -264,6 +286,8 @@ export function dressMage(ctx: GearCtx): MageRig {
   for (const [leg, d] of [[ctx.legL, 0], [ctx.legR, 0.002]] as const) {
     put(leg, robe, [0.27, 0.44, 0.33 + d], [0, -0.21, 0]);
     put(leg, trim, [0.28, 0.045, 0.34 + d], [0, -0.44, 0], gold);
+    // Runes of arcane light down the front of the skirt.
+    for (const [rx, ry] of [[0, -0.13], [-0.045, -0.21], [0.045, -0.21], [0, -0.29]] as const) put(leg, rune, [0.035, 0.035, 0.012], [rx, ry, -0.172 - d]);
   }
 
   // ---- the boots: soft leather up to the shin, a gold cuff, a curled toe.
@@ -305,6 +329,16 @@ export function dressMage(ctx: GearCtx): MageRig {
     top = pivot;
     y = -ht;
   });
+  // Stars on the back of it: a larger one with four points, and small ones scattered.
+  const starMat = glow('capeStar', 0xffe48a);
+  const speck = glow('capeSpeck', 0xcfc0ff);
+  const lit = (pivot: THREE.Object3D, mat: THREE.Material, size: V3, at: V3): void => {
+    const g = ctx.box(...size);
+    g.translate(...at);
+    ctx.add(pivot, g, mat);
+  };
+  for (const [w, h] of [[0.05, 0.05], [0.03, 0.11], [0.11, 0.03]] as const) lit(cape[1], starMat, [w, h, 0.012], [0, -0.17, 0.071]);
+  for (const [i, sx, sy] of [[0, -0.15, -0.1], [0, 0.17, -0.25], [1, -0.2, -0.08], [1, 0.2, -0.26], [2, -0.22, -0.1], [2, 0.12, -0.2], [2, -0.08, -0.24]] as const) lit(cape[i], speck, [0.02, 0.02, 0.012], [sx, sy, 0.071]);
   return { cape, slots };
 }
 

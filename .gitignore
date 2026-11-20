@@ -22,3 +22,7 @@ scripts/.*-entry.ts
 # scratch output of my test servers and look scripts
 .next-wand/
 out/
+
+.next-look/
+.next-build/
+.next-landing/

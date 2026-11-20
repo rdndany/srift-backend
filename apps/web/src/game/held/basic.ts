@@ -14,6 +14,14 @@ export function cubeView(item: ItemDef, kit: HeldKit): HeldView {
   return { object: group };
 }
 
+/**
+ * How a held thing sits in the off hand: bigger than a floating orb and sunk so its lower end is below the bottom edge of the view
+ * (the off hand rests low in the corner, and with free space under the item it would look like it hangs in the air).
+ */
+export const OFF_HELD = { scale: 0.5, at: [0, -0.12, 0] as [number, number, number], lean: -0.15 };
+
+/** The same for a picture that runs corner to corner (a dagger): sunk further, so its hilt leaves by the bottom-left corner. */
+export const OFF_HELD_DIAGONAL = { scale: 0.55, at: [-0.02, -0.2, 0] as [number, number, number], lean: -0.15 };
 /** A torch: its picture, and a flame on the tip that shows from the front and from the side. */
 export function torchView(item: ItemDef, kit: HeldKit): HeldView {
   const group = new THREE.Group();
@@ -21,7 +29,8 @@ export function torchView(item: ItemDef, kit: HeldKit): HeldView {
   group.add(kit.models.torchFlame());
   group.rotation.set(0.05, 0.3, 0);
   group.scale.setScalar(0.4);
-  return { object: group, rest: new THREE.Vector3(0.66, -0.32, -0.75) };
+  // In the off hand the handle runs off the bottom of the view, so it is held, not floating (see OFF_HELD).
+  return { object: group, rest: new THREE.Vector3(0.66, -0.32, -0.75), off: OFF_HELD };
 }
 
 /** Anything with no way of its own: its picture, small, in the corner. */
@@ -30,7 +39,7 @@ export function plainView(item: ItemDef, kit: HeldKit): HeldView {
   group.add(kit.models.sprite(item.tile));
   group.rotation.set(0.05, 0.3, 0);
   group.scale.setScalar(0.4);
-  return { object: group, rest: new THREE.Vector3(0.66, -0.32, -0.75) };
+  return { object: group, rest: new THREE.Vector3(0.66, -0.32, -0.75), off: OFF_HELD_DIAGONAL };
 }
 
 /**

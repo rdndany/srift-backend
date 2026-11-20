@@ -556,7 +556,8 @@ for (const b of BLOCKS) {
   if (!b || NOT_ITEMS.has(b.id) || NO_ITEM_BLOCKS.has(b.id) || b.id === 0 || ITEMS.has(b.id)) continue;
   // A lantern is carried by its ring and lights the way: warm, or the blue of a soul lantern (a little weaker in the hand than set down).
   const lantern = lanternInfo(b.id);
-  const carried: Partial<ItemDef> = lantern ? { carry: 'hang', heldLight: lantern.soul ? { r: 0.3, g: 0.62, b: 1, level: SOUL_LANTERN_LIGHT - 0.5 } : { r: 1, g: 0.7, b: 0.38, level: LANTERN_LIGHT - 1 } } : {};
+  // A torch lights the way too, a little less than a lantern (a torch gives 14 to the lantern's 15).
+  const carried: Partial<ItemDef> = lantern ? { carry: 'hang', heldLight: lantern.soul ? { r: 0.3, g: 0.62, b: 1, level: SOUL_LANTERN_LIGHT - 0.5 } : { r: 1, g: 0.7, b: 0.38, level: LANTERN_LIGHT - 1 } } : b.id === B.TORCH ? { heldLight: { r: 1, g: 0.66, b: 0.32, level: BLOCKS[B.TORCH].light - 1 } } : {};
   add({ id: b.id, name: b.name, tile: ITEM_ICON[b.id] ?? b.tiles.side, block: b.id, fuel: BLOCK_FUEL[b.id] ?? 0, ...carried });
 }
 for (const door of joineryDoorItems()) {
@@ -639,6 +640,8 @@ add({ id: I.BOOK, name: 'book', tile: tileIndex('book') });
 add({ id: I.ENCHANTED_BOOK, name: 'enchanted_book', tile: tileIndex('enchanted_book'), maxStack: 1, storesEnchants: true, kind: 'Enchanted Book' });
 add({ id: I.FLINT_AND_STEEL, name: 'flint_and_steel', tile: tileIndex('flint_and_steel'), maxStack: 1, durability: 64, use: 'flint', kind: 'Item' });
 add({ id: I.LAPIS_LAZULI, name: 'lapis_lazuli', tile: tileIndex('lapis_lazuli') });
+/** Points of damage an ender pearl's trip costs the one who throws it. */
+export const PEARL_TRIP_DAMAGE = 5;
 /** Experience a thrown bottle o' enchanting breaks into, inclusive. */
 export const BOTTLE_XP_MIN = 3;
 export const BOTTLE_XP_MAX = 11;
@@ -661,8 +664,10 @@ add({ id: I.TROPICAL_FISH, name: 'tropical_fish', tile: tileIndex('tropical_fish
 add({ id: I.PUFFERFISH, name: 'pufferfish', tile: tileIndex('pufferfish'), food: { hunger: 1, saturation: 0.2, poison: { chance: 1, seconds: 15 }, sickness: { chance: 1, seconds: 15 } } });
 /** Items a character keeps for good: they cannot be thrown on the ground (the Emberstone and the map). */
 export const isUndroppable = (id: number): boolean => getItem(id).undroppable;
-/** What the off hand takes: a shield, an orb, a dagger, and the map (held open in that hand, so it can be read at a glance). */
-export const holdsInOffhand = (id: number): boolean => getItem(id).offhand || getItem(id).use === 'map';
+/** What the shield-hand slot is for: a shield, an orb, a dagger, and the map (held open in that hand, so it can be read at a glance). Shift-click sends these there. */
+export const prefersOffhand = (id: number): boolean => getItem(id).offhand || getItem(id).use === 'map';
+/** What the off hand takes: those, and a stack of torches (the click sets one down when the main hand has no use for it, as in the original). */
+export const holdsInOffhand = (id: number): boolean => prefersOffhand(id) || id === B.TORCH;
 
 add({ id: I.COMPASS, name: 'compass', tile: tileIndex('compass'), maxStack: 1, kind: 'Special' });
 add({ id: I.EMBERSTONE, name: 'emberstone', tile: tileIndex('emberstone'), maxStack: 1, use: 'emberstone', undroppable: true, kind: 'Special' });
@@ -672,8 +677,8 @@ add({ id: I.JEWEL_BLOOM, name: 'jewel_of_bloom', tile: tileIndex('jewel_bloom'),
 // Class weapons. Melee ones swing like a sword, the crossbow shoots arrows, wands, staves and books cast with the class resource.
 add({ id: I.GREATSWORD, name: 'greatsword', tile: tileIndex('greatsword'), maxStack: 1, durability: 500, weapon: { kind: 'melee', damage: 8, cooldown: 0.85, cost: 0 } });
 add({ id: I.DAGGER, name: 'dagger', tile: tileIndex('dagger'), maxStack: 1, durability: 200, offhand: true, weapon: { kind: 'melee', damage: 3, cooldown: 0.3, cost: 0 } });
-add({ id: I.STAFF, name: 'staff', tile: tileIndex('staff'), maxStack: 1, durability: 300, fuel: 15, carry: 'staff', weapon: { kind: 'spell', damage: 5, cooldown: 0.9, cost: 8, speed: 24 } });
-add({ id: I.WAND, name: 'wand', tile: tileIndex('wand'), maxStack: 1, durability: 200, fuel: 8, carry: 'wand', weapon: { kind: 'spell', damage: 3, cooldown: 0.45, cost: 4, speed: 28 } });
+add({ id: I.STAFF, name: 'staff', tile: tileIndex('staff'), maxStack: 1, durability: 300, fuel: 15, carry: 'staff', weapon: { kind: 'spell', damage: 3.6, cooldown: 1.2, cost: 8, speed: 24 } });
+add({ id: I.WAND, name: 'wand', tile: tileIndex('wand'), maxStack: 1, durability: 200, fuel: 8, carry: 'wand', weapon: { kind: 'spell', damage: 1.6, cooldown: 0.65, cost: 4, speed: 28 } });
 add({ id: I.SPELLBOOK, name: 'spellbook', tile: tileIndex('spellbook'), maxStack: 1, weapon: { kind: 'spell', damage: 3, cooldown: 2, cost: 10, speed: 18, radius: 2.5 } });
 add({ id: I.CROSSBOW, name: 'crossbow', tile: tileIndex('crossbow'), maxStack: 1, durability: 465, fuel: 15, use: 'crossbow', weapon: { kind: 'ranged', damage: 11, cooldown: 0.8, cost: 0 } });
 // The orb is only held: it sits in the off hand and adds to the spells of whoever carries it.

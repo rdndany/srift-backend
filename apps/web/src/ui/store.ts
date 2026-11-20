@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { QuestLog, type AuctionCommand, type AuctionView, type StashCommand, type StashView, type ClassView, type Container, type CreativeAmount, type GearRoll, type GearSpec, type ClassId, type MountView, type InspectView, type SocialAction, type SocialView, type TradeAct, type TradeView, type Menu, type MenuKind, type PartyAction, type PartyMemberView, type QuestLogJSON, type RecipeBook } from '@solrift/shared';
+import { QuestLog, type AttrKey, type AuctionCommand, type AuctionView, type StashCommand, type StashView, type ClassView, type Container, type CreativeAmount, type GearRoll, type GearSpec, type ClassId, type MountView, type InspectView, type SocialAction, type SocialView, type TradeAct, type TradeView, type Menu, type MenuKind, type PartyAction, type PartyMemberView, type QuestLogJSON, type RecipeBook } from '@solrift/shared';
 import type { ItemIcons } from '../game/icons';
 import type { MapData } from '../game/mapData';
 
@@ -18,10 +18,12 @@ export interface UiApi {
   menu(): Menu | null;
   click(slot: number, button: 0 | 1): void;
   shift(slot: number): void;
-  /** The Organize button: merge and sort the backpack (not the bags). */
+  /** The Organize button: merge and sort the backpack and each worn bag. */
   organize(): void;
   /** Let go of the stack on the cursor outside the screen: it drops to the ground (all of it, or one). */
   dropCursor(all: boolean): void;
+  /** The trash of the open screen: destroy the stack on the cursor (all of it, or one). */
+  destroyCursor(all: boolean): void;
   /** What this player has held, which decides the recipes the book lists. */
   recipeBook: RecipeBook;
   /** Creative players see every recipe. */
@@ -73,6 +75,9 @@ export interface UiApi {
   closePlayerMenu(relock?: boolean): void;
   /** Use the ability on a button of the ability bar (0..3); the server decides whether it goes off. */
   ability(slot: number): void;
+  /** Spend `n` stat points on Strength, Agility, Vitality or Energy, or take them all back. The server counts them. */
+  spendStat(stat: AttrKey, n: number): void;
+  resetStats(): void;
   /** Open the spellbook, a tab of the inventory window (key K). */
   openSpellbook(): void;
   respawn(): void;

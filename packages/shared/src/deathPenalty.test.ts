@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { B, DEATH_WEAR, GameSession, HeadlessWorld, I, WorldGenerator, armorId, getItem, makeStack, mulberry32, toolId, type InputFrame } from './index';
+import { B, DEATH_WEAR, GameSession, HeadlessWorld, I, WorldGenerator, armorId, getItem, makeStack, mulberry32, parseSessionMessage, toolId, type InputFrame } from './index';
 
 const idle = (): InputFrame => ({ t: 'frame', dt: 1 / 20, locked: true, yaw: 0, pitch: 0, forward: 0, strafe: 0, jump: false, sprint: false, sneak: false, left: false, right: false });
 
@@ -99,5 +99,42 @@ describe('letting go of the cursor outside the screen', () => {
     // Nothing on the cursor: nothing happens.
     s.apply({ t: 'dropCursor', all: true });
     expect(s.drops.drops.reduce((n, d) => n + d.stack.count, 0)).toBe(10);
+  });
+});
+
+describe('the trash beside the screen', () => {
+  const pickUp = (s: ReturnType<typeof make>, id: number) => s.apply({ t: 'click', slot: s.menu!.slots.findIndex((sl, i) => sl.kind !== 'result' && s.menu!.stackAt(i)?.id === id), button: 0 });
+
+  it('destroys what is on the cursor for good: one at a time, or all of it', () => {
+    const s = make();
+    s.inventory.set(0, makeStack(B.PLANKS, 10));
+    s.apply({ t: 'inventory' });
+    pickUp(s, B.PLANKS);
+    expect(s.menu!.cursor?.count).toBe(10);
+    s.apply({ t: 'destroyCursor', all: false });
+    expect(s.menu!.cursor?.count).toBe(9);
+    s.apply({ t: 'destroyCursor', all: true });
+    expect(s.menu!.cursor).toBeNull();
+    expect(s.inventory.countOf(B.PLANKS)).toBe(0);
+    expect(s.drops.drops.length).toBe(0);
+  });
+
+  it('does nothing with an empty cursor, and the protocol understands it', () => {
+    const s = make();
+    s.inventory.set(0, makeStack(B.PLANKS, 3));
+    s.apply({ t: 'inventory' });
+    s.apply({ t: 'destroyCursor', all: true });
+    expect(s.inventory.countOf(B.PLANKS)).toBe(3);
+    expect(parseSessionMessage({ t: 'destroyCursor', all: true })).toEqual({ t: 'destroyCursor', all: true });
+    expect(parseSessionMessage({ t: 'destroyCursor' })).toBeNull();
+  });
+
+  it('keeps what cannot be thrown away', () => {
+    const s = make();
+    s.inventory.set(0, makeStack(I.EMBERSTONE, 1));
+    s.apply({ t: 'inventory' });
+    pickUp(s, I.EMBERSTONE);
+    s.apply({ t: 'destroyCursor', all: true });
+    expect(s.menu!.cursor?.id).toBe(I.EMBERSTONE);
   });
 });

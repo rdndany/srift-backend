@@ -45,12 +45,12 @@ describe('what the item table says about each item', () => {
     expect(usedOnBlock(getItem(B.STONE))).toBe(true);
   });
 
-  it('has lanterns hang from the hand and light the way, a staff and a wand carried as the Mage carries them, and all else in the fist', () => {
+  it('has lanterns hang from the hand and light the way (a torch lights it too), a staff and a wand carried as the Mage carries them, and all else in the fist', () => {
     for (const item of allItems()) {
       const lantern = lanternInfo(item.id);
       const carry = lantern ? 'hang' : item.id === I.STAFF ? 'staff' : item.id === I.WAND ? 'wand' : 'hand';
       expect(item.carry, item.name).toBe(carry);
-      expect(item.heldLight !== null, item.name).toBe(lantern !== null);
+      expect(item.heldLight !== null, item.name).toBe(lantern !== null || item.id === B.TORCH); // the torch lights too, if less
     }
     expect(getItem(B.LANTERN).heldLight).toEqual({ r: 1, g: 0.7, b: 0.38, level: LANTERN_LIGHT - 1 });
     expect(getItem(B.SOUL_LANTERN).heldLight).toEqual({ r: 0.3, g: 0.62, b: 1, level: SOUL_LANTERN_LIGHT - 0.5 });
@@ -73,7 +73,7 @@ describe('what the item table says about each item', () => {
     expect(having('storesEnchants')).toEqual([I.ENCHANTED_BOOK]);
     for (const item of allItems()) {
       expect(isUndroppable(item.id), item.name).toBe(item.undroppable);
-      expect(holdsInOffhand(item.id), item.name).toBe(item.offhand || item.id === I.MAP); // the map is carried open in the off hand too
+      expect(holdsInOffhand(item.id), item.name).toBe(item.offhand || item.id === I.MAP || item.id === B.TORCH); // the map is carried open in the off hand too, and a torch lights it
     }
   });
 

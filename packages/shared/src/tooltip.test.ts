@@ -18,6 +18,16 @@ describe('item tooltips', () => {
     expect(text(I.BREAD).some((t) => /Restores \d+ Hunger/.test(t))).toBe(true);
   });
 
+  it('items with a use of their own say what it does', () => {
+    expect(text(I.ENDER_PEARL).some((t) => /^Use: throw it/.test(t))).toBe(true);
+    expect(text(I.ENDER_PEARL).some((t) => /costs 5 health/.test(t))).toBe(true);
+    for (const id of [I.BUCKET, I.WATER_BUCKET, I.LAVA_BUCKET, I.BOAT, I.MINECART, I.ARMOR_STAND, I.FLINT_AND_STEEL, I.SHEARS]) {
+      expect(text(id).some((t) => t.startsWith('Use: ')), String(id)).toBe(true);
+    }
+    expect(text(I.BOW).some((t) => /arrow/.test(t))).toBe(true);
+    expect(text(I.ARROW).some((t) => /Ammunition/.test(t))).toBe(true);
+  });
+
   it('an enchanted book is named for what it holds', () => {
     const one = tooltipLines({ id: I.ENCHANTED_BOOK, count: 1, damage: 0, ench: [[ENCH.SHARPNESS, 1]] });
     expect(one[0]).toEqual({ text: 'Book of Sharpness', color: 'rare' });

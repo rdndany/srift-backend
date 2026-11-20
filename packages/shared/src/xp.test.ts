@@ -108,6 +108,28 @@ describe('Experience', () => {
     expect(x.points).toBe(0);
   });
 
+  it('stops at level 30: no more levels, the surplus is set aside, and a spent level can be earned back', () => {
+    expect(MAX_LEVEL).toBe(30);
+    const x = new Experience();
+    x.add(totalForLevel(30) + 500);
+    expect(x.level).toBe(30);
+    expect(x.maxed).toBe(true);
+    expect(x.points).toBe(0);
+    expect(x.progress).toBe(1);
+    expect(x.add(1000)).toBe(0);
+    expect(x.total).toBe(totalForLevel(30));
+    // Spending a level (the enchanting table, the anvil) opens the bar again.
+    expect(x.spend(5)).toBe(true);
+    expect(x.maxed).toBe(false);
+    expect(x.add(xpToNext(25) * 6)).toBeGreaterThanOrEqual(5);
+    expect(x.level).toBe(30);
+    // A saved level above the cap is brought down to it.
+    const y = new Experience();
+    y.loadJSON({ l: 250, p: 12 });
+    expect(y.level).toBe(30);
+    expect(y.points).toBe(0);
+  });
+
   it('ignores nonsense and caps absurd amounts', () => {
     const x = new Experience();
     for (const bad of [NaN, -5, 0, Infinity, -Infinity]) expect(x.add(bad)).toBe(0);
@@ -176,6 +198,19 @@ describe('earning experience in a session', () => {
     expect(s.xp.total).toBe(5);
     expect(s.xp.level).toBe(0);
     expect(events.some((e) => e.t === 'xp')).toBe(true);
+  });
+
+  it('at level 30 the orbs of a kill go into the surplus, and twenty zombies fill a bottle', () => {
+    const { s } = make();
+    s.addXp(totalForLevel(30));
+    s.clearInventory();
+    for (let i = 0; i < 20; i++) {
+      const id = s.spawnMob('zombie', CX + 3.5, FLOOR + 1, CZ + 0.5);
+      s.damageMob(id, 100);
+      run(s, 3);
+    }
+    expect(s.xp.level).toBe(30);
+    expect(s.inventory.countOf(I.EXPERIENCE_BOTTLE)).toBe(1);
   });
 
   it('an orb near enough is drawn to you, and one that is too far away is left lying', () => {
@@ -274,6 +309,31 @@ describe('earning experience in a session', () => {
     expect(e.some((x) => x.t === 'xp')).toBe(true);
     s.addXp(2);
     expect(s.drainEvents().some((x) => x.t === 'levelup')).toBe(false);
+  });
+
+  it('at level 30 the surplus fills a bottle o\u2019 enchanting for every 100 points, and a death leaves it alone', () => {
+    const { s } = make();
+    s.addXp(totalForLevel(30));
+    expect(s.xp.level).toBe(30);
+    s.clearInventory();
+    s.drainEvents();
+    s.addXp(60);
+    expect(s.inventory.countOf(I.EXPERIENCE_BOTTLE)).toBe(0);
+    expect(s.xp.surplus).toBe(60);
+    s.addXp(250);
+    expect(s.inventory.countOf(I.EXPERIENCE_BOTTLE)).toBe(3);
+    expect(s.xp.surplus).toBe(10);
+    expect(s.xp.level).toBe(30);
+    expect(s.drainEvents().some((e) => e.t === 'toast' && e.text.includes('Bottles'))).toBe(true);
+    // The surplus is saved with the experience, and a level below the cap fills as usual.
+    const x = new Experience();
+    x.loadJSON(s.xp.toJSON());
+    expect(x.surplus).toBe(10);
+    x.spend(2);
+    x.add(5);
+    expect(x.surplus).toBe(10);
+    expect(x.lose(0.25)).toBeGreaterThan(0);
+    expect(x.surplus).toBe(10);
   });
 
   it('a level gained shows everyone nearby a column of light, and an ordinary gain does not', () => {

@@ -1,4 +1,5 @@
 import { I, toolId } from './items';
+import { TUNING } from './tuning';
 
 /**
  * Character classes: who a character is in a fight. Everything about balance is in this file (the numbers in
@@ -153,7 +154,7 @@ export function offhandModifier(id: number): StatModifier | null {
 
 /** The class level: earned from kills and quests, separate from the experience level of the world. */
 export const CLASS_LEVELS = {
-  max: 20,
+  max: 30,
   /** Points to go from `level` to the next one. */
   toNext: (level: number): number => 30 + 20 * (level - 1) + 4 * (level - 1) * (level - 1),
 };
@@ -263,7 +264,7 @@ export function computeStats(classId: ClassId, level: number, mods: readonly Sta
   out.critDamage = Math.min(4, Math.max(1, round(out.critDamage)));
   out.attackSpeed = Math.min(2, Math.max(0.4, round(out.attackSpeed)));
   out.maxResource = Math.max(0, round(out.maxResource, 1));
-  out.resourceRegen = Math.max(0, round(out.resourceRegen, 2));
+  out.resourceRegen = Math.max(0, round(out.resourceRegen * TUNING.regen, 2));
   return out;
 }
 
@@ -281,7 +282,9 @@ export interface DamageRoll {
 export function rollDamage(stats: ClassStats | null, kind: DamageKind, base: number, rand: () => number): DamageRoll {
   if (!stats || base <= 0) return { amount: Math.max(0, base), crit: false };
   const crit = rand() < stats.critChance;
-  return { amount: round(base * stats.damage[kind] * (crit ? stats.critDamage : 1), 3), crit };
+  // No two hits alike: the damage lands anywhere in a band around what was worked out (see tuning.ts; none in plain units).
+  const spread = TUNING.damageSpread > 0 ? 1 + (rand() * 2 - 1) * TUNING.damageSpread : 1;
+  return { amount: round(base * stats.damage[kind] * (crit ? stats.critDamage : 1) * spread, 3), crit };
 }
 
 /**

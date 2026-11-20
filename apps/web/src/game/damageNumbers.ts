@@ -39,7 +39,8 @@ interface Num {
   still?: boolean;
 }
 
-const fmt = (amount: number): string => (Number.isInteger(amount) ? String(amount) : amount.toFixed(1));
+/** 1,234 for the big numbers of a fight (see tuning.ts), one decimal for a small one. */
+const fmt = (amount: number): string => (Number.isInteger(amount) ? amount.toLocaleString('en-US') : amount.toFixed(1));
 
 /**
  * Damage numbers that float up and fade: white over the mobs the player hurt (orange and larger for a critical),
@@ -99,7 +100,14 @@ export class DamageNumbers {
     canvas.width = 256;
     canvas.height = 96;
     const g = canvas.getContext('2d')!;
-    g.font = `bold ${look.font ?? 64}px "Trebuchet MS", Verdana, sans-serif`;
+    // Long numbers (a crit of 12,345!) get a smaller font so they stay on the picture.
+    let px = look.font ?? 64;
+    g.font = `bold ${px}px "Trebuchet MS", Verdana, sans-serif`;
+    const wide = g.measureText(text).width;
+    if (wide > 224) {
+      px = Math.floor((px * 224) / wide);
+      g.font = `bold ${px}px "Trebuchet MS", Verdana, sans-serif`;
+    }
     g.textAlign = 'center';
     g.textBaseline = 'middle';
     g.lineJoin = 'round';

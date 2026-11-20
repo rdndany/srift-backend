@@ -1,6 +1,6 @@
 'use client';
 
-import { B, CLASSES, CLASS_IDS, CLASS_LEVELS, GAME_VERSION, abilitiesOf, getItem, outfitItems, skillBookId, toolId, type AbilityDef, type ClassId } from '@solrift/shared';
+import { B, CLASSES, abilityCost, CLASS_IDS, CLASS_LEVELS, GAME_VERSION, abilitiesOf, getItem, outfitItems, skillBookId, toolId, type AbilityDef, type ClassId } from '@solrift/shared';
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { AbilityIcon } from './AbilityIcon';
 import { AccountPanel } from './AccountPanel';
@@ -69,7 +69,7 @@ function AbilityCard({ a, i, color }: { a: AbilityDef; i: number; color: string 
         <ul className="cp-chips" aria-label={`${a.name} at a glance`}>
           <li className="lv">Level {a.unlockLevel}</li>
           <li style={{ '--r': cls.resource.color } as CSSProperties} className="cost">
-            {a.cost} {cls.resource.name}
+            {abilityCost(a.cost)} {cls.resource.name}
           </li>
           <li>{num(a.cooldown)} s cooldown</li>
           <li>{a.effect.t === 'guard' ? 'Defense' : KIND_LABEL[a.kind]}</li>
