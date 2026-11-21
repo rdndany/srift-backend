@@ -5,7 +5,7 @@ import { isLavaId } from './fluids';
 import { makeStack, type ItemStack } from './inventory';
 import { I, ITEMS, type Drop } from './items';
 import { findPath, type PathNode } from './pathfinding';
-import { createBody, stepPlayer, type BlockReader, type Body, type MoveInput } from './physics';
+import { createBody, stepPlayer, type BlockReader, type Body, type MoveInput, type Solid } from './physics';
 import { raycast } from './raycast';
 import type { VillagerState } from './trading';
 import { TUNING } from './tuning';
@@ -58,12 +58,37 @@ export type MobKind =
   | 'stray'
   | 'drowned'
   | 'villager'
+  /** The boss of the Hollow Cellar. Not an ordinary monster: it follows a script (see boss.ts), shrugs off stuns and shoves, and never wanders off. */
+  | 'hollow_king'
+  /** The monsters that live only in the Hollow Deep (see `HOLLOW_DEEP_KINDS`): never born by the spawner, put at their posts by the dungeon. */
+  | 'moss_lurker'
+  | 'spore_puff'
+  | 'ember_wraith'
+  | 'ashen_knight'
+  | 'hollow_priest'
+  | 'shade'
   /** A quest giver of the Adventure mode: it stands where it was put, cannot be hurt, and its variant says which person it is (see `NPCS`). */
   | 'npc'
   /** A training dummy: stands where it was put, takes any hit without dying, and mends itself. Never saved. */
   | 'dummy'
   /** A placed stand. It wears armor, holds one item, and stays where it was put. */
   | 'armor_stand';
+
+/**
+ * The six monsters of the Hollow Deep, the dungeon of caves under the Adventure mode. They exist nowhere else: no spawn pool, spawner
+ * or save brings them back (`MobManager.loadJSON` drops them), and the dungeon puts each at a post (`Realm.openMobs`, as guards).
+ */
+export const HOLLOW_DEEP_KINDS = ['moss_lurker', 'spore_puff', 'ember_wraith', 'ashen_knight', 'hollow_priest', 'shade'] as const;
+export type HollowDeepKind = (typeof HOLLOW_DEEP_KINDS)[number];
+export const isHollowDeepKind = (kind: string): kind is HollowDeepKind => (HOLLOW_DEEP_KINDS as readonly string[]).includes(kind);
+
+/** What a monster's blow can leave on a player besides the damage (see `Player.afflict`). */
+export type MobEffect = 'poison' | 'root' | 'slow' | 'weak' | 'burn';
+/** One effect or several: a blow that is not stopped leaves all of them (a lurker's roots and its poison). */
+export type MobEffects = MobEffect | readonly MobEffect[];
+
+/** A thing the world shows where a monster of the Hollow Deep did something (the realm draws it with particles and sounds). */
+export type MobFx = 'spores' | 'heal' | 'summon' | 'blink' | 'slam' | 'block' | 'curse' | 'ignite';
 
 /** A mob's extra bits that a client needs to draw it: slime size, rabbit coat. */
 export interface MobTraits {
@@ -89,7 +114,7 @@ export interface MobDef {
   burnsInDaylight: boolean;
   /** How far away it notices the player. */
   detect: number;
-  melee: { damage: number; cooldown: number; reach: number; effect?: 'poison' } | null;
+  melee: { damage: number; cooldown: number; reach: number; effect?: MobEffects } | null;
   drops(rand: () => number, mob?: MobTraits): Drop[];
   /** Experience orbs' worth when a player kills it. */
   xp(rand: () => number, mob?: MobTraits): number;
@@ -115,6 +140,12 @@ export interface MobDef {
   provoke?: 'daylight' | 'stare';
   /** Set for the zombie and skeleton variants, so they borrow the original's behaviour. */
   behaves?: 'zombie' | 'skeleton' | 'spider';
+  /** A boss: it is not stunned, rooted, slowed or shoved by a hit, and the interface shows its health bar to everyone in the fight. */
+  boss?: boolean;
+  /** Stands motionless while it has nobody to hunt (camouflage), a guard of a dungeon too: it does not wander off from its post. */
+  still?: boolean;
+  /** Fire does not touch it: no burning, no harm from lava or flames. */
+  fireImmune?: boolean;
 }
 
 const between = (rand: () => number, lo: number, hi: number) => lo + Math.floor(rand() * (hi - lo + 1));
@@ -453,6 +484,161 @@ export const MOBS: Record<MobKind, MobDef> = {
     },
     xp: () => 5,
   },
+  hollow_king: {
+    kind: 'hollow_king',
+    name: 'The Hollow King',
+    width: 3,
+    height: 7.4,
+    // Plain units, like every mob (the game multiplies them, see tuning.ts): a zombie is 20.
+    health: 420,
+    speed: 2.1,
+    runSpeed: 3.5,
+    hostile: true,
+    burnsInDaylight: false,
+    detect: 48,
+    melee: { damage: 5, cooldown: 2.2, reach: 4.2 },
+    behaves: 'zombie',
+    persistent: true,
+    boss: true,
+    jumpSpeed: 9,
+    drops: (r) => [{ id: I.BONE, count: between(r, 6, 10) }],
+    xp: () => 150,
+  },
+  // ---- the monsters of the Hollow Deep (plain units: a zombie is 20 health and hits for 3) ----
+  moss_lurker: {
+    kind: 'moss_lurker',
+    name: 'moss lurker',
+    width: 0.95,
+    height: 1.5,
+    health: 36,
+    speed: 0.8,
+    runSpeed: 1.9,
+    hostile: true,
+    burnsInDaylight: false,
+    detect: 14,
+    melee: { damage: 4, cooldown: 1.7, reach: 1.7, effect: ['root', 'poison'] },
+    still: true,
+    drops: (r) => {
+      const out: Drop[] = [{ id: B.MOSS_BLOCK, count: between(r, 1, 3) }];
+      const berries = between(r, 0, 2);
+      if (berries > 0) out.push({ id: I.GLOW_BERRIES, count: berries });
+      if (r() < 0.25) out.push({ id: I.SPIDER_EYE, count: 1 });
+      return out;
+    },
+    xp: () => 9,
+  },
+  spore_puff: {
+    kind: 'spore_puff',
+    name: 'spore puff',
+    width: 0.7,
+    height: 0.75,
+    health: 6,
+    speed: 0.9,
+    runSpeed: 1.7,
+    hostile: true,
+    burnsInDaylight: false,
+    detect: 14,
+    melee: null,
+    flying: true,
+    drops: (r) => {
+      const out: Drop[] = [];
+      if (r() < 0.6) out.push({ id: I.SPIDER_EYE, count: 1 });
+      const caps = between(r, 0, 2);
+      if (caps > 0) out.push({ id: B.BROWN_MUSHROOM, count: caps });
+      return out;
+    },
+    xp: () => 4,
+  },
+  ember_wraith: {
+    kind: 'ember_wraith',
+    name: 'ember wraith',
+    width: 0.7,
+    height: 1.9,
+    health: 26,
+    speed: 1.5,
+    runSpeed: 3.0,
+    hostile: true,
+    burnsInDaylight: false,
+    detect: 24,
+    melee: null,
+    flying: true,
+    fireImmune: true,
+    drops: (r) => {
+      const out: Drop[] = [{ id: I.COAL, count: between(r, 1, 2) }];
+      const dust = between(r, 0, 2);
+      if (dust > 0) out.push({ id: I.REDSTONE, count: dust });
+      if (r() < 0.2) out.push({ id: I.FLINT, count: 1 });
+      return out;
+    },
+    xp: () => 12,
+  },
+  ashen_knight: {
+    kind: 'ashen_knight',
+    name: 'ashen knight',
+    width: 0.85,
+    height: 2.05,
+    health: 64,
+    speed: 1.2,
+    runSpeed: 2.5,
+    hostile: true,
+    burnsInDaylight: false,
+    detect: 22,
+    melee: { damage: 6, cooldown: 1.5, reach: 1.6 },
+    jumpSpeed: 8,
+    drops: (r) => {
+      const out: Drop[] = [];
+      const iron = between(r, 0, 2);
+      if (iron > 0) out.push({ id: I.IRON_INGOT, count: iron });
+      const bones = between(r, 0, 2);
+      if (bones > 0) out.push({ id: I.BONE, count: bones });
+      if (r() < 0.5) out.push({ id: I.COAL, count: 1 });
+      return out;
+    },
+    xp: () => 18,
+  },
+  hollow_priest: {
+    kind: 'hollow_priest',
+    name: 'hollow priest',
+    width: 0.65,
+    height: 1.95,
+    health: 32,
+    speed: 1.2,
+    runSpeed: 2.5,
+    hostile: true,
+    burnsInDaylight: false,
+    detect: 24,
+    melee: null,
+    drops: (r) => {
+      const out: Drop[] = [{ id: I.BONE, count: between(r, 1, 3) }];
+      const lapis = between(r, 0, 3);
+      if (lapis > 0) out.push({ id: I.LAPIS_LAZULI, count: lapis });
+      if (r() < 0.2) out.push({ id: I.BOOK, count: 1 });
+      return out;
+    },
+    xp: () => 16,
+  },
+  shade: {
+    kind: 'shade',
+    name: 'shade',
+    width: 0.5,
+    height: 2.0,
+    health: 15,
+    speed: 2.2,
+    runSpeed: 4.8,
+    hostile: true,
+    burnsInDaylight: false,
+    detect: 20,
+    melee: { damage: 3.5, cooldown: 0.55, reach: 1.25 },
+    jumpSpeed: 8.5,
+    drops: (r) => {
+      const out: Drop[] = [];
+      if (r() < 0.12) out.push({ id: I.ENDER_PEARL, count: 1 });
+      const string = between(r, 0, 2);
+      if (string > 0) out.push({ id: I.STRING, count: string });
+      return out;
+    },
+    xp: () => 10,
+  },
   stray: {
     kind: 'stray',
     name: 'stray',
@@ -605,6 +791,11 @@ export const SLIME_SIZES = [1, 2, 4] as const;
 export const CREEPER_FUSE = 1.5;
 /** How long a mob's melee swing lasts on screen (the lunge, the arms coming down), in seconds. */
 export const ATTACK_ANIM = 0.4;
+/** A boss swings slowly: the time between the start of its swing and the blow landing, and how fast it turns (radians per second). */
+export const BOSS_WINDUP = 0.9;
+export const BOSS_TURN = 2.4;
+/** How long a boss's swing is reported to the clients: the wind-up (the blow lands at BOSS_WINDUP), then the follow-through. */
+export const BOSS_ANIM = 1.5;
 export const CREEPER_TRIGGER = 3;
 export const CREEPER_ABORT = 7;
 export const EXPLOSION_RADIUS = 3;
@@ -626,6 +817,52 @@ const ENDERMAN_TELEPORT_RANGE = 16;
 const VILLAGER_LEASH = 14;
 /** A quest giver turns to look at a player this close. */
 const NPC_NOTICE = 7;
+
+// ---- the Hollow Deep: how each of its monsters fights (seconds, blocks, blocks/s) -------------------------------------------------
+/** Moss lurker: it lies still until somebody comes this close (or it is hurt), and its blow roots for `root` seconds and poisons. */
+export const LURKER_AMBUSH = 5.5;
+export const LURKER_ROOT = 1.6;
+export const LURKER_POISON = 6;
+/** Spore puff: it swells once this close, bursts `fuse` seconds later in a cloud of this radius that lingers `cloud` seconds. */
+export const PUFF_PRIME = 2.4;
+export const PUFF_FUSE = 0.9;
+export const PUFF_RADIUS = 3.2;
+export const PUFF_CLOUD = 3.5;
+export const PUFF_POISON = 6;
+export const PUFF_SLOW = 0.55;
+/** Ember wraith: it hovers this far from its prey (closer than the first, it backs off), winds up `windup` seconds and throws a slow fireball every `cooldown`. */
+export const WRAITH_NEAR = 6;
+export const WRAITH_FAR = 11;
+export const WRAITH_WINDUP = 0.7;
+export const WRAITH_COOLDOWN = 3.6;
+export const WRAITH_BALL_SPEED = 9;
+export const WRAITH_BALL_DAMAGE = 4;
+export const WRAITH_BURN = 4;
+/** Ashen knight: it charges from `min` to `max` blocks away, winds up, dashes at `speed` and slams; the next charge is `cooldown` seconds after the slam. */
+export const KNIGHT_CHARGE_MIN = 5;
+export const KNIGHT_CHARGE_MAX = 12;
+export const KNIGHT_WINDUP = 0.85;
+export const KNIGHT_DASH_SPEED = 11;
+export const KNIGHT_DASH_TIME = 1.2;
+export const KNIGHT_RECOVER = 1.0;
+export const KNIGHT_COOLDOWN = 6;
+export const KNIGHT_SLAM_DAMAGE = 9;
+/** A blow from the front (the way the knight faces, within this cosine) is cut to this share while its shield is up. */
+export const KNIGHT_BLOCK = 0.3;
+const KNIGHT_FRONT = 0.35;
+/** Hollow priest: it keeps this far off, throws a curse bolt every `cooldown`, heals hostile mobs within `heal` blocks, and below half health calls two skeletons. */
+export const PRIEST_NEAR = 6;
+export const PRIEST_FAR = 12;
+export const PRIEST_COOLDOWN = 3.2;
+export const PRIEST_BOLT_SPEED = 11;
+export const PRIEST_BOLT_DAMAGE = 3;
+export const PRIEST_HEAL_RANGE = 10;
+export const PRIEST_HEAL_EVERY = 3;
+export const PRIEST_HEAL_SHARE = 0.2;
+export const PRIEST_CALLS = 2;
+/** Shade: it blinks behind its prey when it first sees them and every `cooldown` after, and hits `dark` times as hard against somebody who stands in the dark. */
+export const SHADE_BLINK_COOLDOWN = 5;
+export const SHADE_DARK = 1.4;
 
 // ---------------------------------------------------------------------------
 // World helpers
@@ -772,7 +1009,13 @@ export interface MobPlayer {
 
 export interface MobEvents {
   /** Damage the player; (kx,kz) is a unit knockback direction pointing away from the attacker. */
-  hurtPlayer(amount: number, kx: number, kz: number, source: MobKind | 'arrow', target?: MobPlayer, effect?: 'poison'): void;
+  hurtPlayer(amount: number, kx: number, kz: number, source: MobKind | 'arrow', target?: MobPlayer, effect?: MobEffects): void;
+  /** A status without a blow: roots, slows (to `power` of the speed), weakens, poisons or sets alight the player for `seconds` (see `Player.afflict`). */
+  afflict?(target: MobPlayer, effect: MobEffect, seconds: number, power?: number): void;
+  /** Light the ground fire (`B.FIRE`) in this cell if it may burn there; returns whether it did. */
+  ignite?(x: number, y: number, z: number): boolean;
+  /** Something is shown where a monster of the Hollow Deep did it (spore burst, healing beam to `x2,y2,z2`, summoning, a blink...). */
+  fx?(kind: MobFx, x: number, y: number, z: number, x2?: number, y2?: number, z2?: number): void;
   explode(x: number, y: number, z: number, radius: number, source: Mob): void;
   sound(kind: 'say' | 'hurt' | 'death' | 'hiss' | 'shoot' | 'teleport' | 'yes' | 'no', mob: Mob): void;
   /** A villager opens or closes a door (the lower half is at y). Returns false when it could not (somebody is in the way). */
@@ -814,6 +1057,12 @@ export class Arrow {
   spell = 0;
   /** A spell's ending: called where it stopped, with the mob it struck (null: it hit the ground or a wall). The projectile is gone after. */
   impact: ((x: number, y: number, z: number, mob: Mob | null) => void) | null = null;
+  /** Who is blamed in a player's death message for what this hurts them with (an arrow: the skeleton). */
+  source: MobKind | 'arrow' = 'arrow';
+  /** What a monster's spell that strikes a player leaves on them besides the damage (a burn, a curse); a shield that stops the blow stops it too. */
+  effect: MobEffects | undefined = undefined;
+  /** ...and what else it does where it struck a player (the fireball lights the ground). */
+  onPlayer: ((p: MobPlayer, x: number, y: number, z: number) => void) | null = null;
   /**
    * An arrow's ending, for the archer who shot it: it hit a mob (`dealt`: what it did, `head`: a headshot, which hits half as hard again) or
    * stuck in the ground or a wall (`mob` null; `x, y, z` is then where it entered, and `vx, vy, vz` still the way it was flying). The
@@ -959,6 +1208,10 @@ function packedGear(slots: readonly (ItemStack | null)[]): NonNullable<MobSave['
   return out;
 }
 
+/** How far a guard of a dungeon sees (with a clear line), and how far the call of one that has seen somebody carries. */
+const GUARD_SIGHT = 13;
+const GUARD_CALL = 9;
+
 export class Mob {
   readonly def: MobDef;
   readonly body: Body;
@@ -985,6 +1238,23 @@ export class Mob {
   yaw: number;
   dead = false;
   deathTime = 0;
+  /** Kept by a dungeon: it never despawns by distance, so a monster that was put in a room is still there (and never made again) until it is killed. */
+  bound = false;
+  /** Stands at its post until it sees somebody (or hears a guard beside it), instead of hunting by distance and wandering: the monsters of a dungeon are put where they are and wake when you come into their sight. */
+  guard = false;
+  /** A patrol: when it has not seen anybody it walks round its post (homeX, homeZ) within this many blocks, 0 for none. */
+  patrol = 0;
+  homeX = 0;
+  homeZ = 0;
+  /** A strong one of a dungeon: it has more health and hits harder, and leaves a piece of gear. */
+  elite = false;
+  /** A boss that is gathering a spell: 1 while it winds up (its arms rise), 0 otherwise. Set by the script (see boss.ts); only drawn. */
+  casting = 0;
+  /** A boss's ward: the share of every blow that is undone (0..1). Set by the script (see boss.ts). */
+  ward = 0;
+  /** A boss's rage: how much harder it hits and how much faster it runs (1 = as made). */
+  damageMul = 1;
+  hasteMul = 1;
   /** Seconds since last hit (for the red flash). */
   hurtTime = 99;
   /** Seconds since it last swung at something (for the lunge and the swing of its arms); `ATTACK_ANIM` and more means not attacking. */
@@ -994,6 +1264,8 @@ export class Mob {
   onFire = 0;
   /** Class abilities: seconds left stunned (no thinking, no moving), slowed to `slowMul` of its speed, or rooted in place. */
   stunTime = 0;
+  /** A boss's swing under way: the seconds left before the blow lands (0: not swinging). */
+  windup = 0;
   slowTime = 0;
   slowMul = 1;
   rootTime = 0;
@@ -1058,6 +1330,26 @@ export class Mob {
   /** Seconds left in love (looking for a mate), and the rest before it may breed again. */
   love = 0;
   breedCooldown = 0;
+  // The Hollow Deep's monsters (see the `think*` of each): what they are doing, for how long, and where their post is.
+  /** The step of a move that has steps (a knight: 0 hunting, 1 winding up, 2 dashing, 3 recovering; a puff: 0 drifting, 1 swelling), and the seconds left in it. */
+  phase = 0;
+  phaseTime = 0;
+  /** Seconds until the special move may be used again (a knight's charge, a shade's blink, a priest's healing). */
+  skillCd = 0;
+  /** The way a dash or a throw was aimed (a yaw), and where a throw is aimed at. */
+  aimYaw = 0;
+  aimX = 0;
+  aimY = 0;
+  aimZ = 0;
+  /** `casting` is `castKind` for this many more seconds (the drawn pose of a throw, a blink or a heal). */
+  castT = 0;
+  castKind = 1;
+  /** A priest that has called its skeletons. */
+  summoned = false;
+  /** Where a guard was put: a flyer that has nobody to hunt hovers around it. Set by the first step as a guard. */
+  post: { x: number; y: number; z: number } | null = null;
+  /** The velocity a flier is steering toward (blocks/s); null: it drifts at random (bats). */
+  fly: { vx: number; vy: number; vz: number } | null = null;
   readonly cmd: MoveInput = { forward: 0, strafe: 0, jump: false, sprint: false, sneak: false, fly: false, flyDown: false, yaw: 0 };
 
   constructor(
@@ -1109,6 +1401,11 @@ export class Mob {
 
   get eyeY(): number {
     return this.body.y + this.height * 0.9;
+  }
+
+  /** A knight's shield is up (it is not charging or recovering from a charge): blows from the front are cut down. */
+  get guarding(): boolean {
+    return this.def.kind === 'ashen_knight' && !this.dead && this.phase < 2;
   }
 
   aabb(): { min: [number, number, number]; max: [number, number, number] } {
@@ -1195,6 +1492,8 @@ function nearestPlayer(players: readonly MobPlayer[], x: number, z: number): Mob
 export class MobManager {
   readonly mobs: Mob[] = [];
   readonly arrows: Arrow[] = [];
+  /** Clouds of spores left where a puff burst: they poison and slow whoever stands in them (no block is touched). */
+  readonly clouds: { x: number; y: number; z: number; r: number; t: number; tick: number }[] = [];
   private nextId = 1;
 
   constructor(private readonly rand: () => number = Math.random) {}
@@ -1210,7 +1509,7 @@ export class MobManager {
     const out: MobSave[] = [];
     for (const m of this.mobs) {
       // Villagers are kept by the realm, with their trades, in the world's state.
-      if (m.dead || out.length >= limit || m.kind === 'villager' || m.kind === 'npc' || m.kind === 'dummy') continue;
+      if (m.dead || out.length >= limit || m.kind === 'villager' || m.kind === 'npc' || m.kind === 'dummy' || isHollowDeepKind(m.kind)) continue;
       if (Math.hypot(m.body.x - cx, m.body.z - cz) > radius) continue;
       out.push({
         kind: m.kind,
@@ -1234,7 +1533,7 @@ export class MobManager {
     if (!Array.isArray(list)) return 0;
     let n = 0;
     for (const e of list as Partial<MobSave>[]) {
-      if (!e || !(e.kind! in MOBS) || e.kind === 'villager' || e.kind === 'npc' || e.kind === 'dummy' || ![e.x, e.y, e.z].every((v) => Number.isFinite(v))) continue;
+      if (!e || !(e.kind! in MOBS) || e.kind === 'villager' || e.kind === 'npc' || e.kind === 'dummy' || isHollowDeepKind(e.kind!) || ![e.x, e.y, e.z].every((v) => Number.isFinite(v))) continue;
       const size = SLIME_SIZES.includes(e.size as 1 | 2 | 4) ? e.size : 1;
       const m = this.spawn(e.kind as MobKind, e.x!, e.y!, e.z!, {
         size,
@@ -1325,7 +1624,13 @@ export class MobManager {
       mob.sincePlayerHit = 0;
       mob.aggro = true;
     }
-    mob.health -= amount * TUNING.damageScale;
+    // A knight with its shield up takes a blow from the front on the shield: most of it is stopped, and it is not pushed.
+    if (mob.guarding && (kx !== 0 || kz !== 0) && (kx * Math.sin(mob.yaw) + kz * Math.cos(mob.yaw)) / Math.hypot(kx, kz) > KNIGHT_FRONT) {
+      amount *= KNIGHT_BLOCK;
+      knock = false;
+      events.fx?.('block', mob.body.x - Math.sin(mob.yaw) * 0.5, mob.body.y + mob.height * 0.55, mob.body.z - Math.cos(mob.yaw) * 0.5);
+    }
+    mob.health -= amount * TUNING.damageScale * (1 - mob.ward);
     // A training dummy takes anything and starts over once it has taken all it has.
     if (mob.kind === 'dummy' && mob.health <= 0) mob.health = mob.maxHealth;
     mob.hurtTime = 0;
@@ -1333,7 +1638,7 @@ export class MobManager {
     // has no one to fight: water, and arrows, which are dodged in `stepArrow`.)
     if (mob.kind === 'enderman') mob.aggro = true;
     // An armor stand stays where it was set. A hit does not send it sliding off its block.
-    if (knock && mob.kind !== 'armor_stand') {
+    if (knock && mob.kind !== 'armor_stand' && !mob.def.boss) {
       const len = Math.hypot(kx, kz) || 1;
       const k = 5.5 * (hit?.knock ?? 1);
       mob.kbx = (kx / len) * k;
@@ -1418,6 +1723,11 @@ export class MobManager {
       m.sincePlayerHit += dt;
       if (m.stunTime > 0) m.stunTime = Math.max(0, m.stunTime - dt);
       if (m.rootTime > 0) m.rootTime = Math.max(0, m.rootTime - dt);
+      if (m.castT > 0 && (m.castT -= dt) <= 0) {
+        m.castT = 0;
+        m.casting = 0;
+      }
+      if (m.skillCd > 0) m.skillCd -= dt;
       if (m.slowTime > 0 && (m.slowTime -= dt) <= 0) {
         m.slowTime = 0;
         m.slowMul = 1;
@@ -1438,7 +1748,7 @@ export class MobManager {
       env.player = nearestPlayer(players, m.body.x, m.body.z);
       const dist = Math.hypot(m.body.x - env.player.x, m.body.z - env.player.z);
       // Despawn far away mobs.
-      if ((dist > 110 && !m.def.persistent) || (m.def.hostile && dist > 64 && env.rand() < dt * 0.15)) {
+      if (!m.bound && !m.def.boss && ((dist > 110 && !m.def.persistent) || (m.def.hostile && dist > 64 && env.rand() < dt * 0.15))) {
         this.mobs.splice(i, 1);
         continue;
       }
@@ -1473,6 +1783,7 @@ export class MobManager {
     }
 
     this.breed(events, baseEnv.rand);
+    if (this.clouds.length > 0) this.stepClouds(dt, players, events);
 
     for (let i = this.arrows.length - 1; i >= 0; i--) {
       if (this.stepArrow(this.arrows[i], baseEnv, players, events, dt)) this.arrows.splice(i, 1);
@@ -1552,6 +1863,10 @@ export class MobManager {
       }
     }
 
+    if (control && m.def.flying && m.fly) {
+      this.steerPhysics(m, env, dt);
+      return;
+    }
     if (control && (m.def.flying || (m.def.aquatic && this.inLiquid(env, b)))) {
       this.floatPhysics(m, env, dt);
       return;
@@ -1572,12 +1887,25 @@ export class MobManager {
 
     const px = b.x;
     const pz = b.z;
+    // Players are solid: a monster stops at their edge instead of walking into them.
+    cmd.solids = this.playerSolids(m, env);
     stepPlayer(env.world, b, cmd, dt);
+    cmd.solids = undefined;
     // Chickens flap and drift down.
     if (m.def.glides && !b.onGround && b.vy < -1.6) b.vy = -1.6;
     const moved = Math.hypot(b.x - px, b.z - pz);
     m.speedNow = moved / dt;
     m.walkPhase += moved * 3.2;
+  }
+
+  /** The players near a monster, as things it cannot walk through (undefined when none is close). */
+  private playerSolids(m: Mob, env: MobEnv): Solid[] | undefined {
+    let out: Solid[] | undefined;
+    for (const p of env.players ?? [env.player]) {
+      if (!p.alive || Math.abs(p.x - m.body.x) > 4 || Math.abs(p.z - m.body.z) > 4) continue;
+      (out ??= []).push({ x: p.x, y: p.y, z: p.z, r: 0.3, h: 1.8 });
+    }
+    return out;
   }
 
   private inLiquid(env: MobEnv, b: Body): boolean {
@@ -1677,6 +2005,11 @@ export class MobManager {
         if (m.dead) return;
       }
     }
+    if (m.def.fireImmune) {
+      // Flames and lava are home to it.
+      m.onFire = 0;
+      m.body.inLava = false;
+    }
     if (m.body.inLava) {
       m.lavaTimer += dt;
       if (m.lavaTimer >= 0.5) {
@@ -1686,7 +2019,7 @@ export class MobManager {
       }
     }
     // Walking into flames sets a mob alight.
-    if (!m.body.inWater) {
+    if (!m.body.inWater && !m.def.fireImmune) {
       const fx = Math.floor(m.body.x);
       const fz = Math.floor(m.body.z);
       if (env.world.getBlock(fx, Math.floor(m.body.y + 0.2), fz) === B.FIRE || env.world.getBlock(fx, Math.floor(m.body.y + m.height * 0.6), fz) === B.FIRE) m.onFire = Math.max(m.onFire, 8);
@@ -1742,6 +2075,13 @@ export class MobManager {
       canTarget = m.aggro;
     }
 
+    // A guard hunts only what it can see, and then so do the guards beside it.
+    if (m.guard && canTarget && !m.aggro) {
+      // (A lurker lies in wait: it sees nobody until they are almost on top of it.)
+      if (dist <= (m.kind === 'moss_lurker' ? LURKER_AMBUSH : GUARD_SIGHT) && this.hasLineOfSight(m, env)) this.callGuards(m);
+      else canTarget = false;
+    }
+
     if (m.kind === 'enderman') this.thinkTeleport(m, env, dt, dist, canTarget);
 
     if (m.kind === 'npc') {
@@ -1754,6 +2094,12 @@ export class MobManager {
     }
     if (m.kind === 'armor_stand') {
       m.yaw = m.homeYaw;
+      return;
+    }
+
+    // The fliers of the Hollow Deep hunt (and, as guards, hover about their post) on their own.
+    if (m.kind === 'spore_puff' || m.kind === 'ember_wraith') {
+      this.thinkFlyer(m, env, events, dt, dist, canTarget);
       return;
     }
 
@@ -1807,11 +2153,30 @@ export class MobManager {
       if (m.fuse >= 0) m.fuse = -1;
       if (m.love > 0 && this.seekMate(m, env)) return;
       m.path = null;
+      // A charge that lost its target is called off.
+      if (m.phase !== 0) {
+        m.phase = 0;
+        if (m.castT <= 0) m.casting = 0;
+      }
+      // A camouflaged monster (a lurker) stands still, patrol or not, until it has somebody to hunt.
+      if (m.def.still && !m.aggro) return;
       this.wander(m, env, dt);
       return;
     }
 
     switch (m.def.behaves ?? m.kind) {
+      case 'moss_lurker':
+        this.thinkLurker(m, env, events, dt, dist);
+        break;
+      case 'ashen_knight':
+        this.thinkKnight(m, env, events, dt, dist);
+        break;
+      case 'hollow_priest':
+        this.thinkPriest(m, env, events, dt, dist);
+        break;
+      case 'shade':
+        this.thinkShade(m, env, events, dt, dist);
+        break;
       case 'zombie':
         this.thinkZombie(m, env, events, dt, targetDist);
         env.player = realPlayer;
@@ -1830,6 +2195,15 @@ export class MobManager {
         break;
       default:
         this.wander(m, env, dt);
+    }
+  }
+
+  /** A guard has seen somebody: it hunts them, and so does every guard of the dungeon within earshot. */
+  private callGuards(m: Mob): void {
+    m.aggro = true;
+    for (const o of this.mobs) {
+      if (!o.guard || o.dead || o.aggro || Math.abs(o.body.y - m.body.y) > 3) continue;
+      if (Math.hypot(o.body.x - m.body.x, o.body.z - m.body.z) <= GUARD_CALL) o.aggro = true;
     }
   }
 
@@ -1963,6 +2337,20 @@ export class MobManager {
       m.wanderTimer = m.wandering ? 2 + env.rand() * 3 : 2 + env.rand() * 4;
       m.wanderYaw = env.rand() * Math.PI * 2;
     }
+    // A patrol keeps to a few blocks round its post: past the edge it turns back, and near the edge it does not set off outwards.
+    if (m.patrol > 0) {
+      const hx = m.homeX - m.body.x;
+      const hz = m.homeZ - m.body.z;
+      const away = Math.hypot(hx, hz);
+      if (away > m.patrol) {
+        m.wandering = true;
+        m.wanderYaw = Math.atan2(-hx, -hz);
+      } else if (m.wanderTimer > 0 && away > m.patrol * 0.6) {
+        const home = Math.atan2(-hx, -hz);
+        const turn = Math.atan2(Math.sin(m.wanderYaw - home), Math.cos(m.wanderYaw - home));
+        if (Math.abs(turn) > Math.PI / 2) m.wanderYaw = home + turn * 0.3;
+      }
+    }
     if (!m.wandering) return;
     if (this.cliffAhead(m, env, m.wanderYaw)) {
       m.wanderYaw += Math.PI * (0.6 + env.rand() * 0.8);
@@ -2060,10 +2448,64 @@ export class MobManager {
     m.yaw = Math.atan2(-(tx - m.body.x), -(tz - m.body.z));
   }
 
-  private thinkZombie(m: Mob, env: MobEnv, events: MobEvents, dt: number, dist: number): void {
+  /**
+   * A boss's melee: it turns at a set rate (so a player can run round it), winds up a swing it stands still for (the swing is
+   * shown from the start of the wind-up) and lands it at the end, on whoever is still in front of it and in reach.
+   */
+  private thinkBossMelee(m: Mob, env: MobEnv, events: MobEvents, dt: number): void {
     const p = env.player;
     const melee = m.def.melee!;
-    this.chase(m, env, dt, 0.9, m.def.runSpeed);
+    const turn = (to: number, rate: number): void => {
+      const d = Math.atan2(Math.sin(to - m.yaw), Math.cos(to - m.yaw));
+      const step = rate * dt;
+      m.yaw += Math.abs(d) <= step ? d : Math.sign(d) * step;
+    };
+    const rate = BOSS_TURN * m.hasteMul;
+    const toP = Math.atan2(-(p.x - m.body.x), -(p.z - m.body.z));
+    const flat = Math.hypot(p.x - m.body.x, p.z - m.body.z);
+    const level = p.y - m.body.y > -1.5 && p.y - m.body.y < 2.5;
+    if (m.windup > 0) {
+      // Winding up: rooted, slowly following the target with the eyes.
+      m.cmd.forward = 0;
+      m.cmd.speed = 0;
+      turn(toP, rate * 0.35);
+      m.windup -= dt;
+      if (m.windup <= 0) {
+        m.windup = 0;
+        const off = Math.abs(Math.atan2(Math.sin(toP - m.yaw), Math.cos(toP - m.yaw)));
+        if (flat <= melee.reach + 1.2 && level && off <= 1.2) {
+          const len = flat || 1;
+          events.hurtPlayer(melee.damage * m.damageMul, (p.x - m.body.x) / len, (p.z - m.body.z) / len, m.kind, p);
+        }
+      }
+      return;
+    }
+    if (flat <= melee.reach && level) {
+      m.cmd.forward = 0;
+      m.cmd.speed = 0;
+      turn(toP, rate);
+      if (m.attackCooldown <= 0 && Math.abs(Math.atan2(Math.sin(toP - m.yaw), Math.cos(toP - m.yaw))) < 0.5) {
+        m.attackCooldown = melee.cooldown;
+        m.attackTime = 0;
+        m.windup = BOSS_WINDUP / Math.max(1, m.hasteMul);
+      }
+      return;
+    }
+    const before = m.yaw;
+    this.chase(m, env, dt, melee.reach * 0.6, m.def.runSpeed * m.hasteMul);
+    const want = m.yaw;
+    m.yaw = before;
+    turn(want, rate);
+  }
+
+  private thinkZombie(m: Mob, env: MobEnv, events: MobEvents, dt: number, dist: number): void {
+    if (m.def.boss) {
+      this.thinkBossMelee(m, env, events, dt);
+      return;
+    }
+    const p = env.player;
+    const melee = m.def.melee!;
+    this.chase(m, env, dt, 0.9, m.def.runSpeed * m.hasteMul);
     const dy = p.y - m.body.y;
     if (dist < melee.reach + 0.3 && dy > -1.2 && dy < 1.7 && m.attackCooldown <= 0) {
       m.attackCooldown = melee.cooldown;
@@ -2072,8 +2514,8 @@ export class MobManager {
       const len = dist || 1;
       const kx = (p.x - m.body.x) / len;
       const kz = (p.z - m.body.z) / len;
-      if (p.ref instanceof Mob) this.damage(p.ref, melee.damage, kx, kz, events);
-      else events.hurtPlayer(melee.damage, kx, kz, m.kind, p);
+      if (p.ref instanceof Mob) this.damage(p.ref, melee.damage * m.damageMul, kx, kz, events);
+      else events.hurtPlayer(melee.damage * m.damageMul, kx, kz, m.kind, p);
     }
   }
 
@@ -2341,6 +2783,573 @@ export class MobManager {
     this.chase(m, env, dt, 1.5, m.def.runSpeed);
   }
 
+  // ---- the Hollow Deep --------------------------------------------------------------------------------------------------------
+
+  /** Free flight for a flier that steers (`m.fly`): the velocity eases to the one asked for, and each axis stops at a wall (which turns the flier a little aside). */
+  private steerPhysics(m: Mob, env: MobEnv, dt: number): void {
+    const b = m.body;
+    const f = m.fly!;
+    const lava = !!m.def.fireImmune;
+    const allowed = (x: number, y: number, z: number): boolean => {
+      const id = env.world.getBlock(Math.floor(x), Math.floor(y), Math.floor(z));
+      if (IS_SOLID[id]) return false;
+      return IS_LIQUID[id] !== 1 || (lava && isLavaId(id));
+    };
+    const k = Math.min(1, 3.5 * dt);
+    const sm = m.slowTime > 0 ? m.slowMul : 1;
+    if (m.knockTime > 0) {
+      m.knockTime -= dt;
+      b.vx = m.kbx;
+      b.vz = m.kbz;
+      m.kbx *= 0.92;
+      m.kbz *= 0.92;
+    } else {
+      b.vx += (f.vx * sm - b.vx) * k;
+      b.vz += (f.vz * sm - b.vz) * k;
+    }
+    b.vy += (f.vy * sm - b.vy) * k;
+    const hw = m.width / 2;
+    const px = b.x;
+    const pz = b.z;
+    const fits = (nx: number, ny: number, nz: number): boolean =>
+      allowed(nx, ny + 0.1, nz) && allowed(nx, ny + m.height - 0.1, nz) && allowed(nx + Math.sign(b.vx) * hw, ny + m.height / 2, nz + Math.sign(b.vz) * hw);
+    let blocked = false;
+    if (fits(b.x + b.vx * dt, b.y, b.z)) b.x += b.vx * dt;
+    else {
+      b.vx = 0;
+      blocked = true;
+    }
+    if (fits(b.x, b.y, b.z + b.vz * dt)) b.z += b.vz * dt;
+    else {
+      b.vz = 0;
+      blocked = true;
+    }
+    if (fits(b.x, b.y + b.vy * dt, b.z)) b.y += b.vy * dt;
+    else {
+      b.vy = 0;
+      blocked = true;
+    }
+    // Pinned against rock while it wants to go on: slide off in a random direction for a moment (see `steer`).
+    if (blocked && Math.hypot(f.vx, f.vy, f.vz) > 0.3 && m.floatTimer <= 0 && env.rand() < 0.25) {
+      m.floatTimer = 0.6 + env.rand() * 0.5;
+      m.wanderYaw = env.rand() * Math.PI * 2;
+      m.floatPitch = (env.rand() - 0.3) * 0.9;
+    }
+    b.onGround = false;
+    b.inWater = false;
+    b.inLava = false;
+    m.speedNow = Math.hypot(b.x - px, b.z - pz) / dt;
+    m.walkPhase += Math.hypot(b.vx, b.vz) * dt * 1.6 + dt * 3;
+  }
+
+  /** A flier of the Hollow Deep goes for a point at this speed (blocks/s); zero stops it. While it is jammed against a wall it takes a random heading for a moment instead. */
+  private steer(m: Mob, tx: number, ty: number, tz: number, speed: number, dt: number): void {
+    if (m.floatTimer > 0) {
+      m.floatTimer -= dt;
+      const cp = Math.cos(m.floatPitch);
+      m.fly = { vx: -Math.sin(m.wanderYaw) * cp * speed, vy: Math.sin(m.floatPitch) * speed, vz: -Math.cos(m.wanderYaw) * cp * speed };
+      return;
+    }
+    const dx = tx - m.body.x;
+    const dy = ty - (m.body.y + m.height / 2);
+    const dz = tz - m.body.z;
+    const len = Math.hypot(dx, dy, dz);
+    if (len < 0.25 || speed <= 0) {
+      m.fly = { vx: 0, vy: 0, vz: 0 };
+      return;
+    }
+    // Slow down on the last blocks, so it does not shoot past.
+    const s = Math.min(speed, len * 2.2);
+    m.fly = { vx: (dx / len) * s, vy: (dy / len) * s, vz: (dz / len) * s };
+  }
+
+  /** A puff or a wraith: hunts when it has somebody to hunt, otherwise hovers round its post (a guard's) or where it is. */
+  private thinkFlyer(m: Mob, env: MobEnv, events: MobEvents, dt: number, dist: number, canTarget: boolean): void {
+    const b = m.body;
+    if (!m.post) {
+      const home = m.patrol > 0;
+      // Put on the floor of a cave, a flier is raised to hover above it.
+      const low = solidAt(env.world, b.x, b.y - 0.6, b.z) || solidAt(env.world, b.x, b.y - 1.4, b.z);
+      m.post = { x: home ? m.homeX : b.x, y: b.y + (low ? 1.4 : 0), z: home ? m.homeZ : b.z };
+    }
+    if (m.fleeTimer > 0) m.fleeTimer -= dt;
+    if (!canTarget) {
+      if (m.phase !== 0) {
+        m.phase = 0;
+        m.casting = 0;
+      }
+      m.wanderTimer -= dt;
+      const reach = m.patrol > 0 ? m.patrol : 4.5;
+      if (m.wanderTimer <= 0) {
+        m.wanderTimer = 1.5 + env.rand() * 2.5;
+        const a = env.rand() * Math.PI * 2;
+        const r = env.rand() * reach;
+        m.aimX = m.post.x + Math.cos(a) * r;
+        m.aimY = m.post.y + (env.rand() - 0.5) * 1.6;
+        m.aimZ = m.post.z + Math.sin(a) * r;
+      }
+      this.steer(m, m.aimX || m.post.x, m.aimY || m.post.y, m.aimZ || m.post.z, m.def.speed * 0.55, dt);
+      if (m.fly && Math.hypot(m.fly.vx, m.fly.vz) > 0.1) m.yaw = Math.atan2(-m.fly.vx, -m.fly.vz);
+      return;
+    }
+    if (m.kind === 'spore_puff') this.thinkPuff(m, env, events, dt);
+    else this.thinkWraith(m, env, events, dt, dist);
+  }
+
+  /** Light the ground fire where a fireball came down: in the open cell it stopped in, or the first one with floor under it below. Whatever may not burn (a protected place) refuses. */
+  private lightGround(env: MobEnv, events: MobEvents, x: number, y: number, z: number): void {
+    if (!events.ignite) return;
+    const bx = Math.floor(x);
+    const bz = Math.floor(z);
+    const by = Math.floor(y);
+    for (let dy = 0; dy <= 3; dy++) {
+      const here = env.world.getBlock(bx, by - dy, bz);
+      if (here === B.FIRE) return;
+      if (here !== B.AIR) continue;
+      if (IS_SOLID[env.world.getBlock(bx, by - dy - 1, bz)] !== 1) continue;
+      if (events.ignite(bx, by - dy, bz)) events.fx?.('ignite', bx + 0.5, by - dy + 0.3, bz + 0.5);
+      return;
+    }
+  }
+
+  private thinkWraith(m: Mob, env: MobEnv, events: MobEvents, dt: number, dist: number): void {
+    const p = env.player;
+    const b = m.body;
+    const cy = b.y + m.height * 0.5;
+    const dy = p.y + 1.0 - cy;
+    const dist3 = Math.hypot(p.x - b.x, dy, p.z - b.z);
+    const los = this.hasLineOfSight(m, env);
+    this.face(m, p.x, p.z);
+
+    // Throwing: it holds still, the flames gather in its hands, and the fireball goes.
+    if (m.phase === 1) {
+      m.phaseTime -= dt;
+      m.casting = 1;
+      this.steer(m, b.x, b.y + m.height / 2, b.z, 0, dt);
+      if (m.phaseTime <= 0) {
+        m.phase = 0;
+        m.casting = 0;
+        m.shootCooldown = WRAITH_COOLDOWN + env.rand() * 0.8;
+        m.castT = 0.3;
+        m.castKind = 3;
+        m.casting = 3;
+        m.attackTime = 0;
+        this.throwFireball(m, env, events);
+      }
+      return;
+    }
+
+    m.strafeTimer -= dt;
+    if (m.strafeTimer <= 0) {
+      m.strafeTimer = 1.2 + env.rand() * 1.8;
+      m.strafeDir = env.rand() < 0.5 ? -1 : 1;
+    }
+    // Keep its distance: close in when far off or out of sight, back off when pressed, circle in between. It hangs a little above its prey.
+    const hover = p.y + 1.7 + Math.sin(m.age * 1.4 + m.id) * 0.5;
+    const fast = m.def.runSpeed * m.hasteMul;
+    const away = Math.atan2(b.x - p.x, b.z - p.z);
+    if (!los || dist3 > WRAITH_FAR) {
+      this.steer(m, p.x, hover, p.z, fast, dt);
+    } else if (dist3 < WRAITH_NEAR) {
+      this.steer(m, b.x + Math.sin(away) * 3, hover + 0.4, b.z + Math.cos(away) * 3, fast, dt);
+    } else {
+      const side = away + (Math.PI / 2) * m.strafeDir;
+      this.steer(m, b.x + Math.sin(side) * 3, hover, b.z + Math.cos(side) * 3, m.def.speed * m.hasteMul, dt);
+    }
+    if (los && dist3 >= 4 && dist3 <= 20 && m.shootCooldown <= 0) {
+      m.phase = 1;
+      m.phaseTime = WRAITH_WINDUP;
+      m.casting = 1;
+      events.sound('hiss', m);
+    }
+    void dist;
+  }
+
+  private throwFireball(m: Mob, env: MobEnv, events: MobEvents): void {
+    const p = env.player;
+    const b = m.body;
+    const ox = b.x - Math.sin(m.yaw) * 0.4;
+    const oy = b.y + m.height * 0.62;
+    const oz = b.z - Math.cos(m.yaw) * 0.4;
+    // A little ahead of a player who is moving: the ball is slow.
+    const lead = Math.hypot(p.x - ox, p.z - oz) / WRAITH_BALL_SPEED;
+    const tx = p.x;
+    const ty = p.y + 1.0;
+    const tz = p.z;
+    const dx = tx - ox;
+    const dy = ty - oy;
+    const dz = tz - oz;
+    const len = Math.hypot(dx, dy, dz) || 1;
+    void lead;
+    const a = new Arrow(ox, oy, oz, (dx / len) * WRAITH_BALL_SPEED, (dy / len) * WRAITH_BALL_SPEED, (dz / len) * WRAITH_BALL_SPEED, WRAITH_BALL_DAMAGE * m.damageMul);
+    a.gravity = 0;
+    a.spell = 1;
+    a.source = 'ember_wraith';
+    a.effect = 'burn';
+    // Where it lands (a wall, the floor) or strikes, it may light the ground fire.
+    a.impact = (x, y, z) => {
+      if (env.rand() < 0.8) this.lightGround(env, events, x - a.vx * 0.03, y - a.vy * 0.03, z - a.vz * 0.03);
+    };
+    a.onPlayer = (_p, x, y, z) => {
+      if (env.rand() < 0.8) this.lightGround(env, events, x, y, z);
+    };
+    this.arrows.push(a);
+    events.sound('shoot', m);
+  }
+
+  private thinkPuff(m: Mob, env: MobEnv, events: MobEvents, dt: number): void {
+    const p = env.player;
+    const b = m.body;
+    const dy = p.y + 0.9 - (b.y + m.height / 2);
+    const dist3 = Math.hypot(p.x - b.x, dy, p.z - b.z);
+    this.face(m, p.x, p.z);
+    // It bobs as it drifts, a little below the player's head.
+    const bob = Math.sin(m.age * 2.2 + m.id) * 0.25;
+    if (m.phase === 0) {
+      this.steer(m, p.x, p.y + 0.9 + bob, p.z, m.def.runSpeed * m.hasteMul, dt);
+      if (dist3 < PUFF_PRIME) {
+        m.phase = 1;
+        m.phaseTime = PUFF_FUSE;
+        m.casting = 1;
+        events.sound('hiss', m);
+      }
+      return;
+    }
+    // Swelling: it creeps closer; if the prey gets well away it deflates and starts over.
+    m.phaseTime -= dt;
+    this.steer(m, p.x, p.y + 0.9 + bob, p.z, m.def.speed * 0.5, dt);
+    if (dist3 > PUFF_PRIME * 2.4) {
+      m.phase = 0;
+      m.casting = 0;
+    } else if (m.phaseTime <= 0) {
+      this.burst(m, env, events);
+    }
+  }
+
+  /** The puff bursts: a cloud of spores (no blocks are touched, unlike an explosion) that poisons and slows, and the puff is gone. */
+  private burst(m: Mob, env: MobEnv, events: MobEvents): void {
+    const b = m.body;
+    const x = b.x;
+    const y = b.y + m.height / 2;
+    const z = b.z;
+    m.noDrops = true;
+    m.casting = 0;
+    events.fx?.('spores', x, y, z);
+    this.clouds.push({ x, y, z, r: PUFF_RADIUS, t: PUFF_CLOUD, tick: 0.5 });
+    this.sporeTouch(env.players ?? [env.player], x, y, z, PUFF_RADIUS, events, PUFF_POISON, 4);
+    this.kill(m, events, false);
+  }
+
+  /** Whoever stands in the cloud is poisoned and slowed. */
+  private sporeTouch(players: readonly MobPlayer[], x: number, y: number, z: number, r: number, events: MobEvents, poison: number, slow: number): void {
+    for (const p of players) {
+      if (!p.alive || p.invulnerable) continue;
+      if (Math.hypot(p.x - x, p.z - z) > r || p.y + 1.8 < y - r * 0.6 || p.y > y + r * 0.8) continue;
+      events.afflict?.(p, 'poison', poison);
+      events.afflict?.(p, 'slow', slow, PUFF_SLOW);
+    }
+  }
+
+  /** The clouds the puffs left thin out, and keep poisoning whoever stands in them. */
+  private stepClouds(dt: number, players: readonly MobPlayer[], events: MobEvents): void {
+    for (let i = this.clouds.length - 1; i >= 0; i--) {
+      const c = this.clouds[i];
+      c.t -= dt;
+      c.tick -= dt;
+      if (c.t <= 0) {
+        this.clouds.splice(i, 1);
+        continue;
+      }
+      if (c.tick > 0) continue;
+      c.tick = 0.5;
+      events.fx?.('spores', c.x, c.y, c.z, c.r * (c.t / PUFF_CLOUD));
+      this.sporeTouch(players, c.x, c.y, c.z, c.r, events, PUFF_POISON * 0.5, 1.5);
+    }
+  }
+
+  private thinkLurker(m: Mob, env: MobEnv, events: MobEvents, dt: number, dist: number): void {
+    const p = env.player;
+    const melee = m.def.melee!;
+    if (!m.aggro) {
+      // Lying in the moss: it does not move until somebody is almost on top of it (or hurts it).
+      if (dist > LURKER_AMBUSH || !this.hasLineOfSight(m, env)) return;
+      m.aggro = true;
+      m.attackCooldown = Math.min(m.attackCooldown, 0.35);
+      m.castT = 0.7; // it rises out of the moss
+      m.castKind = 1;
+      m.casting = 1;
+      events.sound('hiss', m);
+    }
+    this.chase(m, env, dt, 1.0, m.def.runSpeed * m.hasteMul);
+    const dy = p.y - m.body.y;
+    if (dist < melee.reach + 0.3 && dy > -1.2 && dy < 1.8 && m.attackCooldown <= 0) {
+      m.attackCooldown = melee.cooldown;
+      m.attackTime = 0;
+      this.face(m, p.x, p.z);
+      const len = dist || 1;
+      events.hurtPlayer(melee.damage * m.damageMul, (p.x - m.body.x) / len, (p.z - m.body.z) / len, m.kind, p, melee.effect);
+    }
+  }
+
+  private thinkKnight(m: Mob, env: MobEnv, events: MobEvents, dt: number, dist: number): void {
+    const p = env.player;
+    const b = m.body;
+    const melee = m.def.melee!;
+    const dy = p.y - b.y;
+    if (m.phase === 1) {
+      // Winding up: it plants itself, shield forward, sword back.
+      this.face(m, p.x, p.z);
+      m.casting = 1;
+      m.phaseTime -= dt;
+      if (m.phaseTime <= 0) {
+        m.phase = 2;
+        m.phaseTime = KNIGHT_DASH_TIME;
+        m.casting = 2;
+        m.aimYaw = Math.atan2(-(p.x - b.x), -(p.z - b.z));
+        events.sound('shoot', m);
+      }
+      return;
+    }
+    if (m.phase === 2) {
+      // The dash: a straight line at the way it was aimed, so a step aside is enough.
+      m.yaw = m.aimYaw;
+      m.cmd.forward = 1;
+      m.cmd.speed = KNIGHT_DASH_SPEED * m.hasteMul;
+      if (b.onGround && this.blockedAhead(m, env, -Math.sin(m.yaw), -Math.cos(m.yaw))) m.cmd.jump = true;
+      m.phaseTime -= dt;
+      const elapsed = KNIGHT_DASH_TIME - m.phaseTime;
+      if (dist < 1.45 && dy > -1.3 && dy < 1.9) {
+        // The slam.
+        const len = dist || 1;
+        m.attackTime = 0;
+        events.hurtPlayer(KNIGHT_SLAM_DAMAGE * m.damageMul, ((p.x - b.x) / len) * 1.8, ((p.z - b.z) / len) * 1.8, m.kind, p);
+        events.fx?.('slam', b.x - Math.sin(m.yaw) * 0.9, b.y + 0.1, b.z - Math.cos(m.yaw) * 0.9);
+        this.endCharge(m, KNIGHT_RECOVER);
+      } else if (elapsed > 0.3 && m.speedNow < 3) {
+        // Ran into a wall: it staggers, shield down.
+        events.fx?.('slam', b.x - Math.sin(m.yaw) * 0.9, b.y + 0.1, b.z - Math.cos(m.yaw) * 0.9);
+        this.endCharge(m, KNIGHT_RECOVER * 1.6);
+      } else if (m.phaseTime <= 0) {
+        this.endCharge(m, KNIGHT_RECOVER * 0.6);
+      }
+      return;
+    }
+    if (m.phase === 3) {
+      m.phaseTime -= dt;
+      if (m.phaseTime <= 0) {
+        m.phase = 0;
+        m.casting = 0;
+      }
+      return;
+    }
+    // Hunting: a charge from a distance, a sword in close.
+    if (m.skillCd <= 0 && dist >= KNIGHT_CHARGE_MIN && dist <= KNIGHT_CHARGE_MAX && Math.abs(dy) < 2 && this.hasLineOfSight(m, env)) {
+      m.phase = 1;
+      m.phaseTime = KNIGHT_WINDUP;
+      m.casting = 1;
+      this.face(m, p.x, p.z);
+      events.sound('hiss', m);
+      return;
+    }
+    this.chase(m, env, dt, 1.0, m.def.runSpeed * m.hasteMul);
+    if (dist < melee.reach + 0.3 && dy > -1.2 && dy < 1.8 && m.attackCooldown <= 0) {
+      m.attackCooldown = melee.cooldown;
+      m.attackTime = 0;
+      this.face(m, p.x, p.z);
+      const len = dist || 1;
+      events.hurtPlayer(melee.damage * m.damageMul, (p.x - b.x) / len, (p.z - b.z) / len, m.kind, p, melee.effect);
+    }
+  }
+
+  /** The charge is over: it stands still for a moment (shield down) and cannot charge again for a while. */
+  private endCharge(m: Mob, recover: number): void {
+    m.phase = 3;
+    m.phaseTime = recover;
+    m.casting = 3;
+    m.skillCd = KNIGHT_COOLDOWN;
+    m.body.vx = 0;
+    m.body.vz = 0;
+  }
+
+  private thinkPriest(m: Mob, env: MobEnv, events: MobEvents, dt: number, dist: number): void {
+    const p = env.player;
+    const b = m.body;
+    const los = this.hasLineOfSight(m, env);
+    this.face(m, p.x, p.z);
+    m.strafeTimer -= dt;
+    if (m.strafeTimer <= 0) {
+      m.strafeTimer = 1.5 + env.rand() * 2;
+      m.strafeDir = env.rand() < 0.5 ? -1 : 1;
+    }
+    // Hurt to half, it calls for help, once.
+    if (!m.summoned && m.health <= m.maxHealth * 0.5) this.callSkeletons(m, env, events);
+
+    // Keeps its distance, like an archer.
+    if (!los || dist > PRIEST_FAR) {
+      this.chase(m, env, dt, PRIEST_FAR * 0.7, m.def.runSpeed * m.hasteMul);
+    } else if (dist < PRIEST_NEAR) {
+      m.cmd.forward = -1;
+      m.cmd.strafe = m.strafeDir * 0.5;
+      m.cmd.speed = m.def.runSpeed * m.hasteMul;
+      if (this.cliffAhead(m, env, m.yaw + Math.PI)) m.cmd.forward = 0;
+    } else {
+      m.cmd.strafe = m.strafeDir * 0.5;
+      m.cmd.speed = m.def.speed;
+    }
+
+    // Mends whoever is hurt among the others (a beam of light from its staff to them).
+    if (m.skillCd <= 0) {
+      const ally = this.hurtAlly(m);
+      if (ally) {
+        m.skillCd = PRIEST_HEAL_EVERY;
+        ally.health = Math.min(ally.maxHealth, ally.health + ally.maxHealth * PRIEST_HEAL_SHARE);
+        m.castT = 0.6;
+        m.castKind = 2;
+        m.casting = 2;
+        events.fx?.('heal', b.x, b.y + m.height * 0.8, b.z, ally.body.x, ally.body.y + ally.height * 0.55, ally.body.z);
+        events.sound('yes', m);
+      }
+    }
+
+    // The curse: a dark bolt that hurts and leaves the target weak and slow.
+    if (los && dist < 18 && m.shootCooldown <= 0) {
+      m.shootCooldown = PRIEST_COOLDOWN + env.rand() * 0.6;
+      m.castT = 0.5;
+      m.castKind = 1;
+      m.casting = 1;
+      m.attackTime = 0;
+      const ox = b.x - Math.sin(m.yaw) * 0.3;
+      const oy = b.y + m.height * 0.8;
+      const oz = b.z - Math.cos(m.yaw) * 0.3;
+      const dx = p.x - ox;
+      const dy = p.y + 1.0 - oy;
+      const dz = p.z - oz;
+      const len = Math.hypot(dx, dy, dz) || 1;
+      const a = new Arrow(ox, oy, oz, (dx / len) * PRIEST_BOLT_SPEED, (dy / len) * PRIEST_BOLT_SPEED, (dz / len) * PRIEST_BOLT_SPEED, PRIEST_BOLT_DAMAGE * m.damageMul);
+      a.gravity = 0;
+      a.spell = 2;
+      a.source = 'hollow_priest';
+      a.effect = ['weak', 'slow'];
+      a.impact = (x, y, z) => events.fx?.('curse', x, y, z);
+      this.arrows.push(a);
+      events.sound('shoot', m);
+    }
+  }
+
+  /** The most hurt living hostile mob within healing range (not itself, not a boss, which has its own script), if any is hurt enough. */
+  private hurtAlly(m: Mob): Mob | null {
+    let best: Mob | null = null;
+    let bestShare = 0.85;
+    for (const o of this.mobs) {
+      if (o === m || o.dead || !o.def.hostile || o.def.boss || o.kind === 'dummy' || Math.abs(o.body.y - m.body.y) > 5) continue;
+      if (Math.hypot(o.body.x - m.body.x, o.body.z - m.body.z) > PRIEST_HEAL_RANGE) continue;
+      const share = o.health / o.maxHealth;
+      if (share < bestShare) {
+        bestShare = share;
+        best = o;
+      }
+    }
+    return best;
+  }
+
+  /** Two skeletons step out of the dark around the priest: bound to the dungeon like its own monsters, hunting at once, and they leave nothing. */
+  private callSkeletons(m: Mob, env: MobEnv, events: MobEvents): void {
+    m.summoned = true;
+    const b = m.body;
+    const baseY = Math.floor(b.y);
+    const a0 = env.rand() * Math.PI * 2;
+    let made = 0;
+    for (let i = 0; i < 12 && made < PRIEST_CALLS; i++) {
+      const a = a0 + i * (Math.PI / 4) + (i >= 8 ? 0.4 : 0);
+      const r = i < 8 ? 2 : 3;
+      const x = Math.floor(b.x + Math.cos(a) * r);
+      const z = Math.floor(b.z + Math.sin(a) * r);
+      for (const dy of [0, 1, -1]) {
+        if (!standingOn(env.world, x, baseY + dy, z)) continue;
+        const add = this.spawn('skeleton', x + 0.5, baseY + dy, z + 0.5);
+        add.bound = true;
+        add.aggro = true;
+        add.noDrops = true;
+        add.yaw = add.homeYaw = Math.atan2(-(env.player.x - add.body.x), -(env.player.z - add.body.z));
+        events.fx?.('summon', x + 0.5, baseY + dy + 0.8, z + 0.5);
+        made++;
+        break;
+      }
+    }
+    m.castT = 0.9;
+    m.castKind = 2;
+    m.casting = 2;
+    events.sound('no', m);
+  }
+
+  private thinkShade(m: Mob, env: MobEnv, events: MobEvents, dt: number, dist: number): void {
+    const p = env.player;
+    const melee = m.def.melee!;
+    // The first sight of its prey, and every few seconds after, it is simply behind them.
+    if (m.skillCd <= 0 && this.hasLineOfSight(m, env)) {
+      if (this.blink(m, env, events)) return;
+      m.skillCd = 1.2; // nowhere to land: try again soon
+    }
+    this.chase(m, env, dt, 0.9, m.def.runSpeed * m.hasteMul);
+    const dy = p.y - m.body.y;
+    if (dist < melee.reach + 0.3 && dy > -1.2 && dy < 1.8 && m.attackCooldown <= 0) {
+      m.attackCooldown = melee.cooldown;
+      m.attackTime = 0;
+      this.face(m, p.x, p.z);
+      const len = dist || 1;
+      // It hits harder against somebody in the dark (no torch, lantern or glowing block near them).
+      const dark = !nearLight(env.world, p.x, p.y + 1, p.z, 4);
+      events.hurtPlayer(melee.damage * m.damageMul * (dark ? SHADE_DARK : 1), (p.x - m.body.x) / len, (p.z - m.body.z) / len, m.kind, p, melee.effect);
+    }
+  }
+
+  /** Where a shade can step out behind a player: floor under it, room for it, nothing solid between it and them. Null if there is no such place. */
+  blinkSpot(env: MobEnv): { x: number; y: number; z: number } | null {
+    const p = env.player;
+    const yaw = p.yaw ?? 0;
+    const py = Math.floor(p.y + 0.01);
+    const tries: [number, number][] = [[1.6, 0], [1.6, 0.55], [1.6, -0.55], [2.2, 0], [1.2, 0], [2.2, 0.9], [2.2, -0.9], [1.4, 1.57], [1.4, -1.57]];
+    for (const [d, turn] of tries) {
+      const a = yaw + turn;
+      const x = p.x + Math.sin(a) * d;
+      const z = p.z + Math.cos(a) * d;
+      for (const dy of [0, 1, -1, -2]) {
+        const cy = py + dy;
+        if (!standingOn(env.world, Math.floor(x), cy, Math.floor(z))) continue;
+        if (Math.abs(cy - p.y) > 2) continue;
+        // Free of rock between its chest and theirs.
+        const dx = p.x - x;
+        const dyy = p.y + 1.0 - (cy + 1.0);
+        const dz = p.z - z;
+        const len = Math.hypot(dx, dyy, dz) || 1;
+        if (raycast(env.world, x, cy + 1.0, z, dx / len, dyy / len, dz / len, len)) continue;
+        return { x: Math.floor(x) + 0.5, y: cy, z: Math.floor(z) + 0.5 };
+      }
+    }
+    return null;
+  }
+
+  private blink(m: Mob, env: MobEnv, events: MobEvents): boolean {
+    const spot = this.blinkSpot(env);
+    if (!spot) return false;
+    const b = m.body;
+    events.fx?.('blink', b.x, b.y + m.height / 2, b.z);
+    b.x = spot.x;
+    b.y = spot.y;
+    b.z = spot.z;
+    b.vx = b.vy = b.vz = 0;
+    m.path = null;
+    m.teleported = true;
+    this.face(m, env.player.x, env.player.z);
+    m.skillCd = SHADE_BLINK_COOLDOWN + env.rand();
+    m.attackCooldown = Math.min(m.attackCooldown, 0.2);
+    m.castT = 0.45; // it flickers back into sight
+    m.castKind = 2;
+    m.casting = 2;
+    events.fx?.('blink', spot.x, spot.y + m.height / 2, spot.z);
+    return true;
+  }
+
   // ---- arrows ---------------------------------------------------------------------
 
   /** Returns true when the arrow should be removed. */
@@ -2442,7 +3451,8 @@ export class MobManager {
       const hw = 0.3;
       if (nx > p.x - hw && nx < p.x + hw && nz > p.z - hw && nz < p.z + hw && ny > p.y && ny < p.y + 1.8) {
         const len = Math.hypot(a.vx, a.vz) || 1;
-        events.hurtPlayer(a.damage, a.vx / len, a.vz / len, 'arrow', p);
+        events.hurtPlayer(a.damage, a.vx / len, a.vz / len, a.source, p, a.effect);
+        a.onPlayer?.(p, nx, ny, nz);
         return true;
       }
     }
@@ -2454,7 +3464,7 @@ export class MobManager {
 
   /** Class abilities: stun, slow or root a mob (the longer effect of each kind wins). Bosses and quest givers are not affected. */
   applyStatus(mob: Mob, s: { stun?: number; slow?: { mult: number; seconds: number }; root?: number }): void {
-    if (mob.dead || mob.def.invulnerable) return;
+    if (mob.dead || mob.def.invulnerable || mob.def.boss) return;
     if (s.stun) mob.stunTime = Math.max(mob.stunTime, s.stun);
     if (s.root) mob.rootTime = Math.max(mob.rootTime, s.root);
     if (s.slow) {

@@ -1,7 +1,7 @@
 import { B, BLOCKS, FALLS, IS_LEAVES, IS_LOG, SOUL_WARD_HEIGHT, SOUL_WARD_RADIUS, chestId, chestInfo, chestPartnerPos, doorId, doorInfo, doorKind, isAnvil, isChest } from './blocks';
 import { WORLD_HEIGHT } from './chunk';
 import { LOOT_TABLES, positionRand, rollChest, spawnerKind } from './loot';
-import { bodyOverlapsBlock } from './physics';
+import { bodyOverlapsBlock, type Solid } from './physics';
 import { BlockEntities } from './blockEntities';
 import { DAY_LENGTH_SECONDS, daylightAt } from './daylight';
 import { DropWorld, type DropCollector } from './dropEntities';
@@ -12,7 +12,7 @@ import { BOTTLE_XP_MAX, BOTTLE_XP_MIN, blockDrops, getItem, toolId } from './ite
 import { makeStack, type ItemStack } from './inventory';
 import { ChestMenu } from './menu';
 import { EffectField } from './abilityEffects';
-import { MobManager, MobSpawner, type Mob, type MobEvents, type MobKind, type MobPlayer } from './mobs';
+import { MobManager, MobSpawner, type Mob, type MobEvents, type MobFx, type MobKind, type MobPlayer } from './mobs';
 import { hash2 } from './noise';
 import type { Player } from './player';
 import { Parties } from './party';
@@ -20,7 +20,9 @@ import { AuctionHouse } from './auction';
 import { StashVault } from './stash';
 import { bagDrop } from './bags';
 import { skillBookDrop } from './skillbooks';
-import { gearDrop, type GearRoll } from './gear';
+import { gearDrop, pickRarity, randomGear, type GearRoll } from './gear';
+import type { DungeonView } from './dungeonView';
+import { BossBrain, type BossArenaDef, type BossTarget, type BossView, type BossWorld } from './boss';
 import { jewelDrop, jewelKind } from './jewels';
 import type { DummyStation, NpcStation } from './quests';
 import { canStayAt } from './plants';
@@ -298,6 +300,13 @@ export class Realm {
         const p = (target?.ref as Player | undefined) ?? this.players[0];
         p?.hurtByMob(amount, kx, kz, source, effect);
       },
+      afflict: (target, effect, seconds, power) => {
+        const p = target.ref as Player | undefined;
+        p?.afflict(effect, seconds, power);
+      },
+      // The ground fire of a fireball: only where fire may burn (not in a protected place, and it needs floor or fuel).
+      ignite: (x, y, z) => this.fire.ignite(x, y, z),
+      fx: (kind, x, y, z, x2, y2, z2) => this.deepFx(kind, x, y, z, x2, y2, z2),
       explode: (x, y, z, radius, source) => this.explode(x, y, z, radius, source),
       sound: (sound, mob) => {
         for (const p of this.players) {
@@ -328,6 +337,8 @@ export class Realm {
             }
           }
         }
+        if (mob.def.boss) this.bossLoot(mob, x, y, z);
+        if (mob.elite) this.eliteLoot(x, y, z);
         // ...and sometimes a piece of gear with a rarity, a level and bonus stats (see gear.ts).
         const piece = gearDrop(mob.kind, this.rand);
         if (piece) {
@@ -520,6 +531,7 @@ export class Realm {
       this.mobEvents,
     );
     this.effects.update(dt, this.mobs);
+    for (const brain of this.bosses.values()) brain.update(dt);
     if (this.naturalSpawning) {
       const living = view.filter((v) => (v.ref as Player).screen !== 'dead' && !(v.ref as Player).spectating);
       if (living.length > 0) {
@@ -630,13 +642,14 @@ export class Realm {
     if (this.npcTimer < 1) return;
     this.npcTimer = 0;
     for (const st of this.stations) {
-      const have = this.npcMobs.get(st.index);
+      const key = st.key ?? st.index;
+      const have = this.npcMobs.get(key);
       let nearest = Infinity;
       for (const p of players) nearest = Math.min(nearest, Math.hypot(p.x - st.x, p.z - st.z));
       if (have) {
         const gone = have.dead || !this.mobs.mobs.includes(have);
         if (gone || nearest > FOLK_LEAVE) {
-          this.npcMobs.delete(st.index);
+          this.npcMobs.delete(key);
           const i = this.mobs.mobs.indexOf(have);
           if (i >= 0) this.mobs.mobs.splice(i, 1);
         } else {
@@ -653,7 +666,7 @@ export class Realm {
       const m = this.mobs.spawn('npc', st.x, st.y, st.z, { variant: st.index });
       m.homeYaw = st.npc.yaw;
       m.yaw = st.npc.yaw;
-      this.npcMobs.set(st.index, m);
+      this.npcMobs.set(key, m);
     }
   }
 
@@ -741,6 +754,10 @@ export class Realm {
     if (!this.mayEnter(p, reopen)) return;
     const slot = this.assignCopy(key);
     const spot = this.generator.instanceEntry(slot);
+    if (slot >= 0) {
+      this.openBoss(slot);
+      this.openMobs(slot);
+    }
     if (slot < 0 || !spot) {
       p.portalCooldown = 3;
       p.emit({ t: 'toast', text: 'The portal is crowded: every dungeon is in use. Try again soon.' });
@@ -762,7 +779,7 @@ export class Realm {
     if (need.level !== undefined && p.xp.level < need.level) {
       why = `${need.name} is for level ${need.level} and up. You are level ${p.xp.level}.`;
     } else if (need.item !== undefined && !reopen && p.inventory.countOf(need.item) < 1) {
-      why = `${need.name} needs ${getItem(need.item).name}.`;
+      why = `${need.name} needs ${getItem(need.item).name.replace(/_/g, ' ').replace(/\b[a-z]/g, (c) => c.toUpperCase())}.`;
     }
     if (!why) return true;
     p.emit({ t: 'toast', text: why });
@@ -814,6 +831,8 @@ export class Realm {
       const out = this.generator.instanceExit();
       if (out) this.sendTo(p, out);
     }
+    this.updateGates(present);
+    for (const slot of present) this.ensureExit(slot);
     for (const [slot, c] of [...this.copies]) {
       if (present.has(slot)) {
         c.empty = 0;
@@ -849,6 +868,9 @@ export class Realm {
       const [x, y, z] = k.split(',').map(Number);
       if (inside(x, y, z)) this.spawnerReady.delete(k);
     }
+    this.bosses.delete(slot);
+    this.populated.delete(slot);
+    this.progress.delete(slot);
     this.blockEntities.clearWhere(inside);
     // Blocks: whatever was changed goes back, and the chunk is let go of.
     for (let cz = b.z0 >> 4; cz <= b.z1 >> 4; cz++) {
@@ -872,6 +894,194 @@ export class Realm {
       const b = this.generator.instanceBounds(slot);
       if (b) this.blockEntities.clearWhere((x, _y, z) => x >= b.x0 && x <= b.x1 && z >= b.z0 && z <= b.z1);
     }
+  }
+
+  // ---- the monsters and gates of a dungeon ---------------------------------------------------------
+
+  /** The copies whose monsters have been put in their places (once each: what is killed in a copy stays dead until the copy is wiped). */
+  private readonly populated = new Set<number>();
+  /** For each open copy: the cages that have been broken and the gates that have opened. */
+  private readonly progress = new Map<number, { broken: Set<string>; open: Set<string> }>();
+
+  /** A copy was opened: its monsters are put at their posts, once. They are guards: they walk a short beat round their post until they see somebody. */
+  private openMobs(slot: number): void {
+    if (this.populated.has(slot)) return;
+    this.populated.add(slot);
+    for (const spec of this.generator.instanceMobs(slot)) {
+      const m = this.mobs.spawn(spec.kind, spec.x, spec.y, spec.z);
+      m.bound = true;
+      m.guard = true;
+      // They walk their beat, 4 to 8 blocks round the post, until somebody comes into their sight.
+      m.patrol = 4 + this.rand() * 4;
+      m.homeX = spec.x;
+      m.homeZ = spec.z;
+      m.yaw = m.homeYaw = spec.yaw;
+      if (spec.elite) {
+        m.elite = true;
+        m.maxHealth *= spec.elite;
+        m.health = m.maxHealth;
+        m.damageMul = 1 + (spec.elite - 1) * 0.25;
+      }
+    }
+  }
+
+  /** What an elite leaves: a piece of gear for anybody, uncommon or better. */
+  private eliteLoot(x: number, y: number, z: number): void {
+    const piece = randomGear(5 + Math.floor(this.rand() * 3), pickRarity([60, 33, 7], this.rand), undefined, this.rand);
+    const a = this.rand() * Math.PI * 2;
+    this.drops.spawn(piece, x, y + 0.5, z, Math.cos(a) * 1.4, 3.5, Math.sin(a) * 1.4, 0.5);
+  }
+
+  /** Tell everybody in a copy something. */
+  private tellCopy(slot: number, text: string): void {
+    for (const p of this.players) if (this.copyAt(p) === slot) p.emit({ t: 'toast', text });
+  }
+
+  /**
+   * The gates of the copies that have somebody in them: each cage that is gone is noted, and a gate whose cages are
+   * all gone opens (its bars are taken out of the wall). A cage that is not in a loaded chunk has not been touched.
+   */
+  private updateGates(present: ReadonlySet<number>): void {
+    for (const slot of present) {
+      const gates = this.generator.instanceGates(slot);
+      if (gates.length === 0) continue;
+      let st = this.progress.get(slot);
+      if (!st) this.progress.set(slot, (st = { broken: new Set(), open: new Set() }));
+      const all = new Set(gates.flatMap((g) => g.cages.map((c) => `${c.x},${c.y},${c.z}`)));
+      for (const g of gates) {
+        for (const c of g.cages) {
+          const k = `${c.x},${c.y},${c.z}`;
+          if (st.broken.has(k) || (this.world.hasChunk && !this.world.hasChunk(c.x >> 4, c.z >> 4)) || this.world.getBlock(c.x, c.y, c.z) === B.SPAWNER) continue;
+          st.broken.add(k);
+          this.tellCopy(slot, `A cage shatters (${st.broken.size} of ${all.size}).`);
+        }
+        const wasOpen = st.open.has(g.id);
+        if (!wasOpen && !g.cages.every((c) => st!.broken.has(`${c.x},${c.y},${c.z}`))) continue;
+        if (wasOpen) {
+          // Open already: its bars come back if the chunk was unloaded and made again, so take them out again.
+          for (const b of g.boxes) {
+            if (this.world.hasChunk && !this.world.hasChunk(b.x0 >> 4, b.z0 >> 4)) continue;
+            for (let y = b.y0; y <= b.y1; y++) for (let z = b.z0; z <= b.z1; z++) for (let x = b.x0; x <= b.x1; x++) if (this.world.getBlock(x, y, z) !== B.AIR) this.world.setBlock(x, y, z, B.AIR);
+          }
+          continue;
+        }
+        st.open.add(g.id);
+        for (const b of g.boxes) {
+          for (let y = b.y0; y <= b.y1; y++) for (let z = b.z0; z <= b.z1; z++) for (let x = b.x0; x <= b.x1; x++) if (this.world.getBlock(x, y, z) !== B.AIR) this.world.setBlock(x, y, z, B.AIR);
+          this.emitNear(b.x0, b.y0 + 1, b.z0 + 1, { t: 'burst', id: B.COBBLE, x: b.x0, y: b.y0 + 1, z: b.z0 + 1, count: 24 });
+        }
+        this.tellCopy(slot, `${g.name} grinds open.`);
+      }
+    }
+  }
+
+  // ---- the boss of a dungeon ---------------------------------------------------------------------
+  /** The boss of each open copy (by slot), asleep on his throne until somebody comes near. A boss that has fallen stays fallen until the copy is wiped. */
+  private readonly bosses = new Map<number, BossBrain>();
+
+  /** A copy was opened: its boss (if its dungeon has one) is put on his throne, once. */
+  private openBoss(slot: number): void {
+    if (this.bosses.has(slot)) return;
+    const spec = this.generator.instanceBoss(slot);
+    if (!spec) return;
+    const mob = this.mobs.spawn('hollow_king', spec.x, spec.y, spec.z);
+    mob.bound = true;
+    mob.yaw = mob.homeYaw = spec.yaw;
+    const arena: BossArenaDef = { ...spec.arena, y: spec.y, home: { x: spec.x, y: spec.y, z: spec.z, yaw: spec.yaw } };
+    const inRoom = (p: Player): boolean => this.copyAt(p) === slot && !p.vitals.dead && !p.spectating && p.screen !== 'dead' && p.body.x >= arena.x0 - 2 && p.body.x <= arena.x1 + 3 && p.body.z >= arena.z0 - 2 && p.body.z <= arena.z1 + 3 && Math.abs(p.body.y - arena.y) <= 16;
+    const emitRoom = (e: SessionEvent): void => {
+      for (const p of this.players) if (this.copyAt(p) === slot) p.emit(e);
+    };
+    const world: BossWorld = {
+      targets: (): BossTarget[] =>
+        this.players.filter(inRoom).map((p) => ({
+          x: p.body.x,
+          y: p.body.y,
+          z: p.body.z,
+          hurt: (amount, kx, kz) => p.hurtByMob(amount, kx, kz, 'hollow_king'),
+        })),
+      spawnAdd: (kind, x, y, z) => {
+        const add = this.mobs.spawn(kind, x, y, z);
+        add.bound = true;
+        add.aggro = true;
+        // The court is a part of the fight, not a prize: it leaves nothing.
+        add.noDrops = true;
+        this.emitNear(x, y, z, { t: 'burst', id: B.OBSIDIAN, x: Math.floor(x), y: Math.floor(y), z: Math.floor(z), count: 14 });
+        return add;
+      },
+      removeMob: (m) => {
+        const i = this.mobs.mobs.indexOf(m);
+        if (i >= 0) this.mobs.mobs.splice(i, 1);
+      },
+      mark: (kind, x, y, z, r, ttl) => void this.effects.mark(kind, 'The Hollow King', x, y, z, r, ttl),
+      say: (text, kind) => emitRoom({ t: 'boss', text, kind }),
+      fx: (e) => emitRoom({ t: 'bossFx', ...e }),
+      defeated: () => emitRoom({ t: 'toast', text: 'The Hollow King has fallen.' }),
+      rand: () => this.rand(),
+    };
+    this.bosses.set(slot, new BossBrain(mob, arena, world));
+  }
+
+  /**
+   * When a copy's boss has fallen, a portal stands where he fought: a frame of obsidian across the way (5 wide, 5 high) with a
+   * violet portal in it, which takes whoever steps into it out of the dungeon (see `usePortal`). It is made as soon as the
+   * chunk is there, and made again if the chunk was unloaded and generated afresh.
+   */
+  private ensureExit(slot: number): void {
+    const brain = this.bosses.get(slot);
+    const spec = this.generator.instanceBoss(slot);
+    if (!brain || brain.state !== 'dead' || !spec?.exit) return;
+    const { x, y, z } = spec.exit;
+    if (this.world.hasChunk && !this.world.hasChunk(x >> 4, (z - 2) >> 4) || this.world.hasChunk && !this.world.hasChunk(x >> 4, (z + 2) >> 4)) return;
+    if (this.world.getBlock(x, y, z) === B.PORTAL && this.world.getBlock(x, y + 2, z) === B.PORTAL) return;
+    for (let dz = -2; dz <= 2; dz++) {
+      for (let dy = -1; dy <= 3; dy++) {
+        const frame = dz === -2 || dz === 2 || dy === -1 || dy === 3;
+        this.world.setBlock(x, y + dy, z + dz, frame ? B.OBSIDIAN : B.PORTAL);
+      }
+    }
+    this.emitNear(x, y + 1, z, { t: 'burst', id: B.OBSIDIAN, x, y: y + 1, z, count: 30 });
+    this.tellCopy(slot, 'A portal opens in the Molten Heart: step into it to leave the dungeon.');
+  }
+
+  /** How far a player is in the dungeon they stand in (null outside one). */
+  dungeonViewFor(p: Player): DungeonView | null {
+    const slot = this.copyAt(p);
+    if (slot < 0) return null;
+    const gates = this.generator.instanceGates(slot);
+    const st = this.progress.get(slot);
+    const cages = new Set(gates.flatMap((g) => g.cages.map((c) => `${c.x},${c.y},${c.z}`)));
+    const brain = this.bosses.get(slot);
+    return { name: 'The Hollow Cellar', cages: st ? st.broken.size : 0, cagesTotal: cages.size, gates: st ? st.open.size : 0, gatesTotal: gates.length, boss: brain ? brain.state : 'none' };
+  }
+
+  /** What a player sees of the boss they are fighting (null when they are not in a fight). */
+  bossViewFor(p: Player): BossView | null {
+    const slot = this.copyAt(p);
+    if (slot < 0) return null;
+    const brain = this.bosses.get(slot);
+    return brain && brain.state === 'fighting' ? brain.view() : null;
+  }
+
+  /** The Hollow King's reward: everybody who fought him gets a piece of gear for their own class, rare or better. */
+  private bossLoot(mob: Mob, x: number, y: number, z: number): void {
+    const slot = this.generator.instanceAt(mob.body.x, mob.body.z);
+    for (const p of this.players) {
+      if (p.screen === 'dead' || p.spectating || this.copyAt(p) !== slot) continue;
+      const piece = randomGear(7 + Math.floor(this.rand() * 3), pickRarity([0, 62, 38], this.rand), p.cls?.classId, this.rand);
+      const a = this.rand() * Math.PI * 2;
+      this.drops.spawn(piece, x, y + 0.5, z, Math.cos(a) * 1.6, 4, Math.sin(a) * 1.6, 0.5);
+    }
+  }
+
+  /** The monsters and villagers close to a spot, as things a player cannot walk through (undefined when none is). */
+  solidsNear(x: number, y: number, z: number): Solid[] | undefined {
+    let out: Solid[] | undefined;
+    for (const m of this.mobs.mobs) {
+      if (m.dead || m.width < 0.3 || Math.abs(m.body.x - x) > 6 || Math.abs(m.body.z - z) > 6 || Math.abs(m.body.y - y) > 6) continue;
+      (out ??= []).push({ x: m.body.x, y: m.body.y, z: m.body.z, r: m.width / 2, h: m.height });
+    }
+    return out;
   }
 
   /** Is this block part of a place players may not change? (See `WorldGenerator.isProtected`.) */
@@ -1155,6 +1365,8 @@ export class Realm {
   }
 
   private runSpawner(x: number, y: number, z: number): void {
+    // The cages of a dungeon make nothing: they are the locks of its gates (see `updateGates`), and its monsters are already in it.
+    if (this.generator.instanceAt(x, z) >= 0) return;
     const k = `${x},${y},${z}`;
     const ready = this.spawnerReady.get(k);
     if (ready === undefined) {
@@ -1393,6 +1605,55 @@ export class Realm {
     for (const l of due) {
       if (this.world.getBlock(l.x, l.y, l.z) === B.TNT) this.world.setBlock(l.x, l.y, l.z, B.AIR);
       this.explode(l.x + 0.5, l.y + 0.5, l.z + 0.5, TNT_RADIUS, 'tnt');
+    }
+  }
+
+  /** What the monsters of the Hollow Deep show of what they do: chips of a block of a fitting look (no block is touched) and a sound. x2, y2, z2: the other end of a beam (a healing), or the size of a thinning cloud of spores. */
+  private deepFx(kind: MobFx, x: number, y: number, z: number, x2?: number, y2?: number, z2?: number): void {
+    const burst = (id: number, px: number, py: number, pz: number, count: number): void => {
+      const bx = Math.floor(px);
+      const by = Math.floor(py);
+      const bz = Math.floor(pz);
+      this.emitNear(bx, by, bz, { t: 'burst', id, x: bx, y: by, z: bz, count, soft: true }, 40);
+    };
+    switch (kind) {
+      case 'spores': {
+        // The burst (no size given) is thick; the thinning cloud after it is a few chips.
+        const thin = x2 !== undefined;
+        burst(B.MOSS_BLOCK, x, y, z, thin ? 6 : 26);
+        burst(B.SLIME_BLOCK, x + (this.rand() - 0.5) * 2, y + (this.rand() - 0.3), z + (this.rand() - 0.5) * 2, thin ? 3 : 12);
+        break;
+      }
+      case 'heal': {
+        // A beam of green light chips from the staff to the one it mends.
+        const ex = x2 ?? x;
+        const ey = y2 ?? y;
+        const ez = z2 ?? z;
+        for (let i = 0; i <= 6; i++) burst(B.SLIME_BLOCK, x + ((ex - x) * i) / 6, y + ((ey - y) * i) / 6, z + ((ez - z) * i) / 6, 2);
+        burst(B.EMERALD_ORE, ex, ey, ez, 6);
+        break;
+      }
+      case 'summon':
+        burst(B.OBSIDIAN, x, y, z, 14);
+        burst(B.AMETHYST_BLOCK, x, y + 0.5, z, 6);
+        break;
+      case 'blink':
+        burst(B.OBSIDIAN, x, y, z, 8);
+        break;
+      case 'curse':
+        burst(B.AMETHYST_BLOCK, x, y, z, 8);
+        break;
+      case 'slam':
+        burst(B.COBBLED_DEEPSLATE, x, y + 0.3, z, 16);
+        this.emitNear(x, y, z, { t: 'sound', sound: 'stone', action: 'break', vol: 1 }, 40);
+        break;
+      case 'block':
+        burst(B.COBBLED_DEEPSLATE, x, y, z, 4);
+        this.emitNear(x, y, z, { t: 'sound', sound: 'stone', action: 'hit', vol: 0.8 }, 32);
+        break;
+      case 'ignite':
+        this.emitNear(x, y, z, { t: 'fire', kind: 'ignite', vol: 0.7 }, 32);
+        break;
     }
   }
 

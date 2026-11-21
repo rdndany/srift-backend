@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { QuestLog, type AttrKey, type AuctionCommand, type AuctionView, type StashCommand, type StashView, type ClassView, type Container, type CreativeAmount, type GearRoll, type GearSpec, type ClassId, type MountView, type InspectView, type SocialAction, type SocialView, type TradeAct, type TradeView, type Menu, type MenuKind, type PartyAction, type PartyMemberView, type QuestLogJSON, type RecipeBook } from '@solrift/shared';
+import { QuestLog, type BossView, type DungeonView, type AttrKey, type AuctionCommand, type AuctionView, type StashCommand, type StashView, type ClassView, type Container, type CreativeAmount, type GearRoll, type GearSpec, type ClassId, type MountView, type InspectView, type SocialAction, type SocialView, type TradeAct, type TradeView, type Menu, type MenuKind, type PartyAction, type PartyMemberView, type QuestLogJSON, type RecipeBook } from '@solrift/shared';
 import type { ItemIcons } from '../game/icons';
 import type { MapData } from '../game/mapData';
 
@@ -178,6 +178,11 @@ export interface UiState {
   tradeAsk: string | null;
   /** The character's class state (null for a character without a class), and whether the class sheet (K) is open. */
   cls: ClassView | null;
+  /** The boss being fought (its health bar, phase and the spell it gathers), and the last thing it said or the raid was warned of. */
+  boss: BossView | null;
+  /** How far the player is in the dungeon they are in (the tracker under the quests); null outside one. */
+  dungeon: DungeonView | null;
+  bossLine: { text: string; kind: 'yell' | 'warn'; stamp: number } | null;
   /** The tab of the inventory window (E): the bags, the crafting grid, or the spellbook (K opens it there). */
   invTab: 'inventory' | 'crafting' | 'spells';
   /** A window drawn for the loading screen only, so that its first real opening paints nothing new (see warmWindows in main.ts). */
@@ -251,6 +256,9 @@ export const useUi = create<UiState>()(() => ({
   trade: null,
   tradeAsk: null,
   cls: null,
+  boss: null,
+  dungeon: null,
+  bossLine: null,
   invTab: 'inventory',
   warmMenu: null,
   mount: { mount: 0, pick: 0, cd: [0, 0] },
@@ -280,6 +288,8 @@ export const setQuests = (log: QuestLogJSON): void =>
 
 /** The session sent the party (or none) and who is inviting. */
 export const setParty = (members: PartyMemberView[], invite: string | null): void => useUi.setState({ party: members, partyInvite: invite });
+
+export const showBossLine = (text: string, kind: 'yell' | 'warn'): void => useUi.setState((s) => ({ bossLine: { text, kind, stamp: (s.bossLine?.stamp ?? 0) + 1 } }));
 
 export const showZone = (id: string): void => useUi.setState((s) => ({ zone: { id, stamp: (s.zone?.stamp ?? 0) + 1 } }));
 

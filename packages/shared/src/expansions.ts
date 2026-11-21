@@ -72,7 +72,7 @@ export const EXPANSIONS: readonly Expansion[] = [
     accent: '#ff7a2e',
     content: [
       { kind: 'zone', name: 'Dawnwatch and the Adventure mode', blurb: 'A village of quest givers where every adventurer starts.', playable: true },
-      { kind: 'dungeon', name: 'The Hollow Cellar', blurb: 'The first dungeon, behind the portal in the village chapel: a separate map made fresh for every player (level 5 and up), with three spawner cages.', playable: true },
+      { kind: 'dungeon', name: 'The Hollow Cellar', blurb: 'The first dungeon, behind the portal in the village chapel: a separate map made fresh for every player (level 5 and up): three cages that each let their pack out once, and at the end the Hollow King, a scripted boss with phases, telegraphed spells, a court of helpers and his own health bar.', playable: true },
       { kind: 'dungeon', name: 'The Cinderdeep', blurb: 'A party instance of burning halls and collapsing bridges.', playable: true },
       { kind: 'dungeon', name: 'Gloomhold Catacombs', blurb: 'Crypts guarded by the king\u2019s hollow knights.', playable: true },
       { kind: 'boss', name: 'Ashmaw, the Cinder Warden', blurb: 'Guards the gate of the Cinderdeep.', playable: true },

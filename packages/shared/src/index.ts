@@ -75,6 +75,8 @@ export * from './tuning';
 export * from './skillbooks';
 export * from './bags';
 export * from './abilityEffects';
+export * from './boss';
+export * from './dungeonView';
 export * from './organize';
 export * from './emberstone';
 export * from './gear';

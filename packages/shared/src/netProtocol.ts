@@ -9,6 +9,8 @@ import type { WeatherKind } from './weather';
 import { cleanCamera, parseSessionMessage, type ClassView, type Command, type SessionEvent, type SessionScreen } from './sessionProtocol';
 import { isClassId, type ClassId } from './classes';
 import type { Fx } from './abilityEffects';
+import type { BossView } from './boss';
+import type { DungeonView } from './dungeonView';
 import type { GearRoll } from './gear';
 import { isSocialAction, type ChatChannel, type SocialAction, type SocialView } from './social';
 
@@ -129,6 +131,8 @@ export interface SelfView {
   dead: boolean;
   /** Seconds of the Poison status effect left. Left out when there is none. */
   poison?: number;
+  /** How fast a monster's roots or slowness let you move (0 rooted, else the share of your speed). Left out when you are free: the client's own steps use it. */
+  mv?: number;
   /** Seconds of the Hunger sickness status effect left. Left out when there is none. */
   foodSick?: number;
   /** Experience level, and how full the bar is (0..1). */
@@ -167,6 +171,10 @@ export interface SelfView {
   mountCd?: [number, number];
   /** The class state, for a character that has a class (left out otherwise). */
   cls?: ClassView;
+  /** The boss this player is fighting, for the boss's own health bar (left out when not in a fight). */
+  boss?: BossView;
+  /** How far this player is in the dungeon they are in (its tracker; left out outside a dungeon). */
+  dungeon?: DungeonView;
 }
 
 export interface MenuView {
@@ -258,6 +266,9 @@ export interface MobView {
   fuse: number;
   /** Seconds since its melee swing, sent only while the swing is on screen (so it never costs a byte at rest). */
   atk?: number;
+  /** A boss gathering a spell (its arms are raised): sent only while it does. */
+  /** What a monster is in the middle of (a boss's spell: 1; the Hollow Deep's monsters use 1, 2 and 3 for their moves). Left out when nothing. */
+  cast?: number;
   /** Slime size (1, 2, 4). */
   size: number;
   /** Coat variant (rabbits). */

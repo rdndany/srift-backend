@@ -1,4 +1,4 @@
-import type { BobberDraw, Body, ClassView, Container, Fx, GearRoll, ItemStack, Menu, MobKind, SessionScreen, WeatherKind } from '@solrift/shared';
+import type { BobberDraw, BossView, DungeonView, Body, ClassView, Container, Fx, GearRoll, ItemStack, Menu, MobKind, SessionScreen, WeatherKind } from '@solrift/shared';
 import type { MountView, SaveMode } from '@solrift/shared';
 
 /** A mob as the renderer needs it. The shared `Mob` fits, and so does an interpolated network copy. */
@@ -12,6 +12,8 @@ export interface MobLike {
   hurtTime: number;
   /** Seconds since its melee swing (`ATTACK_ANIM` or more: not swinging). A mob that never reports it simply never swings. */
   attackTime?: number;
+  /** A boss gathering a spell: 1 while it winds up. */
+  casting?: number;
   dead: boolean;
   deathTime: number;
   burning: boolean;
@@ -162,6 +164,10 @@ export interface ClientSession {
   readonly fx: readonly Fx[];
   /** The character's class state for the interface, or null for a character without a class. */
   classView(): ClassView | null;
+  /** The boss being fought, for its health bar (null when not in a fight). */
+  bossView(): BossView | null;
+  /** How far the player is in the dungeon they are in, for its tracker (null outside one). */
+  dungeonView(): DungeonView | null;
   /** The mount ridden (1 + its place in MOUNTS, 0 on foot), the one the mount key summons (the same way) and a bit for each mount learned. */
   mountView(): MountView;
   eye(): { x: number; y: number; z: number };

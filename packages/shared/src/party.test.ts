@@ -4,12 +4,14 @@ import {
   DUNGEON_MIN_LEVEL,
   GameSession,
   HeadlessWorld,
+  I,
   INSTANCE_SLOTS,
   INSTANCE_STRIDE,
   MAX_PARTY,
   Player,
   Realm,
   makeGenerator,
+  makeStack,
   mulberry32,
   parseSessionMessage,
   totalForLevel,
@@ -30,6 +32,7 @@ function person(realm: Realm, name: string): Player {
   const p = new Player(realm, { mode: 'survival', name });
   p.finishLoading();
   p.xp.add(totalForLevel(DUNGEON_MIN_LEVEL));
+  p.inventory.collect(makeStack(I.HOLLOW_SIGIL, 2));
   return p;
 }
 

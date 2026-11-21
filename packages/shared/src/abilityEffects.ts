@@ -45,6 +45,9 @@ export type FxKind =
   | 'fang'
   | 'thunder_warn'
   | 'thunder_hit'
+  /** A boss's: the ground a spell is about to strike (a ring that fills as the spell comes), and the blast when it does (see boss.ts). */
+  | 'boss_warn'
+  | 'boss_blast'
   /** A player went up a level: a column of light stands round them (the client draws it on the player, which moves). */
   | 'level_up';
 

@@ -15,6 +15,7 @@ import {
   type MountId,
   type QuestEvent,
   type SaveMode,
+  type SessionEvent,
   type WorldKind,
   BEYOND_BIOMES,
   BeyondWorldGenerator,
@@ -25,6 +26,7 @@ import type { BeyondClient } from './beyondClient';
 import type { AdminBar } from './adminBar';
 import type { Atlas } from './atlas';
 import type { GameAudio } from './audio';
+import { RENDERABLE, renderDark } from './darkRender';
 import type { BookRenderer } from './bookRenderer';
 import type { ChaseCamera } from './chaseCamera';
 import type { Chat } from './chat';
@@ -99,6 +101,8 @@ export interface DebugParts {
   setPartyPins(party: { name: string; x: number; z: number }[]): void;
   /** Break your own body into cubes now (`variant` picks the way), and stay down for a while. */
   die(variant: number): void;
+  /** Hand events to the client as if the server had sent them (a `bossFx`, say). */
+  deliver(events: SessionEvent[]): void;
 }
 
 /**
@@ -197,6 +201,17 @@ export function installDebugHooks(parts: DebugParts): void {
       audio.resume();
       audio.play(kind, action, vol, pan);
     },
+    /** The dark ambience of the Hollow Deep: one sound by name (groan, whisper, scrape, rockfall, chains, drip, drip_lush, scream, breath, sting, glass, heartbeat, crackle). */
+    playAmbient: (name: string, o?: { depth?: number; az?: number; dist?: number }) => audio.debugDark('ambient', name, o),
+    /** The Hollow King's sounds: wake, yell, phase2, phase3, cast_<spell>, release_<spell> (slam, pillars, court, rain, unbound), step, swing, grunt, down. */
+    playBoss: (name: string, o?: { pan?: number; dist?: number }) => audio.debugDark('boss', name, o),
+    /** How many dark sounds are sounding, how many sources are held and how many have been made (to see that nothing leaks). */
+    darkStats: () => audio.darkStats(),
+    /** Render one dark sound off-line and measure it (peak, RMS, whether every voice was given back). */
+    renderDark: (kind: 'ambient' | 'boss', name: string, seconds?: number, depth?: number) => renderDark(kind, name, seconds, { depth }),
+    darkNames: () => ({ ambient: [...RENDERABLE.ambient], boss: [...RENDERABLE.boss] }),
+    /** Hand events to the client as if the server had sent them. */
+    deliver: (events: SessionEvent[]) => parts.deliver(events),
     stats: () => world.refreshStats(),
     /** How crowded the scene is and what it costs: draw calls of the last frame, how the other players are drawn. */
     crowd: () => ({ calls: parts.drawn().calls, triangles: parts.drawn().triangles, players: players.stats(), fps: parts.drawn().fps }),
@@ -412,6 +427,27 @@ export function installDebugHooks(parts: DebugParts): void {
         love: m.love ?? 0,
       })),
     clearMobs: () => L().clearMobs(),
+    /**
+     * Pins properties of a mob (casting: true, hurtTime: 0, yaw: 0, speedNow: 0 ... and pos: [x, y, z]) so that the game cannot change them,
+     * for pictures of a pose; holdMob(id) lets go. Debugging only.
+     */
+    holdMob: (id: number, flags?: Record<string, unknown>) => {
+      const m = session.mobs.mobs.find((mob) => mob.id === id) as unknown as Record<string, unknown> & { body: Record<string, number> } | undefined;
+      if (!m) return;
+      const pin = (o: Record<string, unknown>, key: string, value: unknown): void => {
+        Object.defineProperty(o, key, { get: () => value, set: () => undefined, configurable: true, enumerable: true });
+      };
+      const free = (o: Record<string, unknown>, key: string): void => {
+        const value = o[key];
+        Object.defineProperty(o, key, { value, writable: true, configurable: true, enumerable: true });
+      };
+      for (const key of ['yaw', 'speedNow', 'casting', 'hurtTime', 'attackTime', 'burning', 'walkPhase']) if (Object.getOwnPropertyDescriptor(m, key)?.get) free(m, key);
+      for (const key of ['x', 'y', 'z']) if (Object.getOwnPropertyDescriptor(m.body, key)?.get) free(m.body, key);
+      if (!flags) return;
+      const { pos, ...rest } = flags as { pos?: [number, number, number] };
+      for (const [key, value] of Object.entries(rest)) pin(m, key, value);
+      if (pos) (['x', 'y', 'z'] as const).forEach((key, i) => pin(m.body, key, pos[i]));
+    },    /** Talk to a villager by mob id, as a right-click does. */
     /** Talk to a villager by mob id, as a right-click does. */
     talkToMob: (id: number) => act(() => L().talkToMob(id)),
     /** The quest log as the client knows it (Adventure mode). */

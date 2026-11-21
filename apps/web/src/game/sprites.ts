@@ -543,6 +543,97 @@ function bagGrid(tier: number): Cell[] {
   return outline(g);
 }
 
+/** An icon drawn from rows of letters (a space or a dot is clear), each letter a colour of the palette. */
+function artGrid(rows: readonly string[], palette: Record<string, RGB>): Cell[] {
+  const g = blank();
+  rows.forEach((row, y) => {
+    for (let x = 0; x < N && x < row.length; x++) {
+      const c = palette[row[x]];
+      if (c) g[y * N + x] = c;
+    }
+  });
+  return g;
+}
+
+/** The Warden Scroll: a sheet of old parchment, rolled at both ends, crowded with ink and sealed in red wax. */
+function wardenScrollGrid(): Cell[] {
+  return outline(
+    artGrid(
+      [
+        '................',
+        '..KKKKKKKKKKKK..',
+        '.KPPPPPPPPPPPPK.',
+        '.KDKKKKKKKKKKDK.',
+        '..KPPPPPPPPPPK..',
+        '..KPIIIIPIIIPK..',
+        '..KPPPPPPPPPPK..',
+        '..KPIIPIIIIPPK..',
+        '..KPPPPRRPPPPK..',
+        '..KPIIIRrRIIPK..',
+        '..KPPPPRRPPPPK..',
+        '..KPIIIIPIIPPK..',
+        '..KPPPPPPPPPPK..',
+        '.KDKKKKKKKKKKDK.',
+        '.KPPPPPPPPPPPPK.',
+        '..KKKKKKKKKKKK..',
+      ],
+      { K: [150, 118, 76], P: [236, 218, 170], D: [188, 160, 112], I: [96, 66, 44], R: [186, 44, 40], r: [118, 22, 28] },
+    ),
+  );
+}
+
+/** The Hollow Bone: a long bone with a knob at each end, cracked, with an ember glowing in the cracks. */
+function hollowBoneGrid(): Cell[] {
+  const g = blank();
+  const light: RGB = [234, 228, 208];
+  const dark: RGB = [166, 156, 134];
+  const ember: RGB = [246, 130, 42];
+  const put = (x: number, y: number, c: RGB): void => {
+    if (x >= 0 && y >= 0 && x < N && y < N) g[y * N + x] = c;
+  };
+  for (let i = 0; i <= 8; i++) {
+    const x = 4 + i;
+    const y = 11 - i;
+    put(x, y, light);
+    put(x + 1, y, dark);
+    put(x, y - 1, light);
+  }
+  // The two knobs at the ends, each with a notch between its lobes.
+  for (const [cx, cy] of [[3, 12], [12, 3]] as const) {
+    for (const [dx, dy] of [[-1, 0], [0, 1], [-1, 1], [1, 0], [0, -1], [1, 1], [-1, -1], [1, -1], [0, 0]] as const) put(cx + dx, cy + dy, dx + dy > 0 ? dark : light);
+  }
+  put(2, 13, light);
+  put(13, 2, light);
+  put(1, 12, light);
+  put(14, 3, light);
+  // The glow in the cracks.
+  for (const [x, y] of [[7, 8], [8, 7], [9, 6], [10, 5]] as const) put(x, y, ember);
+  put(8, 8, shade(ember, 30));
+  return outline(g);
+}
+
+/** The Hollow Sigil: a disc of black iron on a ring, with an ember eye, the mark that the Hollow Cellar lets through. */
+function hollowSigilGrid(): Cell[] {
+  const g = blank();
+  const CX = 7.5;
+  const CY = 8.6;
+  fillShape(
+    g,
+    (x, y) => Math.hypot(x - CX, y - CY) <= 6.3,
+    (x, y) => {
+      const r = Math.hypot(x - CX, y - CY);
+      const d = Math.floor(hashPx(x, y) * 10) - 4;
+      if (r > 5.0) return shade([128, 130, 148], (x + y < 16 ? 16 : -22) + d);
+      const eye = Math.abs(x - CX) + Math.abs(y - CY);
+      if (eye <= 1.9) return [255, 220, 110];
+      if (eye <= 3.9) return [240, 118, 36];
+      return shade([44, 38, 58], d);
+    },
+  );
+  // The ring it hangs by.
+  for (const [x, y] of [[7, 0], [8, 0], [6, 1], [9, 1], [6, 2], [9, 2]] as const) g[y * N + x] = [176, 178, 194];
+  return outline(g);
+}
 /** The flame carved into the Emberstone (6 x 7 pixels): X is the ember, O its bright heart. */
 const EMBER_FLAME = ['..XX..', '.XXX..', '.XXXX.', 'XXOOXX', 'XXOOXX', '.XOOX.', '..XX..'] as const;
 
@@ -2982,6 +3073,9 @@ const BUILDERS: Record<string, () => Cell[]> = {
   cooked_salmon: () => salmonGrid(true),
   tropical_fish: tropicalFishGrid,
   pufferfish: pufferfishGrid,
+  warden_scroll: wardenScrollGrid,
+  hollow_bone: hollowBoneGrid,
+  hollow_sigil: hollowSigilGrid,
   coal: coalGrid,
   raw_iron: () => rawOreGrid([222, 170, 140]),
   raw_gold: () => rawOreGrid([250, 214, 56]),

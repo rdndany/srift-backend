@@ -53,7 +53,7 @@ import { Container, HOTBAR_SLOTS, PLAYER_SLOTS, cloneStack, makeStack, type Item
 import { I, PEARL_TRIP_DAMAGE, bagSlotsOf, bedItemColor, blockDrops, breakTime, canHarvest, dyeColor, getItem, harvestHint, holdsInOffhand, isUndroppable, mountOfItem, outfitItems, silkKeeps, skillBookAbility, usedOnBlock, type ItemDef, type ItemUse, type WeaponDef } from './items';
 import { AnvilMenu, ChestMenu, CraftingMenu, EnchantMenu, CreativeMenu, FurnaceMenu, GrindstoneMenu, TradeMenu, type Menu } from './menu';
 import { tooltipName } from './tooltip';
-import { ARMOR_STAND_POSES, ARROW_GRAVITY, WOOL_REGROW, arrowSpeed, rayAabb, type Mob, type MobKind, type MobManager } from './mobs';
+import { ARMOR_STAND_POSES, ARROW_GRAVITY, WOOL_REGROW, arrowSpeed, rayAabb, type Mob, type MobEffect, type MobEffects, type MobKind, type MobManager } from './mobs';
 import { growTree, isSapling } from './trees';
 import { PLAYER_EYE, bodyOverlapsBlock, collides, createBody, stepPlayer, type Body, type MoveInput } from './physics';
 
@@ -77,6 +77,8 @@ import type { WorldGenerator } from './worldgen';
 import { campfireFood } from './campfire';
 import { COOK_SECONDS } from './smelting';
 import { EXHAUSTION, Vitals } from './survival';
+import type { BossView } from './boss';
+import type { DungeonView } from './dungeonView';
 import type { ClassView, Command, InputFrame, SessionEvent, SessionScreen } from './sessionProtocol';
 import { MAX_COINS, stackSellPrice, shopOf } from './economy';
 import { AUCTIONEER, DEFAULT_AUCTION_QUERY, cleanQuery, depositFor, sellBlocker, type AuctionQuery } from './auction';
@@ -108,6 +110,9 @@ const MELEE_MARGIN = 0.15;
 const MELEE_LAG = 0.12;
 /** Fixed simulation step. */
 export const STEP = 1 / 60;
+/** How long a status from a monster's blow lasts when it does not say (poison: 7 s, 12 on hardcore), and how much of its damage a weakened player does. */
+const AFFLICT_SECONDS: Record<MobEffect, number> = { poison: 7, root: 1.6, slow: 3, weak: 6, burn: 4 };
+const WEAK_DAMAGE = 0.6;
 /** Chance that one use of an anvil wears it down a step. */
 export const ANVIL_WEAR_CHANCE = 0.12;
 /** Points of damage an ender pearl's trip costs. */
@@ -182,6 +187,14 @@ export function buildMove(f: InputFrame, flying: boolean, canSprint: boolean, no
     flyDown: flying && f.sneak,
     yaw: f.yaw,
   };
+}
+
+/** A rooted player (see `Player.rootTime`) neither walks nor jumps: the move of the frame is emptied. The server and the client's own prediction both do this. */
+export function rooted(move: MoveInput): void {
+  move.forward = 0;
+  move.strafe = 0;
+  move.jump = false;
+  move.sprint = false;
 }
 
 export interface PlayerOptions {
@@ -1547,7 +1560,34 @@ export class Player implements EffectOwner {
   foodSick = 0;
   private foodSickTick = 0;
 
-  hurtByMob(amount: number, kx: number, kz: number, source: MobKind | 'arrow', effect?: 'poison'): void {
+  /**
+   * Statuses a monster's blow can leave (see fflict): seconds of Root (no walking or jumping), of Slow (to slowMul of the speed) and of Weakness (the
+   * player's attacks do WEAK_DAMAGE of their damage). The client predicts its own steps with the move multiplier the snapshot carries (moveMul).
+   */
+  rootTime = 0;
+  slowTime = 0;
+  slowMul = 1;
+  weakTime = 0;
+
+  /** How fast the statuses let the player move now: 1 free, 0 rooted, else the slow's share. */
+  get moveMul(): number {
+    if (this.rootTime > 0) return 0;
+    return this.slowTime > 0 ? this.slowMul : 1;
+  }
+
+  /** Put a status on the player (not a creative player or a spectator, who are not touched by monsters): seconds of it, a slow to power of the speed. */
+  afflict(effect: MobEffect, seconds = AFFLICT_SECONDS[effect], power = 0.5): void {
+    if (this.invulnerable || this.vitals.dead || this.spectating || seconds <= 0) return;
+    if (effect === 'poison') this.poison = Math.max(this.poison, this.hardcore ? Math.round(((seconds * 12) / 7) * 100) / 100 : seconds);
+    else if (effect === 'root') this.rootTime = Math.max(this.rootTime, seconds);
+    else if (effect === 'slow') {
+      this.slowMul = this.slowTime > 0 ? Math.min(this.slowMul, power) : power;
+      this.slowTime = Math.max(this.slowTime, seconds);
+    } else if (effect === 'weak') this.weakTime = Math.max(this.weakTime, seconds);
+    else this.catchFire(seconds);
+  }
+
+  hurtByMob(amount: number, kx: number, kz: number, source: MobKind | 'arrow', effect?: MobEffects): void {
     if (this.invulnerable || this.vitals.dead) return;
     if (this.hardcore) amount *= HARD_DAMAGE;
     // The class's toughness, a guard ability or a roll in progress come first; a hit that is fully avoided does not even push.
@@ -1561,7 +1601,7 @@ export class Player implements EffectOwner {
     if (this.tryBlock(amount, kx, kz)) return;
     const before = this.vitals.health;
     this.vitals.damage(this.protect(this.afterArmor(amount), source === 'arrow' ? 'projectile' : 'all'), 'mob');
-    if (effect === 'poison' && this.mode === 'survival') this.poison = Math.max(this.poison, this.hardcore ? 12 : 7);
+    if (effect !== undefined && this.mode === 'survival') for (const e of typeof effect === 'string' ? [effect] : effect) this.afflict(e);
     if (this.vitals.health < before) {
       this.emit({ t: 'dmg', x: this.body.x, y: this.body.y + 1.2, z: this.body.z, amount: Math.round((before - this.vitals.health) * 10) / 10, taken: true, ...(this.cls && this.cls.reductionLeft > 0 ? { guarded: true } : {}) });
       this.wearArmor(amount);
@@ -1663,7 +1703,7 @@ export class Player implements EffectOwner {
       }
     } else this.stabs = 0;
     const base = blade ? (blade.kind === 'melee' ? blade.damage : 1) : tool ? tool.damage : 1;
-    const roll = rollDamage(this.cls?.stats ?? null, 'melee', (base + sharpnessBonus(levelOf(hs, ENCH.SHARPNESS))) * (combo ? 1.5 : 1), this.rand);
+    const roll = rollDamage(this.cls?.stats ?? null, 'melee', (base + sharpnessBonus(levelOf(hs, ENCH.SHARPNESS))) * (combo ? 1.5 : 1) * (this.weakTime > 0 ? WEAK_DAMAGE : 1), this.rand);
     const dealt = roll.amount;
     this.mobs.damage(mob, dealt, d.x, d.z, this.realm.mobEvents, true, true, true, {
       knock: 1 + levelOf(hs, ENCH.KNOCKBACK),
@@ -2151,7 +2191,7 @@ export class Player implements EffectOwner {
         // A crossbow bolt hits as hard as the weapon says (9 is a full bow); the class's ranged multiplier and crits come on top.
         const weapon = bow ? getItem(bow.id).weapon : null;
         const shot = weapon ? (arrow.damage * weapon.damage) / 9 : arrow.damage;
-        const roll = rollDamage(this.cls?.stats ?? null, 'ranged', shot, this.rand);
+        const roll = rollDamage(this.cls?.stats ?? null, 'ranged', shot * (this.weakTime > 0 ? WEAK_DAMAGE : 1), this.rand);
         arrow.damage = roll.amount;
         // Where it ends, the archer is told: a number and a mark over what it hit (a headshot counts as a critical hit), or the arrow stands in the wall.
         arrow.onHit = (a, mob, dealt, head) => {
@@ -2655,7 +2695,7 @@ export class Player implements EffectOwner {
    */
   strike(mob: Mob, base: number, kind: DamageKind, from: { x: number; z: number }, knock = 1, lift = 0): void {
     if (mob.dead || mob.def.invulnerable) return;
-    const roll = rollDamage(this.cls?.stats ?? null, kind, base, this.rand);
+    const roll = rollDamage(this.cls?.stats ?? null, kind, base * (this.weakTime > 0 ? WEAK_DAMAGE : 1), this.rand);
     this.mobs.damage(mob, roll.amount, mob.body.x - from.x, mob.body.z - from.z, this.realm.mobEvents, true, knock > 0, true, { knock, lift });
     this.showHit(mob, roll.amount, roll.crit);
   }
@@ -3082,6 +3122,15 @@ export class Player implements EffectOwner {
     // Its own sound for each (a wand zaps, a staff booms, a spellbook hums), heard by the players near.
     this.realm.emitNear(eye.x, eye.y, eye.z, { t: 'spell', weapon: itemId === I.STAFF ? 'staff' : itemId === I.SPELLBOOK ? 'spellbook' : 'wand', vol: 0.8 });
     this.emit({ t: 'swing' });
+  }
+
+  /** The boss this player is fighting (its health, phase and the spell it gathers), for its health bar; null when none. */
+  dungeonView(): DungeonView | null {
+    return this.realm.dungeonViewFor(this);
+  }
+
+  bossView(): BossView | null {
+    return this.realm.bossViewFor(this);
   }
 
   /** What a class player's interface shows (null without a class). */
@@ -3671,6 +3720,8 @@ export class Player implements EffectOwner {
     }
     this.vitals.respawn();
     this.onFire = 0;
+    this.poison = 0;
+    this.rootTime = this.slowTime = this.weakTime = 0;
     if (!this.respawnAtBed()) this.respawn();
     this.screen = 'none';
     this.lastHealth = this.vitals.health;
@@ -3855,8 +3906,15 @@ export class Player implements EffectOwner {
       this.poison = 0;
       this.foodSick = 0;
       this.onFire = 0;
+      this.rootTime = this.slowTime = this.weakTime = 0;
       return;
     }
+    if (this.rootTime > 0) this.rootTime = Math.max(0, this.rootTime - STEP);
+    if (this.slowTime > 0 && (this.slowTime -= STEP) <= 0) {
+      this.slowTime = 0;
+      this.slowMul = 1;
+    }
+    if (this.weakTime > 0) this.weakTime = Math.max(0, this.weakTime - STEP);
     if (this.poison > 0) {
       this.poison = Math.max(0, this.poison - STEP);
       this.poisonTick += STEP;
@@ -4031,7 +4089,9 @@ export class Player implements EffectOwner {
     const pz = b.z;
     // A mount runs at its own speed: no sprinting on it (and so no hunger), and no sneaking.
     const canSprint = (this.mode === 'creative' || this.vitals.hunger > 6) && !this.blocking && !this.mountId;
-    const move = buildMove(f, this.flying, canSprint, this.spectating, this.speedMul);
+    const move = buildMove(f, this.flying, canSprint, this.spectating, this.speedMul * (this.slowTime > 0 && this.rootTime <= 0 ? this.slowMul : 1));
+    // Rooted: no walking, no jumping (the roots hold the feet).
+    if (this.rootTime > 0 && !this.flying) rooted(move);
     if (this.mountId) {
       move.sneak = false;
       move.stepHeight = MOUNT_STEP_HEIGHT;
@@ -4040,6 +4100,8 @@ export class Player implements EffectOwner {
     // (the crouch before it does not hold the body: it keeps walking or running into the spring)
     if (this.slamLeap?.launched) move.accel = 0.5;
     if (this.rush) rushMove(move, this.rush.yaw, this.rush.speed, this.rush.stall > 0);
+    // Monsters and people are solid: the body is pushed out of whoever it walks into.
+    if (!this.flying && !this.spectating) move.solids = this.realm.solidsNear(b.x, b.y, b.z);
     const vyBefore = b.vy;
     const wasOnGround = b.onGround;
     stepPlayer(this.world.physicsReader, b, move, STEP);
@@ -4213,7 +4275,10 @@ export class Player implements EffectOwner {
     const log = this.quests!;
     if (this.dialogNpc) {
       const npc = npcById(this.dialogNpc);
-      if (!npc || Math.hypot(npc.x - this.body.x, npc.z - this.body.z) > DIALOG_RANGE) this.closeDialog();
+      // A dungeon's person stands in every copy: the one to measure to is the one in the copy being stood in.
+      const slot = npc?.dungeon ? this.generator.instanceAt(this.body.x, this.body.z) : -1;
+      const shift = slot > 0 ? (this.generator.instanceBounds(slot)?.z0 ?? 0) - (this.generator.instanceBounds(0)?.z0 ?? 0) : 0;
+      if (!npc || Math.hypot(npc.x - this.body.x, npc.z + shift - this.body.z) > DIALOG_RANGE) this.closeDialog();
     }
     this.questTimer += dt;
     if (this.questTimer < 0.25) return;
@@ -4270,6 +4335,8 @@ export class Player implements EffectOwner {
     if (c.a === 'accept') {
       if (talking !== q.giver || !log.accept(q.id)) return;
       this.emit({ t: 'quest', what: 'accept', text: `Quest accepted: ${q.name}` });
+      for (const it of q.give ?? []) this.collectOrDrop(makeStack(it.id, it.count));
+      if (q.give?.length) this.emit({ t: 'inv' });
       this.noteQuests(log.sync((items) => items.reduce((n, id) => n + this.inventory.countOf(id), 0)));
       // A place you are standing in already counts for a quest that asks you to go there.
       if (this.zoneId) this.questEvent({ t: 'enter', zone: this.zoneId });

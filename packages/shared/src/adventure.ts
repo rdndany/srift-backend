@@ -1,4 +1,4 @@
-import { B, IS_LIQUID, IS_SOLID, LEAF_BLOCKS, LOG_BLOCKS, bedId, doorId, slabId, stairId, woolId } from './blocks';
+import { B, DRESS, IS_LIQUID, IS_SOLID, LEAF_BLOCKS, LOG_BLOCKS, bedId, doorId, slabId, stairId, woolId } from './blocks';
 import { CHUNK_SIZE, SEA_LEVEL, WORLD_HEIGHT, blockIndex } from './chunk';
 import type { LootTableName } from './loot';
 import type { MobKind } from './mobs';
@@ -8,7 +8,9 @@ import { Lot, auctionHouse, farm, house, lampPost, stall, stashHouse, styleFor, 
 import { banner, bench, cart, crates, fencedRing, flowerGarden, fountain, hayBale, obelisk, shelter, tree } from './villageDecor';
 import { buildWall } from './villageWall';
 import { GREYKEEP, buildCastle } from './castle';
-import { WorldGenerator, type Column, type InstanceRequirement } from './worldgen';
+import { I } from './items';
+import { DEEP_U, DEEP_V, DEEP_V0, buildHollowDeep, type DeepModel } from './hollowDeep';
+import { WorldGenerator, type Column, type InstanceBoss, type InstanceGate, type InstanceMob, type InstanceRequirement } from './worldgen';
 
 /**
  * The world of the Adventure mode. It is the ordinary generated world with two made places set into it
@@ -19,9 +21,11 @@ import { WorldGenerator, type Column, type InstanceRequirement } from './worldge
  *    character wakes, with a stair up to the village;
  *  - Greykeep, a castle on the flat ground north of the village, gate toward the road;
  *  - the Hollow Cellar, a dungeon a little way east along a gravel road: a ruined chapel on the surface with a
- *    portal in it. The dungeon itself is not under the chapel but in a separate map, far from the land: three
- *    rooms, each with a monster cage, and a vault of treasure at the back. Every player gets a copy of their own
- *    (an "instance", see `instanceAt`), so nobody waits for anybody and nobody can spoil it for anyone.
+ *    portal in it. The dungeon itself is not under the chapel but in a separate map, far from the land: a gatehall
+ *    with a warden in it, a great nave with a wing of rooms to each side, a court and an armoury behind an iron gate,
+ *    and the Hollow King's throne hall behind another. Its monsters stand where they were put; three cages are the
+ *    locks of its gates. Every player gets a copy of their own (an "instance", see `instanceAt`), so nobody waits for
+ *    anybody and nobody can spoil it for anyone.
  *
  * Like all generation this is a pure function of the seed (the mode uses `ADVENTURE_SEED`), so the client,
  * the server and the tests all see the same places.
@@ -91,8 +95,8 @@ export const DUNGEON_MIN_LEVEL = 5;
  */
 export const INSTANCE_X0 = 4096;
 export const INSTANCE_Z0 = 4096;
-export const INSTANCE_LENGTH = 64;
-export const INSTANCE_STRIDE = 48;
+export const INSTANCE_LENGTH = DEEP_U;
+export const INSTANCE_STRIDE = DEEP_V;
 export const INSTANCE_SLOTS = 48;
 
 /** The ground a dungeon copy covers (x0..x1, z0..z1, inclusive) when (x, z) is inside one; every copy has the same shape, INSTANCE_STRIDE blocks apart. */
@@ -105,8 +109,8 @@ export function instanceFootprint(x: number, z: number): { x0: number; z0: numbe
   const z0 = INSTANCE_Z0 + slot * INSTANCE_STRIDE;
   return { x0: INSTANCE_X0, z0, x1: INSTANCE_X0 + INSTANCE_LENGTH - 1, z1: z0 + INSTANCE_STRIDE - 1 };
 }
-/** The floor of the rooms. */
-export const INSTANCE_FLOOR = 60;
+/** The floor of the camp at the top of the dungeon (the caves go down from it). */
+export const INSTANCE_FLOOR = 150;
 /** The portal in the chapel stands here (its centre), facing along x. */
 const PORTAL_X = DUNGEON_X;
 
@@ -157,25 +161,18 @@ export class AdventureWorldGenerator extends WorldGenerator {
   readonly ruinY: number;
   /** The floor of the Undercroft (the block under your feet). */
   readonly undercroftY: number;
-  /** The floor of the dungeon rooms. */
+  /** The floor of the dungeon's camp, at the top of the caves. */
   readonly cellarY = INSTANCE_FLOOR;
-  /** Where the first room starts (x), and where the last one ends. The first copy of the dungeon is described; the others are shifted in z. */
-  readonly roomX = INSTANCE_X0 + 4;
-  readonly cellarEnd = INSTANCE_X0 + 55;
-  /** The middle of the first copy, along z. */
-  readonly roomZ = INSTANCE_Z0 + INSTANCE_STRIDE / 2;
-  /** Where the monster cages of the first copy are. */
-  readonly cages: readonly { x: number; y: number; z: number }[];
+  /** The middle of the first copy, along z (the copies are this shifted by `INSTANCE_STRIDE`). */
+  readonly roomZ = INSTANCE_Z0 - DEEP_V0;
+  /** The first copy of the dungeon, a cave system (see hollowDeep.ts). */
+  readonly deep: DeepModel;
   private readonly plots: Plot[];
   private readonly paint = new Map<string, number>();
   private readonly voxels = new Map<string, number[]>();
   private readonly ops: Op[] = [];
   /** Greykeep's ops, kept in order and by chunk: the castle is thousands of boxes, and most chunks touch none of them. */
   private readonly castleOps = new Map<string, Op[]>();
-  /** What the dungeon is made of (for the first copy). */
-  private readonly instanceOps: Op[] = [];
-  /** Where `box` writes: the land, or the dungeon while it is being planned. */
-  private sink: Op[] = this.ops;
   private readonly chests = new Map<string, LootTableName>();
 
   /** How far the land under this world is slid: the village stands where the generated land is good, not at the origin. */
@@ -210,21 +207,15 @@ export class AdventureWorldGenerator extends WorldGenerator {
       { cx: 0, cz: -78, half: 32, skirt: 8, g: this.hubY, air: 48 },
     ];
 
-    this.cages = [
-      { x: this.roomX + 5, y: this.cellarY + 1, z: this.roomZ },
-      { x: this.roomX + 25, y: this.cellarY + 1, z: this.roomZ },
-      { x: this.roomX + 45, y: this.cellarY + 1, z: this.roomZ },
-    ];
-
     this.buildVillage();
     this.buildGreykeep();
     this.buildCellarHouse();
     this.buildUndercroft();
     this.scatterGreens();
     this.buildRuin();
-    this.sink = this.instanceOps;
-    this.buildCellar();
-    this.sink = this.ops;
+    // The dungeon: a cave system, built once and copied into every instance's chunks.
+    this.deep = buildHollowDeep(seed, INSTANCE_FLOOR);
+    for (const c of this.deep.chests) this.chests.set(`${INSTANCE_X0 + c.u},${c.y},${this.roomZ + c.v}`, c.table);
   }
 
   // ---- the world --------------------------------------------------------------------------------
@@ -285,7 +276,12 @@ export class AdventureWorldGenerator extends WorldGenerator {
   }
 
   override npcStations(): readonly NpcStation[] {
-    return NPCS.map((npc, index) => ({ npc, index, x: npc.x, y: (npc.cellar ? this.undercroftY : this.hubY) + 1, z: npc.z }));
+    const made = NPCS.flatMap((npc, index): NpcStation[] => (npc.dungeon ? [] : [{ npc, index, x: npc.x, y: (npc.cellar ? this.undercroftY : this.hubY) + 1, z: npc.z }]));
+    // A dungeon's person stands in every copy of it, at the same spot.
+    const inCopies = NPCS.flatMap((npc, index): NpcStation[] =>
+      npc.dungeon ? Array.from({ length: INSTANCE_SLOTS }, (_, slot) => ({ npc, index, key: 1000 + index * INSTANCE_SLOTS + slot, x: npc.x, y: this.cellarY + 1, z: npc.z + slot * INSTANCE_STRIDE })) : [],
+    );
+    return [...made, ...inCopies];
   }
 
   override dummyStations(): readonly DummyStation[] {
@@ -332,15 +328,16 @@ export class AdventureWorldGenerator extends WorldGenerator {
     return x >= GREYKEEP.x0 - margin && x <= GREYKEEP.x1 + margin && z >= GREYKEEP.z0 - margin && z <= GREYKEEP.z1 + margin;
   }
 
-  /** The Hollow Cellar is not for beginners. */
+  /** The Hollow Cellar is not for beginners, and its portal opens only for a Hollow Sigil (a Warden Scroll joined to a Hollow Bone), which a new copy uses up. */
   override instanceRequirement(): InstanceRequirement {
-    return { name: 'The Hollow Cellar', level: DUNGEON_MIN_LEVEL };
+    return { name: 'The Hollow Cellar', level: DUNGEON_MIN_LEVEL, item: I.HOLLOW_SIGIL, consume: true };
   }
 
-  /** The gatehall, two steps in front of the way out, facing the rooms (+x). */
+  /** The camp at the top of the caves, a few steps in front of the way out, facing the caves (+x). */
   override instanceEntry(slot: number): { x: number; y: number; z: number; yaw: number } | null {
     if (!(slot >= 0 && slot < INSTANCE_SLOTS)) return null;
-    return { x: this.roomX + 2.5, y: this.cellarY + 1, z: this.roomZ + slot * INSTANCE_STRIDE + 0.5, yaw: -Math.PI / 2 };
+    const e = this.deep.entry;
+    return { x: INSTANCE_X0 + e.u + 0.5, y: e.y, z: this.roomZ + slot * INSTANCE_STRIDE + e.v + 0.5, yaw: e.yaw };
   }
 
   /** Just outside the chapel's portal, facing back down the road (-x). */
@@ -348,29 +345,61 @@ export class AdventureWorldGenerator extends WorldGenerator {
     return { x: PORTAL_X - 3.5, y: this.ruinY + 1, z: DUNGEON_Z + 0.5, yaw: Math.PI / 2 };
   }
 
-  /** The cages of a copy. */
+  /** The Hollow King waits in the Molten Heart, the lowest cavern, in front of his obsidian throne, facing the way in (+x). */
+  override instanceBoss(slot: number): InstanceBoss | null {
+    if (!(slot >= 0 && slot < INSTANCE_SLOTS)) return null;
+    const dz = this.roomZ + slot * INSTANCE_STRIDE;
+    const b = this.deep.boss;
+    const a = this.deep.arena;
+    const e = this.deep.exitPortal;
+    return { x: INSTANCE_X0 + b.u + 0.5, y: b.y, z: dz + b.v + 0.5, yaw: b.yaw, arena: { x0: INSTANCE_X0 + a.u0, z0: dz + a.v0, x1: INSTANCE_X0 + a.u1, z1: dz + a.v1 }, exit: { x: INSTANCE_X0 + e.u, y: e.y, z: dz + e.v } };
+  }
+
+  /** The cages of a copy (the cage blocks stand on the floor of a grotto each). */
   instanceCages(slot: number): { x: number; y: number; z: number }[] {
-    return this.cages.map((c) => ({ x: c.x, y: c.y, z: c.z + slot * INSTANCE_STRIDE }));
+    return this.deep.cages.map((c) => ({ x: INSTANCE_X0 + c.u, y: c.y, z: this.roomZ + slot * INSTANCE_STRIDE + c.v }));
   }
 
-  /** The gatehall's cage makes the dead, the crypt's the bones, and the vault's both. */
+  /** The cages of a copy make nothing: they are locks (see `instanceGates`). */
   override spawnerAt(x: number, y: number, z: number): MobKind | null {
-    const slot = this.instanceAt(x, z);
-    if (slot < 0) return super.spawnerAt(x, y, z);
-    const i = this.instanceCages(slot).findIndex((c) => c.x === Math.floor(x) && c.y === Math.floor(y) && c.z === Math.floor(z));
-    return i < 0 ? null : (['zombie', 'skeleton', i % 2 === 0 ? 'zombie' : 'skeleton'] as const)[i];
+    return this.instanceAt(x, z) < 0 ? super.spawnerAt(x, y, z) : null;
   }
 
-  /** One copy of the dungeon: solid rock all the way up, and the rooms cut in it. */
+  /** The dungeon's monsters, each put at its post, one or two of a kind and a few strong ones (elites) by the cages. They stand until they see somebody (see `Mob.guard`). */
+  override instanceMobs(slot: number): readonly InstanceMob[] {
+    if (!(slot >= 0 && slot < INSTANCE_SLOTS)) return [];
+    const dz = this.roomZ + slot * INSTANCE_STRIDE;
+    return this.deep.posts.map((p) => ({
+      kind: p.kind,
+      x: INSTANCE_X0 + p.u + 0.5,
+      y: p.y,
+      z: dz + p.v + 0.5,
+      yaw: hash2(this.seed + 63, p.u, p.v) * Math.PI * 2,
+      ...(p.elite ? { elite: p.elite } : {}),
+    }));
+  }
+
+  /** Two iron gates, straight corridors of the caves: the first under the lush cave (shut until the first two cages are broken) and the second before the Molten Heart (until the third is). */
+  override instanceGates(slot: number): readonly InstanceGate[] {
+    if (!(slot >= 0 && slot < INSTANCE_SLOTS)) return [];
+    const dz = this.roomZ + slot * INSTANCE_STRIDE;
+    const cages = this.instanceCages(slot);
+    return this.deep.gates.map((g) => ({
+      id: g.id,
+      name: g.name,
+      cages: g.cages.map((i) => cages[i]),
+      boxes: [{ x0: INSTANCE_X0 + g.u, x1: INSTANCE_X0 + g.u, y0: g.y0, y1: g.y1, z0: dz + g.v0, z1: dz + g.v1 }],
+    }));
+  }
+
+  /** One copy of the dungeon: solid rock all the way up, and the caves cut in it. */
   private instanceChunk(slot: number, ox: number, oz: number): Uint16Array {
     const blocks = new Uint16Array(CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT);
     blocks.fill(B.STONE, blockIndex(0, 1, 0));
     blocks.fill(B.BEDROCK, 0, blockIndex(0, 1, 0));
-    const dz = slot * INSTANCE_STRIDE;
-    for (const op of this.instanceOps) this.write(blocks, dz === 0 ? op : { ...op, z0: op.z0 + dz, z1: op.z1 + dz }, ox, oz);
+    this.deep.fillChunk(blocks, ox, oz, INSTANCE_X0, INSTANCE_Z0 + slot * INSTANCE_STRIDE, blockIndex);
     return blocks;
   }
-
   /**
    * What players may not change: the whole of Dawnwatch (from bedrock to sky, so nobody digs a hole under a quest
    * giver or tunnels below the houses), the chapel ruin, and the Hollow Cellar with its stairs. Like a WoW town,
@@ -385,8 +414,10 @@ export class AdventureWorldGenerator extends WorldGenerator {
     if (bx >= GREYKEEP.x0 && bx <= GREYKEEP.x1 && bz >= GREYKEEP.z0 && bz <= GREYKEEP.z1) return true;
     // The chapel: its ring and the portal in it, from bedrock to sky.
     if (Math.abs(bx - DUNGEON_X) <= RUIN_HALF && Math.abs(bz - DUNGEON_Z) <= RUIN_HALF) return true;
-    // Every copy of the dungeon, whole.
-    return by >= 0 && this.instanceAt(bx, bz) >= 0;
+    // The dungeon is free to dig and build in (its walls and seals are bedrock): only the bars of its gates and the portal back stay.
+    const slot = this.instanceAt(bx, bz);
+    if (slot < 0) return false;
+    return this.deep.protectedAt(bx - INSTANCE_X0, by, bz - (INSTANCE_Z0 + slot * INSTANCE_STRIDE - DEEP_V0));
   }
 
   override lootAt(x: number, y: number, z: number): LootTableName | null {
@@ -477,7 +508,7 @@ export class AdventureWorldGenerator extends WorldGenerator {
   // ---- plans ------------------------------------------------------------------------------------
 
   private box(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, id: number, mode: OpMode = 'set'): void {
-    this.sink.push({ x0: Math.min(x0, x1), y0: Math.min(y0, y1), z0: Math.min(z0, z1), x1: Math.max(x0, x1), y1: Math.max(y0, y1), z1: Math.max(z0, z1), id, mode });
+    this.ops.push({ x0: Math.min(x0, x1), y0: Math.min(y0, y1), z0: Math.min(z0, z1), x1: Math.max(x0, x1), y1: Math.max(y0, y1), z1: Math.max(z0, z1), id, mode });
   }
 
   private chest(x: number, y: number, z: number, table: LootTableName): void {
@@ -1013,76 +1044,5 @@ export class AdventureWorldGenerator extends WorldGenerator {
       put(cx, 4, cz + dz, B.OBSIDIAN);
     }
     for (const dz of [-3, 3]) put(cx - 1, 1, cz + dz, B.TORCH);
-  }
-
-  /**
-   * The Hollow Cellar (the first copy of it; the others are this shifted along z): a gatehall with the way out in its
-   * west wall, a crypt and a vault, joined by passages, all cut in solid rock.
-   */
-  private buildCellar(): void {
-    const fy = this.cellarY;
-    const z = this.roomZ;
-    const rx = this.roomX;
-
-    const room = (x0: number, x1: number, hz: number, floor: (x: number, zz: number) => number): void => {
-      this.box(x0 - 1, fy - 1, z - hz - 1, x1 + 1, fy + 7, z + hz + 1, B.STONE_BRICKS, 'set');
-      this.box(x0, fy + 1, z - hz, x1, fy + 5, z + hz, B.AIR);
-      for (let zz = z - hz; zz <= z + hz; zz++) for (let x = x0; x <= x1; x++) this.box(x, fy, zz, x, fy, zz, floor(x, zz));
-    };
-    const mossy = (x: number, zz: number): number => {
-      const r = hash2(this.seed + 60, x, zz);
-      return r < 0.45 ? B.MOSSY_COBBLE : r < 0.75 ? B.COBBLE : B.STONE_BRICKS;
-    };
-    const pillar = (x: number, zz: number, tall: number): void => {
-      this.box(x, fy + 1, zz, x, fy + tall, zz, B.STONE_BRICKS);
-    };
-    const lamp = (x: number, zz: number): void => {
-      this.box(x, fy + 1, zz, x, fy + 1, zz, B.COBBLE);
-      this.box(x, fy + 2, zz, x, fy + 2, zz, B.TORCH);
-    };
-    const passage = (x0: number, x1: number): void => {
-      this.box(x0, fy - 1, z - 2, x1, fy + 6, z + 2, B.STONE_BRICKS, 'set');
-      this.box(x0, fy + 1, z - 1, x1, fy + 4, z + 1, B.AIR);
-      this.box(x0, fy, z - 1, x1, fy, z + 1, B.COBBLE);
-    };
-    const cage = (i: number): void => {
-      const c = this.cages[i];
-      this.box(c.x, c.y, c.z, c.x, c.y, c.z, B.SPAWNER);
-    };
-
-    // The gatehall.
-    room(rx, rx + 10, 5, mossy);
-    lamp(rx + 1, z - 4);
-    lamp(rx + 1, z + 4);
-    lamp(rx + 9, z - 4);
-    lamp(rx + 9, z + 4);
-    cage(0);
-    this.chest(rx + 9, fy + 1, z - 3, 'dungeon');
-    // The crypt: pillars, and a cage in the middle.
-    const bx = rx + 19;
-    room(bx, bx + 12, 6, mossy);
-    for (const dx of [3, 9]) for (const dz of [-3, 3]) pillar(bx + dx, z + dz, 5);
-    lamp(bx + 1, z - 5);
-    lamp(bx + 1, z + 5);
-    lamp(bx + 11, z - 5);
-    lamp(bx + 11, z + 5);
-    cage(1);
-    this.chest(bx + 11, fy + 1, z + 5, 'dungeon');
-    // The vault: a cage, and the treasure at the back.
-    const cx = bx + 21;
-    room(cx, cx + 10, 5, (x, zz) => (Math.abs(zz - z) <= 1 && x >= cx + 7 ? B.STONE_BRICKS : mossy(x, zz)));
-    lamp(cx + 1, z - 4);
-    lamp(cx + 1, z + 4);
-    cage(2);
-    this.chest(cx + 9, fy + 1, z - 1, 'temple');
-    this.chest(cx + 9, fy + 1, z + 1, 'temple');
-    // The passages between the rooms (cut last, so that a room's wall does not close them).
-    passage(rx + 11, rx + 18);
-    passage(bx + 13, bx + 20);
-    // The way out: a portal in the west wall of the gatehall, in a frame of obsidian, with a torch on each side.
-    this.box(rx - 1, fy, z - 2, rx - 1, fy + 4, z + 2, B.OBSIDIAN);
-    this.box(rx - 1, fy + 1, z - 1, rx - 1, fy + 3, z + 1, B.PORTAL);
-    lamp(rx, z - 3);
-    lamp(rx, z + 3);
   }
 }

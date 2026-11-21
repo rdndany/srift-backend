@@ -49,6 +49,8 @@ shaped(I.BUCKET, 1, ['I I', ' I '], { I: I.IRON_INGOT });
 // Four iron ingots round a pinch of redstone: the needle finds north, as in the original.
 shaped(I.COMPASS, 1, [' I ', 'IRI', ' I '], { I: I.IRON_INGOT, R: I.REDSTONE });
 shapeless(I.FLINT_AND_STEEL, 1, [I.IRON_INGOT, I.FLINT]);
+// The key of the Hollow Cellar, as the Cloak of Invisibility was made in Blood Castle: two pieces, joined.
+shapeless(I.HOLLOW_SIGIL, 1, [I.WARDEN_SCROLL, I.HOLLOW_BONE]);
 // Six planks round an iron ingot, as in the original.
 shaped(I.SHIELD, 1, ['PIP', 'PPP', ' P '], { P: B.PLANKS, I: I.IRON_INGOT });
 // Class weapons (anyone may make and carry them; see classes.ts).

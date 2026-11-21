@@ -292,6 +292,12 @@ const JEWEL_DROP_CHANCE: Partial<Record<MobKind, number>> = {
   cave_spider: 0.012,
   creeper: 0.014,
   enderman: 0.06,
+  moss_lurker: 0.03,
+  spore_puff: 0.008,
+  ember_wraith: 0.04,
+  ashen_knight: 0.06,
+  hollow_priest: 0.09,
+  shade: 0.035,
 };
 
 /** How likely each jewel is to be the one that drops: Dawn is common, Bloom rare. */

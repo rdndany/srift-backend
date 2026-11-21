@@ -10,6 +10,8 @@ export interface AmbientEnv {
   day: number;
   /** 0..1 rain intensity. */
   rain: number;
+  /** In the Hollow Deep: its own dark ambience (dungeonAmbience.ts) takes over, so the music, the birds and the cave drones are left out. */
+  dungeon?: boolean;
 }
 
 const ROOTS = [48, 50, 53, 55, 57]; // C2 D2 F2 G2 A2 (midi)
@@ -75,9 +77,9 @@ export class Ambience {
   }
 
   update(dt: number, env: AmbientEnv): void {
-    this.music.gain.setTargetAtTime(0.3 * this.musicVolume, this.ctx.currentTime, 0.2);
+    this.music.gain.setTargetAtTime(env.dungeon ? 0 : 0.3 * this.musicVolume, this.ctx.currentTime, 0.2);
 
-    if (this.musicVolume > 0.01 && !this.musicPlaying) {
+    if (this.musicVolume > 0.01 && !this.musicPlaying && !env.dungeon) {
       this.nextMusic -= dt;
       if (this.nextMusic <= 0) {
         this.nextMusic = rnd(70, 200);
@@ -85,7 +87,7 @@ export class Ambience {
       }
     }
 
-    if (!env.underground && env.day > 0.55 && env.rain < 0.1) {
+    if (!env.underground && !env.dungeon && env.day > 0.55 && env.rain < 0.1) {
       this.nextBird -= dt;
       if (this.nextBird <= 0) {
         this.nextBird = rnd(6, 20);
@@ -93,7 +95,7 @@ export class Ambience {
       }
     }
 
-    if (env.underground) {
+    if (env.underground && !env.dungeon) {
       this.nextCave -= dt;
       if (this.nextCave <= 0) {
         this.nextCave = rnd(40, 110);

@@ -240,7 +240,7 @@ function RealmAbout() {
       <summary>Embers of the Hollow King &middot; preview</summary>
       <div id="adventure-about">
         <p>
-          You wake with nothing in a cave under the village of Dawnwatch. Climb out, meet {NPCS.length} villagers, take up {QUESTS.length} quests that teach you the whole game, and clear the Hollow Cellar together.
+          You wake with nothing in a cave under the village of Dawnwatch. Climb out, meet {NPCS.filter((n) => !n.dungeon).length} villagers, take up {QUESTS.length} quests that teach you the whole game, and clear the Hollow Cellar together.
         </p>
         <ul>
           <li>Quest givers, a quest log (L) and a tracker</li>
@@ -641,7 +641,7 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
             </span>
           ))}
         </div>
-        <p>SolRift</p>
+        <img className="gp-loading-logo" src="/art/solrift-logo.png" alt="SolRift" draggable={false} />
         <i className="gp-loading-bar" aria-hidden="true">
           <b />
         </i>
@@ -651,11 +651,9 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
       <ClickSparks />
 
       <div className="fp-rail" data-no-play>
-        <header className="fp-nav fp-px">
-          <button className="fp-brand" onClick={home} aria-label="SolRift, to the front page">
-            <ItemSprite id={toolId('sword', 'diamond')} size={28} />
-            <span>SolRift</span>
-          </button>
+        <button className="fp-brand" onClick={home} aria-label="SolRift, to the front page"><img src="/art/solrift-token-logo.png" alt="SolRift" draggable={false} /></button>
+          <header className="fp-nav fp-px">
+          <span className="fp-brand-gap" aria-hidden="true" />
           <nav className="site-nav fp-links" aria-label="Menu">
             <button className="fp-link-play" aria-current="page">
               Play

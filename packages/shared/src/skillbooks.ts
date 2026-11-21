@@ -29,6 +29,12 @@ const BOOK_DROP_CHANCE: Partial<Record<MobKind, number>> = {
   cave_spider: 0.05,
   creeper: 0.08,
   enderman: 0.25,
+  moss_lurker: 0.12,
+  spore_puff: 0.03,
+  ember_wraith: 0.15,
+  ashen_knight: 0.2,
+  hollow_priest: 0.3,
+  shade: 0.14,
 };
 
 /** The chance a kill of this kind drops a book (before choosing which). */

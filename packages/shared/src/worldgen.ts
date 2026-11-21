@@ -96,6 +96,38 @@ export const LAVA_LEVEL = 10;
 /** How far outside a monster-free place (a village) no monster is born. */
 export const SAFE_BUFFER = 24;
 
+/** The boss of a dungeon copy: where it stands (and returns to after a wipe), which way it faces, and the room it fights in (x0..x1, z0..z1 inclusive). */
+export interface InstanceBoss {
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  arena: { x0: number; z0: number; x1: number; z1: number };
+  /** Where a portal out opens when the boss has fallen: the air block over the floor in the middle of the frame (the frame runs along z). */
+  exit?: { x: number; y: number; z: number };
+}
+
+/** A monster that stands in a dungeon copy from the moment it is opened (not made by a cage, and never made again). */
+export interface InstanceMob {
+  kind: MobKind;
+  x: number;
+  y: number;
+  z: number;
+  /** Which way it faces at its post. */
+  yaw: number;
+  /** A strong one: its health and blows are this many times those of its kind (it also leaves a piece of gear). */
+  elite?: number;
+}
+
+/** A way through a dungeon that is shut until its cages are broken: the blocks that shut it (boxes, inclusive) and the cages that hold it. */
+export interface InstanceGate {
+  id: string;
+  /** What the players are told when it opens. */
+  name: string;
+  cages: readonly { x: number; y: number; z: number }[];
+  boxes: readonly { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number }[];
+}
+
 /** What a dungeon asks of whoever walks into its portal. */
 export interface InstanceRequirement {
   /** The dungeon's name, for the messages. */
@@ -417,6 +449,21 @@ export class WorldGenerator {
   /** The region of the world a copy takes up, as block coordinates (x1, z1 and y1 are inclusive). */
   instanceBounds(_slot: number): { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number } | null {
     return null;
+  }
+
+  /** The boss that waits in a copy (see boss.ts), or null when it has none. */
+  instanceBoss(_slot: number): InstanceBoss | null {
+    return null;
+  }
+
+  /** The monsters that stand in a copy when it is opened, each at its post. */
+  instanceMobs(_slot: number): readonly InstanceMob[] {
+    return [];
+  }
+
+  /** The gates of a copy, shut until their cages are broken. */
+  instanceGates(_slot: number): readonly InstanceGate[] {
+    return [];
   }
 
   /** What a monster cage makes (the cages of a copy are all told apart here); null leaves it to the usual rules. */

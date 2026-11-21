@@ -150,11 +150,24 @@ export type SessionMessage = InputFrame | Command;
 
 export type MobSound = 'say' | 'hurt' | 'death' | 'hiss' | 'shoot' | 'teleport' | 'yes' | 'no';
 
+/** What a boss fight makes a sound of (see the `bossFx` event) and the spells a boss may wind up. */
+export type BossFxKind = 'wake' | 'cast' | 'release' | 'phase' | 'down' | 'step' | 'swing';
+export type BossSpell = 'slam' | 'pillars' | 'court' | 'rain' | 'unbound';
+/** A `bossFx` event without its tag: what a boss's script hands the realm to send. */
+export type BossFx = Omit<Extract<SessionEvent, { t: 'bossFx' }>, 't'>;
+
 /** What happened, for the client to show and hear. The session never touches graphics or audio. */
 export type SessionEvent =
   /** Inventory, menu or furnace contents changed: re-read them. */
   | { t: 'inv' }
   | { t: 'toast'; text: string }
+  /** A boss speaks (yell, in its own voice) or the fight is announced (warn): shown across the screen to everybody in its room. */
+  | { t: 'boss'; text: string; kind: 'yell' | 'warn' }
+  /**
+   * The sound of a boss fight, for everybody in the copy (the client works the loudness out from where it stands). `wake`: he rises; `cast`: `spell` begins to wind up (`seconds` long); `release`: it lands (at x,y,z);
+   * `phase`: the next phase (`phase`) begins; `down`: he has fallen; `step`: a stride; `swing`: a melee blow.
+   */
+  | { t: 'bossFx'; what: BossFxKind; spell?: BossSpell; phase?: number; seconds?: number; x?: number; y?: number; z?: number }
   | { t: 'sound'; sound: SoundKind; action: 'break' | 'place' | 'step' | 'hit' | 'land' | 'jump'; vol: number; x?: number; y?: number; z?: number }
   /** Chips of a block's own texture. `soft` is the short puff of placing one; without it, the block has broken. */
   | { t: 'burst'; id: number; x: number; y: number; z: number; count: number; soft?: boolean }

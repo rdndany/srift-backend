@@ -6,6 +6,7 @@ import {
   GameSession,
   HeadlessWorld,
   I,
+  INSTANCE_STRIDE,
   NPCS,
   NPC_LEASH,
   makeGenerator,
@@ -54,13 +55,17 @@ describe('the protected places of Adventure', () => {
     expect(generator.isProtected(38, Y - 1, 0)).toBe(false); // the skirt around the village
     expect(generator.isProtected(-39, Y, 0)).toBe(false);
     expect(generator.isProtected(60, Y, 60)).toBe(false);
-    // The chapel, with its portal, and every copy of the dungeon.
+    // The chapel, with its portal; the dungeon is free to dig in but for the bars of its gates and the portal in its camp.
     expect(generator.isProtected(92, generator.ruinY, 0)).toBe(true);
     expect(generator.isProtected(92, generator.ruinY + 2, 0)).toBe(true);
-    for (const slot of [0, 5, 47]) for (const c of generator.instanceCages(slot)) expect(generator.isProtected(c.x, c.y, c.z)).toBe(true);
-    expect(generator.isProtected(generator.cellarEnd, generator.cellarY + 2, generator.roomZ)).toBe(true);
+    for (const slot of [0, 5, 47]) {
+      for (const c of generator.instanceCages(slot)) expect(generator.isProtected(c.x, c.y, c.z)).toBe(false);
+      for (const g of generator.instanceGates(slot)) for (const b of g.boxes) expect(generator.isProtected(b.x0, b.y0, b.z0)).toBe(true);
+      expect(generator.isProtected(4096 + 4, generator.cellarY + 2, generator.roomZ + slot * INSTANCE_STRIDE)).toBe(true);
+    }
+    expect(generator.isProtected(generator.instanceEntry(0)!.x, generator.cellarY + 2, generator.roomZ)).toBe(false);
     // The land under the old cellar's place is plain land now, and free.
-    expect(generator.isProtected(generator.roomX + 10, generator.cellarY + 2, 0)).toBe(false);
+    expect(generator.isProtected(4110, generator.cellarY + 2, 0)).toBe(false);
   });
 
   it('are the same in an ordinary world: nothing is', () => {
@@ -123,21 +128,59 @@ describe('an Adventure player in a protected place', () => {
     expect(world.getBlock(50, gy, 0)).toBe(B.AIR);
   });
 
-  it('may still mine a spawner of the cellar, which is what the quests ask for', () => {
+  it('may mine a spawner of the cellar, which is what the quests ask for, and dig the wall beside it: the dungeon is free', () => {
     const { s, world } = make();
     s.xp.add(totalForLevel(DUNGEON_MIN_LEVEL));
+    s.inventory.collect(makeStack(I.HOLLOW_SIGIL, 1));
     s.realm.usePortal(s);
     run(s, 0.2);
     const c = generator.instanceCages(s.realm.copyAt(s))[0];
     expect(world.getBlock(c.x, c.y, c.z)).toBe(B.SPAWNER);
     s.breakBlock(c.x, c.y, c.z);
     expect(world.getBlock(c.x, c.y, c.z)).toBe(B.AIR);
-    // ... but not the wall beside it.
+    // ... and the wall beside it.
     const wall = world.getBlock(c.x, c.y - 1, c.z);
     s.breakBlock(c.x, c.y - 1, c.z);
-    expect(world.getBlock(c.x, c.y - 1, c.z)).toBe(wall);
+    expect(world.getBlock(c.x, c.y - 1, c.z)).not.toBe(wall);
   });
 
+  it('lets somebody in the Hollow Deep build and dig, but not break the bars of its gates or the portal back', () => {
+    const { s, world } = make();
+    s.xp.add(totalForLevel(DUNGEON_MIN_LEVEL));
+    s.inventory.collect(makeStack(I.HOLLOW_SIGIL, 1));
+    s.realm.usePortal(s);
+    run(s, 0.2);
+    const slot = s.realm.copyAt(s);
+    const e = generator.instanceEntry(slot)!;
+    const x = Math.floor(e.x) + 2;
+    const z = Math.floor(e.z) + 2;
+    const floor = e.y - 1;
+    s.inventory.set(0, makeStack(B.TORCH, 4));
+    s.inventory.set(1, makeStack(B.STONE, 4));
+    s.selected = 1;
+    const t = { x, y: floor, z, id: world.getBlock(x, floor, z), nx: 0, ny: 1, nz: 0 };
+    expect(s.useHeldOn(t)).toBe(true);
+    expect(world.getBlock(x, floor + 1, z)).toBe(B.STONE);
+    s.breakBlock(x, floor + 1, z);
+    expect(world.getBlock(x, floor + 1, z)).toBe(B.AIR);
+    s.selected = 0;
+    expect(s.useHeldOn(t)).toBe(true);
+    expect(world.getBlock(x, floor + 1, z)).toBe(B.TORCH);
+    s.breakBlock(x, floor + 1, z);
+    expect(world.getBlock(x, floor + 1, z)).toBe(B.AIR);
+    // The floor can be dug.
+    s.breakBlock(x, floor, z);
+    expect(world.getBlock(x, floor, z)).not.toBe(t.id);
+    // The bars of a gate and the portal in the camp stay.
+    const bars = generator.instanceGates(slot)[0].boxes[0];
+    const barBlock = world.getBlock(bars.x0, bars.y0, bars.z0);
+    s.breakBlock(bars.x0, bars.y0, bars.z0);
+    expect(world.getBlock(bars.x0, bars.y0, bars.z0)).toBe(barBlock);
+    const px = 4096 + 4;
+    const pz = generator.roomZ + slot * INSTANCE_STRIDE;
+    s.breakBlock(px, generator.cellarY + 2, pz);
+    expect(world.getBlock(px, generator.cellarY + 2, pz)).toBe(B.PORTAL);
+  });
   it('can change everything in creative mode (an operator online)', () => {
     const { s, world } = make();
     s.teleport(LX + 0.5, Y + 1, LZ + 0.5, 0, 0);

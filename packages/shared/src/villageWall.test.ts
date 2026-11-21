@@ -104,7 +104,7 @@ describe("Dawnwatch's wall and its gates", () => {
 
   it('lets a player walk from the Landing to every quest giver and out through the three open gates, but not out the north', () => {
     for (const npc of NPCS) {
-      if (npc.cellar) continue;
+      if (npc.cellar || npc.dungeon) continue;
       expect(seen.has(`${Math.floor(npc.x)},${g + 1},${Math.floor(npc.z)}`), `${npc.id} can be reached`).toBe(true);
     }
     expect(anyAt((x) => x > HUB_HALF + 1)).toBe(true);

@@ -165,12 +165,23 @@ function QuestTracker() {
   const log = useUi((s) => s.quests);
   const screen = useUi((s) => s.screen);
   const logOpen = useUi((s) => s.questLogOpen);
+  const dungeon = useUi((s) => s.dungeon);
   useUi((s) => s.questsVersion);
   if (!adventure || screen === 'dead' || logOpen) return null;
   const active = log.activeQuests();
   // (The element stays, empty and invisible, so there is always a place for the first quest to appear.)
   return (
     <div id="quest-tracker" data-testid="quest-tracker">
+      {dungeon && (
+        <div className="tracker-quest tracker-dungeon" data-testid="dungeon-tracker">
+          <div className="tracker-name">{dungeon.name}</div>
+          <div className={`tracker-line${dungeon.cages >= dungeon.cagesTotal ? ' done' : ''}`}>Cages destroyed: {dungeon.cages}/{dungeon.cagesTotal}</div>
+          <div className={`tracker-line${dungeon.gates >= dungeon.gatesTotal ? ' done' : ''}`}>Iron gates opened: {dungeon.gates}/{dungeon.gatesTotal}</div>
+          <div className={`tracker-line${dungeon.boss === 'dead' ? ' done' : ''}`}>
+            {dungeon.boss === 'dead' ? 'The Hollow King is slain: take the portal out' : dungeon.boss === 'fighting' ? 'The Hollow King: in combat' : 'The Hollow King: 0/1 slain'}
+          </div>
+        </div>
+      )}
       {active.slice(0, 5).map((q) => {
         const ready = log.status(q.id) === 'ready';
         return (

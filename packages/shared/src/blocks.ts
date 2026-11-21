@@ -427,6 +427,9 @@ export const ITEM_TILES = [
   'cooked_salmon',
   'tropical_fish',
   'pufferfish',
+  'warden_scroll',
+  'hollow_bone',
+  'hollow_sigil',
 ] as const;
 
 /** All atlas tiles: block textures first (stable indices), then item sprites. */

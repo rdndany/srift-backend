@@ -45,7 +45,7 @@ export function LoadingScreen() {
           ))}
         </div>
         <h1 className="ld-logo">
-          Sol<b>Rift</b>
+          <img src="/art/solrift-logo.png" alt="SolRift" draggable={false} />
         </h1>
         <div className="ld-bar" aria-hidden>
           <div id="loading-bar" />

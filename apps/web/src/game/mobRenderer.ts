@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ATTACK_ANIM, DYE_RGB, MOBS, NPCS, getItem, variantLevel, variantProfession, type MobKind, type Profession } from '@solrift/shared';
+import { ATTACK_ANIM, BOSS_ANIM, BOSS_WINDUP, DYE_RGB, MOBS, NPCS, getItem, variantLevel, variantProfession, type MobKind, type Profession } from '@solrift/shared';
 import type { ArrowLike, MobLike } from './clientSession';
 import type { EntityLight } from './entityLight';
 import { ArcaneBoltView, FireballView, type FireParticles, type SpellView } from './fireFx';
@@ -7,8 +7,11 @@ import type { SpellKit } from './spellFx';
 import { FireballBoltView } from './fireballFx';
 import { StaffBoltView } from './staffFx';
 import { WandBoltView } from './wandFx';
+import { BOSS_SKINS, hollowKingRig } from './mobBoss';
+import { DEEP_RIGS, DEEP_SKINS, isDeepKind, poseDeep } from './mobDeep';
 import { batRig, creeperRig, endermanRig, HOSTILE_SKINS, slimeRig, spiderRig, undeadRig } from './mobHostile';
-import { eyes, hash, jit, mix, mul, plain, rect, withFeatures, type Feature, type Painter, type Part, type RGB } from './mobPaint';
+import { eyes, hash, jit, mix, mul, plain, rect, withFeatures, type Brick, type Feature, type Painter, type Part, type RGB } from './mobPaint';
+import { paintTile } from './atlas';
 
 // ---- skins ---------------------------------------------------------------------
 const SKINS: Record<string, Painter> = {
@@ -56,7 +59,7 @@ DYE_RGB.forEach((c, i) => {
   const lo: [number, number, number] = [c[0] * 0.93, c[1] * 0.93, c[2] * 0.93];
   EXTRA_SKINS[`sheep_wool_${i}`] = (x, y) => jit(hash(x >> 1, y >> 1, 21) > 0.5 ? [c[0], c[1], c[2]] : lo, 6, x, y, 21);
 });
-Object.assign(SKINS, EXTRA_SKINS, HOSTILE_SKINS);
+Object.assign(SKINS, EXTRA_SKINS, HOSTILE_SKINS, BOSS_SKINS, DEEP_SKINS);
 
 // Skeletons (and the stray, which is the same in ice): bone shaded from its lit top-left corner to its shadowed edge, yellowed
 // in patches and cracked here and there; a skull with hollow sockets and a glint in them; a bow of wood, a leather quiver.
@@ -227,6 +230,18 @@ function drawArm(pull: number): { up: number; fore: number } {
   const ez = -Math.cos(up) * ARM_UP;
   return { up, fore: up - Math.atan2(-(tx - ex), -(tz - ez)) };
 }
+
+/** Where in a boss's swing (0..1) the blow lands: the end of the wind-up. */
+const bossHit = BOSS_WINDUP / BOSS_ANIM;
+
+/** A boss's arms: raised slowly overhead for the whole wind-up (so a player sees it coming), brought down hard as the blow lands, then lifted back to rest. */
+const bossStrikeArm = (k: number): number => {
+  if (k <= 0 || k >= 1) return 0;
+  const up = 2.1;
+  if (k < bossHit - 0.07) return up * (1 - (1 - k / (bossHit - 0.07)) ** 2);
+  if (k < bossHit + 0.03) return up - (up + 1.3) * ((k - (bossHit - 0.07)) / 0.1);
+  return -1.3 * (1 - (k - bossHit - 0.03) / (1 - bossHit - 0.03)) ** 2;
+};
 
 /**
  * How far an arm is turned (radians, + is forward) at a point `k` (0..1) through a melee swing: it is drawn back, comes
@@ -604,6 +619,8 @@ const RIGS: Record<MobKind, Part[]> = {
   zombie: undeadRig({ p: 'zombie', hair: true }),
   skeleton: skeletonRig('skeleton'),
   creeper: creeperRig(),
+  hollow_king: hollowKingRig(),
+  ...DEEP_RIGS,
   pig: [
     { size: [0.5, 0.5, 0.5], at: [0, 0.68, -0.6], skin: 'pig_body', front: 'pig_face', isHead: true },
     { size: [0.62, 0.5, 0.95], at: [0, 0.6, 0.05], skin: 'pig_body' },
@@ -691,6 +708,127 @@ function boxGeo(size: [number, number, number], hang: boolean): THREE.BoxGeometr
   return g;
 }
 
+/** How bright each side of a cube of a cluster (`Part.bricks`) is painted into it (+x, -x, +y, -y, +z, -z). */
+const BRICK_SHADE = [0.86, 0.7, 1.15, 0.5, 0.78, 0.86];
+/** The corners of each side of a unit cube (top left, top right, bottom left, bottom right, seen from outside), in the order above. */
+const BRICK_FACES: [number, number, number][][] = [
+  [[1, 1, 1], [1, 1, -1], [1, -1, 1], [1, -1, -1]],
+  [[-1, 1, -1], [-1, 1, 1], [-1, -1, -1], [-1, -1, 1]],
+  [[-1, 1, -1], [1, 1, -1], [-1, 1, 1], [1, 1, 1]],
+  [[-1, -1, 1], [1, -1, 1], [-1, -1, -1], [1, -1, -1]],
+  [[-1, 1, 1], [1, 1, 1], [-1, -1, 1], [1, -1, 1]],
+  [[1, 1, -1], [-1, 1, -1], [1, -1, -1], [-1, -1, -1]],
+];
+
+const brickGeos = new Map<Brick[], THREE.BufferGeometry>();
+/** One mesh of all the cubes of a cluster: every cube its own size and place, and a shade of its own baked into its corners. */
+function brickGeo(bricks: Brick[], skins: number): THREE.BufferGeometry {
+  let g = brickGeos.get(bricks);
+  if (g) return g;
+  const n = bricks.length;
+  const pos = new Float32Array(n * 24 * 3);
+  const uv = new Float32Array(n * 24 * 2);
+  const col = new Float32Array(n * 24 * 3);
+  const idx = new Uint32Array(n * 36);
+  const eu = 0.6 / (16 * skins);
+  const ev = 0.6 / 16;
+  bricks.forEach(([x, y, z, w, h, d, shade, skin], b) => {
+    for (let f = 0; f < 6; f++) {
+      const k = BRICK_SHADE[f] * shade;
+      for (let c = 0; c < 4; c++) {
+        const v = b * 24 + f * 4 + c;
+        const [cx, cy, cz] = BRICK_FACES[f][c];
+        pos[v * 3] = x + (cx * w) / 2;
+        pos[v * 3 + 1] = y + (cy * h) / 2;
+        pos[v * 3 + 2] = z + (cz * d) / 2;
+        uv[v * 2] = (skin + (c & 1 ? 1 : 0)) / skins + (c & 1 ? -eu : eu);
+        uv[v * 2 + 1] = c < 2 ? 1 - ev : ev;
+        col[v * 3] = k;
+        col[v * 3 + 1] = k;
+        col[v * 3 + 2] = k;
+      }
+      const o = b * 36 + f * 6;
+      const v0 = b * 24 + f * 4;
+      idx.set([v0, v0 + 2, v0 + 1, v0 + 2, v0 + 3, v0 + 1], o);
+    }
+  });
+  g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  g.setIndex(new THREE.BufferAttribute(idx, 1));
+  g.computeBoundingSphere();
+  brickGeos.set(bricks, g);
+  return g;
+}
+
+const brickAtlases = new Map<string, THREE.CanvasTexture>();
+/** The skins of a cluster side by side in one picture. */
+function brickAtlas(names: string[]): THREE.CanvasTexture {
+  const key = names.join(',');
+  let t = brickAtlases.get(key);
+  if (t) return t;
+  const c = document.createElement('canvas');
+  c.width = 16 * names.length;
+  c.height = 16;
+  const ctx = c.getContext('2d')!;
+  names.forEach((name, i) => ctx.drawImage(skin(name).image as HTMLCanvasElement, i * 16, 0));
+  t = new THREE.CanvasTexture(c);
+  t.magFilter = THREE.NearestFilter;
+  t.minFilter = THREE.NearestFilter;
+  t.generateMipmaps = false;
+  t.colorSpace = THREE.SRGBColorSpace;
+  brickAtlases.set(key, t);
+  return t;
+}
+
+/** Three upright panes crossing in a star, standing on the origin and one block high and wide (a flame, see `Part.flame`). */
+let flameGeometry: THREE.BufferGeometry | null = null;
+function flameGeo(): THREE.BufferGeometry {
+  if (flameGeometry) return flameGeometry;
+  const pos: number[] = [];
+  const uv: number[] = [];
+  const idx: number[] = [];
+  for (let i = 0; i < 3; i++) {
+    const a = (i * Math.PI) / 3;
+    const dx = Math.cos(a) * 0.5;
+    const dz = Math.sin(a) * 0.5;
+    const o = i * 4;
+    pos.push(-dx, 0, -dz, dx, 0, dz, dx, 1, dz, -dx, 1, -dz);
+    uv.push(0, 0, 1, 0, 1, 1, 0, 1);
+    idx.push(o, o + 1, o + 2, o, o + 2, o + 3);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  g.computeBoundingSphere();
+  flameGeometry = g;
+  return g;
+}
+
+/** The four frames of the fire of a flint and steel (the game's own tile, `fire_0`..`fire_3`), as flat cut-out materials shared by every flame. */
+let flameMaterials: THREE.MeshBasicMaterial[] | null = null;
+function flameMats(): THREE.MeshBasicMaterial[] {
+  if (flameMaterials) return flameMaterials;
+  flameMaterials = [0, 1, 2, 3].map((i) => {
+    const c = document.createElement('canvas');
+    c.width = c.height = 16;
+    paintTile(c.getContext('2d')!, `fire_${i}`, 0);
+    const map = new THREE.CanvasTexture(c);
+    map.magFilter = THREE.NearestFilter;
+    map.minFilter = THREE.NearestFilter;
+    map.generateMipmaps = false;
+    map.colorSpace = THREE.SRGBColorSpace;
+    // (`transparent` keeps the shadow maps from drawing the panes as squares; the alpha test does the cutting.)
+    return new THREE.MeshBasicMaterial({ map, alphaTest: 0.5, transparent: true, side: THREE.DoubleSide, toneMapped: false, color: 0xfff2e0 });
+  });
+  return flameMaterials;
+}
+
+/** How much of a lit-from-within block's own light each side shows (+x, -x, +y, -y, +z, -z), so that it still reads as a block. */
+const SELF_SHADE = [0.82, 0.66, 1, 0.45, 0.78, 0.7];
+
 const heartGeo = new THREE.OctahedronGeometry(0.13);
 const heartMat = new THREE.MeshBasicMaterial({ color: 0xff5d9e });
 
@@ -705,7 +843,12 @@ interface View {
   /** Floats over an animal that is in love. */
   heart: THREE.Mesh;
   group: THREE.Group;
+  /** A boss's spell building (0..1): its arms rise as it does. */
+  castK?: number;
   parts: { mesh: THREE.Mesh; def: Part; mats: THREE.MeshBasicMaterial[] }[];
+  /** The flames among `parts` (a burning boss), and the embers still owed to the air above them. */
+  flames?: View['parts'];
+  emberDebt?: number;
   /** A quest giver's name plate and quest marks (a mob that is not one has neither). */
   plate?: THREE.Sprite;
   marks?: Record<QuestMark, THREE.Sprite>;
@@ -792,6 +935,7 @@ function buildView(kind: MobKind, key: number, gear: readonly number[] = []): Vi
   const variant = key % SHORN;
   const group = new THREE.Group();
   const parts: View['parts'] = [];
+  let flames: View['parts'] | undefined;
   const coats = COAT[kind];
   const coat = coats?.[variant] ?? coats?.[0];
   const base = kind === 'armor_stand' ? standRig(variant, gear) : kind === 'rabbit' ? rabbitRig(RABBIT_COATS[variant] ?? 'brown') : kind === 'villager' ? villagerRig(variantProfession(variant), variantLevel(variant)) : kind === 'npc' ? npcRig(variant) : RIGS[kind];
@@ -800,8 +944,20 @@ function buildView(kind: MobKind, key: number, gear: readonly number[] = []): Vi
     const base = skin(kind === 'sheep' && def.skin === 'sheep_wool' ? (shorn ? 'sheep_shorn' : variant > 0 ? `sheep_wool_${variant}` : def.skin) : def.skin);
     const mk = (map: THREE.Texture) => (def.alpha ? new THREE.MeshBasicMaterial({ map, transparent: true, opacity: def.alpha, depthWrite: false }) : new THREE.MeshBasicMaterial({ map }));
     // BoxGeometry face order: +x, -x, +y, -y, +z, -z. The mob faces -Z, so the face goes on index 5.
-    const mats = def.flat ? [mk(base)] : [0, 1, 2, 3, 4, 5].map((i) => mk(i === 5 && def.front ? skin(def.front) : base));
-    const mesh = new THREE.Mesh(boxGeo(def.size, !!def.hang), def.flat ? mats[0] : mats);
+    if (def.flame !== undefined) {
+      // A flame: shared geometry and materials; it has none of its own to free.
+      const flame = new THREE.Mesh(flameGeo(), flameMats()[0]);
+      flame.position.set(...def.at);
+      flame.scale.set(def.size[0], def.size[1], def.size[0]);
+      (def.of !== undefined ? parts[def.of].mesh : group).add(flame);
+      const entry = { mesh: flame, def, mats: [] as THREE.MeshBasicMaterial[] };
+      parts.push(entry);
+      (flames ??= []).push(entry);
+      continue;
+    }
+    const cubes = def.bricks && def.brickSkins ? new THREE.MeshBasicMaterial({ map: brickAtlas(def.brickSkins), vertexColors: true }) : null;
+    const mats = cubes ? [cubes] : def.flat ? [mk(base)] : [0, 1, 2, 3, 4, 5].map((i) => mk(i === 5 && def.front ? skin(def.front) : base));
+    const mesh = new THREE.Mesh(cubes ? brickGeo(def.bricks!, def.brickSkins!.length) : boxGeo(def.size, !!def.hang), def.flat || cubes ? mats[0] : mats);
     mesh.position.set(...def.at);
     if (def.order) mesh.rotation.order = def.order;
     mesh.rotation.x = def.rotX ?? 0;
@@ -814,7 +970,7 @@ function buildView(kind: MobKind, key: number, gear: readonly number[] = []): Vi
   heart.position.set(0, MOBS[kind].height + 0.45, 0);
   heart.visible = false;
   group.add(heart);
-  const view: View = { variant: key, gearKey: kind === 'armor_stand' ? gear.join(',') : '', heart, group, parts };
+  const view: View = { variant: key, gearKey: kind === 'armor_stand' ? gear.join(',') : '', heart, group, parts, flames };
   if (kind === 'npc') {
     const plate = new THREE.Sprite(new THREE.SpriteMaterial({ map: plateTexture(variant), transparent: true, toneMapped: false, fog: false }));
     plate.scale.set(1.6, 0.36, 1);
@@ -889,6 +1045,10 @@ export class MobRenderer {
   /** The cubes of every fireball, wand and staff bolt in flight (made on the first one; each cube has its own colour). */
   private cubeMat: THREE.MeshBasicMaterial | null = null;
   private time = 0;
+  private readonly flameQ = new THREE.Quaternion();
+  private readonly flameS = new THREE.Quaternion();
+  private readonly flameE = new THREE.Euler();
+  private readonly flameV = new THREE.Vector3();
   private env: EntityLight | null = null;
   private readonly tint = new THREE.Color();
   private readonly faceF = new Float32Array(6);
@@ -986,15 +1146,17 @@ export class MobRenderer {
 
       // A melee swing (it plays whether or not the blow lands: a raised shield stops the damage, not the attack):
       // the body lunges the way it faces and the arms come down.
-      const swingK = !m.dead && m.attackTime !== undefined && m.attackTime >= 0 && m.attackTime < ATTACK_ANIM ? m.attackTime / ATTACK_ANIM : -1;
+      const bossy = MOBS[m.kind].boss === true;
+      const swingLen = bossy ? BOSS_ANIM : ATTACK_ANIM;
+      const swingK = !m.dead && m.attackTime !== undefined && m.attackTime >= 0 && m.attackTime < swingLen ? m.attackTime / swingLen : -1;
       // An archer does not lunge: the swing is its shot (the string hand springs forward and draws again, see below).
       const archer = m.kind === 'skeleton' || m.kind === 'stray';
       if (swingK >= 0 && !archer) {
-        const lunge = 0.38 * Math.sin(Math.PI * Math.min(1, swingK * 1.25)) * (m.kind === 'slime' ? 1.3 : 1);
+        const lunge = bossy ? 0.5 * Math.max(0, Math.sin(Math.PI * Math.min(1, Math.max(0, (swingK - bossHit + 0.05) / 0.3)))) : 0.38 * Math.sin(Math.PI * Math.min(1, swingK * 1.25)) * (m.kind === 'slime' ? 1.3 : 1);
         g.position.x -= Math.sin(g.rotation.y) * lunge;
         g.position.z -= Math.cos(g.rotation.y) * lunge;
       }
-      const armTurn = swingK >= 0 ? strikeArm(swingK) : 0;
+      const armTurn = swingK >= 0 ? (bossy ? bossStrikeArm(swingK) : strikeArm(swingK)) : 0;
       // The string is drawn at rest and springs loose when the arrow leaves, then is drawn again.
       const pull = swingK >= 0 ? Math.min(1, swingK * 1.15) ** 1.5 * 0.95 : 1;
       const bend = archer ? drawArm(pull) : null;
@@ -1051,9 +1213,36 @@ export class MobRenderer {
       }
       const fuseFlash = m.fuse >= 0 && Math.floor(m.fuse * 8) % 2 === 0;
 
+      v.castK = (v.castK ?? 0) + ((m.casting && !m.dead ? 1 : 0) - (v.castK ?? 0)) * Math.min(1, dt * 7);
+      const castK = v.castK;
+      // Embers rise from a burning boss's flames.
+      if (v.flames && this.fire && !m.dead && dt > 0) {
+        v.emberDebt = (v.emberDebt ?? 0) + dt * 46;
+        for (; v.emberDebt >= 1; v.emberDebt--) {
+          const fl = v.flames[Math.floor(Math.random() * v.flames.length)];
+          fl.mesh.getWorldPosition(this.flameV);
+          const hgt = fl.def.size[1] * (0.4 + Math.random() * 0.6);
+          this.fire.ember(this.flameV.x, this.flameV.y + hgt, this.flameV.z, fl.def.size[0]);
+        }
+      }
       for (const p of v.parts) {
         const d = p.def;
+        if (d.flame !== undefined) {
+          // A flame flickers through the frames of the fire tile, each on its own beat, leaps and sways, and stays upright.
+          const f = d.flame;
+          const t = this.time;
+          p.mesh.visible = !m.dead;
+          p.mesh.material = flameMats()[Math.floor(t * 9 + f * 4.7) & 3];
+          const w = 1 + 0.12 * Math.sin(t * 13 + f * 5) + 0.07 * Math.sin(t * 27 + f * 2);
+          const h = 1 + 0.2 * Math.sin(t * 10 + f * 3) + 0.1 * Math.sin(t * 23 + f * 9);
+          p.mesh.scale.set(d.size[0] * w, d.size[1] * h, d.size[0] * w);
+          p.mesh.parent!.getWorldQuaternion(this.flameQ).invert();
+          this.flameE.set(Math.sin(t * 2.3 + f * 6) * 0.07, f * 2.1, Math.sin(t * 3.1 + f * 4) * 0.09);
+          p.mesh.quaternion.copy(this.flameQ).multiply(this.flameS.setFromEuler(this.flameE));
+          continue;
+        }
         if (d.swing) p.mesh.rotation.x = (d.rotX ?? 0) + swing * d.swing + (d.strike ? armTurn * d.strike : 0);
+        if (d.raise) p.mesh.rotation.x = (d.rotX ?? 0) + (d.swing ? swing * d.swing : 0) + (d.strike ? armTurn * d.strike : 0) + castK * d.raise + Math.sin(this.time * 1.4 + m.id) * 0.035 * (1 - moving);
         if (d.swingY) p.mesh.rotation.y = (d.rotY ?? 0) + swing * d.swingY;
         if (d.flap) p.mesh.rotation.z = (d.rotZ ?? 0) + Math.sin(this.time * (m.kind === 'bat' ? 22 : 14) + m.id) * d.flap * (m.kind === 'bat' ? 1 : 0.3 + moving);
         // A knee or an elbow folds back as the limb it hangs from swings back.
@@ -1068,7 +1257,8 @@ export class MobRenderer {
         }
         if (d.glow) {
           // Eyes shine in the dark: the world's light does not dim them (a hurt flash still shows).
-          p.mats[0].color.setRGB(kr, kg, kb);
+          const pu = d.pulse ? 1.12 + d.pulse * Math.sin(this.time * 3.3 + p.mesh.id * 1.9) : 1;
+          p.mats[0].color.setRGB(kr * pu, kg * pu, kb * pu);
           continue;
         }
         if (p.mats.length === 1) {
@@ -1076,20 +1266,28 @@ export class MobRenderer {
           let r = 0;
           let gr = 0;
           let b = 0;
+          const own = d.selfLit ?? 0;
           for (let i = 0; i < 6; i++) {
-            r += faceR[i * 3];
-            gr += faceR[i * 3 + 1];
-            b += faceR[i * 3 + 2];
+            const k = own * SELF_SHADE[i];
+            r += Math.max(faceR[i * 3], k);
+            gr += Math.max(faceR[i * 3 + 1], k * 0.78);
+            b += Math.max(faceR[i * 3 + 2], k * 0.66);
           }
           if (fuseFlash) p.mats[0].color.setRGB(1.7, 1.7, 1.7);
           else p.mats[0].color.setRGB((r / 6) * kr, (gr / 6) * kg, (b / 6) * kb);
           continue;
         }
+        const own = d.selfLit ?? 0;
         for (let i = 0; i < 6; i++) {
           if (fuseFlash) p.mats[i].color.setRGB(1.7, 1.7, 1.7);
-          else p.mats[i].color.setRGB(faceR[i * 3] * kr, faceR[i * 3 + 1] * kg, faceR[i * 3 + 2] * kb);
+          else if (own > 0) {
+            const k = own * SELF_SHADE[i];
+            p.mats[i].color.setRGB(Math.max(faceR[i * 3], k) * kr, Math.max(faceR[i * 3 + 1], k * 0.78) * kg, Math.max(faceR[i * 3 + 2], k * 0.66) * kb);
+          } else p.mats[i].color.setRGB(faceR[i * 3] * kr, faceR[i * 3 + 1] * kg, faceR[i * 3 + 2] * kb);
         }
       }
+      // The monsters of the Hollow Deep have poses of their own (see mobDeep.ts), after the walk and swing above.
+      if (isDeepKind(m.kind)) poseDeep(m.kind, g, v.parts, m, castK, this.time, dt);
     }
 
     for (const [id, v] of this.views) {
@@ -1235,4 +1433,15 @@ export function disposeMobAssets(): void {
   plateTex.clear();
   for (const g of geoCache.values()) g.dispose();
   geoCache.clear();
+  for (const g of brickGeos.values()) g.dispose();
+  brickGeos.clear();
+  for (const t of brickAtlases.values()) t.dispose();
+  brickAtlases.clear();
+  flameGeometry?.dispose();
+  flameGeometry = null;
+  for (const m of flameMaterials ?? []) {
+    m.map?.dispose();
+    m.dispose();
+  }
+  flameMaterials = null;
 }

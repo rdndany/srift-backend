@@ -142,7 +142,7 @@ export default function GameView() {
           <div className="pause-in">
           <header className="pause-head">
             <h1>
-              Sol<b>Rift</b>
+              <img className="pause-logo" src="/art/solrift-logo.png" alt="SolRift" draggable={false} />
             </h1>
             <div className="pause-sub">
               <span className="only-single">Game paused</span>

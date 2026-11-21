@@ -41,6 +41,14 @@ export function makeUiSync(session: ClientSession, input: Input, overlay: HTMLEl
     const cv = session.classView();
     const shown = useUi.getState().cls;
     if (cv ? !shown || JSON.stringify(cv) !== JSON.stringify(shown) : shown !== null) useUi.setState({ cls: cv });
+    // The boss being fought (its health bar), published when something in it changed.
+    const bv = session.bossView();
+    const bshown = useUi.getState().boss;
+    if (bv ? !bshown || JSON.stringify(bv) !== JSON.stringify(bshown) : bshown !== null) useUi.setState({ boss: bv });
+    // How far the player is in the dungeon they are in (its tracker).
+    const dv = session.dungeonView();
+    const dshown = useUi.getState().dungeon;
+    if (dv ? !dshown || JSON.stringify(dv) !== JSON.stringify(dshown) : dshown !== null) useUi.setState({ dungeon: dv });
     const health = Math.ceil(session.vitals.health);
     const hunger = Math.ceil(session.vitals.hunger);
     const air = Math.round(session.vitals.air * 2) / 2;

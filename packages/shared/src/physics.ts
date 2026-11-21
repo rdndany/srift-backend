@@ -35,6 +35,17 @@ export interface Body {
   height?: number;
 }
 
+/** Something solid that bodies cannot walk through (a monster, a person): an upright cylinder, x, y, z at its feet. */
+export interface Solid {
+  x: number;
+  y: number;
+  z: number;
+  /** Radius. */
+  r: number;
+  /** Height. */
+  h: number;
+}
+
 export interface MoveInput {
   /** -1..1 */
   forward: number;
@@ -58,6 +69,8 @@ export interface MoveInput {
   noclip?: boolean;
   /** Overrides how high a step the body walks up without jumping (a mount walks up a whole block). */
   stepHeight?: number;
+  /** Characters in the way: the body is pushed out of each of them (never into a wall), so nobody walks through anybody. */
+  solids?: readonly Solid[];
 }
 
 export function createBody(x: number, y: number, z: number): Body {
@@ -318,6 +331,53 @@ export function stepPlayer(world: BlockReader, b: Body, input: MoveInput, dt: nu
   moveAxis(world, b, 'x', b.vx * dt, guard, wasOnGround, input.stepHeight);
   moveAxis(world, b, 'z', b.vz * dt, guard, wasOnGround, input.stepHeight);
   moveAxis(world, b, 'y', b.vy * dt, false);
+  if (input.solids && input.solids.length > 0) pushOut(world, b, input.solids);
+}
+
+/**
+ * Push a body out of the characters it overlaps: sideways, along the line between the two, and only as far as there is room
+ * (a body against a wall is not pushed into it). A body that is above the top of one (a jump over it) is not touched.
+ */
+function pushOut(world: BlockReader, b: Body, solids: readonly Solid[]): void {
+  const hw = (b.width ?? PLAYER_WIDTH) / 2;
+  const bh = b.height ?? PLAYER_HEIGHT;
+  for (const s of solids) {
+    if (b.y >= s.y + s.h - 0.25 || b.y + bh <= s.y + 0.1) continue;
+    const min = hw + s.r;
+    let dx = b.x - s.x;
+    let dz = b.z - s.z;
+    const d = Math.hypot(dx, dz);
+    if (d >= min) continue;
+    if (d < 1e-4) {
+      dx = 1;
+      dz = 0;
+    } else {
+      dx /= d;
+      dz /= d;
+    }
+    const push = min - Math.max(d, 0) + 0.001;
+    const w = b.width;
+    const h = b.height;
+    let moved = false;
+    for (const [mx, mz] of [[dx, dz], [dx, 0], [0, dz]] as const) {
+      if (mx === 0 && mz === 0) continue;
+      const k = push * Math.hypot(mx, mz) > 0 ? push : 0;
+      const nx = b.x + mx * k;
+      const nz = b.z + mz * k;
+      if (!collides(world, nx, b.y, nz, w, h)) {
+        b.x = nx;
+        b.z = nz;
+        moved = true;
+        break;
+      }
+    }
+    // Whoever pushed into it loses the speed they had towards it.
+    const vn = b.vx * dx + b.vz * dz;
+    if (moved && vn < 0) {
+      b.vx -= vn * dx;
+      b.vz -= vn * dz;
+    }
+  }
 }
 
 export function isWaterBlock(id: number): boolean {

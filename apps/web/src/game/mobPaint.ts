@@ -70,4 +70,27 @@ export interface Part {
   bend?: number;
   /** Shines by itself (eyes in the dark): not shaded by the light around the mob. */
   glow?: boolean;
+  /** A boss's arm (or what it holds) while the boss gathers a spell: turned this much more (radians) as the spell builds. */
+  raise?: number;
+  /** Lit from within (a block of lava stone): at least this bright (0..1) whatever light falls on it, shaded by side. */
+  selfLit?: number;
+  /**
+   * A cluster of many small cubes drawn as ONE mesh (one draw call): each is [x, y, z, w, h, d, shade, skin], placed from the part's joint
+   * (so with `hang` the limb runs down from it), `shade` a brightness (about 0.6..1.3, baked into the cube) and `skin` an index into
+   * `brickSkins`. The part's own `size` and `skin` are then unused for the shape. Used for the Hollow King (see mobBoss.ts).
+   */
+  bricks?: Brick[];
+  /** The skins (see SKINS in mobRenderer.ts) the cubes of `bricks` are painted with. */
+  brickSkins?: string[];
+  /**
+   * A flame, like the fire of a flint and steel (block B.FIRE, see atlas.ts `fire_0`..`fire_3`): three crossed upright panes `size[0]` wide
+   * and `size[1]` high standing on the point `at`, flickering through the four frames of the fire tile. It stays upright whatever the
+   * part it is fastened to (`of`) does, is not lit or shaded, casts no shadow and shows no hurt flash. The number is its phase.
+   */
+  flame?: number;
+  /** A glowing part that breathes: its brightness swells and fades by this much (0..1) at a pace of its own. */
+  pulse?: number;
 }
+
+/** One cube of a cluster: x, y, z, w, h, d, shade, skin (see `Part.bricks`). */
+export type Brick = [number, number, number, number, number, number, number, number];

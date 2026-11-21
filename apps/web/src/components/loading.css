@@ -95,6 +95,12 @@
     3px 3px 0 #3a3a3a,
     6px 6px 0 rgba(0, 0, 0, 0.55);
 }
+.ld-logo img {
+  display: block;
+  width: min(460px, 82vw);
+  height: auto;
+  filter: drop-shadow(0 6px 0 rgba(0, 0, 0, 0.45));
+}
 .ld-logo b {
   font-weight: 400;
   color: var(--gold);

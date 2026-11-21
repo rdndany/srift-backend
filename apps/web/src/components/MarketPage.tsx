@@ -9,7 +9,6 @@ import {
   GAME_VERSION,
   HOUSE_NAME,
   timeLeftLabel,
-  toolId,
   tooltipLines,
   type AuctionQuery,
   type AuctionRow,
@@ -29,7 +28,6 @@ import { ClickSparks, Embers, Reveal, useFrontMotion } from './fx';
 import { lobbyUrl } from '../game/route';
 import { SCROLL_KEY } from './frontNav';
 import { ART } from './homeAssets';
-import { ItemSprite } from './ItemSprite';
 import { Tip } from './ItemView';
 import { CoinIcon } from './ShopUI';
 import './home.css';
@@ -261,11 +259,9 @@ export function MarketPage() {
       {tip && tip.lines.length > 0 && createPortal(<div className="tooltip" style={{ left: Math.min(tip.x + 16, window.innerWidth - 360), top: Math.min(tip.y + 16, window.innerHeight - 40) }}><Tip lines={tip.lines} /></div>, document.body)}
 
       <div className="fp-rail" data-no-play>
-        <header className="fp-nav fp-px">
-          <button className="fp-brand" onClick={() => toFront(null)} aria-label="SolRift, to the front page">
-            <ItemSprite id={toolId('sword', 'diamond')} size={28} />
-            <span>SolRift</span>
-          </button>
+        <button className="fp-brand" onClick={() => toFront(null)} aria-label="SolRift, to the front page"><img src="/art/solrift-token-logo.png" alt="SolRift" draggable={false} /></button>
+          <header className="fp-nav fp-px">
+          <span className="fp-brand-gap" aria-hidden="true" />
           <nav className="site-nav fp-links" aria-label="Menu">
             <button className="fp-link-play" onClick={play}>
               Play

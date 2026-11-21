@@ -90,6 +90,8 @@ export interface QuestDef {
   progress: string;
   complete: string;
   objectives: readonly Objective[];
+  /** Handed over the moment the quest is taken up (the key to a place the quest sends you to). */
+  give?: readonly ItemReward[];
   reward: QuestReward;
 }
 
@@ -104,6 +106,8 @@ export interface NpcDef {
   yaw: number;
   /** Stands in the cave under the village, not on its ground. */
   cellar?: boolean;
+  /** Stands in a dungeon, one for every copy of it: x and z are where they stand in the first copy, and the others are the same place shifted (see NpcStation.key). */
+  dungeon?: boolean;
   /** What they say when you have no quest business with them. */
   greeting: string;
   /** How they are drawn. */
@@ -114,6 +118,8 @@ export interface NpcDef {
 export interface NpcStation {
   npc: NpcDef;
   index: number;
+  /** What tells this station from the others of the same person (a dungeon has one for every copy). Left out: the index. */
+  key?: number;
   x: number;
   y: number;
   z: number;
@@ -273,6 +279,18 @@ export const NPCS: readonly NpcDef[] = [
     yaw: Math.PI,
     greeting: 'Anything you leave with me waits for you, and for any other hero on your wallet. Leave a wand as a mage and your warrior can pick it up. Nobody else gets near it.',
     look: { robe: [76, 60, 38], trim: [196, 150, 60], hair: [150, 150, 150], hat: 'cap', beard: true },
+  },
+  // The Warden of the Hollow Cellar: he stands just inside the portal of every copy (`dungeon`), and gives and takes in the quests that send you down.
+  {
+    id: 'hale',
+    name: 'Warden Hale',
+    title: 'Warden of the Hollow Cellar',
+    x: 4108.5,
+    z: 4189.5,
+    yaw: Math.PI / 2,
+    dungeon: true,
+    greeting: 'Keep your voice down and your torch up. Whatever is awake in here does not need much of a reason.',
+    look: { robe: [70, 84, 110], trim: [196, 172, 96], hair: [120, 112, 104], hat: 'helm', beard: true },
   },
 ];
 
@@ -466,32 +484,37 @@ export const QUESTS: readonly QuestDef[] = [
     name: 'Into the Dark',
     chapter: CH2,
     giver: 'varro',
-    turnIn: 'varro',
+    turnIn: 'hale',
     requires: ['night_watch', 'stone_age'],
-    summary: 'Find the ruined chapel east of Dawnwatch and step through the portal in it.',
+    summary: 'Take the Hollow Sigil east to the ruined chapel, step through the portal, and report to Warden Hale just inside.',
     offer:
-      'Follow the road east out of the village. A mile on there is a ruined chapel, and in it a portal of black stone that was not there in my father\'s day. It leads to the Hollow Cellar, and something has been waking down there. The dead we keep fighting are coming from it.\n\nI want to know what is in it. Step through, look around, and come back by the portal on the far side. The portal turns back anyone below level 5, so if it will not take you, go and earn some experience first. The cellar is yours alone: it is made fresh for whoever goes in. Bring torches, a sword, and food. It is dark in there.',
-    progress: 'East along the gravel road to the ruin, then through the portal (level 5 and up). Do not go in without torches and food.',
-    complete: 'You went in and came out. Then it is real. Cages that make the dead? That explains the numbers. We cannot let them keep running.',
+      'Follow the road east out of the village. A mile on there is a ruined chapel, and in it a portal of black stone that was not there in my father\'s day. It leads to the Hollow Cellar, and something has been waking down there. The dead we keep fighting are coming from it.\n\nThe portal does not open for just anybody. It wants a Hollow Sigil, and a Sigil is two halves joined: a Warden Scroll and a Hollow Bone. Tobin keeps both on his shelves if you ever need another. I have had one made up for you; take it. Each time you go into a new cellar, the portal keeps the Sigil.\n\nI sent Warden Hale down a week ago to hold the entrance. Find him just inside the portal and tell him I sent you; he will know what is wanted. The portal turns back anyone below level 5, so earn some experience first. The cellar is yours alone: it is made fresh for whoever goes in. Bring torches, a sword, and food. It is dark in there.',
+    progress: 'East along the gravel road to the ruin, then through the portal (level 5 and up, and the Hollow Sigil I gave you). Warden Hale waits just inside.',
+    complete:
+      'Varro sent you? Then the Watch has not forgotten us. I am Hale. I went down with six, and I am what is left. We held this hall for three days, and then we stopped being able to hold anything past it.\n\nThe cellar is not one hall but a maze of them, and every way on is shut. Cages, old iron things, are what keep the gates closed, and what make the dead. Smash the cages and the gates open; leave one standing and you will not pass. I will be here, at the door. Take a torch from me for the road.',
     objectives: [{ kind: 'enter', zone: 'hollow_cellar', count: 1, label: 'Enter the Hollow Cellar' }],
+    give: [{ id: I.HOLLOW_SIGIL, count: 1 }, { id: B.TORCH, count: 12 }],
     reward: { xp: 80, items: [{ id: B.TORCH, count: 16 }] },
   },
   {
     id: 'cellar_cleanse',
     name: 'Cleansing the Cellar',
     chapter: CH2,
-    giver: 'varro',
-    turnIn: 'varro',
+    giver: 'hale',
+    turnIn: 'hale',
     requires: ['into_the_dark'],
-    summary: 'Destroy the monster spawners in the Hollow Cellar.',
+    summary: 'Smash the three cages that hold the Hollow Cellar shut, and put down the Hollow King on his throne.',
     offer:
-      'Three cages. Each one makes the dead as fast as we cut them down. You will find them in the cellar, past the portal in the chapel: the gatehall, the crypt, and the vault at the back. Break each cage with a pick and they stop.\n\nExpect company. If you fall or leave, the cellar keeps your place for a minute or two; after that it is made new. Use what you have learned: tools, armour if you have it, a shield, food in your pack. The treasure in the vault is yours to keep.',
-    progress: 'Three monster cages in the Cellar: the gatehall, the crypt, the vault. Break each with a pickaxe.',
-    complete: 'The cages are broken. The Watch owes you a great deal, traveller. Take this, and the thanks of Dawnwatch.\n\nThere is more under the Rift than one cellar. But that is a story for another day.',
-    objectives: [{ kind: 'mine', blocks: [B.SPAWNER], count: 3, label: 'Monster cages destroyed' }],
+      'Here is what I learned before the rest of mine fell. The cellar has three cages, and each is a lock. Two are in the side chambers off the great nave: one in the north wing, one in the south. Break those two and the iron gate at the east of the nave opens, onto the Warden\'s Court. Beyond the court there is a third cage, in the armoury, and when it is gone the way to the throne hall opens.\n\nThe dead here are not a crowd; they stand where they were put, and they wake when they see you. Take them a few at a time, and mind the ones that wear armour. When one is hurt, those beside it hear. Do not stand in the nave and shout.\n\nAt the end is the Hollow King. He gathers his spells slowly enough that you can see them coming: where the ground glows, do not stand. When he calls his court, kill the court first, or he will shrug off most of what you do. Come back to me when it is done. If you all fall, he heals, and the dead rise no more, but he will be waiting.',
+    progress: 'Two cages in the side chambers of the nave open the iron gate; the armoury holds the third, past the Warden\'s Court. Then the throne hall. Hale waits at the entrance.',
+    complete:
+      'The Hollow King is ash? Then the dead are finally at rest, and I can take the Watch home. You did what six of us could not. Take this, and the thanks of Dawnwatch.\n\nThere is more under the Rift than one cellar. But that is a story for another day.',
+    objectives: [
+      { kind: 'mine', blocks: [B.SPAWNER], count: 3, label: 'Cages smashed' },
+      { kind: 'kill', mobs: ['hollow_king'], count: 1, label: 'The Hollow King slain' },
+    ],
     reward: { xp: 250, items: [{ id: toolId('sword', 'iron'), count: 1 }, { id: I.SHIELD, count: 1 }, { id: I.EMERALD, count: 6 }, { id: bagId(5), count: 1 }] },
-  },
-];
+  },];
 
 const questMap = new Map(QUESTS.map((q) => [q.id, q]));
 export const questById = (id: string): QuestDef | null => questMap.get(id) ?? null;

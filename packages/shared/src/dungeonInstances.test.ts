@@ -9,6 +9,7 @@ import {
   HeadlessWorld,
   I,
   INSTANCE_SLOTS,
+  INSTANCE_X0,
   INSTANCE_STRIDE,
   Player,
   Realm,
@@ -30,6 +31,7 @@ function make(seed = 9) {
   const s = new GameSession({ seed: ADVENTURE_SEED, world, generator, naturalSpawning: true, rand: mulberry32(seed) });
   s.finishLoading();
   s.xp.add(totalForLevel(DUNGEON_MIN_LEVEL));
+  s.inventory.collect(makeStack(I.HOLLOW_SIGIL, 8));
   return { s, world, realm: s.realm };
 }
 
@@ -42,6 +44,7 @@ function guest(realm: Realm, name: string, level = DUNGEON_MIN_LEVEL, mode: 'sur
   const p = new Player(realm, { mode, name });
   p.finishLoading();
   if (level > 0) p.xp.add(totalForLevel(level));
+  p.inventory.collect(makeStack(I.HOLLOW_SIGIL, 8));
   return p;
 }
 
@@ -94,21 +97,33 @@ describe('entering the dungeon', () => {
     expect(realm.copiesInUse).toBe(2);
   });
 
-  it('puts the cages to work, in your copy only', () => {
+  it('puts the monsters in your copy only, each at its post, and the cages make nothing', () => {
     const { s, realm } = make();
     const g = guest(realm, 'Ada');
     realm.usePortal(s);
+    expect(generator.instanceMobs(0).length).toBeGreaterThan(20);
+    const inCopy = (slot: number) => realm.mobs.mobs.filter((m) => m.kind !== 'npc' && generator.instanceAt(m.body.x, m.body.z) === slot);
+    expect(inCopy(0).filter((m) => m.kind !== 'hollow_king').length).toBe(generator.instanceMobs(0).length);
+    expect(inCopy(1).length).toBe(0);
     realm.usePortal(g);
-    g.teleport(generator.roomX + 60, generator.cellarY + 1, generator.roomZ + INSTANCE_STRIDE + 0.5); // out of the cage's reach, in the other copy
-    run(s, 25);
-    const mine = realm.mobs.mobs.filter((m) => m.kind === 'zombie' || m.kind === 'skeleton');
-    expect(mine.length).toBeGreaterThan(0);
-    for (const m of mine) expect(generator.instanceAt(m.body.x, m.body.z), `${m.kind} at ${m.body.x},${m.body.z}`).toBe(0);
-    // The monsters come from the cage, in the kind that cage makes, and nothing else turns up.
-    for (const m of mine) expect(['zombie', 'skeleton']).toContain(m.kind);
-    expect(realm.mobs.mobs.filter((m) => m.kind !== 'zombie' && m.kind !== 'skeleton' && m.kind !== 'npc').length).toBe(0);
+    expect(inCopy(1).filter((m) => m.kind !== 'hollow_king').length).toBe(generator.instanceMobs(1).length);
+    // Standing at a cage for a minute: nothing is made (the monsters were put there when the copy opened), and every one of them is a guard.
+    const before = inCopy(0).length;
+    const c = generator.instanceCages(0)[0];
+    s.teleport(c.x + 0.5, c.y, c.z - 2.5);
+    run(s, 40);
+    expect(inCopy(0).length).toBeLessThanOrEqual(before);
+    for (const m of inCopy(0)) {
+      if (m.kind === 'hollow_king') continue;
+      expect(m.guard, m.kind).toBe(true);
+      expect(m.bound).toBe(true);
+    }
+    // Nothing the cages could make but what the dungeon holds; no packs: no kind more than three times in any room of ten blocks.
+    for (const m of inCopy(0)) {
+      const near = inCopy(0).filter((o) => o.kind === m.kind && Math.hypot(o.body.x - m.body.x, o.body.z - m.body.z) < 10).length;
+      expect(near, `${m.kind} at ${m.body.x.toFixed(0)},${m.body.z.toFixed(0)}`).toBeLessThanOrEqual(3);
+    }
   });
-
   it('says so when every dungeon is taken, and leaves the player where they are', () => {
     const { s, realm } = make();
     for (let i = 0; i < INSTANCE_SLOTS; i++) realm.usePortal(guest(realm, `g${i}`));
@@ -124,8 +139,8 @@ describe('entering the dungeon', () => {
     const { s, realm } = make();
     const g = guest(realm, 'Ada');
     realm.usePortal(g);
-    s.teleport(generator.roomX + 6.5, generator.cellarY + 1, generator.roomZ + 0.5); // copy 0, which is Ada's... no: nobody has it yet
-    s.teleport(generator.roomX + 6.5, generator.cellarY + 1, generator.roomZ + INSTANCE_STRIDE * 5 + 0.5); // an empty copy
+    s.teleport(INSTANCE_X0 + 8.5, generator.cellarY + 1, generator.roomZ + 0.5); // copy 0, which is Ada's... no: nobody has it yet
+    s.teleport(INSTANCE_X0 + 8.5, generator.cellarY + 1, generator.roomZ + INSTANCE_STRIDE * 5 + 0.5); // an empty copy
     run(s, 1.5);
     expect(realm.copyAt(s)).toBe(-1);
     expect(Math.abs(s.body.x - generator.instanceExit().x)).toBeLessThan(2);
@@ -141,7 +156,8 @@ describe('leaving a dungeon behind', () => {
     realm.usePortal(g);
     const slot = realm.copyAt(g);
     const cages = generator.instanceCages(slot);
-    const chest = { x: generator.roomX + 9, y: generator.cellarY + 1, z: generator.roomZ + slot * INSTANCE_STRIDE - 3 };
+    const c0 = generator.deep.chests[0];
+    const chest = { x: INSTANCE_X0 + c0.u, y: c0.y, z: generator.roomZ + slot * INSTANCE_STRIDE + c0.v };
 
     // Ada breaks a cage, takes the loot from a chest, and a monster is left behind.
     g.breakBlock(cages[0].x, cages[0].y, cages[0].z);
@@ -191,7 +207,7 @@ describe('leaving a dungeon behind', () => {
     s.breakBlock(c.x, c.y, c.z);
     expect(world.editedChunks().length).toBe(0);
     // ... and the chests of an earlier run are forgotten on loading.
-    realm.blockEntities.chest(generator.roomX + 9, generator.cellarY + 1, generator.roomZ - 3).set(0, makeStack(I.DIAMOND, 1));
+    realm.blockEntities.chest(INSTANCE_X0 + 15, generator.cellarY + 1, generator.roomZ - 4).set(0, makeStack(I.DIAMOND, 1));
     const state = realm.saveState();
     const next = make().realm;
     next.loadState(state);

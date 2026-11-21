@@ -7,6 +7,7 @@
  */
 @import './styles/page.css';              /* the page, the game canvas, the crosshair, the bottom row of the HUD */
 @import './styles/player-frame.css';      /* the character frame, top left */
+@import './styles/boss-frame.css';        /* the boss's frame across the top, what it says, and the spell it gathers */
 @import './styles/slots.css';             /* an item slot: icon, count, wear bar */
 @import './styles/menu.css';              /* the menu screen and its grids: crafting, furnace, palette */
 @import './styles/tooltip.css';           /* the font, the item tooltip, the item on the pointer */

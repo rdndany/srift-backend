@@ -689,6 +689,11 @@ export class FireParticles {
     }
   }
 
+  /** An ember lifted off a burning thing (a boss's flames): it drifts up on the heat and cools as it goes. `s` is the size of the flame it came from. */
+  ember(x: number, y: number, z: number, s = 1): void {
+    this.fire.add(SPARK, x + rnd(-0.2, 0.2) * s, y, z + rnd(-0.2, 0.2) * s, rnd(-0.5, 0.5), rnd(1.2, 3.4), rnd(-0.5, 0.5), rnd(0.9, 2.2), rnd(0.07, 0.13), 0.02, 0.35, 0.25);
+  }
+
   /** One mote of the swirl around the bolt. */
   mote(x: number, y: number, z: number): void {
     this.fire.add(MIST, x, y, z, rnd(-0.15, 0.15), rnd(-0.1, 0.25), rnd(-0.15, 0.15), rnd(0.18, 0.32), 0.2, 0.03, 1.5, 0);

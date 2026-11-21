@@ -1,5 +1,10 @@
-import type { MobKind, MobSound, SoundKind } from '@solrift/shared';
+import type { BossFx, MobKind, MobSound, SoundKind } from '@solrift/shared';
 import { Ambience, hallImpulse, type AmbientEnv } from './ambience';
+import { bossLoudness, playBoss, playBossNamed, playGrunt, playYell, type BossPlay, type BossSoundName } from './bossSounds';
+import { VoicePool, makeSink, type DarkSink } from './darkSounds';
+import { deepMobSound, isDeepVoice } from './audioDeep';
+import { DungeonAmbience, type DungeonEnv } from './dungeonAmbience';
+import type { AmbientName } from './dungeonSounds';
 import { playAbilitySound, type AbilitySound } from './abilitySounds';
 import { STEP_ACTIONS, STEP_SURFACES, prepareStep, stepBuffers } from './stepSounds';
 
@@ -64,6 +69,12 @@ export class GameAudio {
   private foot = 0;
   private noise: AudioBuffer | null = null;
   private ambience: Ambience | null = null;
+  /** The sound of the Hollow Deep, and of its boss (see dungeonAmbience.ts, bossSounds.ts). */
+  private dungeon: DungeonAmbience | null = null;
+  private dark: DarkSink | null = null;
+  private readonly bossPool = new VoicePool(14);
+  private lastRoar = -9;
+  private lastGrunt = -9;
   private rainGain: GainNode | null = null;
   private rainFilter: BiquadFilterNode | null = null;
   /** The bed of a place (wind, sea, a storm...): one looping noise through a filter, with a slow swell on its level. */
@@ -140,6 +151,7 @@ export class GameAudio {
         impulse.getChannelData(1).set(bed.right);
       }
       this.ambience = new Ambience(this.ctx, this.ambBus, this.noise, impulse, this.main);
+      this.dungeon = new DungeonAmbience(this.ctx, this.ambBus, this.darkSink()!);
     }
     if (this.ctx.state === 'suspended') void this.ctx.resume();
   }
@@ -689,6 +701,8 @@ export class GameAudio {
     if (!this.ctx || volume <= 0.02) return;
     const v = volume;
     const r = 0.9 + Math.random() * 0.2;
+    // The monsters of the Hollow Deep have voices of their own (audioDeep.ts).
+    if (isDeepVoice(kind) && deepMobSound(kind, action, v, r, { voice: (...a) => this.voice(...a), blip: (...a) => this.blip(...a) })) return;
     if (action === 'teleport') {
       this.voice('sine', 1500 * r, 260, 0.22, 0.25 * v, 0, 40);
       this.voice('triangle', 300 * r, 900, 0.18, 0.12 * v);
@@ -786,6 +800,10 @@ export class GameAudio {
         if (action === 'say') this.voice('sawtooth', 95 * r, 70, 0.9, 0.22 * v, 420, 9);
         else if (action === 'hurt') this.voice('sawtooth', 150 * r, 90, 0.25, 0.3 * v, 500);
         else this.voice('sawtooth', 110 * r, 40, 0.7, 0.32 * v, 400);
+        break;
+      case 'hollow_king':
+        // Only the grunt is his here: his voice and his death come with the fight itself (the `bossFx` events).
+        if (action === 'hurt') this.bossGrunt(v, this.pan);
         break;
       case 'stray':
       case 'skeleton':
@@ -981,7 +999,74 @@ export class GameAudio {
     }, distance * 2200);
   }
 
+  // ---- the Hollow Deep ------------------------------------------------------------------------------------
+
+  /** The noise and tools of the dark sounds, made once the sound has started. */
+  private darkSink(): DarkSink | null {
+    if (!this.ctx || !this.noise) return null;
+    this.dark ??= makeSink(this.ctx, this.noise);
+    return this.dark;
+  }
+
+  /** The bed and the random sounds of the dungeon (see dungeonAmbience.ts). Call a few times a second; it fades out and frees itself when the player is not in one. */
+  dungeonAmbient(dt: number, env: DungeonEnv): void {
+    this.dungeon?.update(dt, env, !this.levels.muted && this.levels.ambience > 0.01 && this.levels.master > 0.01);
+  }
+
+  /** What the boss sounds are made of, or null when sound is off (not started, muted, or the effects turned down). */
+  private bossPlay(): BossPlay | null {
+    const sink = this.darkSink();
+    if (!sink || !this.sfx || this.levels.muted || this.levels.effects < 0.01 || this.levels.master < 0.01) return null;
+    return { sink, pool: this.bossPool, bus: this.sfx, wet: this.tail() };
+  }
+
+  /**
+   * A sound of the boss fight (a `bossFx` event): `dist` blocks from the listener (it gets quieter and duller with it, but the big ones are
+   * heard everywhere in the copy), `pan` the ear it comes from.
+   */
+  bossFx(e: BossFx, dist: number, pan: number): void {
+    const p = this.bossPlay();
+    if (!p || !this.ctx) return;
+    if (e.what === 'wake' || e.what === 'phase' || e.what === 'down') this.lastRoar = this.ctx.currentTime;
+    playBoss(e, p, bossLoudness(e.what, dist), pan);
+  }
+
+  /** The king spoke (a yell): a deep torn voice, a syllable for about every two words. Held back a moment if a roar has just begun. */
+  bossYell(text: string): void {
+    const p = this.bossPlay();
+    if (!p || !this.ctx) return;
+    const words = text.trim().split(/\s+/).length;
+    playYell(p, Math.ceil(words / 2), this.ctx.currentTime - this.lastRoar < 0.6 ? 1.3 : 0);
+  }
+
+  /** A grunt of the king's, at most one in a second and a half. */
+  bossGrunt(volume: number, pan: number): void {
+    const p = this.bossPlay();
+    if (!p || !this.ctx || this.ctx.currentTime - this.lastGrunt < 1.5) return;
+    this.lastGrunt = this.ctx.currentTime;
+    playGrunt(p, { vol: volume, far: Math.min(0.7, (1 - volume) * 0.7) }, pan);
+  }
+
+  /** For the debug hooks: one dark ambient sound, or one boss sound, by name, now. */
+  debugDark(kind: 'ambient' | 'boss', name: string, opts: { depth?: number; pan?: number; dist?: number } = {}): boolean {
+    this.resume();
+    if (kind === 'ambient') return this.dungeon?.debugPlay(name as AmbientName, opts) ?? false;
+    const p = this.bossPlay();
+    if (!p) return false;
+    playBossNamed(name as BossSoundName, p, opts.pan ?? 0, opts.dist ?? 0);
+    return true;
+  }
+
+  /** For the debug hooks: how many sounds and sources the dark layers have going, and have made. */
+  darkStats(): { dungeon: ReturnType<DungeonAmbience['stats']> | null; boss: ReturnType<VoicePool['stats']> } {
+    return { dungeon: this.dungeon?.stats() ?? null, boss: this.bossPool.stats() };
+  }
+
   dispose(): void {
+    this.dungeon?.dispose();
+    this.dungeon = null;
+    this.dark = null;
+    this.bossPool.fadeAll(0.05);
     void this.ctx?.close();
     this.ctx = null;
     this.master = null;

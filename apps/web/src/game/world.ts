@@ -164,6 +164,11 @@ export class World implements WorldAccess {
     }
   }
 
+  /** Is this chunk here? (A dungeon's cages and gates are only looked at where the land is loaded: what is far away has not been touched.) */
+  hasChunk(cx: number, cz: number): boolean {
+    return this.chunks.has(chunkKey(cx, cz));
+  }
+
   isChunkMeshed(cx: number, cz: number): boolean {
     return this.chunks.get(chunkKey(cx, cz))?.meshed ?? false;
   }

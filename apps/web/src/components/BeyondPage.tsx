@@ -1,6 +1,6 @@
 'use client';
 
-import { B, BEYOND_BIOMES, GAME_VERSION, toolId, type BeyondBiome, type BiomeFamily } from '@solrift/shared';
+import { B, BEYOND_BIOMES, GAME_VERSION, type BeyondBiome, type BiomeFamily } from '@solrift/shared';
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { AccountPanel } from './AccountPanel';
 import { Blocks } from './BlockCube';
@@ -10,7 +10,6 @@ import { ClickSparks, Embers, Reveal, Spot, useFrontMotion } from './fx';
 import { lobbyUrl } from '../game/route';
 import { SCROLL_KEY, goMarket } from './frontNav';
 import { ART } from './homeAssets';
-import { ItemSprite } from './ItemSprite';
 import './home.css';
 import './front.css';
 import './classPage.css';
@@ -191,11 +190,9 @@ export function BeyondPage() {
       {view && <Lightbox group={view.group} at={view.at} onClose={close} onMove={move} />}
 
       <div className="fp-rail" data-no-play>
-        <header className="fp-nav fp-px">
-          <button className="fp-brand" onClick={() => toFront(null)} aria-label="SolRift, to the front page">
-            <ItemSprite id={toolId('sword', 'diamond')} size={28} />
-            <span>SolRift</span>
-          </button>
+        <button className="fp-brand" onClick={() => toFront(null)} aria-label="SolRift, to the front page"><img src="/art/solrift-token-logo.png" alt="SolRift" draggable={false} /></button>
+          <header className="fp-nav fp-px">
+          <span className="fp-brand-gap" aria-hidden="true" />
           <nav className="site-nav fp-links" aria-label="Menu">
             <button className="fp-link-play" onClick={play}>
               Play

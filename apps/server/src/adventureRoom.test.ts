@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ADVENTURE_LAYOUT, ADVENTURE_SEED, B, GENERATOR_VERSION, CELLAR_HOUSE, CHUNK_VOLUME, DUNGEON_MIN_LEVEL, FIRST_QUEST, NPCS, totalForLevel, SPAWN_SIZE, SPAWN_X0, SPAWN_Z0, makeGenerator, mulberry32, parseNetClientMessage, type AdventureWorldGenerator, type NetServerMessage, type Snapshot } from '@solrift/shared';
+import { ADVENTURE_LAYOUT, ADVENTURE_SEED, B, GENERATOR_VERSION, CELLAR_HOUSE, CHUNK_VOLUME, DUNGEON_MIN_LEVEL, FIRST_QUEST, I, INSTANCE_STRIDE, INSTANCE_X0, NPCS, makeStack, totalForLevel, SPAWN_SIZE, SPAWN_X0, SPAWN_Z0, makeGenerator, mulberry32, parseNetClientMessage, type AdventureWorldGenerator, type NetServerMessage, type Snapshot } from '@solrift/shared';
 import { GameRoom } from './room';
 import { MemoryRoomStore } from './roomStore';
 
@@ -118,7 +118,7 @@ describe('an Adventure room', () => {
     p.quests!.done.add(FIRST_QUEST);
     ticks(room, 30);
     const npcs = c.snap.mobs.filter((m) => m.kind === 'npc');
-    expect(npcs.map((m) => m.variant).sort((a, b) => a - b)).toEqual(NPCS.map((_, i) => i));
+    expect(npcs.map((m) => m.variant).sort((a, b) => a - b)).toEqual(NPCS.flatMap((n, i) => (n.dungeon ? [] : [i])));
 
     const maren = NPCS.find((n) => n.id === 'maren')!;
     p.teleport(maren.x, generator.hubY + 1, maren.z + 2, 0, 0);
@@ -184,6 +184,7 @@ describe('an Adventure room', () => {
     for (const x of [a, b, c]) {
       const p = room.player(x.id)!;
       p.xp.add(totalForLevel(DUNGEON_MIN_LEVEL));
+      p.inventory.collect(makeStack(I.HOLLOW_SIGIL, 1));
       p.teleport(92.5, generator.ruinY + 1, 0.5, 0, 0);
     }
     ticks(room, 4);
@@ -200,6 +201,7 @@ describe('an Adventure room', () => {
     c.join('ann');
     const p = room.player(c.id)!;
     p.xp.add(totalForLevel(DUNGEON_MIN_LEVEL));
+    p.inventory.collect(makeStack(I.HOLLOW_SIGIL, 1));
     p.teleport(92.5, generator.ruinY + 1, 0.5, 0, 0);
     ticks(room, 4);
     const slot = generator.instanceAt(p.body.x, p.body.z);
@@ -211,12 +213,13 @@ describe('an Adventure room', () => {
     d.join('bob');
     const q = room.player(d.id)!;
     q.xp.add(totalForLevel(DUNGEON_MIN_LEVEL));
+    q.inventory.collect(makeStack(I.HOLLOW_SIGIL, 1));
     q.teleport(92.5, generator.ruinY + 1, 0.5, 0, 0);
     ticks(room, 4);
     expect(generator.instanceAt(q.body.x, q.body.z)).not.toBe(slot);
 
     // Whatever is built inside a copy is not part of the saved world.
-    const spot = { x: generator.roomX + 8, y: generator.cellarY + 1, z: generator.roomZ + slot * 48 };
+    const spot = { x: INSTANCE_X0 + 10, y: generator.cellarY + 1, z: generator.roomZ + slot * INSTANCE_STRIDE };
     room.realm.world.setBlock(spot.x, spot.y, spot.z, 1);
     room.save();
     const again = new GameRoom({ seed: 1, kind: 'adventure', naturalSpawning: false, rand: mulberry32(4), store });

@@ -80,7 +80,7 @@ describe('what the item table says about each item', () => {
   it('says what kind of thing each item is', () => {
     const called = (kind: ItemKind): number[] => allItems().filter((i) => itemKind(i.id) === kind).map((i) => i.id);
     expect(called('Enchanted Book')).toEqual([I.ENCHANTED_BOOK]);
-    expect(called('Special')).toEqual([I.MAP, I.COMPASS, I.EMBERSTONE].sort((a, b) => a - b));
+    expect(called('Special')).toEqual([I.MAP, I.COMPASS, I.EMBERSTONE, I.HOLLOW_SIGIL].sort((a, b) => a - b));
     for (const item of allItems()) {
       const kind = itemKind(item.id);
       expect(kind === 'Skill Book', item.name).toBe(skillBookAbility(item.id) !== null);

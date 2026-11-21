@@ -54,6 +54,8 @@ export const LOOT_TABLES = {
       e(I.EXPERIENCE_BOTTLE, 2, 1, 3),
       e(I.JEWEL_DAWN, 2),
       e(I.JEWEL_RIFT, 1),
+      e(I.WARDEN_SCROLL, 2),
+      e(I.HOLLOW_BONE, 2),
     ],
   },
   /** Abandoned mineshafts: supplies someone left behind. */

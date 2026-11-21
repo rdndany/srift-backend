@@ -1,6 +1,6 @@
 import type * as THREE from 'three';
 import { BLOCKS, I, abilitiesOf, getItem, type SessionEvent } from '@solrift/shared';
-import { bumpUi, pushPickup, pushQuestNote, setParty, setQuests, showZone, useUi } from '../ui/store';
+import { bumpUi, pushPickup, pushQuestNote, setParty, setQuests, showBossLine, showZone, useUi } from '../ui/store';
 import type { AbilityFx } from './abilityFx';
 import type { GameAudio } from './audio';
 import type { ClientSession } from './clientSession';
@@ -44,6 +44,8 @@ export interface EventParts {
   setPartyPins(party: { name: string; x: number; z: number }[]): void;
   /** Your own body falls apart where it stood. */
   breakSelf(): void;
+  /** The boss of this copy has fallen (where he stood): a hook for whatever follows the fight (the way out, say). Optional. */
+  bossDown?(x?: number, y?: number, z?: number): void;
 }
 
 /**
@@ -64,6 +66,20 @@ export function makeEventHandler(parts: EventParts): (events: SessionEvent[]) =>
         case 'toast':
           hud.toast(e.text);
           break;
+        case 'boss':
+          showBossLine(e.text, e.kind);
+          // His yells are heard as well as read: a deep torn voice, wherever he is in the copy.
+          if (e.kind === 'yell') audio.bossYell(e.text);
+          break;
+        case 'bossFx': {
+          // The sound of the fight: how loud and how dull it is follows how far the king is (a roar or his fall is heard in all of the copy).
+          // It has no place when it comes without one: the room, then.
+          const has = e.x !== undefined && e.y !== undefined && e.z !== undefined;
+          const dist = has ? Math.hypot(e.x! - camera.position.x, e.y! - camera.position.y, e.z! - camera.position.z) : 0;
+          audio.bossFx(e, dist, has ? panOf(e.x!, e.z!) : 0);
+          if (e.what === 'down') parts.bossDown?.(e.x, e.y, e.z);
+          break;
+        }
         case 'sound':
           audio.play(e.sound, e.action, e.vol, e.x !== undefined && e.z !== undefined ? panOf(e.x, e.z) : 0);
           if ((e.action === 'step' || e.action === 'land') && e.x !== undefined && e.y !== undefined && e.z !== undefined) footDust(e.sound, e.action, e.x, e.y, e.z, e.vol);

@@ -1,5 +1,6 @@
 import {
   ATTACK_ANIM,
+  BOSS_ANIM,
   BASH_ANIM,
   HeadlessWorld,
   Player,
@@ -1607,6 +1608,7 @@ export class GameRoom {
       air: p.vitals.air,
       dead: p.vitals.dead,
       ...(p.poison > 0.05 ? { poison: round(p.poison) } : {}),
+      ...(p.moveMul < 1 ? { mv: round(p.moveMul) } : {}),
       ...(p.foodSick > 0.05 ? { foodSick: round(p.foodSick) } : {}),
       level: p.xp.level,
       xpProgress: round(p.xp.progress),
@@ -1628,6 +1630,8 @@ export class GameRoom {
       riding: p.riding?.id ?? 0,
       ...mountFields(p),
       ...(p.cls ? { cls: p.classView()! } : {}),
+      ...(p.bossView() ? { boss: p.bossView()! } : {}),
+      ...(p.dungeonView() ? { dungeon: p.dungeonView()! } : {}),
     };
 
     const players: PlayerView[] = noPlayers ? [] : this.visibleFrames(m).map((f) => f.view);
@@ -1649,7 +1653,8 @@ export class GameRoom {
         deathTime: round(mob.deathTime),
         burning: mob.burning,
         fuse: round(mob.fuse),
-        ...(mob.attackTime < ATTACK_ANIM ? { atk: round(mob.attackTime) } : {}),
+        ...(mob.attackTime < (mob.def.boss ? BOSS_ANIM : ATTACK_ANIM) ? { atk: round(mob.attackTime) } : {}),
+        ...(mob.casting ? { cast: mob.casting } : {}),
         size: mob.size,
         variant: mob.variant,
         ...(mob.baby ? { baby: 1 as const } : {}),

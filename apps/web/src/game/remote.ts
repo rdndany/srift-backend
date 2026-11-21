@@ -24,6 +24,7 @@ import {
   Weather,
   makeGenerator,
   buildMove,
+  rooted,
   rushMove,
   newBook,
   cleanName,
@@ -31,8 +32,12 @@ import {
   parsePenalty,
   createBody,
   stepPlayer,
+  MOBS,
+  type Solid,
   type BlockReader,
   type ClassId,
+  type BossView,
+  type DungeonView,
   type ClassView,
   parseGear,
   type Fx,
@@ -188,6 +193,8 @@ export class RemoteSession implements ClientSession {
   aimsAtTalker = false;
   burning = false;
   poison = 0;
+  /** What the server says the roots or slowness on you leave of your speed (see Player.moveMul). */
+  moveMul = 1;
   foodSick = 0;
   /** The bed this player lies in (only the way it points matters to the client), or null. */
   sleeping: { dir: number } | null = null;
@@ -197,6 +204,8 @@ export class RemoteSession implements ClientSession {
   /** The effects the server has sent in full and that are still on (see applyFx). */
   private readonly fxKnown = new Map<number, Fx>();
   private cls: ClassView | null = null;
+  private boss: BossView | null = null;
+  private dungeon: DungeonView | null = null;
   readonly others = new Map<number, OtherPlayer>();
   readonly generator: WorldGenerator;
 
@@ -473,18 +482,34 @@ export class RemoteSession implements ClientSession {
     }
   }
 
+  private solidsNear(): Solid[] | undefined {
+    let out: Solid[] | undefined;
+    const b = this.body;
+    for (const m of this.mobs.mobs) {
+      if (m.dead || Math.abs(m.body.x - b.x) > 6 || Math.abs(m.body.z - b.z) > 6 || Math.abs(m.body.y - b.y) > 6) continue;
+      const def = MOBS[m.kind];
+      const scale = (m.size || 1) * (m.baby ? 0.5 : 1);
+      if (!def || def.width * scale < 0.3) continue;
+      (out ??= []).push({ x: m.body.x, y: m.body.y, z: m.body.z, r: (def.width * scale) / 2, h: def.height * scale });
+    }
+    return out;
+  }
+
   private predict(input: NetInput): void {
     if (!this.world || this.sleeping || this.riding) return;
     // A mount runs at its own speed, and a rider neither sprints nor sneaks (see Player.simulateStep).
     const mount = this.mountIdx > 0 ? MOUNTS[this.mountIdx - 1] : null;
     const canSprint = (this.mode === 'creative' || this.vitals.hunger > 6) && !this.blocking && !mount;
-    const move = buildMove({ t: 'frame', dt: STEP, locked: true, ...input }, this.flying, canSprint, false, mount ? mount.speed : (this.cls?.speedMul ?? 1));
+    const move = buildMove({ t: 'frame', dt: STEP, locked: true, ...input }, this.flying, canSprint, false, (mount ? mount.speed : (this.cls?.speedMul ?? 1)) * (this.moveMul > 0 ? this.moveMul : 1));
+    if (this.moveMul <= 0 && !this.flying) rooted(move);
     if (mount) {
       move.sneak = false;
       move.stepHeight = MOUNT_STEP_HEIGHT;
     }
     // A Charge runs on the server's terms: predict it the same way, or the body would be dragged back at every snapshot.
     if (this.cls?.rush) rushMove(move, this.cls.rush.yaw, this.cls.rush.speed);
+    // Monsters and people are solid, here as on the server (see Realm.solidsNear), as far as the snapshots tell.
+    if (!this.flying && !this.spectating) move.solids = this.solidsNear();
     const y0 = this.body.y;
     const wasOnGround = this.body.onGround;
     stepPlayer(this.world, this.body, move, STEP);
@@ -495,6 +520,13 @@ export class RemoteSession implements ClientSession {
 
   classView(): ClassView | null {
     return this.cls;
+  }
+
+  bossView(): BossView | null {
+    return this.boss;
+  }
+  dungeonView(): DungeonView | null {
+    return this.dungeon;
   }
 
   /** Smooth other players, mobs and arrows between snapshots. Call once per frame. */
@@ -641,12 +673,15 @@ export class RemoteSession implements ClientSession {
     this.aimsAtTalker = !!y.talk;
     this.burning = y.burning;
     this.poison = y.poison ?? 0;
+    this.moveMul = y.mv ?? 1;
     this.foodSick = y.foodSick ?? 0;
     this.sleeping = y.sleeping > 0 ? { dir: y.sleeping - 1 } : null;
     this.riding = y.riding > 0 ? { id: y.riding } : null;
     this.mountIdx = y.mount ?? 0;
     this.mountCd = y.mountCd ?? [0, 0];
     this.cls = y.cls ?? null;
+    this.boss = y.boss ?? null;
+    this.dungeon = y.dungeon ?? null;
     this.applyFx(s);
     this.time = s.time;
     this.weather.kind = s.weather.kind;
@@ -779,7 +814,7 @@ export class RemoteSession implements ClientSession {
       seen.add(v.id);
       let t = this.mobTargets.get(v.id);
       if (!t) {
-        const obj: MobLike = { id: v.id, kind: v.kind, body: { x: v.x, y: v.y, z: v.z }, yaw: v.yaw, walkPhase: v.walk, speedNow: v.speed, hurtTime: v.hurt, attackTime: v.atk ?? 99, dead: v.dead, deathTime: v.deathTime, burning: v.burning, fuse: v.fuse, fuseFraction: 0, size: v.size ?? 1, variant: v.variant ?? 0, baby: false, sheared: false, love: 0, gear: v.gear };
+        const obj: MobLike = { id: v.id, kind: v.kind, body: { x: v.x, y: v.y, z: v.z }, yaw: v.yaw, walkPhase: v.walk, speedNow: v.speed, hurtTime: v.hurt, attackTime: v.atk ?? 99, casting: v.cast ?? 0, dead: v.dead, deathTime: v.deathTime, burning: v.burning, fuse: v.fuse, fuseFraction: 0, size: v.size ?? 1, variant: v.variant ?? 0, baby: false, sheared: false, love: 0, gear: v.gear };
         t = { obj, x: v.x, y: v.y, z: v.z, yaw: v.yaw };
         this.mobTargets.set(v.id, t);
       }
@@ -794,6 +829,7 @@ export class RemoteSession implements ClientSession {
       if (v.hurt < o.hurtTime) o.hurtTime = v.hurt;
       // The swing is only listed while it is on screen; a new one restarts the clock (in between it runs on its own).
       if (v.atk !== undefined && v.atk < (o.attackTime ?? 99)) o.attackTime = v.atk;
+      o.casting = v.cast ?? 0;
       o.dead = v.dead;
       o.deathTime = Math.max(o.deathTime, v.deathTime);
       o.burning = v.burning;

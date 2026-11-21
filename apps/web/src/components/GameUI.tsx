@@ -15,6 +15,7 @@ import { PlayerUI } from './PlayerUI';
 import { PickupFeed } from './PickupFeed';
 import { RecipeToast } from './RecipeToast';
 import { PlayerFrame } from './PlayerFrame';
+import { BossBanner, BossFrame } from './BossFrame';
 import { AirBubbles } from './Vitals';
 
 function DeathScreen() {
@@ -102,6 +103,8 @@ export function GameUI() {
         <Hotbar />
       </div>
       <PlayerFrame />
+      <BossFrame />
+      <BossBanner />
       <MenuScreen />
       <DeathScreen />
       <SpectatorBanner />

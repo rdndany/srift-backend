@@ -52,6 +52,8 @@ const COLORS: Record<FxKind, number> = {
   fang: 0xb8a8ff,
   thunder_warn: 0xb8a8ff,
   thunder_hit: 0xb8a8ff,
+  boss_warn: 0xff3a14,
+  boss_blast: 0xff8a2a,
   level_up: 0xffc040,
 };
 
@@ -186,6 +188,54 @@ export class AbilityFx {
           ring.scale.setScalar(Math.max(0.05, r * (0.4 + 0.8 * k)));
           mats[0].opacity = 0.85 * (1 - k);
           mats[1].opacity = 0.8 * (1 - k);
+        };
+        return entry;
+      }
+      case 'boss_warn': {
+        // The classic telegraph: the edge of the danger, and a fill that rises to meet it when the spell lands.
+        const edge = new THREE.Mesh(this.ring, mat(0.95));
+        const fill = new THREE.Mesh(this.disc, mat(0.28));
+        const base = new THREE.Mesh(this.disc, mat(0.1));
+        edge.position.y = fill.position.y = base.position.y = 0.13;
+        g.add(edge, base, fill);
+        const embers: THREE.Mesh[] = [];
+        for (let i = 0; i < 9; i++) {
+          const s = new THREE.Mesh(this.bar, mat(0.8));
+          s.scale.set(0.07, 0.5, 0.07);
+          embers.push(s);
+          g.add(s);
+        }
+        entry.animate = (t, age) => {
+          const k = Math.min(1, t);
+          edge.scale.setScalar(r * (1 + 0.02 * Math.sin(age * 14)));
+          base.scale.setScalar(r);
+          fill.scale.setScalar(Math.max(0.05, r * k));
+          mats[1].opacity = 0.2 + 0.25 * k;
+          embers.forEach((s, i) => {
+            const a = i * 2.4;
+            const ph = (age * 1.4 + i * 0.31) % 1;
+            const rr = r * (0.2 + 0.7 * ((i * 0.37) % 1)) * (0.4 + 0.6 * k);
+            s.position.set(Math.cos(a) * rr, 0.3 + ph * 3.2, Math.sin(a) * rr);
+          });
+        };
+        return entry;
+      }
+      case 'boss_blast': {
+        const column = new THREE.Mesh(this.bar, mat(0.7));
+        const ring = new THREE.Mesh(this.ring, mat(0.95));
+        const flash = new THREE.Mesh(this.disc, mat(0.5));
+        ring.position.y = flash.position.y = 0.15;
+        g.add(column, ring, flash);
+        entry.animate = (t) => {
+          const k = Math.min(1, t);
+          const out = 1 - Math.pow(1 - k, 3);
+          column.scale.set(Math.max(0.05, r * 0.9 * (1 - k)), 9 * (1 - k * 0.6), Math.max(0.05, r * 0.9 * (1 - k)));
+          column.position.y = 4.2;
+          ring.scale.setScalar(Math.max(0.05, r * (0.7 + 0.5 * out)));
+          flash.scale.setScalar(Math.max(0.05, r));
+          mats[0].opacity = 0.7 * (1 - k);
+          mats[1].opacity = 0.95 * (1 - k);
+          mats[2].opacity = 0.5 * (1 - k) * (1 - k);
         };
         return entry;
       }
@@ -395,6 +445,11 @@ export class AbilityFx {
         return play('mount_gather', MOUNT_HOWL.delay);
       case 'thunder_hit':
         return play('mount_strike');
+      case 'boss_warn':
+        return play('mount_gather', f.ttl - f.age);
+      case 'boss_blast':
+        this.onImpact?.(f.x, f.y, f.z, Math.min(1, 0.25 + f.r * 0.08));
+        return play('meteor_hit');
       case 'leap':
         return play('slam_leap');
       case 'slam':

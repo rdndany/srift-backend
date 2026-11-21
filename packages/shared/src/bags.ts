@@ -98,6 +98,12 @@ const BAG_DROP_CHANCE: Partial<Record<MobKind, number>> = {
   cave_spider: 0.025,
   creeper: 0.03,
   enderman: 0.12,
+  moss_lurker: 0.06,
+  spore_puff: 0.015,
+  ember_wraith: 0.07,
+  ashen_knight: 0.09,
+  hollow_priest: 0.14,
+  shade: 0.06,
 };
 
 /** The smallest bag a kind leaves: an enderman carries nothing as poor as a small pouch. */

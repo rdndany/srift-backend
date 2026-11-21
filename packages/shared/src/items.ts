@@ -190,6 +190,10 @@ export const I = {
   TROPICAL_FISH: 500,
   /** Eating it poisons and sickens you, as in the original. */
   PUFFERFISH: 501,
+  /** The key of the Hollow Cellar: a Warden Scroll and a Hollow Bone made into a Hollow Sigil (see crafting.ts). Each new copy of the dungeon uses one up. */
+  WARDEN_SCROLL: 502,
+  HOLLOW_BONE: 503,
+  HOLLOW_SIGIL: 504,
 } as const;
 
 /** The classes a skill book can be for (the same ids as `ClassId`, written out so that this file need not import classes). */
@@ -671,6 +675,9 @@ export const holdsInOffhand = (id: number): boolean => prefersOffhand(id) || id 
 
 add({ id: I.COMPASS, name: 'compass', tile: tileIndex('compass'), maxStack: 1, kind: 'Special' });
 add({ id: I.EMBERSTONE, name: 'emberstone', tile: tileIndex('emberstone'), maxStack: 1, use: 'emberstone', undroppable: true, kind: 'Special' });
+add({ id: I.WARDEN_SCROLL, name: 'warden_scroll', tile: tileIndex('warden_scroll'), maxStack: 16, kind: 'Material' });
+add({ id: I.HOLLOW_BONE, name: 'hollow_bone', tile: tileIndex('hollow_bone'), maxStack: 16, kind: 'Material' });
+add({ id: I.HOLLOW_SIGIL, name: 'hollow_sigil', tile: tileIndex('hollow_sigil'), maxStack: 8, kind: 'Special' });
 add({ id: I.JEWEL_DAWN, name: 'jewel_of_dawn', tile: tileIndex('jewel_dawn'), maxStack: 64, kind: 'Jewel' });
 add({ id: I.JEWEL_RIFT, name: 'jewel_of_the_rift', tile: tileIndex('jewel_rift'), maxStack: 64, kind: 'Jewel' });
 add({ id: I.JEWEL_BLOOM, name: 'jewel_of_bloom', tile: tileIndex('jewel_bloom'), maxStack: 64, kind: 'Jewel' });

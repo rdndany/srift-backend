@@ -226,7 +226,7 @@ describe('an Adventure player', () => {
     expect(s.drainEvents().find((e) => e.t === 'quests')).toBeDefined();
     run(s, 1.5);
     const people = s.mobs.mobs.filter((m) => m.kind === 'npc');
-    expect(people.map((m) => m.variant).sort((a, b) => a - b)).toEqual(NPCS.map((_, i) => i));
+    expect(people.map((m) => m.variant).sort((a, b) => a - b)).toEqual(NPCS.flatMap((n, i) => (n.dungeon ? [] : [i])));
     for (const m of people) {
       expect(m.def.invulnerable).toBe(true);
       const n = NPCS[m.variant];
@@ -488,7 +488,11 @@ describe('an Adventure player', () => {
       log.done.add(id);
     };
     for (const r of dark.requires) chain(r);
-    expect(log.accept(dark.id)).toBe(true);
+    // Varro gives the quest, and the Hollow Sigil that the portal asks for.
+    talkTo(s, 'varro');
+    s.apply({ t: 'quest', a: 'accept', id: dark.id });
+    s.closeMenu();
+    expect(s.inventory.countOf(I.HOLLOW_SIGIL)).toBe(1);
     s.drainEvents();
     run(s, 0.5);
     expect(s.drainEvents().filter((e) => e.t === 'zone' && e.id === 'dawnwatch').length).toBe(0); // the Landing is inside it, and was announced on arrival
@@ -499,8 +503,57 @@ describe('an Adventure player', () => {
     const events = s.drainEvents();
     expect(events.filter((e) => e.t === 'zone' && e.id === 'hollow_cellar').length).toBe(1);
     expect(log.status(dark.id)).toBe('ready');
+    expect(s.inventory.countOf(I.HOLLOW_SIGIL)).toBe(0); // a new copy took it
     run(s, 0.6);
     expect(s.drainEvents().some((e) => e.t === 'zone')).toBe(false);
+  });
+
+  it('ends "Into the Dark" with Warden Hale inside the cellar and takes the next quest from him, there and then', () => {
+    const s = make();
+    s.xp.add(totalForLevel(DUNGEON_MIN_LEVEL));
+    run(s, 0.5);
+    const log = s.quests!;
+    unlock(log, 'into_the_dark');
+    // The quest and its key come from Varro in the village...
+    expect(questById('into_the_dark')!.turnIn).toBe('hale');
+    expect(questById('cellar_cleanse')!.giver).toBe('hale');
+    expect(questById('cellar_cleanse')!.turnIn).toBe('hale');
+    talkTo(s, 'varro');
+    s.apply({ t: 'quest', a: 'accept', id: 'into_the_dark' });
+    s.closeMenu();
+    expect(s.inventory.countOf(I.HOLLOW_SIGIL)).toBe(1);
+    expect(log.offeredBy('varro').map((q) => q.id)).not.toContain('cellar_cleanse');
+    // ...in the cellar, the Warden is at the door, and the portal need not be taken again.
+    s.teleport(DUNGEON_X + 0.5, generator.ruinY + 1, DUNGEON_Z + 0.5);
+    run(s, 2);
+    expect(s.realm.copyAt(s)).toBe(0);
+    expect(log.status('into_the_dark')).toBe('ready');
+    const st = generator.npcStations().find((n) => n.npc.id === 'hale' && generator.instanceAt(n.x, n.z) === 0)!;
+    s.teleport(st.x + 2, st.y, st.z, Math.PI / 2, 0);
+    run(s, 2);
+    const hale = s.mobs.mobs.find((m) => m.kind === 'npc' && NPCS[m.variant].id === 'hale' && generator.instanceAt(m.body.x, m.body.z) === 0)!;
+    expect(hale).toBeDefined();
+    expect(s.talkNpc(hale)).toBe(true);
+    expect(log.markerFor('hale')).toBe('ready');
+    s.apply({ t: 'quest', a: 'complete', id: 'into_the_dark' });
+    expect(log.status('into_the_dark')).toBe('done');
+    expect(log.offeredBy('hale').map((q) => q.id)).toEqual(['cellar_cleanse']);
+    s.apply({ t: 'quest', a: 'accept', id: 'cellar_cleanse' });
+    expect(log.status('cellar_cleanse')).toBe('active');
+    s.closeMenu();
+    // The cages count towards the quest as they are smashed, and a gate opens when its cages are gone.
+    const cages = generator.instanceCages(0);
+    const gate = generator.instanceGates(0)[0].boxes[0];
+    const toasts = (): string[] => s.drainEvents().flatMap((e) => (e.t === 'toast' ? [e.text] : []));
+    toasts();
+    for (const c of [cages[0], cages[1]]) {
+      s.teleport(c.x + 0.5, c.y, c.z + 2.5, 0, 0);
+      s.breakBlock(c.x, c.y, c.z);
+      run(s, 1.5);
+    }
+    expect(log.progressOf('cellar_cleanse')[0]).toBe(2);
+    expect(s.world.getBlock(gate.x0, gate.y0, gate.z0)).toBe(B.AIR);
+    expect(toasts().join(' ')).toMatch(/cage shatters \(2 of 3\)[\s\S]*grinds open/);
   });
 
   it('is saved with its quests and gets them back', () => {

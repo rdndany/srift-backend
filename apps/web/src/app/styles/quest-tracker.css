@@ -99,3 +99,8 @@ body.minimap-on #quest-tracker {
     opacity: 0;
   }
 }
+
+#quest-tracker .tracker-dungeon .tracker-name {
+  color: #ff9a3c;
+  letter-spacing: 0.04em;
+}

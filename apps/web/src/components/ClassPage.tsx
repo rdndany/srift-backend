@@ -1,6 +1,6 @@
 'use client';
 
-import { B, CLASSES, abilityCost, CLASS_IDS, CLASS_LEVELS, GAME_VERSION, abilitiesOf, getItem, outfitItems, skillBookId, toolId, type AbilityDef, type ClassId } from '@solrift/shared';
+import { B, CLASSES, abilityCost, CLASS_IDS, CLASS_LEVELS, GAME_VERSION, abilitiesOf, getItem, outfitItems, skillBookId, type AbilityDef, type ClassId } from '@solrift/shared';
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { AbilityIcon } from './AbilityIcon';
 import { AccountPanel } from './AccountPanel';
@@ -131,11 +131,9 @@ export function ClassPage({ id }: { id: ClassId }) {
       {asking && <WayDialog mode={null} onDone={play} onClose={() => setAsking(false)} />}
 
       <div className="fp-rail" data-no-play>
-        <header className="fp-nav fp-px">
-          <button className="fp-brand" onClick={() => toFront(null)} aria-label="SolRift, to the front page">
-            <ItemSprite id={toolId('sword', 'diamond')} size={28} />
-            <span>SolRift</span>
-          </button>
+        <button className="fp-brand" onClick={() => toFront(null)} aria-label="SolRift, to the front page"><img src="/art/solrift-token-logo.png" alt="SolRift" draggable={false} /></button>
+          <header className="fp-nav fp-px">
+          <span className="fp-brand-gap" aria-hidden="true" />
           <nav className="site-nav fp-links" aria-label="Menu">
             <button className="fp-link-play" onClick={() => setAsking(true)}>
               Play

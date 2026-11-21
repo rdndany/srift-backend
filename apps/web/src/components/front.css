@@ -115,7 +115,7 @@
   gap: 16px;
   width: min(1120px, calc(100% - 32px));
   height: 62px;
-  margin: 14px auto 0;
+  margin: 36px auto 0;
   padding: 0 20px;
   filter: drop-shadow(0 10px 16px rgba(0, 0, 0, 0.5));
 }
@@ -142,6 +142,30 @@
   text-transform: uppercase;
   text-shadow: 0 2px 0 #000;
 }
+/* The logo hangs over the edge of the bar, like on the Blizzard pages: it sits in the rail beside the bar (the bar itself is clipped to its pixel corners) and the bar keeps a gap for it. */
+#home .fp .fp-rail .fp-brand {
+  position: absolute;
+  z-index: 3;
+  top: 23px;
+  left: max(16px, calc((100% - 1120px) / 2));
+  margin-left: 24px;
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+#home .fp .fp-rail .fp-brand:hover {
+  transform: translateY(-1px) scale(1.03);
+}
+#home .fp .fp-brand img {
+  display: block;
+  height: 88px;
+  width: 88px;
+  filter: drop-shadow(0 5px 6px rgba(0, 0, 0, 0.65)) drop-shadow(0 0 14px rgba(255, 170, 60, 0.28));
+}
+#home .fp .fp-brand-gap {
+  flex: none;
+  width: 96px;
+  height: 1px;
+}
 #home .fp .fp-brand canvas {
   image-rendering: pixelated;
   filter: drop-shadow(0 0 8px rgba(255, 163, 71, 0.6));
@@ -157,10 +181,13 @@
   padding: 10px 14px;
   background: none;
   border: none;
+  font-family: var(--pixel) !important;
   font-size: 11px;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: #d9d0ea;
+  /* a hard, blocky drop shadow, like the letters of the game's own menus */
+  text-shadow: 1px 1px 0 #000, 2px 2px 0 rgba(0, 0, 0, 0.55);
   transition: color 0.12s;
 }
 #home .fp .fp-links button::after {
@@ -385,6 +412,12 @@
 #home .fp .fp-logo span {
   display: block;
   white-space: nowrap;
+}
+#home .fp .fp-logo img {
+  display: block;
+  width: clamp(280px, 56vw, 680px);
+  height: auto;
+  user-select: none;
 }
 #home .fp .fp-logo-back {
   position: absolute;
@@ -1772,6 +1805,20 @@
   }
   #home .fp .fp-brand span {
     display: none;
+  }
+  #home .fp .fp-nav {
+    margin-top: 26px;
+  }
+  #home .fp .fp-rail .fp-brand {
+    top: 29px;
+    margin-left: 14px;
+  }
+  #home .fp .fp-brand img {
+    height: 56px;
+    width: 56px;
+  }
+  #home .fp .fp-brand-gap {
+    width: 58px;
   }
   /* (Play and Market stay: the account button needs the room) */
   #home .fp .fp-links button:nth-child(2) {

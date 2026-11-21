@@ -201,6 +201,14 @@ export function tooltipLines(stack: ItemStack | null, viewerClass?: ClassId | nu
     lines.push({ text: `Cooldown: ${formatEmberTime(EMBER_COOLDOWN)}`, color: 'dim' });
     lines.push({ text: 'Hold the right mouse button to use it', color: 'good' });
   }
+  if (stack.id === I.HOLLOW_SIGIL) {
+    lines.push({ text: 'Opens the Hollow Cellar, once', color: 'good' });
+    lines.push({ text: 'A new dungeon uses it up; coming back to one that is still open does not', color: 'dim' });
+    lines.push({ text: 'Made from a Warden Scroll and a Hollow Bone', color: 'dim' });
+  }
+  if (stack.id === I.WARDEN_SCROLL || stack.id === I.HOLLOW_BONE) {
+    lines.push({ text: 'Half of a Hollow Sigil: put it in a crafting grid with the other half', color: 'dim' });
+  }
   if (item.tool) {
     lines.push({ text: `+${num(scaled(item.tool.damage))} Attack Damage`, color: 'stat' });
     if (item.tool.kind !== 'sword') lines.push({ text: `${num(item.tool.speed)} Mining Speed`, color: 'stat' });

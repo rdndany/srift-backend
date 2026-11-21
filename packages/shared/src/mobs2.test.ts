@@ -20,7 +20,7 @@ function harness(opts: { daylight?: number; invulnerable?: boolean; world?: Bloc
   const rand = mulberry32(opts.seed ?? 7);
   const env: MobEnv = { world, player, daylight: opts.daylight ?? 0, rand };
   const log = {
-    hits: [] as { amount: number; source: string; effect?: string }[],
+    hits: [] as { amount: number; source: string; effect?: string | readonly string[] }[],
     sounds: [] as string[],
     drops: [] as { id: number; count: number }[],
   };
@@ -422,7 +422,7 @@ describe('rabbits', () => {
   it('run from a hit', () => {
     const h = harness({ invulnerable: true });
     const r = h.mgr.spawn('rabbit', 3.5, 1, 0.5);
-    h.mgr.damage(r, 1, -1, 0, h.events, true, true, true);
+    h.mgr.damage(r, 1, 1, 0, h.events, true, true, true);
     h.run(3);
     expect(dist(r.body, h.player)).toBeGreaterThan(5);
   });

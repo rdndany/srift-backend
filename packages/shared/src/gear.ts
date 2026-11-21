@@ -288,6 +288,12 @@ export const GEAR_DROPS: Partial<Record<MobKind, GearDrop>> = {
   cave_spider: { chance: 0.035, level: [3, 7], rarity: COMMON },
   creeper: { chance: 0.04, level: [2, 7], rarity: COMMON },
   enderman: { chance: 0.1, level: [8, 14], rarity: [55, 35, 10] },
+  moss_lurker: { chance: 0.07, level: [4, 9], rarity: [62, 30, 8] },
+  spore_puff: { chance: 0.02, level: [3, 7], rarity: COMMON },
+  ember_wraith: { chance: 0.09, level: [6, 11], rarity: [55, 35, 10] },
+  ashen_knight: { chance: 0.14, level: [6, 12], rarity: [50, 38, 12] },
+  hollow_priest: { chance: 0.2, level: [7, 13], rarity: [40, 42, 18] },
+  shade: { chance: 0.08, level: [6, 11], rarity: [55, 35, 10] },
 };
 
 export const gearDropChance = (kind: MobKind): number => GEAR_DROPS[kind]?.chance ?? 0;

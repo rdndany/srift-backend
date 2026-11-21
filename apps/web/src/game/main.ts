@@ -8,6 +8,8 @@ import {
   GameSession,
   LoopbackLink,
   ADVENTURE_SEED,
+  INSTANCE_FLOOR,
+  MOBS,
   instanceFootprint,
   SaveError,
   SessionHost,
@@ -44,6 +46,7 @@ import { Chat } from './chat';
 import { isPlayPath, markEntry, newUid, paramsFor, prettyAddress, realmPath, uidFromPath } from './route';
 import type { ClientSession } from './clientSession';
 import { GameAudio } from './audio';
+import { NO_DUNGEON, dungeonDepth, hostileThreat, scanSurroundings, type DungeonEnv } from './dungeonAmbience';
 import { buildAtlas } from './atlas';
 import { HeldItem } from './heldItem';
 import { Hud } from './hud';
@@ -662,6 +665,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     if (KIND === 'adventure') {
       const log = useUi.getState().quests;
       for (const n of NPCS) {
+        if (n.dungeon) continue; // (a dungeon's person is in a map of its own)
         const kind = log.markerFor(n.id);
         if (kind && near(n.x, n.z, 400)) pins.push({ kind, name: n.name, x: n.x, z: n.z });
       }
@@ -1314,7 +1318,16 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
       heldLightAt.y -= 0.25;
       heldLightColor.setRGB(handLamp.r, handLamp.g, handLamp.b);
       world.materials.setHeldLight(heldLightAt, heldLightColor, handLamp.level);
-    } else world.materials.setHeldLight(heldLightAt, heldLightColor, 0);
+    } else {
+      // No lamp in hand: the slot of the light by the hand lights the cave round a burning boss (the Hollow King) instead.
+      let king: (typeof session.mobs.mobs)[number] | null = null;
+      for (const mob of session.mobs.mobs) if (mob.kind === 'hollow_king' && !mob.dead && (!king || Math.hypot(mob.body.x - camera.position.x, mob.body.z - camera.position.z) < Math.hypot(king.body.x - camera.position.x, king.body.z - camera.position.z))) king = mob;
+      if (king && Math.hypot(king.body.x - camera.position.x, king.body.z - camera.position.z) < 40) {
+        heldLightAt.set(king.body.x, king.body.y + 4.6, king.body.z);
+        heldLightColor.setRGB(1, 0.46, 0.14);
+        world.materials.setHeldLight(heldLightAt, heldLightColor, 20 + 1.2 * Math.sin(performance.now() / 160));
+      } else world.materials.setHeldLight(heldLightAt, heldLightColor, 0);
+    }
     // Shadows only matter while the sun (or moon) shines on the open; underground and underwater they would be wasted work.
     if (shadows) {
       // (Not before the warm-up is over: it builds the depth shader of the maps, and the first chunks drawn into one would build it in the middle of the loading.)
@@ -1587,7 +1600,37 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     audio.setRain(beyond ? (beyond.feel.snow ? 0 : beyond.feel.precip) : weather.rain, shelter);
     if (beyond) audio.setBed(caveDark > 0.6 ? 'cave' : beyond.feel.bed, 1, shelter);
     audio.setCave(caveDark);
-    audio.ambient(0.1, { underground: covered && roof - body.y > 6, day: sky.brightness, rain: weather.rain });
+    const inDungeon = KIND === 'adventure' && instanceFootprint(body.x, body.z) !== null;
+    audio.ambient(0.1, { underground: covered && roof - body.y > 6, day: sky.brightness, rain: weather.rain, dungeon: inDungeon });
+    audio.dungeonAmbient(0.1, senseDungeon(inDungeon));
+  }
+
+  /** What the dark sound of a dungeon wants to know (see dungeonAmbience.ts): how deep, how hurt, what hostile is near, what lava, water and amethyst is around. */
+  const dungeonSense: DungeonEnv = { ...NO_DUNGEON };
+  let dungeonScanWait = 0;
+  function senseDungeon(inside: boolean): DungeonEnv {
+    const e = dungeonSense;
+    e.active = inside;
+    if (!inside) {
+      Object.assign(e, NO_DUNGEON);
+      return e;
+    }
+    e.depth = dungeonDepth(body.y, INSTANCE_FLOOR);
+    e.hp = Math.max(0, Math.min(1, session.vitals.health / 20));
+    const near: { dist: number }[] = [];
+    for (const m of session.mobs.mobs) {
+      if (m.dead || !MOBS[m.kind]?.hostile) continue;
+      const dist = Math.hypot(m.body.x - body.x, m.body.y - body.y, m.body.z - body.z);
+      if (dist < 24) near.push({ dist });
+    }
+    e.threat = hostileThreat(near);
+    e.fight = session.bossView() !== null;
+    dungeonScanWait -= 1;
+    if (dungeonScanWait <= 0) {
+      dungeonScanWait = 2;
+      Object.assign(e, scanSurroundings((x, y, z) => world.getBlock(x, y, z), body.x, body.y + 1, body.z));
+    }
+    return e;
   }
 
   let netTimer = 0;
@@ -1766,6 +1809,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
       local, remote, session, kind: KIND, seed: SEED, guest, myLook, world, store, atlas, input, camera, sky, rain, audio, hud, admin, chat,
       postfx, fxWanted, applyPostfx, torchGlow, shadows, particles, players, hand, selfView, deathFx, chase, books, abilityFx, mapData,
       act, syncUi, sendCommand, setMapUp, switchWorld,
+      deliver: (events) => handleEvents(events),
       caveDark: () => caveDark,
       beyond,
       drawn: () => ({ calls: sceneCalls, triangles: sceneTris, fps }),

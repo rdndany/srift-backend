@@ -108,11 +108,9 @@ export function Landing({ onEnter }: { onEnter: (way: Way, mode: HomeMode | null
       <ClickSparks />
       {asking !== false && <WayDialog mode={asking} onDone={onEnter} onClose={() => setAsking(false)} />}
       <div className="fp-rail" data-no-play>
-        <header className="fp-nav fp-px">
-          <button className="fp-brand" onClick={() => scrollTo('fp-top')} aria-label="SolRift, to the top">
-            <ItemSprite id={toolId('sword', 'diamond')} size={28} />
-            <span>SolRift</span>
-          </button>
+        <button className="fp-brand" onClick={() => scrollTo('fp-top')} aria-label="SolRift, to the top"><img src="/art/solrift-token-logo.png" alt="SolRift" draggable={false} /></button>
+          <header className="fp-nav fp-px">
+          <span className="fp-brand-gap" aria-hidden="true" />
           <nav className="site-nav fp-links" aria-label="Menu">
             <button className="fp-link-play" onClick={onPlay}>
               Play
@@ -150,10 +148,7 @@ export function Landing({ onEnter }: { onEnter: (way: Way, mode: HomeMode | null
             </p>
           </div>
           <h1 className="fp-logo hero-logo">
-            <span className="fp-logo-back" aria-hidden="true">
-              SolRift
-            </span>
-            <span className="fp-logo-face">SolRift</span>
+            <img src="/art/solrift-logo.png" alt="SolRift" draggable={false} />
           </h1>
           {latest && (
             <p className="fp-xp" id="hero-expansion" style={{ ['--xp' as string]: latest.accent }}>
