@@ -8,7 +8,7 @@ import { COUNTS } from './beyondGuide';
 import { Blocks } from './BlockCube';
 import { BlurWords, ClickSparks, CountUp, Embers, Marquee, Reveal, Spot, useFrontMotion } from './fx';
 import { ItemSprite } from './ItemSprite';
-import { SCROLL_KEY, goMarket } from './frontNav';
+import { SCROLL_KEY, goMarket, goToken } from './frontNav';
 import { ART, SHOT } from './homeAssets';
 import { MODES, type HomeMode } from './modes';
 import { WayDialog, type Way } from './WayDialog';
@@ -119,6 +119,7 @@ export function Landing({ onEnter }: { onEnter: (way: Way, mode: HomeMode | null
             <button onClick={() => scrollTo('site-features')}>Classes</button>
             <button onClick={() => scrollTo('l-expansions')}>Expansions</button>
             <button className="fp-link-market" onClick={goMarket}>Market</button>
+            <button className="fp-link-token" onClick={goToken}>Token</button>
           </nav>
           <div className="fp-account">
             <AccountPanel />

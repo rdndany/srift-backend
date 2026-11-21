@@ -1,0 +1,572 @@
+/*
+ * The token page (/token): what $SOLRIFT is for in the game's economy. It rides on the class pages' styles (classPage.css: the
+ * hero, the steps), which ride on the front page's; everything here starts with `.tk`. `--c` is the page's colour (gold).
+ */
+
+/* ---------- the top ---------- */
+#home .fp.tk .tk-hero {
+  min-height: 0;
+  padding: 150px 24px 80px;
+}
+#home .fp.tk .tk-title {
+  font-size: clamp(54px, 9.5vw, 120px);
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+#home .fp.tk .tk-title em {
+  display: inline-block;
+  padding: 0.12em 0.04em;
+  font-style: normal;
+  text-shadow: none;
+  background: linear-gradient(#fffbe3 0%, #ffe39a 30%, #ffae3d 66%, #ff8a2a 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 5px 0 rgba(0, 0, 0, 0.6)) drop-shadow(0 0 30px rgba(255, 150, 40, 0.45));
+}
+#home .fp.tk .cp-lead {
+  max-width: 600px;
+}
+#home .fp.tk .tk-coin {
+  position: relative;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  animation: tk-float 6s ease-in-out infinite;
+}
+#home .fp.tk .tk-coin img {
+  position: relative;
+  display: block;
+  width: min(420px, 78vw);
+  height: auto;
+  filter: drop-shadow(0 22px 26px rgba(0, 0, 0, 0.6));
+  user-select: none;
+}
+#home .fp.tk .tk-halo {
+  position: absolute;
+  inset: 4% 4%;
+  background: radial-gradient(circle, rgba(255, 170, 50, 0.5), rgba(80, 140, 255, 0.18) 55%, transparent 72%);
+  filter: blur(26px);
+  animation: tk-pulse 4s ease-in-out infinite;
+}
+@keyframes tk-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-12px);
+  }
+}
+@keyframes tk-pulse {
+  0%,
+  100% {
+    opacity: 0.7;
+    transform: scale(0.96);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.04);
+  }
+}
+
+/* ---------- sections ---------- */
+#home .fp.tk .tk-sec {
+  padding-top: 72px;
+}
+#home .fp.tk .tk-fine {
+  margin-top: 18px;
+  max-width: 820px;
+  font-family: var(--body);
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+/* four steps in a row where there is room (the class pages' steps are three) */
+@media (min-width: 1000px) {
+  #home .fp.tk #tk-flow .cp-steps,
+  #home .fp.tk #tk-cash .cp-steps {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+/* ---------- two coins ---------- */
+#home .fp.tk .tk-two {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px;
+}
+#home .fp.tk .tk-coinbox {
+  --s: 6px;
+  --e: 3px;
+  --edge: linear-gradient(135deg, rgba(255, 255, 255, 0.4), rgba(138, 92, 245, 0.45) 50%, rgba(120, 130, 190, 0.4));
+  --fill: linear-gradient(165deg, rgba(22, 16, 40, 0.96), rgba(10, 7, 18, 0.96));
+  padding: 26px 26px 24px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+#home .fp.tk .tk-coinbox.gold {
+  --edge: linear-gradient(135deg, #fff1a0, #ffb02e 50%, #b8640c);
+  --fill: linear-gradient(165deg, rgba(40, 26, 12, 0.96), rgba(14, 9, 6, 0.96));
+}
+#home .fp.tk .tk-coinbox small {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+#home .fp.tk .tk-coinbox.gold small {
+  color: var(--soft-c);
+}
+#home .fp.tk .tk-coinbox h3 {
+  margin: 8px 0 12px;
+  font-size: clamp(28px, 4vw, 40px);
+  letter-spacing: 0.04em;
+  color: #fff;
+  text-shadow: 0 3px 0 rgba(0, 0, 0, 0.6);
+}
+#home .fp.tk .tk-coinbox.gold h3 {
+  color: var(--gold);
+}
+#home .fp.tk .tk-coinbox p {
+  font-family: var(--body);
+  font-size: 15.5px;
+  line-height: 1.7;
+  color: var(--soft);
+}
+#home .fp.tk .tk-coinbox ul {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+#home .fp.tk .tk-coinbox li {
+  position: relative;
+  padding-left: 20px;
+  font-family: var(--body);
+  font-size: 14px;
+  color: #e6dcf6;
+}
+#home .fp.tk .tk-coinbox li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.45em;
+  width: 8px;
+  height: 8px;
+  background: var(--c);
+  box-shadow: 0 0 8px var(--c);
+}
+
+/* ---------- the uses ---------- */
+#home .fp.tk .tk-uses {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+#home .fp.tk .tk-use {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 22px 22px 24px;
+  background: rgba(12, 8, 22, 0.78);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.12),
+    inset 0 3px 0 var(--c);
+  transition: transform 0.18s steps(4), box-shadow 0.18s;
+}
+#home .fp.tk .tk-use:hover {
+  transform: translateY(-3px);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.22),
+    inset 0 3px 0 var(--c),
+    0 18px 36px rgba(0, 0, 0, 0.4);
+}
+#home .fp.tk .tk-use-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+#home .fp.tk .tk-tag {
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--soft-c);
+}
+#home .fp.tk .tk-use h3 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+#home .fp.tk .tk-use p {
+  font-family: var(--body);
+  font-size: 14.5px;
+  line-height: 1.7;
+  color: var(--soft);
+}
+#home .fp.tk .tk-stage {
+  display: inline-block;
+  padding: 4px 9px;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+  color: #d9d0ea;
+}
+#home .fp.tk .tk-stage.live {
+  background: rgba(60, 200, 110, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(90, 230, 140, 0.6);
+  color: #9af0b8;
+}
+#home .fp.tk .tk-stage.next {
+  background: rgba(255, 176, 46, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(255, 190, 80, 0.65);
+  color: #ffd27a;
+}
+
+/* how big a reward is meant to be, as a word and a row of coins */
+#home .fp.tk .tk-size {
+  margin-top: auto;
+  padding-top: 6px;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--soft-c);
+}
+#home .fp.tk .tk-size::before {
+  content: '';
+  display: inline-block;
+  width: 36px;
+  height: 8px;
+  margin-right: 10px;
+  vertical-align: middle;
+  background: repeating-linear-gradient(90deg, var(--c) 0 8px, transparent 8px 12px);
+  opacity: 0.9;
+}
+#home .fp.tk .tk-size.steady::before {
+  width: 20px;
+}
+#home .fp.tk .tk-size.good::before {
+  width: 32px;
+}
+#home .fp.tk .tk-size.rare::before {
+  width: 44px;
+}
+#home .fp.tk .tk-size.seasonal::before {
+  width: 44px;
+  background: repeating-linear-gradient(90deg, #8ed0ff 0 8px, transparent 8px 12px);
+}
+#home .fp.tk .tk-rules {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+#home .fp.tk .tk-rules > li {
+  padding: 20px;
+  background: rgba(12, 8, 22, 0.72);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.12),
+    inset 0 3px 0 var(--c);
+}
+#home .fp.tk .tk-rules h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+#home .fp.tk .tk-rules p {
+  font-family: var(--body);
+  font-size: 14.5px;
+  line-height: 1.65;
+  color: var(--soft);
+}
+
+/* ---------- the facts ---------- */
+#home .fp.tk .tk-facts {
+  --s: 6px;
+  --e: 3px;
+  --edge: linear-gradient(135deg, #fff1a0, #ffb02e 50%, #b8640c);
+  --fill: rgba(10, 7, 18, 0.94);
+  padding: 8px 24px 16px;
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.5);
+}
+#home .fp.tk .tk-facts dl {
+  margin: 0;
+}
+#home .fp.tk .tk-facts dl > div {
+  display: grid;
+  grid-template-columns: minmax(130px, 220px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+  padding: 16px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+#home .fp.tk .tk-facts dl > div:last-child {
+  border-bottom: 0;
+}
+#home .fp.tk .tk-facts dt {
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+#home .fp.tk .tk-facts dd {
+  margin: 0;
+  font-family: var(--body);
+  font-size: 16px;
+  color: #fff;
+  overflow-wrap: anywhere;
+}
+#home .fp.tk .tk-soon {
+  color: var(--soft-c);
+  font-style: italic;
+}
+#home .fp.tk .tk-mint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+#home .fp.tk .tk-mint code {
+  font-size: 13px;
+  color: #ffe39a;
+}
+#home .fp.tk .tk-mint button {
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 0;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28);
+  font-family: var(--pixel);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #fff;
+  cursor: pointer;
+}
+#home .fp.tk .tk-mint button:hover {
+  background: rgba(255, 176, 46, 0.25);
+}
+#home .fp.tk .tk-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin: 6px 0 4px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+#home .fp.tk .tk-links a {
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #b9a4ff;
+}
+#home .fp.tk .tk-warn {
+  max-width: 820px;
+  margin-top: 18px;
+  padding: 14px 18px;
+  background: rgba(255, 90, 70, 0.1);
+  box-shadow: inset 4px 0 0 #ff6a4a;
+  font-family: var(--body);
+  font-size: 14px;
+  line-height: 1.65;
+  color: #f1d8d2;
+}
+#home .fp.tk .tk-warn b {
+  color: #ffb4a0;
+}
+
+/* ---------- the plan ---------- */
+#home .fp.tk .tk-road {
+  position: relative;
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 0 0 0 28px;
+  list-style: none;
+}
+#home .fp.tk .tk-road::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  background: linear-gradient(var(--c), rgba(255, 255, 255, 0.12));
+}
+#home .fp.tk .tk-road > li {
+  position: relative;
+  display: grid;
+  gap: 6px;
+  padding: 16px 20px 18px;
+  background: rgba(12, 8, 22, 0.72);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+#home .fp.tk .tk-road > li::before {
+  content: '';
+  position: absolute;
+  left: -27px;
+  top: 22px;
+  width: 15px;
+  height: 15px;
+  background: #3a3250;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.4);
+}
+#home .fp.tk .tk-road > li.live::before {
+  background: #4fe08a;
+  box-shadow: 0 0 12px #4fe08a;
+}
+#home .fp.tk .tk-road > li.next::before {
+  background: var(--c);
+  box-shadow: 0 0 12px var(--c);
+}
+#home .fp.tk .tk-road .tk-stage {
+  justify-self: start;
+}
+#home .fp.tk .tk-road h3 {
+  margin: 0;
+  font-size: 16px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+#home .fp.tk .tk-road p {
+  font-family: var(--body);
+  font-size: 14.5px;
+  line-height: 1.65;
+  color: var(--soft);
+}
+
+@media (max-width: 800px) {
+  #home .fp.tk .tk-coin {
+    order: -1;
+  }
+  #home .fp.tk .tk-coin img {
+    width: min(240px, 60vw);
+  }
+  #home .fp.tk .tk-facts dl > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #home .fp.tk .tk-coin,
+  #home .fp.tk .tk-halo {
+    animation: none;
+  }
+}
+
+/* ---- achievements ---- */
+#home .fp.tk .tk-lead {
+  max-width: 820px;
+  font-family: var(--body);
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+#home .fp.tk .tk-tiers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 20px 0 8px;
+}
+#home .fp.tk .tk-tier {
+  --tc: #c98443;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  font-family: var(--pixel);
+  font-style: normal;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--tc);
+  border: 2px solid var(--tc);
+  background: rgba(0, 0, 0, 0.35);
+}
+#home .fp.tk .tk-tier small {
+  font-size: 11px;
+  color: #fff;
+  opacity: 0.7;
+}
+#home .fp.tk .tk-tier.silver {
+  --tc: #c9d3dd;
+}
+#home .fp.tk .tk-tier.gold {
+  --tc: #f4c542;
+}
+#home .fp.tk .tk-tier.mythic {
+  --tc: #c77dff;
+}
+#home .fp.tk .tk-achs {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+  margin-top: 18px;
+}
+#home .fp.tk .tk-achcat {
+  padding: 16px 16px 8px;
+  background: rgba(0, 0, 0, 0.32);
+  border: 2px solid rgba(255, 255, 255, 0.08);
+}
+#home .fp.tk .tk-achcat h3 {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 0 10px;
+  font-family: var(--pixel);
+  font-size: 15px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+#home .fp.tk .tk-achcat h3 em {
+  font-family: var(--body);
+  font-style: normal;
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--muted);
+}
+#home .fp.tk .tk-achcat ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+#home .fp.tk .tk-achcat li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+#home .fp.tk .tk-achcat li b {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+}
+#home .fp.tk .tk-achcat li span {
+  display: block;
+  font-family: var(--body);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+#home .fp.tk .tk-achcat li .tk-tier {
+  flex: none;
+  padding: 3px 7px;
+  font-size: 10px;
+}

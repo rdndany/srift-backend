@@ -83,6 +83,7 @@ import type { ClassView, Command, InputFrame, SessionEvent, SessionScreen } from
 import { MAX_COINS, stackSellPrice, shopOf } from './economy';
 import { AUCTIONEER, DEFAULT_AUCTION_QUERY, cleanQuery, depositFor, sellBlocker, type AuctionQuery } from './auction';
 import { STASHKEEPER, stashBlocker } from './stash';
+import { AchievementBook, ACH_TIERS, type AchStat, type AchievementDef } from './achievements';
 import { FIRST_QUEST, NPCS, QuestLog, npcById, questById, rewardCoins, rewardItems, type QuestEvent, type QuestProgress } from './quests';
 import { ABILITY_BY_ID, ClassState, abilitiesOf, abilityAt, type AbilityDef, type AbilityId, type CastBlock } from './abilities';
 import type { EffectOwner, Fx } from './abilityEffects';
@@ -313,6 +314,10 @@ export class Player implements EffectOwner {
   killedBy = '';
   /** Adventure mode: this player's quests (null in every other world). */
   readonly quests: QuestLog | null;
+  /** The deeds counted and the achievements won (see achievements.ts). */
+  readonly ach = new AchievementBook();
+  private achSeconds = 0;
+  private achLevelTimer = 0;
   /** The quest giver (an id of `NPCS`) being talked to, while the dialog is open. */
   dialogNpc: string | null = null;
   /** The money the character carries (see economy.ts). */
@@ -3421,12 +3426,57 @@ export class Player implements EffectOwner {
   // ---- coins ------------------------------------------------------------------------
 
   /** Take in coins (a kill, a quest, a sale). Returns how many were really added (a full purse takes no more). */
-  addCoins(amount: number): number {
+  addCoins(amount: number, earned = false): number {
     const n = Math.min(Math.floor(amount), MAX_COINS - this.coins);
     if (!(n > 0)) return 0;
     this.coins += n;
     this.emit({ t: 'coins', gain: n });
+    // Only coins that were earned count for the achievements (not those another player handed over, or that came back by mail).
+    if (earned) this.achAdd('coins', n);
     return n;
+  }
+
+  // ---- achievements ---------------------------------------------------------------------------------------------
+
+  /** A deed was done: count it, and tell the player about any achievement it won. */
+  achAdd(stat: AchStat, n = 1): void {
+    if (this.spectating) return;
+    this.achWon(this.ach.add(stat, n));
+  }
+
+  private achWon(list: AchievementDef[]): void {
+    if (list.length === 0) return;
+    for (const a of list) this.emit({ t: 'achievement', id: a.id, name: a.name, tier: a.tier, reward: ACH_TIERS[a.tier].name });
+    this.syncAch();
+  }
+
+  /** Tell the client the counts and what has been won (it is small). */
+  syncAch(): void {
+    this.emit({ t: 'ach', view: this.ach.view() });
+  }
+
+  /** A monster was slain near the player (see Realm's `killed` hook). */
+  achKill(mob: { kind: string; elite?: boolean; def: { hostile: boolean; boss?: boolean } }): void {
+    if (!mob.def.hostile && !mob.def.boss) return;
+    this.achAdd('kills');
+    if (mob.elite) this.achAdd('elites');
+    if (mob.def.boss) this.achAdd('bosses');
+    if (mob.kind === 'hollow_king') this.achAdd('dungeons');
+  }
+
+  /** Level and playing time, once a second. */
+  private updateAch(dt: number): void {
+    if (this.spectating || this.vitals.dead) return;
+    this.achSeconds += dt;
+    if (this.achSeconds >= 60) {
+      const m = Math.floor(this.achSeconds / 60);
+      this.achSeconds -= m * 60;
+      this.achAdd('minutes', m);
+    }
+    this.achLevelTimer += dt;
+    if (this.achLevelTimer < 1) return;
+    this.achLevelTimer = 0;
+    this.achWon(this.ach.reach('level', this.cls ? this.cls.level : this.xp.level));
   }
 
   /** Pay coins for something. False (and nothing taken) when there are not enough. */
@@ -3788,6 +3838,8 @@ export class Player implements EffectOwner {
     this.selected = Math.max(0, Math.min(HOTBAR_SLOTS - 1, p.selected));
     this.peakY = this.body.y;
     this.lastHealth = this.vitals.health;
+    this.ach.loadJSON(p.ach);
+    this.syncAch();
     if (this.quests) {
       this.quests.loadJSON(p.quests);
       // A character saved before the cave start who has already got on with the quests has long since left it: the quests
@@ -3857,6 +3909,7 @@ export class Player implements EffectOwner {
       ...(this.emberCooldown > 0 ? { hs: Math.ceil(this.emberCooldown) } : {}),
       ...(this.mountSlot.get(0) ? { mountSlot: plain(this.mountSlot.toJSON()) } : {}),
       ...(this.quests && !this.quests.empty ? { quests: plain(this.quests.toJSON()) } : {}),
+      ...(Object.keys(this.ach.toJSON()).length > 0 ? { ach: plain(this.ach.toJSON()) } : {}),
       ...(this.cls ? { cls: this.cls.toJSON() } : {}),
       ...(this.outfitted ? { of: true } : {}),
       ...(this.hardcore ? { hardcore: true, ...(this.gameOver ? { gameOver: true } : {}), ...(this.spectating ? { spectating: true } : {}) } : {}),
@@ -4219,6 +4272,7 @@ export class Player implements EffectOwner {
     const v = this.tradingWith;
     if (v && (v.dead || Math.hypot(v.body.x - this.body.x, v.body.z - this.body.z) > 6 || Math.abs(v.body.y - this.body.y) > 4)) this.closeMenu();
     if (this.quests) this.updateQuests(dt);
+    this.updateAch(dt);
     this.updatePins(dt);
   }
 
@@ -4362,7 +4416,8 @@ export class Player implements EffectOwner {
       this.addXp(reward.xp);
     }
     for (const it of rewardItems(reward, this.cls?.classId ?? null)) this.collectOrDrop(makeStack(it.id, it.count));
-    this.addCoins(rewardCoins(reward));
+    this.addCoins(rewardCoins(reward), true);
+    this.achAdd('quests');
     this.emit({ t: 'quest', what: 'done', text: `Quest complete: ${q.name}` });
     this.emit({ t: 'inv' });
     this.syncQuests();
@@ -4406,7 +4461,7 @@ export class Player implements EffectOwner {
     const n = Math.min(c.n, s.count);
     s.count -= n;
     this.inventory.set(c.i, s.count > 0 ? s : null);
-    this.addCoins(each * n);
+    this.addCoins(each * n, true);
     this.emit({ t: 'inv' });
     this.emit({ t: 'shop', what: 'sell' });
   }

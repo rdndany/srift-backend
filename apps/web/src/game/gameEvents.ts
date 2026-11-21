@@ -281,6 +281,13 @@ export function makeEventHandler(parts: EventParts): (events: SessionEvent[]) =>
         case 'quests':
           setQuests(e.log);
           break;
+        case 'ach':
+          useUi.setState({ ach: e.view });
+          break;
+        case 'achievement':
+          hud.toast(`Achievement unlocked: ${e.name} (${e.reward})`);
+          pushQuestNote('done', `Achievement unlocked: ${e.name} (${e.reward})`);
+          break;
         case 'dialog':
           useUi.setState({ dialogNpc: e.npc, shopOpen: false, auction: null, stash: null });
           break;

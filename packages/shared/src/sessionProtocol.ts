@@ -161,6 +161,10 @@ export type SessionEvent =
   /** Inventory, menu or furnace contents changed: re-read them. */
   | { t: 'inv' }
   | { t: 'toast'; text: string }
+  /** An achievement was won (the client finds its text in the shared list by `id`). `reward` is the tier's name. */
+  | { t: 'achievement'; id: string; name: string; tier: 'bronze' | 'silver' | 'gold' | 'mythic'; reward: string }
+  /** The achievement counts and the ids won, whole (sent when the character joins and when one is won). */
+  | { t: 'ach'; view: { stats: Record<string, number>; done: string[] } }
   /** A boss speaks (yell, in its own voice) or the fight is announced (warn): shown across the screen to everybody in its room. */
   | { t: 'boss'; text: string; kind: 'yell' | 'warn' }
   /**

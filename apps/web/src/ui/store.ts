@@ -161,6 +161,8 @@ export interface UiState {
   /** The wallet's stash as the Stashkeeper last showed it (null: the window is not open). */
   stash: StashView | null;
   questLogOpen: boolean;
+  /** The achievements: the counts of the deeds and the ids won (as the session last sent them). */
+  ach: { stats: Record<string, number>; done: string[] };
   /** Your party (the leader first; empty when alone), who is inviting you, and whether the party window (P) is open. */
   party: PartyMemberView[];
   partyInvite: string | null;
@@ -245,6 +247,7 @@ export const useUi = create<UiState>()(() => ({
   questsVersion: 0,
   dialogNpc: null,
   questLogOpen: false,
+  ach: { stats: {}, done: [] },
   party: [],
   partyInvite: null,
   partyOpen: false,

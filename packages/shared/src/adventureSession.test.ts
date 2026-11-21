@@ -575,6 +575,41 @@ describe('an Adventure player', () => {
     expect(log.d).toEqual([FIRST_QUEST, 'welcome']);
   });
 
+  it('wins achievements for levels, kills and coins, tells the player, and keeps them in the save', () => {
+    const s = make();
+    run(s, 1.5);
+    s.drainEvents();
+    s.xp.add(totalForLevel(10));
+    run(s, 1.5);
+    const won = (): string[] => s.drainEvents().flatMap((e) => (e.t === 'achievement' ? [e.id] : []));
+    expect(won()).toEqual(expect.arrayContaining(['lvl-5', 'lvl-10']));
+    expect(s.ach.has('lvl-15')).toBe(false);
+
+    // Coins that were earned count; coins another player handed over do not.
+    s.addCoins(5000, true);
+    s.addCoins(500000);
+    expect(s.ach.get('coins')).toBe(5000);
+    expect(won()).toEqual(['coin-1000']);
+
+    // Only monsters count as kills (not a cow), and a boss is also a kill.
+    s.achKill({ kind: 'cow', def: { hostile: false } });
+    expect(s.ach.get('kills')).toBe(0);
+    s.achKill({ kind: 'hollow_king', elite: false, def: { hostile: true, boss: true } });
+    expect(s.ach.get('kills')).toBe(1);
+    expect(s.ach.get('bosses')).toBe(1);
+    expect(s.ach.get('dungeons')).toBe(1);
+    expect(won()).toEqual(expect.arrayContaining(['boss-1', 'deep-1']));
+
+    const save = parsePlayerSave(JSON.parse(JSON.stringify(s.savePlayer())))!;
+    expect(save.ach).toBeDefined();
+    const t = make(9);
+    t.loadPlayer(save);
+    expect(t.ach.has('boss-1')).toBe(true);
+    expect(t.ach.get('coins')).toBe(5000);
+    const synced = t.drainEvents().filter((e) => e.t === 'ach');
+    expect(synced.length).toBeGreaterThan(0);
+  });
+
   it('is told the quest commands are well formed or not at all', () => {
     expect(parseSessionMessage({ t: 'quest', a: 'accept', id: 'welcome' })).toEqual({ t: 'quest', a: 'accept', id: 'welcome' });
     expect(parseSessionMessage({ t: 'quest', a: 'complete', id: 'x' })).not.toBeNull();

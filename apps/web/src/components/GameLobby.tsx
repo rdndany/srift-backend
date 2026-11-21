@@ -43,7 +43,7 @@ import { CharacterSheet } from './CharacterSheet';
 import { ClassSkills } from './ClassSkills';
 import { statLines } from './ClassPicker';
 import { ClickSparks, Embers, useFrontMotion } from './fx';
-import { FRONT_MENU, SCROLL_KEY, frontUrl, goMarket } from './frontNav';
+import { FRONT_MENU, SCROLL_KEY, frontUrl, goMarket, goToken } from './frontNav';
 import { HANDOFF_KEYS, siteUrl, whereAmI } from '../game/route';
 import { ART } from './homeAssets';
 import { ItemSprite } from './ItemSprite';
@@ -664,6 +664,7 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
               </button>
             ))}
             <button className="fp-link-market" onClick={goMarket}>Market</button>
+            <button className="fp-link-token" onClick={goToken}>Token</button>
           </nav>
           <div className="fp-account">
             <AccountPanel />

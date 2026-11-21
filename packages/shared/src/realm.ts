@@ -321,7 +321,7 @@ export class Realm {
         this.drops.spawn(makeStack(d.id, d.count), x, y, z, Math.cos(a) * 1.2, 3, Math.sin(a) * 1.2, 0.5);
       },
       xp: (amount, x, y, z) => this.awardXp(amount, x, y, z),
-      coins: (amount, x, y, z) => this.nearestPlayer(x, y, z)?.addCoins(amount),
+      coins: (amount, x, y, z) => this.nearestPlayer(x, y, z)?.addCoins(amount, true),
       // A monster may leave a skill book (any of the twelve, for any class, known or not) and, separately, a bag and a jewel.
       loot: (mob, x, y, z) => {
         for (const found of [skillBookDrop(mob.kind, this.rand), bagDrop(mob.kind, this.rand), jewelDrop(mob.kind, this.rand)]) {
@@ -352,6 +352,7 @@ export class Realm {
           if (p.screen === 'dead' || p.spectating) continue;
           if (Math.hypot(p.body.x - mob.body.x, p.body.z - mob.body.z) > KILL_CREDIT_RANGE) continue;
           if (p.quests) p.questEvent({ t: 'kill', mob: mob.kind });
+          p.achKill(mob);
         }
       },
       pearl: (x, y, z, owner) => {

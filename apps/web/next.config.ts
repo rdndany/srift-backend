@@ -5,7 +5,7 @@ import type { NextConfig } from 'next';
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 /**
- * Two hosts, one app. The website (front page, Market, World Beyond, classes) is on this host (and `www.`); the game is
+ * Two hosts, one app. The website (front page, Market, Token, World Beyond, classes) is on this host (and `www.`); the game is
  * on `play.` + this host: the character lobby at `/` and the online realm at `/<uid>`. On any other host (a local
  * machine, a preview deploy) there is no split. `NEXT_PUBLIC_SITE_HOST` overrides it at build time (and the pages read it).
  */
@@ -42,6 +42,7 @@ const config: NextConfig = {
       { source: '/game', has: PLAY, destination: '/', permanent: false },
       { source: '/market', has: PLAY, destination: `${SITE_ORIGIN}/market`, permanent: false },
       { source: '/beyond', has: PLAY, destination: `${SITE_ORIGIN}/beyond`, permanent: false },
+      { source: '/token', has: PLAY, destination: `${SITE_ORIGIN}/token`, permanent: false },
       { source: '/classes/:path*', has: PLAY, destination: `${SITE_ORIGIN}/classes/:path*`, permanent: false },
       { source: '/welcome', has: PLAY, destination: SITE_ORIGIN, permanent: false },
       // ...and the game on the game's.

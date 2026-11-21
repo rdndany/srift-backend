@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { AUCTIONEER, QUESTS, STASHKEEPER, formatCoins, getItem, makeStack, npcById, questById, rewardCoins, rewardItems, shopOf, skillBookAbility, tooltipName, zoneDef, type QuestDef, type QuestLog } from '@solrift/shared';
+import { ACHIEVEMENTS, ACH_CATEGORIES, ACH_TIERS, AUCTIONEER, QUESTS, STASHKEEPER, formatCoins, getItem, makeStack, npcById, questById, rewardCoins, rewardItems, shopOf, skillBookAbility, tooltipName, zoneDef, type AchCategory, type QuestDef, type QuestLog } from '@solrift/shared';
+import './achievements.css';
 import { useUi } from '../ui/store';
 import { ItemView } from './ItemView';
 import { AuctionWindow } from './AuctionUI';
@@ -242,6 +243,49 @@ function ZoneBanner() {
   );
 }
 
+/** The achievements: by category, each with its tier and how far you are. */
+function AchievementList() {
+  const ach = useUi((s) => s.ach);
+  const done = new Set(ach.done);
+  return (
+    <div className="ach-list" data-testid="ach-list">
+      <div className="ach-total">
+        {done.size}/{ACHIEVEMENTS.length} won
+      </div>
+      {(Object.keys(ACH_CATEGORIES) as AchCategory[]).map((cat) => (
+        <div key={cat} className="ach-cat">
+          <h4>
+            <span>{ACH_CATEGORIES[cat].name}</span>
+            <em>{ACH_CATEGORIES[cat].blurb}</em>
+          </h4>
+          {ACHIEVEMENTS.filter((a) => a.category === cat).map((a) => {
+            const now = Math.min(a.goal, Math.floor(ach.stats[a.stat] ?? 0));
+            const won = done.has(a.id);
+            return (
+              <div key={a.id} className={`ach-row ${a.tier}${won ? ' won' : ''}`} data-ach={a.id}>
+                <span className="ach-mark">{won ? '\u2713' : ''}</span>
+                <div className="ach-body">
+                  <div className="ach-name">{a.name}</div>
+                  <div className="ach-text">{a.text}</div>
+                  {!won ? (
+                    <div className="ach-bar">
+                      <i style={{ width: `${(now / a.goal) * 100}%` }} />
+                      <b>
+                        {now.toLocaleString()}/{a.goal.toLocaleString()}
+                      </b>
+                    </div>
+                  ) : null}
+                </div>
+                <span className="ach-tier">{ACH_TIERS[a.tier].name}</span>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** The quest log (L): quests by chapter on the left, the chosen one on the right. */
 function QuestLogPanel() {
   const open = useUi((s) => s.questLogOpen);
@@ -249,6 +293,7 @@ function QuestLogPanel() {
   const api = useUi((s) => s.api);
   useUi((s) => s.questsVersion);
   const [pick, setPick] = useState<string | null>(null);
+  const [tab, setTab] = useState<'quests' | 'ach'>('quests');
   if (!open || !api) return null;
 
   const known = QUESTS.filter((q) => log.status(q.id) !== 'locked' && log.status(q.id) !== 'available');
@@ -270,7 +315,16 @@ function QuestLogPanel() {
             {log.active.size} active
           </span>
         </div>
-        <div className="log-cols">
+        <div className="log-tabs" role="tablist">
+          <button role="tab" aria-selected={tab === 'quests'} className={tab === 'quests' ? 'sel' : ''} onClick={() => setTab('quests')}>
+            Quests
+          </button>
+          <button role="tab" aria-selected={tab === 'ach'} className={tab === 'ach' ? 'sel' : ''} onClick={() => setTab('ach')} data-testid="ach-tab">
+            Achievements
+          </button>
+        </div>
+        {tab === 'ach' ? <AchievementList /> : null}
+        <div className="log-cols" style={tab === 'ach' ? { display: 'none' } : undefined}>
           <div className="log-list">
             {shown.length === 0 ? <p className="log-empty">No active quests. Talk to the people of the village.</p> : null}
             {chapters.map((ch) => (

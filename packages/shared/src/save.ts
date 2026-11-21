@@ -64,6 +64,8 @@ export interface PlayerSave {
   spectating?: boolean;
   /** Adventure mode: the quest log (see QuestLog.toJSON). Absent when there is nothing in it. */
   quests?: unknown;
+  /** The achievements: the counts of the deeds and the ones won (see AchievementBook.toJSON). Absent when there is nothing in it. */
+  ach?: unknown;
   /** The character's class progress (see ClassState.toJSON): class, class level, experience and unlocked abilities. Absent without a class and in older saves. */
   cls?: unknown;
   /** The character has been given the clothes of its class (they are armor from then on, and may be taken off for good). Absent in older saves. */
@@ -135,6 +137,7 @@ export function parsePlayerSave(raw: unknown): PlayerSave | null {
     ...(raw.hardcore === true && raw.gameOver === true ? { gameOver: true } : {}),
     ...(raw.hardcore === true && raw.gameOver === true && raw.spectating === true ? { spectating: true } : {}),
     ...(isObject(raw.quests) ? { quests: raw.quests } : {}),
+    ...(isObject(raw.ach) ? { ach: raw.ach } : {}),
     ...(isObject(raw.cls) ? { cls: raw.cls } : {}),
     ...(raw.of === true ? { of: true } : {}),
     ...(typeof raw.savedAt === 'number' && Number.isFinite(raw.savedAt) ? { savedAt: raw.savedAt } : {}),
