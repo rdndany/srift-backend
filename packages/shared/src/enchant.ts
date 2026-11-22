@@ -307,10 +307,12 @@ export function conflicts(a: number, b: number): boolean {
 /** A copy of the stack with these enchantments (replacing any it had). A plain book becomes an enchanted one. */
 export function withEnchants(s: ItemStack, list: readonly Enchant[]): ItemStack {
   const ench = normalizeEnchants(list);
-  const out: ItemStack = { id: s.id === I.BOOK && ench ? I.ENCHANTED_BOOK : s.id, count: s.count, damage: s.damage };
+  // Start from a full copy, so nothing the piece carries is lost on the way: its name and anvil penalty, and above all its `gear`
+  // (the rarity, level and stats it rolled, its +upgrade and a Bloom attribute). Only the glyphs and the book/tome id change.
+  const out = cloneStack(s);
+  out.id = s.id === I.BOOK && ench ? I.ENCHANTED_BOOK : s.id;
   if (ench) out.ench = ench;
-  if (s.name) out.name = s.name;
-  if (s.rc) out.rc = s.rc;
+  else delete out.ench;
   return out;
 }
 

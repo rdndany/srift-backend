@@ -246,6 +246,10 @@
   #home .fp .fp-nav {
     width: min(1280px, calc(100% - 64px));
   }
+  /* the logo hangs over the bar's left end: it follows the wider bar, or it lands on the Play button */
+  #home .fp .fp-rail .fp-brand {
+    left: max(16px, calc((100% - 1280px) / 2));
+  }
 }
 
 /* ---------- people who asked for less movement ---------- */

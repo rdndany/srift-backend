@@ -276,6 +276,20 @@ describe('the altar offers', () => {
     expect(erased(tome, ENCH.SIPHON)!.id).toBe(I.BOOK);
   });
 
+  it('keeps everything a piece rolled when a glyph goes on or off: rarity, +upgrade, Bloom attribute, name', () => {
+    const rolled: ItemStack = { ...sword(), name: 'Dawn Edge', rc: 3, gear: { r: 2, l: 5, s: [['might', 6]], u: 9, o: ['crit', 4] } };
+    const on = inscribed(rolled, ENCH.SHARPNESS)!;
+    expect(on.ench).toEqual([[ENCH.SHARPNESS, 1]]);
+    expect(on.gear).toEqual(rolled.gear);
+    expect(on.gear).not.toBe(rolled.gear); // a copy, not shared
+    expect(on.name).toBe('Dawn Edge');
+    expect(on.rc).toBe(3);
+    const off = erased(on, ENCH.SHARPNESS)!;
+    expect(off.ench).toBeUndefined();
+    expect(off.gear).toEqual(rolled.gear);
+    expect(withEnchants(rolled, [[ENCH.SHARPNESS, 2]]).gear).toEqual(rolled.gear);
+  });
+
   it('erases a glyph, all of its ranks', () => {
     const s = erased(sword([ENCH.SHARPNESS, 3]), ENCH.SHARPNESS)!;
     expect(s.ench).toBeUndefined();
