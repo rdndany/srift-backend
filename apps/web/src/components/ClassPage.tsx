@@ -9,7 +9,7 @@ import { CharacterPreview } from './CharacterPreview';
 import { ABILITY_GUIDE, ABILITY_KEY_LABELS, GUIDE, LEVEL_GAINS, abilityFacts, bookPrice, itemTitle, num, statRows, unlockSteps } from './classGuide';
 import { ClickSparks, Embers, Reveal, Spot, useFrontMotion } from './fx';
 import { lobbyUrl } from '../game/route';
-import { SCROLL_KEY, goMarket, goToken } from './frontNav';
+import { SCROLL_KEY, goMarket, goToken, goCamp } from './frontNav';
 import { ART } from './homeAssets';
 import { ItemSprite } from './ItemSprite';
 import type { HomeMode } from './modes';
@@ -17,6 +17,7 @@ import { WayDialog, type Way } from './WayDialog';
 import './home.css';
 import './front.css';
 import './classPage.css';
+import './responsive.css';
 
 /** The heading of a section: a small numbered label, then the title (the word to light up goes in <em>). */
 function Head({ n, label, blocks, children }: { n: string; label: string; blocks: readonly number[]; children: ReactNode }) {
@@ -141,11 +142,12 @@ export function ClassPage({ id }: { id: ClassId }) {
             <button onClick={() => toFront('site-world')}>The World</button>
             <button onClick={() => toFront('site-features')}>Classes</button>
             <button onClick={() => toFront('l-expansions')}>Expansions</button>
+            <button className="fp-link-camp" onClick={goCamp}>Camp</button>
             <button className="fp-link-market" onClick={goMarket}>Market</button>
             <button className="fp-link-token" onClick={goToken}>Token</button>
           </nav>
           <div className="fp-account">
-            <AccountPanel />
+            <AccountPanel bar />
           </div>
           <i className="fp-progress" aria-hidden="true" />
         </header>

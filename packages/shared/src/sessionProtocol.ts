@@ -1,7 +1,8 @@
 import { ABILITY_SLOTS, type AbilityId } from './abilities';
 import { AUCTION_CATEGORIES, AUCTION_HOURS, AUCTION_SORTS, cleanQuery, type AuctionCommand, type AuctionHours, type AuctionView } from './auction';
 import type { SoundKind } from './blocks';
-import { STASH_SLOTS, type StashCommand, type StashView } from './stash';
+import type { BountyTier, BountyView } from './bounties';
+import { STASH_MAX_SLOTS, type StashCommand, type StashView } from './stash';
 import { MAX_POINTS, ATTR_KEYS, type AttrKey } from './statPoints';
 import type { ClassId } from './classes';
 import { isCreativeAmount, validGearSpec, type CreativeAmount, type GearSpec } from './creative';
@@ -77,8 +78,8 @@ export type Command =
   | { t: 'creativeGear'; spec: GearSpec }
   /** Trading: choose offer index of the villager you are talking to. */
   | { t: 'trade'; index: number }
-  /** Enchanting: choose offer index (0..2) of the table. */
-  | { t: 'enchant'; index: number }
+  /** The Runic Altar: inscribe glyph `id` on the piece in it (a rank up if it has it), or take it off (`erase`). */
+  | { t: 'enchant'; id: number; erase?: boolean }
   /** Anvil: the name typed in the box (null puts the item's own name back). */
   | { t: 'anvilName'; name: string | null }
   /** Swap the held item with the off hand (a shield, in practice). */
@@ -163,10 +164,18 @@ export type SessionEvent =
   | { t: 'toast'; text: string }
   /** An achievement was won (the client finds its text in the shared list by `id`). `reward` is the tier's name. */
   | { t: 'achievement'; id: string; name: string; tier: 'bronze' | 'silver' | 'gold' | 'mythic'; reward: string }
+  /** A dungeon was cleared with this player in range (its last boss fell). The server decides what, if anything, that pays. */
+  | { t: 'clear'; id: string; name: string }
+  /** A daily bounty was finished. The server decides what, if anything, that pays (`day` is the UTC day it was posted for). */
+  | { t: 'bounty'; id: string; name: string; tier: BountyTier; day: number }
+  /** Today's three bounties and how far along each is, whole (sent when the character joins, now and then as it progresses, and when the day turns). */
+  | { t: 'bounties'; view: BountyView }
   /** The achievement counts and the ids won, whole (sent when the character joins and when one is won). */
   | { t: 'ach'; view: { stats: Record<string, number>; done: string[] } }
   /** A boss speaks (yell, in its own voice) or the fight is announced (warn): shown across the screen to everybody in its room. */
   | { t: 'boss'; text: string; kind: 'yell' | 'warn' }
+  /** A rift: it is tearing open (`omen`), opens, sends the next wave, is sealed or collapses. Shown across the screen, with its own sound; `grade` colours it. */
+  | { t: 'rift'; what: 'omen' | 'open' | 'wave' | 'sealed' | 'collapsed'; grade: 'uncommon' | 'rare' | 'epic'; text: string }
   /**
    * The sound of a boss fight, for everybody in the copy (the client works the loudness out from where it stands). `wake`: he rises; `cast`: `spell` begins to wind up (`seconds` long); `release`: it lands (at x,y,z);
    * `phase`: the next phase (`phase`) begins; `down`: he has fallen; `step`: a stride; `swing`: a melee blow.
@@ -197,8 +206,8 @@ export type SessionEvent =
   /** What the stash window shows (sent when it opens and after everything done there). */
   | { t: 'stash'; view: StashView }
   | { t: 'equip' }
-  /** Something was enchanted at the table (or repaired at the anvil). */
-  | { t: 'enchant'; anvil?: boolean }
+  /** Something was enchanted at the altar (`glyph` and its new `rank`, `fail` when the roll failed, or `erase` for one taken off) or repaired at the anvil. */
+  | { t: 'enchant'; anvil?: boolean; glyph?: number; rank?: number; erase?: boolean; fail?: boolean }
   | { t: 'levelup'; level: number }
   /** The class level went up (abilities do not come with it: they are learned from skill books). */
   | { t: 'classlevel'; level: number }
@@ -224,7 +233,8 @@ export type SessionEvent =
   /** A staff, wand or spellbook was cast (the sound of the weapon; the bolt and its burst are drawn from the world). */
   | { t: 'spell'; weapon: 'wand' | 'staff' | 'spellbook'; vol: number }
   /** The hand swung (`off`: the off hand did, a dagger stabbing while a bow is in the main hand). */
-  | { t: 'swing'; off?: boolean }
+  /** The arm swings (`rate`: how much faster than the usual swing, for the attack speed of a weapon in the hand; left out at 1). */
+  | { t: 'swing'; off?: boolean; rate?: number }
   /** A shield took a hit (`broke`: it was the last one). */
   | { t: 'shield'; vol: number; broke?: boolean; parry?: boolean }
   /** Your shield stopped a hit: a plain block, or a parry (the hit came just as the guard went up, so the shield took no wear). */
@@ -283,7 +293,8 @@ function parseAuction(raw: Record<string, unknown>): Command | null {
       const bid = whole(raw.bid, 1, 999_999_999);
       const buyout = whole(raw.buyout, 0, 999_999_999);
       if (slot === null || count === null || bid === null || buyout === null || !AUCTION_HOURS.includes(raw.hours as AuctionHours)) return null;
-      return { t: 'auction', a: 'post', slot, count, bid, buyout, hours: raw.hours as AuctionHours };
+      if (raw.token !== undefined && typeof raw.token !== 'boolean') return null;
+      return { t: 'auction', a: 'post', slot, count, bid, buyout, hours: raw.hours as AuctionHours, ...(raw.token === true ? { token: true } : {}) };
     }
     case 'bid': {
       const id = whole(raw.id, 1, 1e9);
@@ -389,8 +400,9 @@ export function parseSessionMessage(raw: unknown): SessionMessage | null {
       if (raw.name === null) return { t: 'anvilName', name: null };
       return typeof raw.name === 'string' ? { t: 'anvilName', name: raw.name.slice(0, 64) } : null;
     case 'enchant': {
-      const index = num(raw.index);
-      return index !== null && Number.isInteger(index) && index >= 0 && index < 3 ? { t: 'enchant', index } : null;
+      const id = num(raw.id);
+      if (id === null || !Number.isInteger(id) || id < 1 || id > 255) return null;
+      return raw.erase === true ? { t: 'enchant', id, erase: true } : { t: 'enchant', id };
     }
     case 'recipe': {
       const index = num(raw.index);
@@ -419,7 +431,7 @@ export function parseSessionMessage(raw: unknown): SessionMessage | null {
         return slot === null ? null : { t: 'stash', a: 'put', slot, count };
       }
       if (raw.a === 'take') {
-        const slot = whole(raw.slot, 0, STASH_SLOTS - 1);
+        const slot = whole(raw.slot, 0, STASH_MAX_SLOTS - 1);
         return slot === null ? null : { t: 'stash', a: 'take', slot, count };
       }
       return null;

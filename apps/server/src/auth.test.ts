@@ -283,7 +283,7 @@ describe('auth over HTTP and WebSocket', () => {
     expect((await post('/auth/character', { displayName: 'brightpath', class: 'warrior', look: 0 }, { cookie })).status).toBe(409);
     const me = (await (await fetch(base + '/auth/me', { headers: { cookie } })).json()).account;
     expect(me).toMatchObject({ displayName: 'Brightpath', look: code, class: 'warrior' });
-    expect(me.characters).toEqual([{ id: me.id, displayName: 'Brightpath', look: code, class: 'warrior' }]);
+    expect(me.characters).toEqual([{ id: me.id, displayName: 'Brightpath', look: code, outfit: null, class: 'warrior' }]);
     expect(me.maxCharacters).toBe(3);
   });
 

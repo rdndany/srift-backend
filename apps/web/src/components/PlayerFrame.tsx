@@ -10,10 +10,11 @@ import { paletteOfLook } from '../game/lookPalette';
 import { paintSkin, partRects } from '../game/skin';
 import { useProfile } from '../profile/store';
 import { useUi } from '../ui/store';
+import { TokenPurse } from './TokenPurse';
 
 /** Head and shoulders of a look, 16 x 12 pixels: the head's front, the top of the torso and both arms (each with the layer over it). */
-function bustOf(look: Parameters<typeof paletteOfLook>[0]): ImageData {
-  const skin = paintSkin(lookOf(paletteOfLook(look)));
+function bustOf(look: Parameters<typeof paletteOfLook>[0], outfit: string | null = null): ImageData {
+  const skin = paintSkin(lookOf(paletteOfLook(look, outfit)));
   const out = new ImageData(16, 12);
   // Seen from the front, the figure's right arm is on the left.
   const pieces = [
@@ -43,6 +44,7 @@ function bustOf(look: Parameters<typeof paletteOfLook>[0]): ImageData {
 /** The character in a round frame, head and shoulders in pixel art, from the same skin the figure wears. */
 function Portrait() {
   const look = useProfile((s) => s.look);
+  const outfit = useProfile((s) => s.outfit);
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const canvas = ref.current;
@@ -50,7 +52,7 @@ function Portrait() {
     const small = document.createElement('canvas');
     small.width = 16;
     small.height = 12;
-    small.getContext('2d')!.putImageData(bustOf(look), 0, 0);
+    small.getContext('2d')!.putImageData(bustOf(look, outfit), 0, 0);
     const g = canvas.getContext('2d')!;
     g.imageSmoothingEnabled = false;
     g.clearRect(0, 0, canvas.width, canvas.height);
@@ -58,7 +60,7 @@ function Portrait() {
     const px = canvas.width / 13.7;
     const w = 16 * px;
     g.drawImage(small, (canvas.width - w) / 2, canvas.height * 0.1, w, 12 * px);
-  }, [look]);
+  }, [look, outfit]);
   return <canvas ref={ref} width={96} height={96} />;
 }
 
@@ -322,6 +324,7 @@ export function PlayerFrame() {
               </div>
             </div>
           )}
+          <TokenPurse where="frame" />
         </div>
         {box &&
           (ridden || (survival && (foodSick > 0 || poison > 0))) &&

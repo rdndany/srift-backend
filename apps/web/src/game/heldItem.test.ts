@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { ATLAS_COLS, ATLAS_ROWS, B, I, TILE_PX, allItems, getItem } from '@solrift/shared';
+import { ATLAS_COLS, ATLAS_ROWS, B, I, TILE_PX, allItems, getItem, toolId as toolIdOf } from '@solrift/shared';
 
 /**
  * The first-person hand, without a browser. Every item of the game is put in it, shown to a figure and dropped on the ground, and
@@ -110,6 +110,31 @@ describe('the first-person hand', () => {
       expect(seen.shown, item.name).toBeGreaterThan(0);
       expect(seen.triangles, item.name).toBeGreaterThan(0);
     }
+    hand.dispose();
+  });
+
+  it('swings as fast as the attack speed of the weapon says, and a mined swing at the usual pace', () => {
+    const hand = makeHand();
+    const sword = getItem(toolIdOf('sword', 'iron')).id;
+    settle(hand, sword);
+    const frames = (rate?: number): number => {
+      const h = hand as unknown as { swingT: number };
+      hand.swing(rate);
+      let n = 0;
+      while (h.swingT < 1 && n < 600) {
+        hand.update(1 / 60, sword, 0, 16 / 9, 0, false, 0);
+        n++;
+      }
+      // (let a swing that is still in its first half finish before the next one is asked for)
+      for (let i = 0; i < 30; i++) hand.update(1 / 60, sword, 0, 16 / 9, 0, false, 0);
+      return n;
+    };
+    const usual = frames();
+    const quick = frames(1.44);
+    const slow = frames(0.5);
+    expect(usual).toBeGreaterThan(5);
+    expect(quick).toBeLessThan(usual * 0.8);
+    expect(slow).toBeGreaterThan(usual * 1.5);
     hand.dispose();
   });
 

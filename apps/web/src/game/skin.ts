@@ -23,6 +23,8 @@ export interface Look {
   style: number;
   /** Varies the noise (fabric weave, hair strands) between players. */
   seed: number;
+  /** The colour of the buckles and the badge, in place of brass (an outfit's trim). */
+  trim?: RGB;
 }
 
 export const HAIR_STYLES = 3;
@@ -310,6 +312,7 @@ function paintHead(sheet: Sheet, look: Look): void {
 }
 
 function paintBody(sheet: Sheet, look: Look): void {
+  const brass = look.trim ?? BRASS;
   const b = partRects('body', 'base');
   const o = partRects('body', 'over');
   const { shirt, skin, seed } = look;
@@ -336,7 +339,7 @@ function paintBody(sheet: Sheet, look: Look): void {
     [6, 3],
     [7, 3],
     [6, 4],
-  ]) f.px(x, y, x === 6 && y === 3 ? tone(BRASS, 20) : BRASS);
+  ]) f.px(x, y, x === 6 && y === 3 ? tone(brass, 20) : brass);
   f.fill(1, 5, 6, 1, tone(shirt, 16)); // the top edge of the pocket catches the light
   f.fill(1, 6, 6, 3, tone(shirt, -9));
   f.fill(1, 5, 1, 4, tone(shirt, -30));
@@ -381,9 +384,9 @@ function paintBody(sheet: Sheet, look: Look): void {
   };
   const of = new Pen(sheet, o.front);
   belt(of);
-  of.fill(3, 9, 2, 1, BRASS);
-  of.px(3, 9, tone(BRASS, 26));
-  of.px(4, 9, tone(BRASS, -34));
+  of.fill(3, 9, 2, 1, brass);
+  of.px(3, 9, tone(brass, 26));
+  of.px(4, 9, tone(brass, -34));
   belt(new Pen(sheet, o.back));
   belt(new Pen(sheet, o.left, true));
   const or = new Pen(sheet, o.right);
@@ -391,7 +394,7 @@ function paintBody(sheet: Sheet, look: Look): void {
   or.fill(1, 10, 2, 2, LEATHER);
   or.fill(1, 10, 2, 1, LEATHER_DARK);
   or.px(1, 11, tone(LEATHER, -16));
-  or.px(2, 10, BRASS);
+  or.px(2, 10, brass);
 }
 
 function paintArm(sheet: Sheet, look: Look, part: 'armR' | 'armL'): void {
@@ -438,6 +441,7 @@ function paintArm(sheet: Sheet, look: Look, part: 'armR' | 'armL'): void {
 }
 
 function paintLeg(sheet: Sheet, look: Look, part: 'legR' | 'legL'): void {
+  const brass = look.trim ?? BRASS;
   const b = partRects(part, 'base');
   const o = partRects(part, 'over');
   const { pants, seed } = look;
@@ -482,8 +486,8 @@ function paintLeg(sheet: Sheet, look: Look, part: 'legR' | 'legL'): void {
     if (part === 'legR') {
       for (let x = 0; x < 4; x++) p.px(x, 2, tone(LEATHER, (noise(x, 2, seed) - 0.5) * 10));
       if (name === 'front') {
-        p.px(1, 2, BRASS);
-        p.px(2, 2, tone(BRASS, -30));
+        p.px(1, 2, brass);
+        p.px(2, 2, tone(brass, -30));
       }
     }
   }

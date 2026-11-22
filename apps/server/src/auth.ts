@@ -2,7 +2,7 @@ import { createHash, createPublicKey, randomBytes, verify as edVerify } from 'no
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { ClassId, PlayerSave } from '@solrift/shared';
 import { SiwsError, addressToPublicKey, cleanPlayerName, formatSignInMessage, isClassId, parseLookCode, parseSignInMessage, playerNameProblem, briefOfSheet, sheetOfSave, type CharacterBrief, type StashView } from '@solrift/shared';
-import { CharacterLimitError, MAX_CHARACTERS, NameTakenError, type Account, type Repo } from './db';
+import { CharacterLimitError, NameTakenError, type Account, type Repo } from './db';
 
 /** DER prefix of an ed25519 SubjectPublicKeyInfo; the 32-byte key follows it. */
 const ED25519_SPKI = Buffer.from('302a300506032b6570032100', 'hex');
@@ -126,21 +126,26 @@ export class AuthService {
     return s.account;
   }
 
+  /** What outfit a character wears (set by a server that has a token: the choice is kept with the token's records). */
+  outfitOf?: (accountId: string, wallet: string, cls: ClassId | null) => string | null;
+
   /** The signed-in character as the client sees it, with the wallet's other characters to choose from. */
   view(account: Account): PublicAccount {
+    const outfit = (id: string, cls: ClassId | null): string | null => this.outfitOf?.(id, account.wallet, cls) ?? null;
     return {
       id: account.id,
       displayName: account.displayName,
       wallet: account.wallet,
       look: account.look,
+      outfit: outfit(account.id, account.class),
       class: account.class,
-      characters: this.repo.listCharacters(account.wallet).map((c) => ({ id: c.id, displayName: c.displayName, look: c.look as number, class: c.class })),
-      maxCharacters: MAX_CHARACTERS,
+      characters: this.repo.listCharacters(account.wallet).map((c) => ({ id: c.id, displayName: c.displayName, look: c.look as number, outfit: outfit(c.id, c.class), class: c.class })),
+      maxCharacters: this.repo.maxCharacters(account.wallet),
     };
   }
 
   /**
-   * Make a character for the signed-in wallet: a name and a look, up to MAX_CHARACTERS. A character is permanent:
+   * Make a character for the signed-in wallet: a name and a look, up to the wallet's `maxCharacters`. A character is permanent:
    * it cannot be edited or renamed afterwards, only deleted (`deleteCharacter`). The new one becomes the character
    * this session plays.
    */
@@ -160,7 +165,7 @@ export class AuthService {
       if (created.id !== account.id) this.repo.setSessionAccount(hashToken(token), created.id, this.now());
       return created;
     } catch (err) {
-      if (err instanceof CharacterLimitError) throw new AuthError(409, `You already have ${MAX_CHARACTERS} characters. Delete one to make another.`);
+      if (err instanceof CharacterLimitError) throw new AuthError(409, `You already have ${err.max} characters. Delete one to make another.`);
       if (err instanceof NameTakenError) throw new AuthError(409, 'That name is taken. Try another.');
       throw err;
     }
@@ -253,10 +258,12 @@ export interface PublicAccount {
   wallet: string;
   /** The look of the character in play, or null when the wallet has none yet. */
   look: number | null;
+  /** The outfit that character wears (an id from `OUTFITS`), or null. */
+  outfit: string | null;
   /** The class of the character in play (null: none yet, or a character from before classes). */
   class: ClassId | null;
   /** All of the wallet's characters (oldest first), so the client can offer them. */
-  characters: { id: string; displayName: string; look: number; class: ClassId | null }[];
+  characters: { id: string; displayName: string; look: number; outfit: string | null; class: ClassId | null }[];
   maxCharacters: number;
 }
 

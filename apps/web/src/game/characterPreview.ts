@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { I, OUTFIT_CLASSES, armorId, getItem, outfitItems } from '@solrift/shared';
 import { Character, type Palette } from './character';
+import { CompanionFollowers } from './companionRenderer';
 import { ShaderKeeper } from './shaderKeep';
 
 /** A soft round shadow for the figure to stand on. */
@@ -74,6 +75,7 @@ export class CharacterPreview {
     this.target = target;
     // The figure faces -z; turn it to face the camera.
     this.character.root.rotation.y = Math.PI;
+    this.character.showSetHalo(false); // (the figure is copied onto the page: the edge of the halo would show; the stage has a glow of its own)
     this.pivot.add(this.character.root);
     this.pivot.position.y = -1.0;
     this.scene.add(this.pivot);
@@ -104,6 +106,7 @@ export class CharacterPreview {
   /** Repaint the figure for another look (skin tone, hair, eyes, clothes). */
   setLook(palette: Palette): void {
     this.character.setLook(palette);
+    this.frame();
   }
 
   /** Wear armor and clothes (item ids). A tall hat needs the camera pulled back a little. */
@@ -113,7 +116,29 @@ export class CharacterPreview {
     this.frame();
   }
 
+  /** Wear a pair of wings (the number the wire gives, 0: none). */
+  setWings(no: number): void {
+    this.character.setWings(no);
+    this.winged = no > 0;
+    this.frame();
+  }
+
+  private companions: CompanionFollowers | null = null;
+
+  /** Keep a companion at the figure's shoulder (1 + its place in COMPANIONS, 0: none). It is drawn as it is in the game: it bobs, beats its wings and glows. */
+  setCompanion(pet: number): void {
+    if (pet === this.pet) return;
+    this.pet = pet;
+    if (pet > 0 && !this.companions) {
+      this.companions = new CompanionFollowers();
+      this.scene.add(this.companions.group);
+    }
+    this.frame();
+  }
+
   private tall = false;
+  private pet = 0; // 1 + the place of the companion in COMPANIONS (0: none)
+  private winged = false; // wings are as wide as the figure is tall: the camera is pulled back so they show
   private grounded = false;
 
   /** Stand the figure on the bottom edge of the picture, as large as the picture is tall (a character-select screen), instead of floating in the middle. */
@@ -123,17 +148,21 @@ export class CharacterPreview {
   }
 
   private frame(): void {
-    const tall = this.tall;
+    // The figure is the same size with a set on as without (a set may reach out of the picture, which is fine): the camera is placed for the hero,
+    // and for the hat of a mage, whether it is the clothes of the class or a set of the class that is worn.
+    const tall = this.tall || this.character.setClass === 'mage';
     if (this.grounded) {
-      const span = tall ? 4.0 : 3.1; // world units from the soles up, to a little above the head or hat
+      const span = (tall ? 4.0 : 3.1) * (this.winged ? 1.25 : 1) * (this.pet ? 1.12 : 1); // world units from the soles up, to a little above the head or hat
       const dist = span / 2 / Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
       const y = -1.0 + span / 2 - 0.07; // (the boots reach out a little toward the camera: lower on screen than the soles' centre)
       this.camera.position.set(0, y, dist);
       this.camera.lookAt(0, y, 0);
       return;
     }
-    this.camera.position.set(0, tall ? 0.28 : 0.05, tall ? 5.6 : 4.9);
-    this.camera.lookAt(0, tall ? 0.22 : 0, 0);
+    const back = (this.winged ? 1.25 : 1) * (this.pet ? 1.12 : 1);
+    const up = this.winged ? 0.3 : 0; // (the figure floats, and the wings rise to its head)
+    this.camera.position.set(0, (tall ? 0.28 : 0.05) + up, (tall ? 5.6 : 4.9) * back);
+    this.camera.lookAt(0, (tall ? 0.22 : 0) + up, 0);
   }
 
   /** Turn the figure slowly all the way round (so the back, where a cape hangs, shows too). */
@@ -211,6 +240,10 @@ export class CharacterPreview {
     this.character.headPivot.rotation.y = this.yaw * 0.45;
     this.character.headPivot.rotation.x = this.pitch + breath * 0.012;
     this.character.pose(0);
+    this.character.updateSet(t, dt);
+    this.character.updateWings(t, dt);
+    // The companion keeps to the stage, not to the turning figure: it hovers at the shoulder that faces the camera.
+    this.companions?.sync(this.pet > 0 ? [{ key: 0, pet: this.pet, x: 0, y: this.pivot.position.y, z: 0, yaw: Math.PI }] : [], dt);
     // Breathing: the arms hang a touch out and in again, the chest and head rise by a hair.
     this.character.armL.rotation.z = -0.03 - breath * 0.012;
     this.character.armR.rotation.z = 0.03 + breath * 0.012;
@@ -245,6 +278,7 @@ export class CharacterPreview {
     cancelAnimationFrame(this.raf);
     this.setShield(0, null);
     this.character.dispose();
+    this.companions?.dispose();
     (this.shadow.material as THREE.MeshBasicMaterial).map?.dispose();
     (this.shadow.material as THREE.Material).dispose();
     this.shadow.geometry.dispose();

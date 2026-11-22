@@ -9,6 +9,7 @@ import { createBody, stepPlayer, type BlockReader, type Body, type MoveInput, ty
 import { raycast } from './raycast';
 import type { VillagerState } from './trading';
 import { TUNING } from './tuning';
+import { MOB_TIER_INFO, mobTier } from './mobTier';
 
 export type MobKind =
   | 'pig'
@@ -1212,6 +1213,11 @@ function packedGear(slots: readonly (ItemStack | null)[]): NonNullable<MobSave['
 const GUARD_SIGHT = 13;
 const GUARD_CALL = 9;
 
+/** The health a creature of this kind (and a slime of this size) is born with, as the game runs it: the same figure on a server and in a client. */
+export function mobMaxHealth(kind: MobKind, size = 1): number {
+  return (kind === 'slime' ? size * size : MOBS[kind].health) * TUNING.damageScale * (kind === 'dummy' || kind === 'armor_stand' ? 1 : TUNING.mobToughness);
+}
+
 export class Mob {
   readonly def: MobDef;
   readonly body: Body;
@@ -1246,6 +1252,8 @@ export class Mob {
   patrol = 0;
   homeX = 0;
   homeZ = 0;
+  /** The rift it came out of (0: none). A rift's monsters do not burn in the sun, and are not kept in a save: a rift is gone with the session. */
+  rift = 0;
   /** A strong one of a dungeon: it has more health and hits harder, and leaves a piece of gear. */
   elite = false;
   /** A boss that is gathering a spell: 1 while it winds up (its arms rise), 0 otherwise. Set by the script (see boss.ts); only drawn. */
@@ -1373,7 +1381,7 @@ export class Mob {
     this.width = this.def.width * scale;
     this.height = this.def.height * scale;
     // (Training dummies and armor stands are not made tougher: see tuning.ts.)
-    this.maxHealth = (kind === 'slime' ? this.size * this.size : this.def.health) * TUNING.damageScale * (kind === 'dummy' || kind === 'armor_stand' ? 1 : TUNING.mobToughness);
+    this.maxHealth = mobMaxHealth(kind, this.size);
     this.body = createBody(x, y, z);
     this.body.width = this.width;
     this.body.height = this.height;
@@ -1509,7 +1517,7 @@ export class MobManager {
     const out: MobSave[] = [];
     for (const m of this.mobs) {
       // Villagers are kept by the realm, with their trades, in the world's state.
-      if (m.dead || out.length >= limit || m.kind === 'villager' || m.kind === 'npc' || m.kind === 'dummy' || isHollowDeepKind(m.kind)) continue;
+      if (m.dead || out.length >= limit || m.kind === 'villager' || m.kind === 'npc' || m.kind === 'dummy' || m.rift !== 0 || isHollowDeepKind(m.kind)) continue;
       if (Math.hypot(m.body.x - cx, m.body.z - cz) > radius) continue;
       out.push({
         kind: m.kind,
@@ -1683,7 +1691,9 @@ export class MobManager {
         for (const piece of mob.standGear) if (piece) events.drop(piece, mob.body.x, mob.body.y + 0.5, mob.body.z);
       }
       if (mob.sincePlayerHit < PLAYER_KILL_WINDOW) {
-        events.xp?.(mob.def.xp(this.rand, mob.traits), mob.body.x, mob.body.y + 0.3, mob.body.z);
+        // (a rare or epic kind is worth a little more than its base: see `MOB_TIER_INFO`; a boss has its own worth)
+        const worth = mob.def.xp(this.rand, mob.traits) * (mob.def.boss ? 1 : MOB_TIER_INFO[mobTier(mob.kind)].xp);
+        events.xp?.(Math.round(worth), mob.body.x, mob.body.y + 0.3, mob.body.z);
         const coins = coinsForKill(mob.kind, mob.size, this.rand);
         if (coins > 0) events.coins?.(coins, mob.body.x, mob.body.y + 0.3, mob.body.z);
         events.loot?.(mob, mob.body.x, mob.body.y + 0.3, mob.body.z);
@@ -2035,7 +2045,7 @@ export class MobManager {
     }
     if (m.body.inWater) m.onFire = 0;
     else if (m.onFire > 0) m.onFire = Math.max(0, m.onFire - dt);
-    m.burning = (m.def.burnsInDaylight && env.daylight > 0.75 && m.exposed && !m.body.inWater) || m.body.inLava === true || m.onFire > 0;
+    m.burning = (m.def.burnsInDaylight && m.rift === 0 && env.daylight > 0.75 && m.exposed && !m.body.inWater) || m.body.inLava === true || m.onFire > 0;
     if (m.burning) {
       m.fireTimer += dt;
       if (m.fireTimer >= 1) {

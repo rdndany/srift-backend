@@ -1,6 +1,3 @@
-body.minimap-on #quest-tracker {
-  top: 290px;
-}
 #quest-tracker {
   position: fixed;
   top: 44px;
@@ -103,4 +100,23 @@ body.minimap-on #quest-tracker {
 #quest-tracker .tracker-dungeon .tracker-name {
   color: #ff9a3c;
   letter-spacing: 0.04em;
+}
+
+#quest-tracker .tracker-rift {
+  padding-right: 6px;
+  border-right: 3px solid var(--rift, #6bff8a);
+}
+#quest-tracker .tracker-rift .tracker-name {
+  letter-spacing: 0.04em;
+}
+#quest-tracker .tracker-rift[data-phase='omen'] .tracker-name {
+  animation: rift-omen 1s ease-in-out infinite alternate;
+}
+@keyframes rift-omen {
+  from {
+    opacity: 0.55;
+  }
+  to {
+    opacity: 1;
+  }
 }

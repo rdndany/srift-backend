@@ -21,48 +21,77 @@
 }
 /* The tabs share one card: Crafting and Spellbook keep the height the Inventory has. */
 #menu-screen .panel.wow:has(.wow-tabs) {
-  min-height: 627px;
+  min-height: 668px;
 }
 
-/* Tabs hang from the bottom edge of the frame; the chosen one is raised and lit, the others tuck behind the frame. */
+/* The tabs sit inside the card, under the title: the chosen one is lit and joined to the page below, the others are dimmed. */
 .wow-tabs {
-  position: absolute;
-  left: 34px;
-  top: 100%;
   display: flex;
   gap: 4px;
-  margin-top: -4px;
-  pointer-events: none;
+  flex: none;
+  padding: 0 2px;
+  margin: 0 0 -4px;
+  position: relative;
+  z-index: 1;
 }
 .wow-tab {
-  pointer-events: auto;
   position: relative;
-  z-index: -1;
-  min-width: 112px;
-  padding: 9px 20px 7px;
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 8px 6px 7px;
   cursor: pointer;
   font-family: inherit;
   font-size: 12px;
-  letter-spacing: 2px;
+  letter-spacing: 1.5px;
   text-transform: uppercase;
+  white-space: nowrap;
   color: var(--w-dim);
-  background: linear-gradient(#17120d, #0f0c09);
+  background: linear-gradient(#1c160f, #100d09);
   border: 3px solid var(--w-edge);
-  border-top: 0;
-  box-shadow: inset 2px 0 0 0 var(--w-bronze-lo), inset -2px -2px 0 0 var(--w-bronze-lo);
+  box-shadow: inset 2px 2px 0 0 #2a2012, inset -2px -2px 0 0 var(--w-bronze-lo);
   text-shadow: 1px 1px 0 #000;
 }
 .wow-tab:hover {
   color: var(--w-gold-hi);
-  background: linear-gradient(#26200f, #14100a);
+  background: linear-gradient(#2c2412, #16110a);
 }
 .wow-tab.on {
-  z-index: 1;
-  margin-top: 4px;
-  padding-top: 8px;
   color: var(--w-gold-hi);
-  background: linear-gradient(#3a2d1a, #1f170d);
-  box-shadow: inset 2px 0 0 0 var(--w-bronze-hi), inset -2px -2px 0 0 var(--w-bronze-lo), inset 0 -2px 0 0 var(--w-bronze-lo);
+  background: linear-gradient(#4a3920, #2a1f10);
+  box-shadow: inset 2px 2px 0 0 var(--w-bronze-hi), inset -2px 0 0 0 var(--w-bronze-lo), inset 0 -3px 0 0 var(--w-gold);
+}
+/* Unspent stat points, shown on the Attributes tab so they are not missed. */
+.wow-tab .tab-badge {
+  position: absolute;
+  top: -9px;
+  right: -5px;
+  z-index: 2;
+  font-style: normal;
+  font-size: 11px;
+  letter-spacing: 0;
+  line-height: 1;
+  white-space: nowrap;
+  padding: 3px 5px 2px;
+  color: #1a1206;
+  background: linear-gradient(var(--w-gold-hi), var(--w-gold));
+  border: 2px solid var(--w-edge);
+  text-shadow: none;
+  animation: tab-badge-pulse 1.6s ease-in-out infinite;
+}
+@keyframes tab-badge-pulse {
+  50% {
+    filter: brightness(1.25);
+    box-shadow: 0 0 8px 1px rgba(255, 228, 154, 0.7);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wow-tab .tab-badge {
+    animation: none;
+  }
 }
 
 /* The character's numbers, beside the paperdoll. */
@@ -149,17 +178,10 @@
 }
 
 /* Stat points (Strength, Agility, Vitality, Energy): one more column of the Inventory window, inside its frame (the window grows to hold it). */
-#menu-screen .panel.wow.with-points {
-  width: 826px;
-  min-height: 640px;
-  padding-right: 304px;
-}
 #menu-screen .wow .attr-points {
-  position: absolute;
-  top: 38px;
-  right: 28px;
-  bottom: 20px;
+  position: relative;
   box-sizing: border-box;
+  flex: none;
   width: 262px;
   display: flex;
   flex-direction: column;
@@ -314,44 +336,6 @@
   cursor: default;
 }
 
-/* The slots that are not in the game yet: a necklace under the boots and two rings under the character. */
-#menu-screen .wow .char-col {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-#menu-screen .wow .char-col .char-box {
-  box-sizing: content-box;
-  height: 220px;
-  flex: none;
-}
-#menu-screen .wow .ring-row {
-  display: flex;
-  justify-content: center;
-  gap: 18px;
-}
-#menu-screen .wow .slot.locked,
-#menu-screen .wow .slot.locked:hover {
-  cursor: not-allowed;
-  background:
-    repeating-linear-gradient(135deg, rgba(0, 0, 0, 0.28) 0 4px, transparent 4px 8px),
-    linear-gradient(145deg, #1d1914, #0b0907);
-  border-color: #3d2c12;
-  box-shadow: inset 0 0 0 1px #000;
-  z-index: auto;
-}
-#menu-screen .wow .slot.locked span {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  letter-spacing: 2px;
-  color: #7a6a4a;
-  text-shadow: 1px 1px 0 #000;
-  pointer-events: none;
-}
 
 
 /* The trash that shows while a stack is held on the cursor: a place beside the window to throw it away for good. */

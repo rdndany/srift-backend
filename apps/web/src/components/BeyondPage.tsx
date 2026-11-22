@@ -8,12 +8,13 @@ import { COPY, COUNTS, DEEDS, FAMILIES, PLACES, RARITY_LABEL, REALMS, CAVES, bio
 import { SHOTS, shotUrl, type Shot } from './beyondShots';
 import { ClickSparks, Embers, Reveal, Spot, useFrontMotion } from './fx';
 import { lobbyUrl } from '../game/route';
-import { SCROLL_KEY, goMarket, goToken } from './frontNav';
+import { SCROLL_KEY, goMarket, goToken, goCamp } from './frontNav';
 import { ART } from './homeAssets';
 import './home.css';
 import './front.css';
 import './classPage.css';
 import './beyondPage.css';
+import './responsive.css';
 
 /** The heading of a section: a small numbered label, then the title (the word to light up goes in <em>). */
 function Head({ n, label, blocks, children }: { n: string; label: string; blocks: readonly number[]; children: ReactNode }) {
@@ -200,11 +201,12 @@ export function BeyondPage() {
             <button onClick={() => toFront('site-world')}>The World</button>
             <button onClick={() => toFront('site-features')}>Classes</button>
             <button onClick={() => toFront('l-expansions')}>Expansions</button>
+            <button className="fp-link-camp" onClick={goCamp}>Camp</button>
             <button className="fp-link-market" onClick={goMarket}>Market</button>
             <button className="fp-link-token" onClick={goToken}>Token</button>
           </nav>
           <div className="fp-account">
-            <AccountPanel />
+            <AccountPanel bar />
           </div>
           <i className="fp-progress" aria-hidden="true" />
         </header>

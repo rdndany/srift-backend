@@ -1,12 +1,14 @@
-import { BLOCKS, SOUL_WARD_RADIUS, campfireId, lanternInfo } from './blocks';
-import { enchantBaseName, enchantName } from './enchant';
+import { B, BLOCKS, SOUL_WARD_RADIUS, campfireId, lanternInfo } from './blocks';
+import { ELEMENTS, ENCHANTS, enchantBaseName, enchantName, glyphSockets } from './enchant';
 import type { ItemStack } from './inventory';
 import { ABILITY_BY_ID } from './abilities';
+import { companionBonusText } from './companions';
+import { wingBonusText } from './wings';
 import { CLASSES, offhandModifier, type ClassId } from './classes';
 import { formatEmberTime, EMBER_CAST, EMBER_COOLDOWN } from './emberstone';
-import { gearSuffix, optionStat, rarityDef, resourceNameOf, rolledStats, statLine } from './gear';
+import { gearSuffix, glyphLine, optionStat, rarityDef, resourceNameOf, rolledStats, statLine } from './gear';
 import { forgeHint, jewelDef, jewelKind } from './jewels';
-import { BOTTLE_XP_MAX, BOTTLE_XP_MIN, I, PEARL_TRIP_DAMAGE, bagSlotsOf, getItem, isUndroppable, mountOfItem, skillBookAbility, type ItemKind } from './items';
+import { BOTTLE_XP_MAX, BOTTLE_XP_MIN, I, PEARL_TRIP_DAMAGE, bagSlotsOf, getItem, isUndroppable, companionOfItem, wingOfItem, accessoryOfItem, mountOfItem, outfitSetOfItem, skillBookAbility, type ItemKind } from './items';
 import { MOUNT_CAST, mountDef, mountSpeedText } from './mounts';
 import { abilityCost, castCost, scaled } from './tuning';
 
@@ -121,7 +123,7 @@ function useHelp(id: number, item: ReturnType<typeof getItem>): TipLine[] {
   return [];
 }
 
-/** The name an item shows: the one an anvil gave it, or for an enchanted book what it holds ("Book of Sharpness"). */
+/** The name an item shows: the one an anvil gave it, or for a Glyph Tome what it holds ("Tome of Keen Edge"). */
 export function tooltipName(stack: ItemStack): string {
   const item = getItem(stack.id);
   const plus = stack.gear?.u ? ` +${stack.gear.u}` : '';
@@ -131,14 +133,21 @@ export function tooltipName(stack: ItemStack): string {
   if (jewel) return jewelDef(jewel).name;
   const mount = mountDef(mountOfItem(stack.id));
   if (mount) return mount.horn;
+  const set = outfitSetOfItem(stack.id);
+  if (set) return set.name;
+  const pal = companionOfItem(stack.id);
+  if (pal) return pal.name;
+  const wg = wingOfItem(stack.id);
+  if (wg) return wg.name;
   const taught = skillBookAbility(stack.id);
   if (taught) return `Skill Book: ${ABILITY_BY_ID.get(taught)?.name ?? title(item.name)}`;
   if (stack.id === I.EXPERIENCE_BOTTLE) return "Bottle o' Enchanting";
+  if (stack.id === B.ENCHANTING_TABLE) return 'Runic Altar';
   if (!item.storesEnchants) return title(item.name);
   const names = (stack.ench ?? []).map(([id]) => enchantBaseName(id)).filter(Boolean);
-  if (names.length === 0) return title(item.name);
-  if (names.length <= 2) return `Book of ${names.join(' & ')}`;
-  return `Book of ${names[0]} +${names.length - 1}`;
+  if (names.length === 0) return 'Glyph Tome';
+  if (names.length <= 2) return `Tome of ${names.join(' & ')}`;
+  return `Tome of ${names[0]} +${names.length - 1}`;
 }
 
 /**
@@ -155,7 +164,11 @@ export function tooltipLines(stack: ItemStack | null, viewerClass?: ClassId | nu
   const rolled = stack.gear && stack.gear.r > 0 ? stack.gear : undefined; // a plain piece with only jewels on it has no rarity
   const jewels = jewelKind(stack.id);
   const hornOf = mountDef(mountOfItem(stack.id));
-  const nameColor: TipColor = hornOf ? (hornOf.speed >= 2 ? 'epic' : hornOf.speed > 1.6 ? 'superior' : 'uncommon') : bagSlots > 0 ? bagTone(stack.id) : rolled ? rarityTone(rolled.r) : stack.gear || jewels ? 'jewel' : enchanted || item.storesEnchants ? 'rare' : 'name';
+  const setOf = outfitSetOfItem(stack.id);
+  const palOf = companionOfItem(stack.id);
+  const wingsOf = wingOfItem(stack.id);
+  const jewelryOf = accessoryOfItem(stack.id);
+  const nameColor: TipColor = jewelryOf ? (jewelryOf.material === 'diamond' ? 'epic' : jewelryOf.material === 'gold' ? 'rare' : jewelryOf.material === 'iron' ? 'good' : 'name') : wingsOf ? (wingsOf.tier === 2 ? 'epic' : 'superior') : palOf ? 'epic' : setOf ? (setOf.tier === 'epic' ? 'epic' : setOf.tier === 'rare' ? 'superior' : 'uncommon') : hornOf ? (hornOf.speed >= 2 ? 'epic' : hornOf.speed > 1.6 ? 'superior' : 'uncommon') : bagSlots > 0 ? bagTone(stack.id) : rolled ? rarityTone(rolled.r) : stack.gear || jewels ? 'jewel' : enchanted || item.storesEnchants ? 'rare' : 'name';
   const lines: TipLine[] = [{ text: tooltipName(stack), color: nameColor, ...(stack.name ? { italic: true } : {}) }];
   lines.push({ text: rolled ? `${rarityDef(rolled.r).name} ${itemKind(stack.id)}` : itemKind(stack.id), color: rolled ? rarityTone(rolled.r) : 'kind' });
 
@@ -177,6 +190,37 @@ export function tooltipLines(stack: ItemStack | null, viewerClass?: ClassId | nu
     lines.push({ text: hornOf.blurb, color: 'dim' });
     lines.push({ text: `Press H to summon it from the mount slot: stand still for ${MOUNT_CAST} seconds, outdoors and out of the water`, color: 'dim' });
     lines.push({ text: 'Right-click to put it in the mount slot', color: 'good' });
+  }
+
+  if (setOf) {
+    const wrong = !!viewerClass && viewerClass !== setOf.cls;
+    lines.push({ text: `For the ${CLASSES[setOf.cls].name}${wrong ? `: your ${CLASSES[viewerClass!].name} cannot wear it` : ''}`, color: wrong ? 'warn' : 'stat' });
+    lines.push({ text: `${setOf.tier[0].toUpperCase()}${setOf.tier.slice(1)} set: a glowing outfit with a light of its own`, color: 'stat' });
+    lines.push({ text: setOf.blurb, color: 'dim' });
+    lines.push({ text: 'It changes how you look and nothing else: the armor you wear still counts, it is only not seen', color: 'dim' });
+    lines.push({ text: 'Right-click to put it in the outfit slot', color: 'good' });
+  }
+
+  if (palOf) {
+    lines.push({ text: companionBonusText(palOf), color: 'good' });
+    lines.push({ text: palOf.blurb, color: 'dim' });
+    lines.push({ text: 'It follows you while it is in the companion slot of the inventory screen', color: 'dim' });
+    lines.push({ text: 'Right-click to put it in the companion slot', color: 'good' });
+  }
+
+  if (wingsOf) {
+    lines.push({ text: wingBonusText(wingsOf), color: 'good' });
+    lines.push({ text: `${wingsOf.tier === 1 ? 'First' : 'Second'} wings: double-tap jump to fly (jump climbs, sneak sinks), at ${wingsOf.fly}x your walking speed`, color: 'stat' });
+    lines.push({ text: wingsOf.blurb, color: 'dim' });
+    lines.push({ text: 'Flying burns hunger, no fall damage while they are worn, and they fold when you are starving', color: 'dim' });
+    lines.push({ text: 'Right-click to put them in the wing slot', color: 'good' });
+  }
+
+  if (jewelryOf) {
+    for (const [stat, v] of jewelryOf.stats) lines.push({ text: statLine(stat, v, viewerClass ? CLASSES[viewerClass].resource.name : 'Resource'), color: 'stat' });
+    lines.push({ text: jewelryOf.kind === 'ring' ? 'Worn on a finger: you may wear two rings' : 'Worn around the neck: you may wear one necklace', color: 'dim' });
+    lines.push({ text: 'The bonuses work for every class and need no level', color: 'dim' });
+    lines.push({ text: jewelryOf.kind === 'ring' ? 'Right-click to wear it (the inventory screen has two ring slots)' : 'Right-click to wear it (the inventory screen has a necklace slot)', color: 'good' });
   }
 
   if (stack.id === I.COMPASS) {
@@ -306,9 +350,19 @@ export function tooltipLines(stack: ItemStack | null, viewerClass?: ClassId | nu
     if (forge) lines.push({ text: forge, color: 'dim' });
   }
 
-  for (const [id, level] of stack.ench ?? []) {
-    const name = enchantName(id, level);
-    if (name) lines.push({ text: name, color: 'ench' });
+  // The glyphs: what each is and does, and how many sockets are left (a Glyph Tome holds them without them acting).
+  if (stack.ench && stack.ench.length > 0) {
+    if (!item.storesEnchants) lines.push({ text: `Glyph sockets: ${stack.ench.length} / ${Math.max(glyphSockets(stack), stack.ench.length)}`, color: 'dim' });
+    const resource = resourceNameOf(stack.gear?.c ?? (viewerClass ?? undefined));
+    for (const [id, level] of stack.ench) {
+      const name = enchantName(id, level);
+      if (!name) continue;
+      const el = ENCHANTS.find((d) => d.id === id)?.element;
+      lines.push({ text: el ? `${name} (${ELEMENTS[el].name})` : name, color: 'ench' });
+      const what = glyphLine(id, level, resource);
+      if (what) lines.push({ text: what, color: 'stat' });
+    }
+    if (item.storesEnchants) lines.push({ text: 'At an anvil, put a piece with this tome to move its glyphs onto it', color: 'dim' });
   }
 
   if (isUndroppable(stack.id)) lines.push({ text: 'Cannot be dropped', color: 'dim' });

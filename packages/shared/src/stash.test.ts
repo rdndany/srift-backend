@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { I, STASH_SLOTS, StashVault, makeStack, parseNetClientMessage, stashBlocker } from './index';
+import { I, STASH_MAX_SLOTS, STASH_SLOTS, StashVault, makeStack, parseNetClientMessage, stashBlocker } from './index';
 
 describe('the stash vault', () => {
   it('keeps one stash for each owner, and nobody sees another owner\u2019s', () => {
@@ -46,7 +46,7 @@ describe('the stash vault', () => {
 describe('the stash commands', () => {
   it('accept whole numbers in range and nothing else', () => {
     expect(parseNetClientMessage({ t: 'cmd', c: { t: 'stash', a: 'put', slot: 3, count: 10 } })).toBeTruthy();
-    for (const bad of [{ a: 'put', slot: -1, count: 1 }, { a: 'put', slot: 1.5, count: 1 }, { a: 'take', slot: STASH_SLOTS, count: 1 }, { a: 'take', slot: 0, count: 0 }, { a: 'take', slot: 0, count: 65 }, { a: 'steal', slot: 0, count: 1 }, { a: 'put', slot: 0 }]) {
+    for (const bad of [{ a: 'put', slot: -1, count: 1 }, { a: 'put', slot: 1.5, count: 1 }, { a: 'take', slot: STASH_MAX_SLOTS, count: 1 }, { a: 'take', slot: 0, count: 0 }, { a: 'take', slot: 0, count: 65 }, { a: 'steal', slot: 0, count: 1 }, { a: 'put', slot: 0 }]) {
       expect(parseNetClientMessage({ t: 'cmd', c: { t: 'stash', ...bad } }), JSON.stringify(bad)).toBeNull();
     }
   });

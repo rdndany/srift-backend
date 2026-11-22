@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
-import { CLASSES, MAX_LEVEL, STASH_SLOTS, STASHKEEPER, NPCS, briefOfSheet, getItem, tooltipLines, type CharacterSheet as Sheet, type CharacterBrief, type ItemStack, type StashView, type TipLine } from '@solrift/shared';
+import { ACHIEVEMENTS, ACH_CATEGORIES, ACH_TIERS, CLASSES, MAX_LEVEL, STASH_SLOTS, STASHKEEPER, NPCS, briefOfSheet, getItem, tooltipLines, type AchCategory, type CharacterSheet as Sheet, type CharacterBrief, type ItemStack, type StashView, type TipLine } from '@solrift/shared';
 import { lobbyIcons } from '../game/lobbyIcons';
+import { useToken } from '../token/store';
 import { Tip } from './ItemView';
 import { timeAgo } from './modes';
 import './sheet.css';
@@ -71,7 +72,65 @@ const ARMOR_LABELS = ['Head', 'Chest', 'Legs', 'Feet'];
 const filled = (slots: (ItemStack | null)[]): number => slots.reduce((n, s) => n + (s ? 1 : 0), 0);
 const stashkeeper = NPCS.find((n) => n.id === STASHKEEPER)?.name ?? 'the Stashkeeper';
 
-type Tab = 'carried' | 'stash';
+type Tab = 'carried' | 'ach' | 'stash';
+
+/**
+ * The achievements of the character on the page, by category: the ones won are ticked, the others show how far along they are.
+ * It is the list the game shows (L, then Achievements), read from the character's save. With a token live on the server each
+ * tier also says what it pays.
+ */
+function AchievementsTab({ ach }: { ach: Sheet['ach'] }) {
+  const done = useMemo(() => new Set(ach.done), [ach]);
+  const pays = useToken((s) => (s.info?.live ? s.info.tiers : null));
+  const loadInfo = useToken((s) => s.loadInfo);
+  useEffect(() => {
+    void loadInfo();
+  }, [loadInfo]);
+  const won = ACHIEVEMENTS.filter((a) => done.has(a.id)).length;
+  return (
+    <div className="cs-tab" role="tabpanel" id="cs-achtab" data-testid="cs-ach">
+      <p className="cs-note cs-ach-total" id="cs-ach-total">
+        <b>{won}</b> of {ACHIEVEMENTS.length} won
+      </p>
+      {(Object.keys(ACH_CATEGORIES) as AchCategory[]).map((cat) => {
+        const list = ACHIEVEMENTS.filter((a) => a.category === cat);
+        return (
+          <Section key={cat} title={ACH_CATEGORIES[cat].name} note={`${list.filter((a) => done.has(a.id)).length}/${list.length}`}>
+            <ul className="cs-ach-list">
+              {list.map((a) => {
+                const isWon = done.has(a.id);
+                const now = Math.min(a.goal, Math.floor(ach.stats[a.stat] ?? 0));
+                return (
+                  <li key={a.id} className={`cs-ach ${a.tier}${isWon ? ' won' : ''}`} data-ach={a.id} data-won={isWon ? '1' : '0'}>
+                    <span className="cs-ach-mark" aria-hidden="true">
+                      {isWon ? '\u2713' : ''}
+                    </span>
+                    <div className="cs-ach-body">
+                      <b>{a.name}</b>
+                      <span>{a.text}</span>
+                      {!isWon && (
+                        <i className="cs-ach-bar" aria-label={`${now} of ${a.goal}`}>
+                          <u style={{ width: `${(now / a.goal) * 100}%` }} />
+                          <em>
+                            {now.toLocaleString()}/{a.goal.toLocaleString()}
+                          </em>
+                        </i>
+                      )}
+                    </div>
+                    <small className="cs-ach-tier">
+                      {ACH_TIERS[a.tier].name}
+                      {pays ? ` +${pays[a.tier].toLocaleString()}` : ''}
+                    </small>
+                  </li>
+                );
+              })}
+            </ul>
+          </Section>
+        );
+      })}
+    </div>
+  );
+}
 
 /** A titled part of a tab, with what it holds written at the right. */
 function Section({ title, note, id, children }: { title: string; note?: string; id?: string; children: React.ReactNode }) {
@@ -115,7 +174,8 @@ export function CharacterSheet({ sheet, source, empty, stash, showStash, briefs 
   const show: Show = (e, lines) => setTip({ x: e.clientX, y: e.clientY, lines });
   const hide = () => setTip(null);
   const stashUsed = useMemo(() => (stash ? filled(stash.slots) : 0), [stash]);
-  const current: Tab = showStash ? tab : 'carried';
+  const tabs: Tab[] = showStash ? ['carried', 'ach', 'stash'] : ['carried', 'ach'];
+  const current: Tab = tabs.includes(tab) ? tab : 'carried';
 
   if (sheet === undefined) {
     return (
@@ -137,7 +197,7 @@ export function CharacterSheet({ sheet, source, empty, stash, showStash, briefs 
   const viewer: Viewer = { cls: sheet.cls, find };
   const color = sheet.cls ? CLASSES[sheet.cls.id].color : '#8a5cf5';
   const bagItems = sheet.bags.filter((b) => b.bag);
-  const worn = filled(sheet.armor) + (sheet.offhand ? 1 : 0) + (sheet.mount ? 1 : 0);
+  const worn = filled(sheet.armor) + (sheet.offhand ? 1 : 0) + (sheet.mount ? 1 : 0) + (sheet.outfit ? 1 : 0) + (sheet.companion ? 1 : 0) + (sheet.wings ? 1 : 0) + filled(sheet.rings) + (sheet.necklace ? 1 : 0);
   const packSlots = sheet.hotbar.length + sheet.backpack.length;
   const packUsed = filled(sheet.hotbar) + filled(sheet.backpack);
 
@@ -195,16 +255,24 @@ export function CharacterSheet({ sheet, source, empty, stash, showStash, briefs 
       {(sheet.gameOver || sheet.hardcore) && <p className="cs-warn">{sheet.gameOver ? 'Hardcore: this character has died.' : 'Hardcore: one life.'}</p>}
 
       <div className="cs-controls">
-        {showStash && (
-          <div className="cs-tabs" role="tablist" aria-label="Belongings" onKeyDown={(e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { const to: Tab = current === 'carried' ? 'stash' : 'carried'; setTab(to); e.preventDefault(); (e.currentTarget.querySelector(`#cs-tab-${to}`) as HTMLElement | null)?.focus(); } }}>
-            <button type="button" role="tab" id="cs-tab-carried" aria-selected={current === 'carried'} tabIndex={current === 'carried' ? 0 : -1} onClick={() => setTab('carried')}>
-              <svg viewBox="0 0 12 12" width="16" height="16" shapeRendering="crispEdges" aria-hidden="true">
-                <path d="M4 0h4v1h1v1h1v1h1v8H1V3h1V2h1V1h1z" />
-                <path d="M1 5h10v1H1zM4 7h4v3H4z" fill="rgba(0,0,0,0.42)" />
-              </svg>
-              <span>Carried</span>
-              <b>{sheet.itemCount}</b>
-            </button>
+        <div className="cs-tabs" role="tablist" aria-label="Character" onKeyDown={(e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { const to = tabs[(tabs.indexOf(current) + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length]; setTab(to); e.preventDefault(); (e.currentTarget.querySelector(`#cs-tab-${to}`) as HTMLElement | null)?.focus(); } }}>
+          <button type="button" role="tab" id="cs-tab-carried" aria-selected={current === 'carried'} tabIndex={current === 'carried' ? 0 : -1} onClick={() => setTab('carried')}>
+            <svg viewBox="0 0 12 12" width="16" height="16" shapeRendering="crispEdges" aria-hidden="true">
+              <path d="M4 0h4v1h1v1h1v1h1v8H1V3h1V2h1V1h1z" />
+              <path d="M1 5h10v1H1zM4 7h4v3H4z" fill="rgba(0,0,0,0.42)" />
+            </svg>
+            <span>Carried</span>
+            <b>{sheet.itemCount}</b>
+          </button>
+          <button type="button" role="tab" id="cs-tab-ach" aria-selected={current === 'ach'} tabIndex={current === 'ach' ? 0 : -1} onClick={() => setTab('ach')} title="The deeds this character has done">
+            <svg viewBox="0 0 12 12" width="16" height="16" shapeRendering="crispEdges" aria-hidden="true">
+              <path d="M2 1h8v1h1v2h-1v1H9v1H8v1H7v1h1v1h1v1H3v-1h1V8h1V7H4V6H3V5H2V4H1V2h1z" />
+              <path d="M4 2h4v2H7v1H5V4H4z" fill="rgba(0,0,0,0.42)" />
+            </svg>
+            <span>Achievements</span>
+            <b>{sheet.ach.done.length}/{ACHIEVEMENTS.length}</b>
+          </button>
+          {showStash && (
             <button type="button" role="tab" id="cs-tab-stash" aria-selected={current === 'stash'} tabIndex={current === 'stash' ? 0 : -1} onClick={() => setTab('stash')} title="Shared by all the characters of this wallet">
               <svg viewBox="0 0 12 12" width="16" height="16" shapeRendering="crispEdges" aria-hidden="true">
                 <path d="M2 2h8v1h1v3H1V3h1z" />
@@ -212,17 +280,17 @@ export function CharacterSheet({ sheet, source, empty, stash, showStash, briefs 
                 <path d="M5 5h2v3H5z" fillOpacity="0.4" />
               </svg>
               <span>Stash</span>
-              <b>{stash ? `${stashUsed}/${STASH_SLOTS}` : '-'}</b>
+              <b>{stash ? `${stashUsed}/${stash.slots.length || STASH_SLOTS}` : '-'}</b>
             </button>
-          </div>
-        )}
+          )}
+        </div>
         {finder}
       </div>
       {find.length >= 2 && <Whereabouts find={find} sheet={sheet} stash={stash} briefs={briefs} selfId={selfId} characters={characters} />}
 
       {current === 'carried' ? (
         <div className="cs-tab" role="tabpanel" id="cs-carried">
-          <Section title="Worn" note={`${worn} of ${sheet.armor.length + 2}`} id="cs-equipment">
+          <Section title="Worn" note={`${worn} of ${sheet.armor.length + 5 + sheet.rings.length + 1}`} id="cs-equipment">
             <div className="cs-row">
               {sheet.armor.map((s, i) => (
                 <Cell key={i} stack={s} label={ARMOR_LABELS[i]} show={show} hide={hide} viewer={viewer} />
@@ -230,6 +298,16 @@ export function CharacterSheet({ sheet, source, empty, stash, showStash, briefs 
               <span className="cs-gap" aria-hidden="true" />
               <Cell stack={sheet.offhand} label="Off hand" show={show} hide={hide} viewer={viewer} />
               <Cell stack={sheet.mount} label="Mount" show={show} hide={hide} viewer={viewer} />
+              <Cell stack={sheet.outfit} label="Outfit" show={show} hide={hide} viewer={viewer} />
+              <Cell stack={sheet.companion} label="Companion" show={show} hide={hide} viewer={viewer} />
+              <Cell stack={sheet.wings} label="Wings" show={show} hide={hide} viewer={viewer} />
+            </div>
+            <div className="cs-row">
+              {sheet.rings.map((s, i) => (
+                <Cell key={i} stack={s} label="Ring" show={show} hide={hide} viewer={viewer} />
+              ))}
+              <span className="cs-gap" aria-hidden="true" />
+              <Cell stack={sheet.necklace} label="Necklace" show={show} hide={hide} viewer={viewer} />
             </div>
           </Section>
 
@@ -268,6 +346,8 @@ export function CharacterSheet({ sheet, source, empty, stash, showStash, briefs 
             {sheet.savedAt !== null ? `Saved ${timeAgo(sheet.savedAt)} \u00B7 ` : ''}at {sheet.position.x}, {sheet.position.y}, {sheet.position.z}
           </p>
         </div>
+      ) : current === 'ach' ? (
+        <AchievementsTab ach={sheet.ach} />
       ) : (
         <div className="cs-tab" role="tabpanel" id="cs-stashtab">
           <StashPanel stash={stash} used={stashUsed} sorted={sorted} onSort={setSorted} show={show} hide={hide} viewer={viewer} />
@@ -286,7 +366,7 @@ function StashPanel({ stash, used, sorted, onSort, show, hide, viewer }: { stash
   if (stash === undefined) return <p className="cs-note">Reading the Stash...</p>;
   if (stash === null) return <p className="cs-note">The Stash could not be read just now.</p>;
   return (
-    <Section title="Shared Stash" note={`${used} of ${STASH_SLOTS} slots`} id="cs-stash">
+    <Section title="Shared Stash" note={`${used} of ${stash.slots.length || STASH_SLOTS} slots`} id="cs-stash">
       <div className="cs-stashbar">
         <p className="cs-note">Shared by every character of your wallet, and by no one else. Move items in and out at {stashkeeper} in Dawnwatch.</p>
         <button type="button" id="cs-sort" aria-pressed={sorted} onClick={() => onSort(!sorted)} title="Only how it is shown here: in the game the slots stay where you put them">

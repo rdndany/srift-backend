@@ -17,6 +17,8 @@ export interface FeelFrame {
   rush: { yaw: number; roll?: boolean } | null | undefined;
   /** The part of a Ground Slam under way: 1 the crouch, 2 the jump, 3 the blow (0: none). */
   slam: number;
+  /** Flying on wings. */
+  flying?: boolean;
 }
 
 /**
@@ -43,6 +45,8 @@ export class ViewFeel {
   private rushK = 0;
   /** Running in third person widens the view a little (0..1, eased). */
   private runK = 0;
+  /** Flying on wings seen from behind: the view widens with the speed, and the wind rises at the sides (0..1, eased). */
+  private flyK = 0;
   /** How far into an Evasive Roll the view is (it dips and leans). */
   private rollK = 0;
   /** A Ground Slam seen from the eyes: how far into each part the view is (eased), the part it was in and the seconds in it. */
@@ -155,9 +159,11 @@ export class ViewFeel {
       camera.rotation.x += -0.07 * slamDepth - 0.05 * slamCam.fall + 0.03 * slamCam.up - 0.05 * slamBump * slamCam.hit;
     }
     const slamFov = 6 * slamCam.up + 10 * slamCam.fall - 3 * slamCam.wind - 5 * slamCam.hit * slamBump;
-    const wind = Math.max(rushing ? (rolling ? 1 : 0.85) : 0, 0.6 * slamCam.fall + 0.25 * slamCam.up);
+    const wind = Math.max(rushing ? (rolling ? 1 : 0.85) : 0, 0.6 * slamCam.fall + 0.25 * slamCam.up, 0.3 * this.flyK * this.flyK);
     this.runK += ((!f.firstPerson ? Math.max(0, Math.min(1, (Math.hypot(body.vx, body.vz) - 3.5) / 4)) : 0) - this.runK) * Math.min(1, dt * 3);
-    const fov = this.baseFov - 9 * f.bowDraw * f.bowDraw + 16 * this.rushK + 4 * this.rollK + 5 * this.runK + slamFov - 3.5 * this.hitK * this.hitK - (!f.firstPerson ? THIRD_PERSON_FOV_TRIM : 0);
+    const air = Math.hypot(body.vx, body.vy, body.vz);
+    this.flyK += ((f.flying && !f.firstPerson ? Math.min(1, air / 7) : 0) - this.flyK) * Math.min(1, dt * 2.5);
+    const fov = this.baseFov + 7 * this.flyK - 9 * f.bowDraw * f.bowDraw + 16 * this.rushK + 4 * this.rollK + 5 * this.runK + slamFov - 3.5 * this.hitK * this.hitK - (!f.firstPerson ? THIRD_PERSON_FOV_TRIM : 0);
     if (Math.abs(camera.fov - fov) > 0.01) {
       camera.fov = fov;
       camera.updateProjectionMatrix();

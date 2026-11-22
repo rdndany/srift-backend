@@ -1,5 +1,5 @@
 import type { SessionScreen } from '@solrift/shared';
-import { HOTBAR_SLOTS, type ItemStack } from '@solrift/shared';
+import { HOTBAR_SLOTS, compass, type ItemStack } from '@solrift/shared';
 import { bumpUi, useUi } from '../ui/store';
 import type { ClientSession } from './clientSession';
 import type { Input } from './input';
@@ -49,6 +49,11 @@ export function makeUiSync(session: ClientSession, input: Input, overlay: HTMLEl
     const dv = session.dungeonView();
     const dshown = useUi.getState().dungeon;
     if (dv ? !dshown || JSON.stringify(dv) !== JSON.stringify(dshown) : dshown !== null) useUi.setState({ dungeon: dv });
+    // The rift near the player (its tracker).
+    const rift = session.riftView();
+    const rv = rift ? { ...rift, dist: Math.round(Math.hypot(rift.x - session.body.x, rift.z - session.body.z) / 2) * 2, dir: compass(rift.x - session.body.x, rift.z - session.body.z) } : null;
+    const rshown = useUi.getState().rift;
+    if (rv ? !rshown || JSON.stringify(rv) !== JSON.stringify(rshown) : rshown !== null) useUi.setState({ rift: rv });
     const health = Math.ceil(session.vitals.health);
     const hunger = Math.ceil(session.vitals.hunger);
     const air = Math.round(session.vitals.air * 2) / 2;

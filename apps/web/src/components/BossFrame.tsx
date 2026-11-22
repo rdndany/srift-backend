@@ -134,7 +134,7 @@ export function BossBanner() {
   return (
     <div id="boss-banner" key={line.stamp} className={line.kind} data-testid="boss-banner" style={{ top: boss ? 128 : 96 }}>
       {line.kind === 'yell' ? <small>The Hollow King yells</small> : null}
-      <span>{line.text}</span>
+      <span style={line.color ? { color: line.color } : undefined}>{line.text}</span>
     </div>
   );
 }

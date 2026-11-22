@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { CLASSES, MOUNTS, getItem } from '@solrift/shared';
-import { BODY_SCALE, Character, SWING_TIME, disposeCharacterAssets, figureLoadout, layDown, standUp } from './character';
+import { CLASSES, MOUNTS, getItem, glowColor } from '@solrift/shared';
+import { BODY_SCALE, Character, SWING_TIME, disposeCharacterAssets, figureGlows, figureLoadout, layDown, standUp } from './character';
 import { paletteOfCode } from './lookPalette';
 import type { OtherPlayer } from './remote';
 import type { EntityLight } from './entityLight';
@@ -186,6 +186,8 @@ export class PlayerRenderer {
 
   /** Tells whether the cell at a point is water: a player with water at the feet and under them is swimming, not walking. */
   isWater: ((x: number, y: number, z: number) => boolean) | null = null;
+  /** The room over a figure's head (blocks, see `roofGap`): one with wings floats no higher than there is room. */
+  roofAt: ((x: number, y: number, z: number) => number) | null = null;
 
   private light(f: Figure, p: OtherPlayer): void {
     if (f.character) {
@@ -240,6 +242,11 @@ export class PlayerRenderer {
       if (!f) {
         f = this.makeFigure(p);
         this.figures.set(p.id, f);
+      }
+      if (f.look !== p.look) {
+        // A set put on or taken off: the figure is dressed again.
+        f.look = p.look;
+        f.character?.setLook(paletteOfCode(p.look));
       }
       const dist = Math.sqrt(d2[i]);
       const r = rank[i];
@@ -319,7 +326,9 @@ export class PlayerRenderer {
       c.root.visible = true;
       // A mage's hat is tall: the name tag rides above it.
       const tallHat = p.armor[0] ? getItem(p.armor[0]).armor?.outfit === 'mage' : false;
-      if (f.label) f.label.position.y = p.sleeping > 0 ? 0.9 : tallHat ? NAME_Y + 0.45 + lift : NAME_Y + lift;
+      // A set of armor has horns, a crown or a halo: the name rides above that too.
+      const setUp = c.setHeight * BODY_SCALE;
+      if (f.label) f.label.position.y = p.sleeping > 0 ? 0.9 : tallHat ? NAME_Y + 0.45 + lift : NAME_Y + setUp * 0.8 + lift;
       if (p.sleeping > 0) {
         f.rig?.update(dt, null, 0, 0, 0, false);
         c.settle();
@@ -343,16 +352,22 @@ export class PlayerRenderer {
       const afloat = !p.mount && !!this.isWater && this.isWater(p.x, p.y + 0.4, p.z) && (this.isWater(p.x, p.y + 1, p.z) || this.isWater(p.x, p.y - 0.5, p.z));
       if (afloat) f.air = false;
       c.afloat = afloat;
+      c.setWings(p.mount ? 0 : (p.wing ?? 0));
+      c.roof = p.wing && this.roofAt ? this.roofAt(p.x, p.y, p.z) : 4;
+      c.wingFlying = !p.mount && !!p.winged;
       if (f.rig) f.rig.onStep = this.onMountStep;
       f.rig?.update(dt, p.mount ? (MOUNTS[p.mount - 1]?.id ?? null) : null, p.speed, f.turn, f.vy, f.air, this.env ? this.env.at(p.x, p.y, p.z, this.tint) : this.tint.setScalar(Math.max(0.3, this.brightness)), eye);
       c.slamPhase = p.mount ? 0 : (p.slam ?? 0);
       c.bashAge = p.mount ? 9 : (p.bashT ?? 9);
       c.charging = !p.mount && !!p.charging;
       c.casting = p.mount ? 0 : (p.casting ?? 0);
-      c.animate(dt, p.speed, f.turn, Math.min(1, (p.swingT ?? 9) / SWING_TIME), load.hand !== 0, p.blocking && !p.mount, f.vy, f.air, !!p.eating && !p.mount);
+      c.animate(dt, p.speed, f.turn, Math.min(1, ((p.swingT ?? 9) * (p.swingR ?? 1)) / SWING_TIME), load.hand !== 0, p.blocking && !p.mount, f.vy, f.air, !!p.eating && !p.mount);
       c.setArmor(p.armor);
       c.setHeld(load.hand, this.models);
+      const fx = figureGlows(p.held, p.offhand, glowColor(p.hg), glowColor(p.og));
+      c.setHeldGlow(load.hand ? fx.hand : null);
       c.setShield(load.shield, this.models);
+      c.setShieldGlow(load.shield ? fx.shield : null);
       this.light(f, p);
     }
     for (const [id, f] of this.figures) {

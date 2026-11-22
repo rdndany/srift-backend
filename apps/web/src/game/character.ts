@@ -1,10 +1,16 @@
 import * as THREE from 'three';
-import { BASH_ANIM, BED_DIRS, I, getItem, type ArmorMaterial, type Carry, type OutfitClass } from '@solrift/shared';
+import { BASH_ANIM, BED_DIRS, I, getItem, wingByNumber, type ArmorMaterial, type Carry, type OutfitClass, type OutfitDef } from '@solrift/shared';
 import type { EntityLight } from './entityLight';
 import { disposeMageGear, dressMage, pulseMageGlow, type GearCtx, type MageRig } from './mageGear';
+import { disposeSetGear, dressSet, type SetRig } from './setGear';
+import { buildWings, type WingRig } from './wingRig';
 import { disposeClassGear, dressRanger, dressWarrior } from './classGear';
 import { HAIR_STYLES, PARTS, THREE_FACE_ORDER, isSkinSize, legacyToModern, paintSkin, partRects, SKIN_SIZE, type FaceName, type Look, type PartName, type Rect } from './skin';
 import { StoneHeat } from './held/heat';
+import { addAura, stripAura } from './enchantFx';
+
+/** How high a figure with wings floats above the ground (blocks). */
+const WING_HOVER = 0.42;
 
 /**
  * A blocky humanoid dressed from a 64x64 skin (see `skin.ts`): a face with eyes and brows, hair, a hoodie
@@ -23,6 +29,10 @@ export interface Palette {
   /** Hair style, 0..2 (see `HAIR_STYLES`). */
   style?: number;
   seed?: number;
+  /** The buckles and the badge (an outfit's trim; brass without one). */
+  trim?: THREE.Color;
+  /** The set of armor to wear over it all (an outfit of the shop: see `setGear.ts`), or none. */
+  outfit?: OutfitDef | null;
 }
 
 /** The default look of the local player: an orange hoodie and slate trousers. */
@@ -45,6 +55,7 @@ export function lookOf(p: Palette): Look {
     eyes: rgb(p.eyes ?? new THREE.Color('#3b6aa8')),
     style: ((p.style ?? 0) % HAIR_STYLES + HAIR_STYLES) % HAIR_STYLES,
     seed: p.seed ?? 1,
+    ...(p.trim ? { trim: rgb(p.trim) } : {}),
   };
 }
 
@@ -84,32 +95,64 @@ const px = (g: CanvasRenderingContext2D, x: number, y: number, c: string, w = 1,
 
 // ---- armor textures ----------------------------------------------------------------------------
 
-const ARMOR_BASE: Record<ArmorMaterial, RGB> = {
-  leather: [150, 94, 56],
-  gold: [246, 208, 52],
-  iron: [200, 204, 212],
-  diamond: [72, 222, 208],
+/** Each material has a main plate and a darker trim (belts, cuffs, boots, the crown of a helmet): a whole suit in one tone is what made it look like a brick. */
+export type ArmorTone = 'plate' | 'trim';
+const ARMOR_BASE: Record<ArmorMaterial, Record<ArmorTone, RGB>> = {
+  leather: { plate: [160, 102, 62], trim: [92, 58, 36] },
+  gold: { plate: [246, 208, 52], trim: [186, 134, 34] },
+  iron: { plate: [188, 196, 210], trim: [98, 106, 124] },
+  diamond: { plate: [92, 228, 214], trim: [30, 140, 160] },
 };
 
 const textureCache = new Map<string, THREE.CanvasTexture>();
 
-/** A 16x16 plate of the material with a bevel and the details that tell the materials apart. */
-export function armorTexture(material: ArmorMaterial, hole = false): THREE.CanvasTexture {
-  const key = `${material}${hole ? '-hole' : ''}`;
+/** A 16x16 plate of the material with a bevel and the details that tell the materials apart: stitching, brushed steel and rivets, crystal facets. */
+export function armorTexture(material: ArmorMaterial, hole = false, tone: ArmorTone = 'plate'): THREE.CanvasTexture {
+  const key = `${material}-${tone}${hole ? '-hole' : ''}`;
   const hit = textureCache.get(key);
   if (hit) return hit;
-  const base = ARMOR_BASE[material];
+  const base = ARMOR_BASE[material][tone];
+  const plate = tone === 'plate';
   const t = canvasTexture(16, 16, (g) => {
     for (let y = 0; y < 16; y++) {
       for (let x = 0; x < 16; x++) {
-        let d = (noise(x, y, 7) - 0.5) * 14;
-        if (x === 0 || y === 0) d += 30;
-        else if (x === 15 || y === 15) d -= 38;
-        if (material === 'leather' && (x + y) % 5 === 0) d -= 28;
-        if (material === 'iron' && ((x === 3 || x === 12) && (y === 3 || y === 12))) d -= 60;
-        if (material === 'gold' && noise(x * 3, y * 7, 9) > 0.86) d += 30;
-        if (material === 'diamond' && noise(x * 5, y * 3, 4) > 0.88) d += 70;
-        px(g, x, y, css(base, d));
+        let d = (noise(x, y, 7) - 0.5) * 10;
+        let over: RGB | null = null;
+        const edge = x === 0 || y === 0 || x === 15 || y === 15;
+        if (x === 0 || y === 0) d += 26;
+        else if (x === 15 || y === 15) d -= 40;
+        if (material === 'leather') {
+          d += (noise(x * 3, y * 3, 2) - 0.5) * 16; // grain
+          if (plate) {
+            // Panels stitched at the edge and sewn down the middle, the thread a pale cream.
+            const stitch = ((y === 2 || y === 13) && x >= 2 && x <= 13 && x % 2 === 0) || ((x === 2 || x === 13) && y >= 2 && y <= 13 && y % 2 === 0);
+            if (stitch) over = [226, 196, 140];
+            else if (x === 7 || x === 8) d -= x === 7 ? 30 : -14;
+          } else {
+            if ((x === 4 || x === 11) && (y === 4 || y === 11)) over = [238, 194, 84]; // brass studs
+            else if (y === 7 || y === 8) d += y === 7 ? -30 : 12;
+          }
+        } else if (material === 'iron') {
+          if (!edge) d += (noise(1, y, 3) - 0.5) * 26; // brushed along the plate
+          if (plate) {
+            if (y === 7) d -= 40;
+            else if (y === 8) d += 18;
+            if (!edge && (x === 2 || x === 13) && (y === 2 || y === 13)) over = [236, 240, 248]; // rivet heads
+            else if (!edge && (x === 3 || x === 14) && (y === 3 || y === 14)) d -= 50;
+          } else {
+            d += y % 4 === 0 ? 22 : y % 4 === 1 ? -24 : 0; // ribs
+          }
+        } else if (material === 'diamond') {
+          // Cut like a gem: facets of three lights, bright seams between them, a few sparks.
+          const facet = ((x >> 2) + (y >> 2) * 2) % 3;
+          d += [-8, 8, -22][facet];
+          if (!edge && (x + y) % 8 === 0) d += 28;
+          if (!plate) d -= y * 2.4 - 14; // darker toward the foot
+          if (noise(x * 5, y * 3, 4) > 0.97) over = [236, 255, 250];
+        } else {
+          d += (noise(x * 3, y * 7, 9) > 0.86 ? 30 : 0) + (plate ? (y === 7 ? -34 : y === 8 ? 16 : 0) : y % 4 === 0 ? 22 : y % 4 === 1 ? -22 : 0);
+        }
+        px(g, x, y, over && !edge ? css(over, d * 0.4) : css(base, d));
       }
     }
     if (hole) g.clearRect(3, 6, 10, 7); // the face shows through
@@ -125,6 +168,12 @@ export function armorTexture(material: ArmorMaterial, hole = false): THREE.Canva
 export function figureLoadout(held: number, offhand: number): { hand: number; shield: number } {
   if (held && getItem(held).shield) return { hand: offhand && !getItem(offhand).shield ? offhand : 0, shield: held };
   return { hand: held, shield: offhand };
+}
+
+/** The glow (a colour, or null) for what each hand of a figure carries, following `figureLoadout`: a shield in the main hand glows on the arm, the off-hand item in the hand. */
+export function figureGlows(held: number, offhand: number, heldGlow: string | null, offGlow: string | null): { hand: string | null; shield: string | null } {
+  if (held && getItem(held).shield) return { hand: offhand && !getItem(offhand).shield ? offGlow : null, shield: heldGlow };
+  return { hand: heldGlow, shield: offGlow };
 }
 
 // The shield hangs in front of the left arm, turned a little outward, and swings up when it is raised.
@@ -243,20 +292,21 @@ function strip(sources: THREE.Texture[]): THREE.CanvasTexture {
 
 /** One shared material per armor look (the tint lives in the vertex colours, so characters can share it). */
 const armorMaterials = new Map<string, THREE.MeshBasicMaterial>();
-const helmetAtlases = new Map<ArmorMaterial, THREE.CanvasTexture>();
-function armorMaterial(mat: ArmorMaterial, helmet: boolean): THREE.MeshBasicMaterial {
-  const key = `${mat}${helmet ? '-helmet' : ''}`;
+const helmetAtlases = new Map<string, THREE.CanvasTexture>();
+function armorMaterial(mat: ArmorMaterial, helmet: boolean, tone: ArmorTone = 'plate'): THREE.MeshBasicMaterial {
+  const key = `${mat}-${tone}${helmet ? '-helmet' : ''}`;
   let m = armorMaterials.get(key);
   if (m) return m;
   let map: THREE.Texture;
   if (helmet) {
-    let atlas = helmetAtlases.get(mat);
+    const k = `${mat}-${tone}`;
+    let atlas = helmetAtlases.get(k);
     if (!atlas) {
-      atlas = strip([armorTexture(mat), armorTexture(mat, true)]);
-      helmetAtlases.set(mat, atlas);
+      atlas = strip([armorTexture(mat, false, tone), armorTexture(mat, true, tone)]);
+      helmetAtlases.set(k, atlas);
     }
     map = atlas;
-  } else map = armorTexture(mat);
+  } else map = armorTexture(mat, false, tone);
   m = new THREE.MeshBasicMaterial({ map, vertexColors: true, alphaTest: helmet ? 0.5 : 0 });
   armorMaterials.set(key, m);
   return m;
@@ -408,6 +458,12 @@ export class Character {
   private capePivot: THREE.Group | null = null;
   private capeSegs: THREE.Group[] = [];
   private armorIds: readonly number[] = [];
+  /** What the hero wears as armor, whatever is seen of it (a set of armor takes its place in the picture while one is worn). */
+  private wantedArmor: readonly number[] = [];
+  /** The set of armor of an outfit that is worn: its blocks, and the light that stands clear of the body. */
+  private dressed: { def: OutfitDef; rig: SetRig; parts: THREE.Object3D[]; geos: THREE.BufferGeometry[] } | null = null;
+  private fxOn = true;
+  private haloOn = true;
   /** The tint and face light last written to the vertex colours; skip the upload when nothing visible changed. */
   private applied = new Float32Array(9).fill(-1);
   private brightness = 1;
@@ -416,11 +472,19 @@ export class Character {
   private hairMeshes: THREE.Mesh[] = [];
   private hairGeos: THREE.BufferGeometry[] = [];
   private hairStyle = -1;
+  /** A helmet of plate is on: the hair blocks (which stand off the head) would poke out of it. */
+  private helmed = false;
   private paintedLook = true;
   private lookBits: THREE.Object3D[] = [];
   /** Where the right hand holds an item: just below the end of the arm, a little forward. */
   private readonly heldMount = new THREE.Group();
   private heldObj: THREE.Object3D | null = null;
+  /** The model the glow is on and its colour (see `setHeldGlow`). */
+  private glowObj: THREE.Object3D | null = null;
+  private glowColor: string | null = null;
+  /** The same for what the left arm carries (a shield, or an orb or dagger). */
+  private shieldGlowObj: THREE.Object3D | null = null;
+  private shieldGlowColor: string | null = null;
   private heldId = 0;
   /** How the held item is carried (see `ItemDef.carry`): in the fist, hanging from it, or as a staff or a wand. */
   private carry: Carry = 'hand';
@@ -534,7 +598,7 @@ export class Character {
       const geo = box(...size);
       const mesh = new THREE.Mesh(geo, this.hairMat);
       mesh.position.set(...at);
-      mesh.visible = this.paintedLook;
+      mesh.visible = this.paintedLook && !this.helmed;
       this.headPivot.add(mesh);
       this.hairMeshes.push(mesh);
       this.hairGeos.push(geo);
@@ -583,7 +647,7 @@ export class Character {
   /** The blocks that go with the painted looks (hair, buckle) show only for those: another picture has its own. */
   private showLookBits(show: boolean): void {
     this.paintedLook = show;
-    for (const m of this.hairMeshes) m.visible = show;
+    for (const m of this.hairMeshes) m.visible = show && !this.helmed;
     for (const o of this.lookBits) o.visible = show;
   }
   private writeSkin(rgba: Uint8ClampedArray): void {
@@ -599,6 +663,82 @@ export class Character {
     const style = lookOf(palette).style;
     if (style !== this.hairStyle) this.buildHair(style);
     else this.sampleHair();
+    this.setOutfit(palette.outfit ?? null);
+  }
+
+  /** Wear the set of armor of an outfit (null: none), in place of the armor the hero has on in the picture. */
+  setOutfit(def: OutfitDef | null): void {
+    if ((this.dressed?.def.id ?? null) === (def?.id ?? null)) return;
+    if (this.dressed) {
+      const d = this.dressed;
+      for (const m of d.parts) m.parent?.remove(m);
+      for (const geo of d.geos) geo.dispose();
+      d.rig.dispose();
+      this.dressed = null;
+    }
+    if (def) {
+      const parts: THREE.Object3D[] = [];
+      const geos: THREE.BufferGeometry[] = [];
+      const ctx = {
+        box,
+        add: (parent: THREE.Object3D, geo: THREE.BufferGeometry, mat: THREE.Material | THREE.Material[]): THREE.Mesh => {
+          const mesh = new THREE.Mesh(geo, mat);
+          parent.add(mesh);
+          parts.push(mesh);
+          geos.push(geo);
+          return mesh;
+        },
+        root: this.root,
+        head: this.headPivot,
+        torso: this.torso,
+        armL: this.armL,
+        armR: this.armR,
+        legL: this.legL,
+        legR: this.legR,
+      };
+      const rig = dressSet(ctx, def);
+      rig.effects.visible = this.fxOn;
+      rig.halo.visible = this.haloOn;
+      this.dressed = { def, rig, parts, geos };
+    }
+    this.refreshClassGeos();
+    this.armorKey = '';
+    this.wearArmor(this.dressed ? [0, 0, 0, 0] : this.wantedArmor);
+    this.applied.fill(-1); // the new blocks still have plain white vertices
+    this.applyBrightness();
+  }
+
+  /** How far a worn set reaches above the head and to the sides (blocks): 0 with none. The name tag and the camera of a preview make room for it. */
+  get setHeight(): number {
+    return this.dressed?.rig.height ?? 0;
+  }
+  /** The class whose set is worn (null: none). */
+  get setClass(): string | null {
+    return this.dressed?.def.cls ?? null;
+  }
+  get setExtent(): number {
+    return this.dressed?.rig.extent ?? 0;
+  }
+
+  /** Show the light and the wings of a set (off for the arm of the first-person hand, which has the camera in the middle of them). */
+  showSetFx(on: boolean): void {
+    this.fxOn = on;
+    if (this.dressed) this.dressed.rig.effects.visible = on;
+  }
+
+  /** Show the glow behind a worn set (a figure drawn on a see-through canvas, as in a menu, is better without it: its edge shows against the page). */
+  showSetHalo(on: boolean): void {
+    this.haloOn = on;
+    if (this.dressed) this.dressed.rig.halo.visible = on;
+  }
+
+  /** Move the lights and the wings of a worn set (the figure's own `animate` does this; a figure that is only posed, as in a menu, calls it itself). */
+  updateSet(t: number, dt: number, lift = 0): void {
+    this.dressed?.rig.update(t, dt, lift);
+  }
+
+  private refreshClassGeos(): void {
+    this.classGeos = [...[...this.outfits.values()].flatMap((o) => o.geos), ...(this.dressed?.geos ?? [])];
   }
 
   /**
@@ -628,6 +768,12 @@ export class Character {
 
   /** Put armor on: item ids for [helmet, chestplate, leggings, boots], 0 for nothing. */
   setArmor(ids: readonly number[]): void {
+    this.wantedArmor = ids;
+    this.wearArmor(this.dressed ? [0, 0, 0, 0] : ids);
+  }
+
+  /** Show these pieces of armor (what `setArmor` was asked for, or none while a set of armor stands in for them). */
+  private wearArmor(ids: readonly number[]): void {
     const key = ids.join(',');
     if (key === this.armorKey) return;
     this.armorKey = key;
@@ -641,23 +787,24 @@ export class Character {
     // (The clothes of a class are not plate: they are drawn by their own rig, see `syncOutfits`.)
     const material = (i: number): ArmorMaterial | null => (ids[i] && !getItem(ids[i]).armor?.outfit ? (getItem(ids[i]).armor?.material ?? null) : null);
 
-    const piece = (parent: THREE.Object3D, w: number, h: number, d: number, y: number, mat: ArmorMaterial, faceHole = false, x = 0): void => {
+    const piece = (parent: THREE.Object3D, w: number, h: number, d: number, y: number, mat: ArmorMaterial, faceHole = false, x = 0, tone: ArmorTone = 'plate'): void => {
       const geo = box(w, h, d);
       // A helmet's texture strip has the plain plate first and the one with the face hole second.
       if (faceHole) atlasUv(geo, 2, (f) => (f === 5 ? 1 : 0));
-      const mesh = new THREE.Mesh(geo, armorMaterial(mat, faceHole));
+      const mesh = new THREE.Mesh(geo, armorMaterial(mat, faceHole, tone));
       mesh.position.set(x, y, 0);
       parent.add(mesh);
       this.armorGroup.push(mesh);
       this.armorGeos.push(geo);
     };
-    /** A small block of armor (a rivet, a spike, a plate edge) at `at` in the parent: the plate's picture at the same scale as on the big pieces. */
-    const bit = (parent: THREE.Object3D, mat: ArmorMaterial, size: [number, number, number], at: [number, number, number]): void => {
+    /** A small block of armor (a rivet, a spike, a plate edge) at `at` in the parent: the plate's picture at the same scale as on the big pieces. `tilt` turns it about the front-to-back axis. */
+    const bit = (parent: THREE.Object3D, mat: ArmorMaterial, size: [number, number, number], at: [number, number, number], tone: ArmorTone = 'plate', tilt = 0): void => {
       const [w, h, d] = size;
       const geo = box(w, h, d);
       plateUv(geo, w, h, d);
-      const mesh = new THREE.Mesh(geo, armorMaterial(mat, false));
+      const mesh = new THREE.Mesh(geo, armorMaterial(mat, false, tone));
       mesh.position.set(...at);
+      mesh.rotation.z = tilt;
       parent.add(mesh);
       this.armorGroup.push(mesh);
       this.armorGeos.push(geo);
@@ -667,82 +814,98 @@ export class Character {
     const chest = material(1);
     const legs = material(2);
     const boots = material(3);
+    const head = this.headPivot;
+    this.helmed = !!helmet;
+    for (const m of this.hairMeshes) m.visible = this.paintedLook && !helmet;
     if (helmet) {
-      piece(this.headPivot, 0.58, 0.58, 0.58, 0.1, helmet, true);
       const gem = ACCENT[helmet];
-      // A rim around the brow, then what sets each metal apart: a seam, a crest and cheek plates, a crown, swept fins.
-      bit(this.headPivot, helmet, [0.62, 0.07, 0.62], [0, 0.27, 0]);
+      // The skull is a little smaller than a cube of plate, and the helm is built up from it in steps: a band at the brow, a stepped crown, a guard behind the neck.
+      // The face stays open, forehead to chin: a cap over the top of the head, a shell over the back and a plate over each ear.
+      bit(head, helmet, [0.58, 0.16, 0.58], [0, 0.3, 0]);
+      bit(head, helmet, [0.58, 0.46, 0.1], [0, 0.12, 0.24]);
+      for (const s of [-1, 1]) bit(head, helmet, [0.06, 0.4, 0.4], [s * 0.27, 0.15, 0.08]);
+      bit(head, helmet, [0.61, 0.07, 0.61], [0, 0.3, 0], 'trim');
+      bit(head, helmet, [0.5, 0.2, 0.04], [0, -0.07, 0.3], 'trim');
       if (helmet === 'leather') {
-        bit(this.headPivot, helmet, [0.06, 0.04, 0.5], [0, 0.41, 0]);
-        bit(this.headPivot, gem, [0.05, 0.05, 0.05], [-0.2, 0.27, -0.325]);
-        bit(this.headPivot, gem, [0.05, 0.05, 0.05], [0.2, 0.27, -0.325]);
+        // A cap with a rolled brim, flaps over the ears and a pad of leather at the crown.
+        bit(head, helmet, [0.5, 0.07, 0.5], [0, 0.4, 0]);
+        bit(head, helmet, [0.34, 0.06, 0.34], [0, 0.46, 0], 'trim');
+        for (const s of [-1, 1]) bit(head, helmet, [0.04, 0.22, 0.2], [s * 0.3, -0.02, -0.05], 'trim');
+        bit(head, gem, [0.07, 0.07, 0.04], [0, 0.3, -0.315]);
       } else if (helmet === 'iron') {
-        bit(this.headPivot, helmet, [0.08, 0.1, 0.52], [0, 0.44, 0]);
-        bit(this.headPivot, helmet, [0.08, 0.06, 0.12], [0, 0.5, -0.2]);
-        bit(this.headPivot, helmet, [0.06, 0.17, 0.04], [0, 0.085, -0.3]);
-        for (const s of [-1, 1]) bit(this.headPivot, helmet, [0.04, 0.2, 0.14], [s * 0.305, -0.08, -0.15]);
+        // A kettle helm: a wide brim, a high rounded crown with a ridge along it, cheek plates and a nasal bar.
+        bit(head, helmet, [0.72, 0.04, 0.72], [0, 0.34, 0], 'trim');
+        bit(head, helmet, [0.5, 0.1, 0.5], [0, 0.42, 0]);
+        bit(head, helmet, [0.32, 0.08, 0.32], [0, 0.51, 0]);
+        bit(head, helmet, [0.06, 0.08, 0.44], [0, 0.57, 0], 'trim');
+        for (const s of [-1, 1]) bit(head, helmet, [0.04, 0.26, 0.2], [s * 0.3, -0.04, -0.1], 'trim');
       } else if (helmet === 'gold') {
         for (const [x, h] of [[-0.2, 0.08], [-0.1, 0.12], [0, 0.16], [0.1, 0.12], [0.2, 0.08]] as const) {
-          bit(this.headPivot, helmet, [0.07, h, 0.07], [x, 0.39 + h / 2, -0.26]);
-          bit(this.headPivot, helmet, [0.07, h, 0.07], [x, 0.39 + h / 2, 0.26]);
+          bit(head, helmet, [0.07, h, 0.07], [x, 0.34 + h / 2, -0.26], 'trim');
+          bit(head, helmet, [0.07, h, 0.07], [x, 0.34 + h / 2, 0.26], 'trim');
         }
-        bit(this.headPivot, gem, [0.08, 0.08, 0.04], [0, 0.27, -0.325]);
+        bit(head, helmet, [0.5, 0.05, 0.5], [0, 0.4, 0]);
+        bit(head, gem, [0.08, 0.08, 0.04], [0, 0.3, -0.315]);
       } else {
+        // A crystal crown: fins sweeping up and out from each temple and a tall blade down the middle.
         for (const s of [-1, 1]) {
-          bit(this.headPivot, helmet, [0.05, 0.16, 0.12], [s * 0.315, 0.2, 0]);
-          bit(this.headPivot, helmet, [0.05, 0.12, 0.1], [s * 0.345, 0.3, 0.02]);
-          bit(this.headPivot, helmet, [0.05, 0.1, 0.08], [s * 0.375, 0.38, 0.04]);
+          bit(head, helmet, [0.05, 0.16, 0.12], [s * 0.32, 0.2, 0], 'plate', s * -0.12);
+          bit(head, helmet, [0.05, 0.14, 0.1], [s * 0.37, 0.33, 0.02], 'plate', s * -0.25);
+          bit(head, helmet, [0.05, 0.12, 0.08], [s * 0.43, 0.44, 0.04], 'plate', s * -0.4);
         }
-        bit(this.headPivot, gem, [0.08, 0.08, 0.04], [0, 0.27, -0.325]);
-        bit(this.headPivot, helmet, [0.07, 0.09, 0.48], [0, 0.43, 0]);
+        bit(head, helmet, [0.5, 0.06, 0.5], [0, 0.4, 0]);
+        bit(head, helmet, [0.07, 0.14, 0.44], [0, 0.5, 0], 'trim');
+        bit(head, gem, [0.08, 0.08, 0.04], [0, 0.3, -0.315]);
       }
     }
     if (chest) {
       const gem = ACCENT[chest];
-      piece(this.torso, 0.58, 0.81, 0.33, 1.125, chest);
-      piece(this.armL, 0.31, 0.36, 0.31, -0.18, chest);
-      piece(this.armR, 0.31, 0.36, 0.31, -0.18, chest);
-      // A keel down the front and the back, a belt with its buckle, studs on the chest.
-      bit(this.torso, chest, [0.12, 0.42, 0.05], [0, 1.18, -0.19]);
-      bit(this.torso, chest, [0.12, 0.4, 0.05], [0, 1.18, 0.19]);
-      bit(this.torso, chest, [0.6, 0.07, 0.35], [0, 0.8, 0]);
-      bit(this.torso, gem, [0.1, 0.09, 0.04], [0, 0.8, -0.185]);
-      for (const s of [-1, 1]) bit(this.torso, gem, [0.06, 0.06, 0.04], [s * 0.15, 1.4, -0.18]);
+      // Broad across the chest and narrower at the waist (a plain block of plate is a brick): a breastplate, a waist band under a belt, a collar round the neck.
+      piece(this.torso, 0.6, 0.58, 0.34, 1.24, chest);
+      piece(this.torso, 0.54, 0.23, 0.3, 0.84, chest);
+      bit(this.torso, chest, [0.64, 0.07, 0.37], [0, 0.955, 0], 'trim');
+      bit(this.torso, gem, [0.1, 0.09, 0.04], [0, 0.955, -0.19]);
+      bit(this.torso, chest, [0.42, 0.08, 0.3], [0, 1.54, 0], 'trim');
+      bit(this.torso, chest, [0.1, 0.4, 0.05], [0, 1.26, -0.195], 'trim');
+      bit(this.torso, chest, [0.3, 0.4, 0.04], [0, 1.26, 0.19], 'trim');
+      for (const s of [-1, 1]) {
+        bit(this.torso, chest, [0.18, 0.2, 0.04], [s * 0.17, 1.36, -0.185]);
+        bit(this.torso, gem, [0.05, 0.05, 0.04], [s * 0.17, 1.3, -0.21]);
+      }
       for (const [arm, s] of [[this.armL, -1], [this.armR, 1]] as const) {
-        // Shoulder plates in two steps with a spike on top, a ring at the elbow, a gauntlet at the wrist.
-        bit(arm, chest, [0.4, 0.04, 0.4], [s * 0.04, -0.01, 0]);
-        bit(arm, chest, [0.38, 0.09, 0.38], [s * 0.035, 0.045, 0]);
-        bit(arm, chest, [0.3, 0.08, 0.3], [s * 0.06, 0.13, 0]);
-        if (chest === 'leather') bit(arm, gem, [0.05, 0.05, 0.05], [s * 0.06, 0.19, -0.1]);
-        else bit(arm, chest, [0.07, 0.12, 0.07], [s * 0.08, 0.23, 0]);
-        bit(arm, chest, [0.33, 0.06, 0.33], [0, -0.4, 0]);
-        bit(arm, chest, [0.34, 0.16, 0.34], [0, -0.64, 0]);
-        bit(arm, gem, [0.07, 0.07, 0.04], [0, -0.64, -0.19]);
+        // A shoulder of three lames laid like tiles, each tilted further outward, with a spike on the top; the upper arm below, an elbow cop, a vambrace down the forearm and a flared cuff.
+        bit(arm, chest, [0.4, 0.05, 0.38], [s * 0.05, 0.0, 0], 'plate', -s * 0.16);
+        bit(arm, chest, [0.34, 0.05, 0.34], [s * 0.065, 0.06, 0], 'trim', -s * 0.28);
+        bit(arm, chest, [0.24, 0.06, 0.28], [s * 0.075, 0.115, 0], 'plate', -s * 0.4);
+        if (chest === 'leather') bit(arm, gem, [0.05, 0.05, 0.05], [s * 0.09, 0.17, -0.1]);
+        else bit(arm, chest, [0.06, 0.14, 0.06], [s * 0.11, 0.2, 0], 'trim', -s * 0.35);
+        piece(arm, 0.31, 0.34, 0.31, -0.19, chest);
+        bit(arm, chest, [0.34, 0.08, 0.34], [0, -0.38, 0], 'trim');
+        piece(arm, 0.3, 0.3, 0.3, -0.55, chest); // (no narrower than the sleeve layer of the skin, 0.2875, or its wristband shows through)
+        piece(arm, 0.31, 0.17, 0.31, -0.665, chest, false, 0, 'trim');
       }
     }
     if (legs) {
       const gem = ACCENT[legs];
-      piece(this.torso, 0.55, 0.27, 0.3, 0.86, legs);
-      piece(this.legL, 0.3, 0.5, 0.3, -0.26, legs);
-      piece(this.legR, 0.3, 0.5, 0.3, -0.26, legs);
-      // Hanging plates over the thigh, a cap at the knee.
+      piece(this.torso, 0.54, 0.05, 0.3, 0.745, legs, false, 0, 'trim');
       for (const leg of [this.legL, this.legR]) {
-        bit(leg, legs, [0.2, 0.22, 0.04], [0, -0.1, -0.17]);
-        bit(leg, legs, [0.12, 0.1, 0.04], [0, -0.26, -0.17]);
-        bit(leg, legs, [0.2, 0.12, 0.07], [0, -0.4, -0.17]);
-        bit(leg, gem, [0.05, 0.05, 0.04], [0, -0.4, -0.22]);
-        bit(leg, legs, [0.34, 0.05, 0.34], [0, -0.04, 0]);
+        // A plate over the thigh, a cop at the knee, a greave down the shin, and hanging plates in front.
+        piece(leg, 0.3, 0.3, 0.3, -0.16, legs);
+        bit(leg, legs, [0.34, 0.05, 0.34], [0, -0.01, 0], 'trim');
+        bit(leg, legs, [0.2, 0.2, 0.04], [0, -0.12, -0.17], 'trim');
+        bit(leg, legs, [0.12, 0.08, 0.04], [0, -0.26, -0.17]);
+        bit(leg, legs, [0.34, 0.1, 0.35], [0, -0.35, 0], 'trim');
+        bit(leg, gem, [0.05, 0.05, 0.04], [0, -0.35, -0.19]);
+        piece(leg, 0.3, 0.2, 0.3, -0.46, legs);
       }
     }
     if (boots) {
       for (const leg of [this.legL, this.legR]) {
-        bit(leg, boots, [0.35, 0.06, 0.38], [0, -0.465, -0.01]);
-        bit(leg, boots, [0.2, 0.1, 0.07], [0, -0.66, -0.205]);
-        bit(leg, boots, [0.2, 0.12, 0.05], [0, -0.66, 0.19]);
-        bit(leg, boots, [0.33, 0.04, 0.4], [0, -0.73, -0.02]);
+        piece(leg, 0.31, 0.26, 0.33, -0.6, boots, false, 0, 'trim');
+        bit(leg, boots, [0.35, 0.07, 0.37], [0, -0.465, 0]);
+        bit(leg, boots, [0.27, 0.12, 0.1], [0, -0.66, -0.2]);
+        bit(leg, boots, [0.33, 0.04, 0.41], [0, -0.73, -0.03], 'trim');
       }
-      piece(this.legL, 0.31, 0.26, 0.34, -0.6, boots);
-      piece(this.legR, 0.31, 0.26, 0.34, -0.6, boots);
     }
     this.applied.fill(-1); // the new pieces still have plain white vertices
     this.applyBrightness();
@@ -771,7 +934,7 @@ export class Character {
       this.outfits.set(cls, this.dress(cls));
       changed = true;
     }
-    this.classGeos = [...this.outfits.values()].flatMap((o) => o.geos);
+    this.refreshClassGeos();
     this.fitGear();
     if (changed) {
       this.applied.fill(-1); // the new parts still have plain white vertices
@@ -845,7 +1008,28 @@ export class Character {
     for (const geo of this.geos) paintFaces(geo, t, f);
     for (const geo of this.armorGeos) paintFaces(geo, t, f);
     for (const geo of this.classGeos) paintFaces(geo, t, f);
+    for (const geo of this.wingRig?.geos ?? []) paintFaces(geo, t, f);
     for (const geo of this.hairGeos) paintFaces(geo, t, f);
+  }
+
+  /** The held item glows in this colour (it carries glyphs; null: plain). Call after `setHeld`, which can change the model. */
+  setHeldGlow(color: string | null): void {
+    const obj = this.heldObj;
+    if (this.glowObj === obj && this.glowColor === color) return;
+    if (this.glowObj) stripAura(this.glowObj);
+    this.glowObj = obj;
+    this.glowColor = color;
+    if (obj && color) addAura(obj, color);
+  }
+
+  /** What the left arm carries glows in this colour (it has glyphs; null: plain). Call after `setShield`, which can change the model. */
+  setShieldGlow(color: string | null): void {
+    const obj = this.shieldObj;
+    if (this.shieldGlowObj === obj && this.shieldGlowColor === color) return;
+    if (this.shieldGlowObj) stripAura(this.shieldGlowObj);
+    this.shieldGlowObj = obj;
+    this.shieldGlowColor = color;
+    if (obj && color) addAura(obj, color);
   }
 
   /**
@@ -1090,7 +1274,8 @@ export class Character {
     const s = Math.sin(this.gait);
     const walkLegs = s * 0.8 * a;
     const legs = walkLegs * (1 - air) + this.legDir * (0.5 + 0.15 * rise) * air;
-    const arms = Math.sin(this.gait - 0.35) * 0.65 * a;
+    // (On wings the stride does not swing the arms: see `wingStep`.)
+    const arms = Math.sin(this.gait - 0.35) * 0.65 * a * (1 - 0.9 * this.wingW);
     // A Ground Slam: each part comes in quickly, the dive and the way out more slowly. The shield is out in front for all of it.
     const sk = this.slamW;
     const ph = this.slamPhase;
@@ -1161,6 +1346,7 @@ export class Character {
       this.headPivot.rotation.x += bite * 0.1 * e;
     } else this.armR.rotation.y = 0;
     if (this.outfits.has('mage')) pulseMageGlow(this.clock);
+    this.dressed?.rig.update(this.clock, dt, Math.min(1, this.spd / 6));
     if (this.capeSegs.length) {
       // The cape ripples: the lower pieces sway a little, more when the figure is on the move.
       const sway = 0.02 + 0.05 * Math.min(1, this.spd / 6);
@@ -1171,6 +1357,111 @@ export class Character {
       this.sit(spd, attack, holding, rise, air);
     } else this.humanize(dt, ease, { s, a, walk, run, air, rise, crouch, still, breath, eatK, wL, wR });
     this.swimStep(dt, ease, vy);
+    // (Whatever the hands are doing, a swing, a block, a bite, a bow drawn, a spell, is theirs: the pose of the wings leaves them alone.)
+    const busy = attack < 1 || blocking || bashing || charged || ph > 0 || eatK > 0.05 || this.aimDraw > 0.02 || this.stabAge < STAB_TIME;
+    this.wingStep(dt, ease, vy, turn, busy, holding);
+  }
+
+  /** The wings on the back (see wingRig.ts), the number the wire gives (1 + the place in WINGS, 0: none), and whether the wearer flies on them. */
+  private wingRig: WingRig | null = null;
+  private wingNo = 0;
+  wingFlying = false;
+  private wingW = 0;
+  /** How far into a flight on them the figure is (0..1, eased): it lies forward and banks. */
+  private wingFlyW = 0;
+  /** How much the hands are busy with something (0..1, eased): the pose of the wings gives way to it. */
+  private wingBusy = 0;
+  /** How much room there is over the figure's head (blocks, 4: plenty). A figure with wings floats as high as there is room for, so its head does not go through a low door or a roof. */
+  roof = 4;
+  private hover = WING_HOVER;
+
+  /** Wear this pair of wings (0: none). */
+  setWings(no: number): void {
+    if (no === this.wingNo) return;
+    this.wingNo = no;
+    this.wingRig?.dispose();
+    this.wingRig = null;
+    const def = wingByNumber(no);
+    if (def) this.wingRig = buildWings(def, this.torso);
+    if (!def) {
+      this.root.position.y = 0;
+      this.legL.rotation.x = 0;
+      this.legR.rotation.x = 0;
+    }
+    this.applied.fill(-1); // the new wings still have plain white vertices
+    this.applyBrightness();
+  }
+
+  /** Move the wings of a figure that is only posed (a menu): `animate` does it for the rest. */
+  updateWings(t: number, dt: number): void {
+    this.wingRig?.update(t, dt, false, 0);
+    if (!this.wingRig) return;
+    // (It floats there too: the legs hang and drift.)
+    this.root.position.y = WING_HOVER + Math.sin(t * 2.4) * 0.05;
+    this.legL.rotation.x = -0.1 + Math.sin(t * 2.2) * 0.06;
+    this.legR.rotation.x = -0.08 - Math.sin(t * 2.2) * 0.06;
+  }
+
+  /**
+   * A figure with wings on never touches the ground: it floats a little above it, upright, the legs hanging and drifting, the arms a little out,
+   * bobbing as it breathes, and leans into the move as it speeds up. The wings beat only while it flies on them. Blended over what `humanize`
+   * and the swimming did (a mount or the water take the figure out of it).
+   */
+  private wingStep(dt: number, ease: (rate: number) => number, vy: number, turn: number, busy: boolean, holding: boolean): void {
+    const on = this.wingRig !== null && !this.riding && !this.afloat;
+    this.wingW += ((on ? 1 : 0) - this.wingW) * ease(on ? 6 : 8);
+    if (this.wingW < 0.002) this.wingW = 0;
+    const flies = on && this.wingFlying;
+    this.wingFlyW += ((flies ? 1 : 0) - this.wingFlyW) * ease(flies ? 4 : 5);
+    if (this.wingFlyW < 0.002) this.wingFlyW = 0;
+    this.wingRig?.update(this.clock, dt, flies, Math.min(1, this.spd / 6));
+    const w = this.wingW;
+    if (w === 0) return;
+    this.wingBusy += ((busy ? 1 : 0) - this.wingBusy) * ease(busy ? 22 : 7);
+    if (this.wingBusy < 0.002) this.wingBusy = 0;
+    // How much of the pose of the wings the figure takes: all of it, less while it is acting (its blow, its guard and its stance are its own).
+    const free = w * (1 - this.wingBusy);
+    const lite = w * (1 - 0.8 * this.wingBusy);
+    const f = this.wingFlyW;
+    const sp = Math.min(1, this.spd / 9);
+    const fsp = Math.min(1, this.spd / 7.5);
+    // Floating, the figure stands up and leans a little as it moves; flying, it lies forward into the flight (more the faster it goes), nose up
+    // in a climb and down in a dive, and banks into a turn like a bird.
+    const lean = mix(-0.04 - 0.3 * sp, -(0.1 + 0.65 * fsp) + Math.max(-0.3, Math.min(0.3, vy * 0.035)), f);
+    const bank = Math.max(-0.5, Math.min(0.5, turn * 0.12)) * (0.3 + 0.7 * fsp) * f;
+    this.root.rotation.x = mix(this.root.rotation.x, lean, lite);
+    this.root.rotation.z = mix(this.root.rotation.z, bank, lite);
+    // (The figure turns about its middle, not about its feet: the body is lifted and shifted to make up for the lean.)
+    // (It sinks quickly under a lintel and rises slowly out from it. Flying, the figure is lifted by its lean as well: that is allowed for.)
+    const room = Math.max(0, Math.min(WING_HOVER, this.roof - 0.04 - 0.9 * (1 - Math.cos(lean)) * f));
+    this.hover += (room - this.hover) * ease(room < this.hover ? 14 : 3);
+    this.root.position.y = mix(this.root.position.y, this.hover * (1 + Math.sin(this.clock * 2.4) * 0.12 * (1 - 0.6 * f)) + 0.9 * (1 - Math.cos(lean)), w);
+    this.root.position.z = mix(this.root.position.z, -0.9 * Math.sin(lean), lite);
+    const trail = mix(0.1 + 0.45 * sp, 0.1 + 0.3 * fsp, f);
+    const flutter = Math.sin(this.clock * (2.2 + 3 * f)) * (0.06 - 0.02 * f);
+    this.legL.rotation.x = mix(this.legL.rotation.x, -trail + flutter, lite);
+    this.legR.rotation.x = mix(this.legR.rotation.x, -trail * 0.8 - flutter, lite);
+    // (The legs do not step: the foot picked up at each stride of the walk is put back, so they hang and drift instead.)
+    this.legL.position.y = mix(this.legL.position.y, Character.HIP, lite);
+    this.legR.position.y = mix(this.legR.position.y, Character.HIP, lite);
+    this.legL.rotation.z = mix(this.legL.rotation.z, -0.04 - 0.05 * f, lite);
+    this.legR.rotation.z = mix(this.legR.rotation.z, 0.04 + 0.05 * f, lite);
+    // The arms of a figure on wings do not swing as a walker's do: empty, they hang loose and drift a little (a touch out and back with the speed);
+    // in flight they are swept back along the body, out a little and rocking with the beat of the wings. A hand with a weapon or a tool in it, and an
+    // arm with a shield on it, keep the pose they have (the weapon stays up and ready, and the swing and the guard are drawn on it): the stride that
+    // would swing them is taken out of them in `animate`.
+    const drift = Math.sin(this.clock * 1.7);
+    const rock = Math.sin(this.clock * (1.7 + 2.6 * f));
+    const armX = mix(0.06 - 0.22 * sp, -0.2 - 0.3 * fsp, f);
+    const out = mix(0.16 + 0.12 * sp, 0.26 + 0.14 * fsp, f);
+    const sway = (0.06 - 0.02 * f) * rock;
+    const shielded = this.shieldId !== 0 && this.shieldIsShield;
+    const freeR = holding ? 0 : free;
+    const freeL = shielded ? 0 : free;
+    if (this.carry === 'hand') this.armR.rotation.x = mix(this.armR.rotation.x, armX + sway + 0.03 * drift, freeR);
+    this.armL.rotation.x = mix(this.armL.rotation.x, armX - sway - 0.03 * drift, freeL);
+    this.armL.rotation.z = mix(this.armL.rotation.z, -out - 0.03 * rock, freeL);
+    this.armR.rotation.z = mix(this.armR.rotation.z, out + 0.03 * rock, freeR);
   }
 
   /**
@@ -2111,6 +2402,8 @@ export class Character {
   }
 
   dispose(): void {
+    this.dressed?.rig.dispose();
+    this.wingRig?.dispose();
     for (const geo of this.classGeos) geo.dispose();
     for (const geo of this.hairGeos) geo.dispose();
     for (const geo of this.armorGeos) geo.dispose();
@@ -2153,4 +2446,5 @@ export function disposeCharacterAssets(): void {
   helmetAtlases.clear();
   disposeMageGear();
   disposeClassGear();
+  disposeSetGear();
 }

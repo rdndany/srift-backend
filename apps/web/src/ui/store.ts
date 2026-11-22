@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { QuestLog, type BossView, type DungeonView, type AttrKey, type AuctionCommand, type AuctionView, type StashCommand, type StashView, type ClassView, type Container, type CreativeAmount, type GearRoll, type GearSpec, type ClassId, type MountView, type InspectView, type SocialAction, type SocialView, type TradeAct, type TradeView, type Menu, type MenuKind, type PartyAction, type PartyMemberView, type QuestLogJSON, type RecipeBook } from '@solrift/shared';
+import { QuestLog, type MobKind, type BountyView, type BossView, type RiftView, type DungeonView, type AttrKey, type AuctionCommand, type AuctionView, type StashCommand, type StashView, type ClassView, type Container, type CreativeAmount, type GearRoll, type GearSpec, type ClassId, type MountView, type InspectView, type SocialAction, type SocialView, type TradeAct, type TradeView, type Menu, type MenuKind, type PartyAction, type PartyMemberView, type QuestLogJSON, type RecipeBook } from '@solrift/shared';
 import type { ItemIcons } from '../game/icons';
 import type { MapData } from '../game/mapData';
 
@@ -14,6 +14,14 @@ export interface UiApi {
   /** The off-hand slot (a shield). */
   offhand: Container;
   mountSlot: Container;
+  /** The outfit slot (a glowing set). */
+  outfitSlot: Container;
+  /** The companion slot (a companion). */
+  companionSlot: Container;
+  /** The wing slot (a pair of wings). */
+  wingSlot: Container;
+  /** The rings and the necklace (ring, ring, necklace). */
+  accessories: Container;
   icons: ItemIcons;
   menu(): Menu | null;
   click(slot: number, button: 0 | 1): void;
@@ -38,8 +46,8 @@ export interface UiApi {
   creativeGear(spec: GearSpec): void;
   /** Trade screen: choose offer index of the villager's list. */
   trade(index: number): void;
-  /** Enchanting table: choose offer index (0..2). */
-  enchant(index: number): void;
+  /** Runic Altar: inscribe the glyph `id` (one rank), or with `erase` take it off the piece. */
+  enchant(id: number, erase?: boolean): void;
   /** Anvil: the name typed in the box (null puts the item's own name back). */
   anvilName(name: string | null): void;
   close(): void;
@@ -118,6 +126,21 @@ export interface CodexView {
   achievements: string[];
 }
 
+
+/** What the frame needs to draw a creature: the store keeps one of these (or null). */
+export interface MobTargetView {
+  id: number;
+  kind: MobKind;
+  /** Its coat or person: an NPC's is which person it is. */
+  variant: number;
+  level: number;
+  /** Its health now and its most; the bar is hidden for a creature that cannot be hurt. */
+  hp: number;
+  max: number;
+  /** Shown a step above its kind (a strong one of a dungeon). */
+  elite: boolean;
+}
+
 export interface UiState {
   screen: Screen;
   /** Bumped whenever inventory/menu contents change so components re-read them. */
@@ -163,6 +186,9 @@ export interface UiState {
   questLogOpen: boolean;
   /** The achievements: the counts of the deeds and the ids won (as the session last sent them). */
   ach: { stats: Record<string, number>; done: string[] };
+  /** Today's daily bounties as the session last sent them (null before the first), and when (ms) that was, for counting down to the next day. */
+  bounties: BountyView | null;
+  bountiesAt: number;
   /** Your party (the leader first; empty when alone), who is inviting you, and whether the party window (P) is open. */
   party: PartyMemberView[];
   partyInvite: string | null;
@@ -173,6 +199,8 @@ export interface UiState {
   inspect: { name: string; view: InspectView | null } | null;
   /** The player the crosshair rests on (it stays a few seconds after you look away), for the target frame. */
   target: { name: string; cls?: ClassId; level?: number; guild?: string } | null;
+  /** The animal, monster or person the crosshair rests on (it stays a few seconds after you look away), for the target frame. */
+  mobTarget: MobTargetView | null;
   /** The menu of a player, and where it is drawn. */
   playerMenu: { name: string; x: number; y: number } | null;
   /** The trade you are in (the table), and who is asking you to trade. */
@@ -184,31 +212,34 @@ export interface UiState {
   boss: BossView | null;
   /** How far the player is in the dungeon they are in (the tracker under the quests); null outside one. */
   dungeon: DungeonView | null;
-  bossLine: { text: string; kind: 'yell' | 'warn'; stamp: number } | null;
+  /** The rift open near the player (its tracker); null when none is within sight. */
+  rift: RiftHud | null;
+  bossLine: { text: string; kind: 'yell' | 'warn'; stamp: number; color?: string } | null;
   /** The tab of the inventory window (E): the bags, the crafting grid, or the spellbook (K opens it there). */
-  invTab: 'inventory' | 'crafting' | 'spells';
+  invTab: 'inventory' | 'attributes' | 'crafting' | 'spells';
   /** A window drawn for the loading screen only, so that its first real opening paints nothing new (see warmWindows in main.ts). */
   warmMenu: Menu | null;
   /** Your mount: the one ridden, the one in the mount slot (H summons it), and the cooldowns of its two skills. */
   mount: MountView;
   /** What a jewel just did to the piece in this slot of the window (shown floating above it; `n` restarts it). */
   jewelFx: { n: number; slot: number; ok: boolean; kind: 'dawn' | 'rift' | 'bloom'; label: string; detail: string } | null;
+  /** The Runic Altar's last inscription that failed (the window flashes and says so; `n` counts them). */
+  altarFail: { n: number } | null;
   /** The last named place entered (the banner shows it for a few seconds; `stamp` restarts it). */
   zone: { id: string; stamp: number } | null;
-  /** The name of the place the player is in (the minimap shows it): a village, a cave, a biome. Empty before the world is ready. */
+  /** The name of the place the player is in : a village, a cave, a biome. Empty before the world is ready. */
   place: string;
   /** What was just picked up off the ground (the feed in the corner; see `pushPickup`). */
   pickups: PickupNote[];
   /** What the quests just did, shown under the tracker for a few seconds. */
   questNotes: { key: number; what: 'accept' | 'step' | 'ready' | 'done'; text: string }[];
-  /** The map: what the minimap in the corner and the map held up in front of you draw from (null before the world is ready). */
+  /** The map: what the map held up in front of you draws from (null before the world is ready). */
   map: MapData | null;
-  /** The minimap in the corner is shown (key J), and the map item is held up (right-click while holding it) at this zoom (pixels per block). */
-  minimap: boolean;
-  /** The character owns a map (the Adventure world hands it out at the end of the first quest; without it there is no minimap). */
+  /** The character owns a map (the Adventure world hands it out at the end of the first quest; without it the compass is all there is). */
   hasMap: boolean;
   /** Which picture of the compass the needle is at now (0..COMPASS_FRAMES - 1, clockwise from straight up); the bar and the bags draw their compasses with it. */
   compassFrame: number;
+  /** The map item is held up (right-click while holding it) at this zoom (pixels per block). */
   mapUp: boolean;
   mapZoom: number;
   /** The Codex of the World Beyond (key B): whether it is open, and what has been found (null outside that world). */
@@ -248,6 +279,8 @@ export const useUi = create<UiState>()(() => ({
   dialogNpc: null,
   questLogOpen: false,
   ach: { stats: {}, done: [] },
+  bounties: null,
+  bountiesAt: 0,
   party: [],
   partyInvite: null,
   partyOpen: false,
@@ -255,23 +288,25 @@ export const useUi = create<UiState>()(() => ({
   socialOpen: false,
   inspect: null,
   target: null,
+  mobTarget: null,
   playerMenu: null,
   trade: null,
   tradeAsk: null,
   cls: null,
   boss: null,
   dungeon: null,
+  rift: null,
   bossLine: null,
   invTab: 'inventory',
   warmMenu: null,
   mount: { mount: 0, pick: 0, cd: [0, 0] },
   jewelFx: null,
+  altarFail: null,
   zone: null,
   place: '',
   questNotes: [],
   pickups: [],
   map: null,
-  minimap: true,
   hasMap: true,
   compassFrame: 0,
   mapUp: false,
@@ -292,7 +327,10 @@ export const setQuests = (log: QuestLogJSON): void =>
 /** The session sent the party (or none) and who is inviting. */
 export const setParty = (members: PartyMemberView[], invite: string | null): void => useUi.setState({ party: members, partyInvite: invite });
 
-export const showBossLine = (text: string, kind: 'yell' | 'warn'): void => useUi.setState((s) => ({ bossLine: { text, kind, stamp: (s.bossLine?.stamp ?? 0) + 1 } }));
+/** The rift near the player as the tracker shows it: its state, and how far and which way it lies. */
+export type RiftHud = RiftView & { dist: number; dir: string };
+
+export const showBossLine = (text: string, kind: 'yell' | 'warn', color?: string): void => useUi.setState((s) => ({ bossLine: { text, kind, stamp: (s.bossLine?.stamp ?? 0) + 1, ...(color ? { color } : {}) } }));
 
 export const showZone = (id: string): void => useUi.setState((s) => ({ zone: { id, stamp: (s.zone?.stamp ?? 0) + 1 } }));
 

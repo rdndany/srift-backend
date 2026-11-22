@@ -42,8 +42,6 @@ export interface PlayerSave {
   xp?: unknown;
   /** Coins carried (absent: none). */
   coins?: number;
-  /** The number the enchanting table rolls this player's offers from (so reloading does not re-roll them). */
-  es?: number;
   /** Worn armor: four stacks like the inventory's. Absent in older saves. */
   armor?: unknown;
   /** The off-hand slot (a shield): one stack like the inventory's. Absent in older saves. */
@@ -54,6 +52,14 @@ export interface PlayerSave {
   hs?: number;
   /** The mount slot: the horn of the mount the mount key summons, a stack like the inventory's. Absent when empty and in older saves. */
   mountSlot?: unknown;
+  /** The outfit slot: the glowing set the hero wears (what others see it in), a stack like the inventory's. Absent when empty and in older saves. */
+  outfitSlot?: unknown;
+  /** The companion slot: the companion that follows the hero, a stack like the inventory's. Absent when empty and in older saves. */
+  companionSlot?: unknown;
+  /** The wing slot: the wings the hero wears, a stack like the inventory's. Absent when empty and in older saves. */
+  wingSlot?: unknown;
+  /** The rings and the necklace worn (slots 0 and 1: rings, slot 2: necklace), stacks like the inventory's. Absent when none is worn and in older saves. */
+  accessories?: unknown;
   /** The bed (its head block) the player respawns at. Absent when none was ever used. */
   spawn?: { x: number; y: number; z: number };
   /** Hardcore world: one life, hard difficulty. Absent (false) in older saves. */
@@ -66,6 +72,8 @@ export interface PlayerSave {
   quests?: unknown;
   /** The achievements: the counts of the deeds and the ones won (see AchievementBook.toJSON). Absent when there is nothing in it. */
   ach?: unknown;
+  /** Today's daily bounties: what was done towards each and which are finished (see BountyBook.toJSON). Absent when nothing is. */
+  bounty?: unknown;
   /** The character's class progress (see ClassState.toJSON): class, class level, experience and unlocked abilities. Absent without a class and in older saves. */
   cls?: unknown;
   /** The character has been given the clothes of its class (they are armor from then on, and may be taken off for good). Absent in older saves. */
@@ -132,12 +140,17 @@ export function parsePlayerSave(raw: unknown): PlayerSave | null {
     ...(raw.bags != null ? { bags: raw.bags } : {}),
     ...(typeof raw.hs === 'number' && Number.isFinite(raw.hs) && raw.hs > 0 ? { hs: Math.min(EMBER_COOLDOWN, raw.hs) } : {}),
     ...(raw.mountSlot != null ? { mountSlot: raw.mountSlot } : {}),
+    ...(raw.outfitSlot != null ? { outfitSlot: raw.outfitSlot } : {}),
+    ...(raw.companionSlot != null ? { companionSlot: raw.companionSlot } : {}),
+    ...(raw.wingSlot != null ? { wingSlot: raw.wingSlot } : {}),
+    ...(raw.accessories != null ? { accessories: raw.accessories } : {}),
     ...(parseSpawn(raw.spawn) ? { spawn: parseSpawn(raw.spawn)! } : {}),
     ...(raw.hardcore === true ? { hardcore: true } : {}),
     ...(raw.hardcore === true && raw.gameOver === true ? { gameOver: true } : {}),
     ...(raw.hardcore === true && raw.gameOver === true && raw.spectating === true ? { spectating: true } : {}),
     ...(isObject(raw.quests) ? { quests: raw.quests } : {}),
     ...(isObject(raw.ach) ? { ach: raw.ach } : {}),
+    ...(isObject(raw.bounty) ? { bounty: raw.bounty } : {}),
     ...(isObject(raw.cls) ? { cls: raw.cls } : {}),
     ...(raw.of === true ? { of: true } : {}),
     ...(typeof raw.savedAt === 'number' && Number.isFinite(raw.savedAt) ? { savedAt: raw.savedAt } : {}),

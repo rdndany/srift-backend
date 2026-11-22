@@ -217,6 +217,14 @@ export const CLASSES: Record<ClassId, ClassDef> = {
   },
 };
 
+/**
+ * How much faster (or slower) the arm swings for an attack speed: the square of the speed, so that a few percent of
+ * haste can be seen in the swing as well as felt in the pace of the blows (1.2 gives 1.44, 1.5 gives 2.25).
+ */
+export function swingRate(attackSpeed: number): number {
+  return Math.round(Math.pow(Math.min(2, Math.max(0.4, attackSpeed)), 2) * 100) / 100;
+}
+
 const round = (n: number, digits = 4): number => {
   const k = 10 ** digits;
   return Math.round(n * k) / k;

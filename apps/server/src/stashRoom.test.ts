@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ADVENTURE_SEED, I, NPCS, STASHKEEPER, STASH_SLOTS, makeGenerator, makeStack, mulberry32, parseNetClientMessage, toolId, type AdventureWorldGenerator, type Command, type NetServerMessage, type StashView } from '@solrift/shared';
+import { ADVENTURE_SEED, I, NPCS, STASHKEEPER, STASH_SLOTS, STASH_TAB_SLOTS, makeGenerator, makeStack, mulberry32, parseNetClientMessage, toolId, type AdventureWorldGenerator, type Command, type NetServerMessage, type StashView } from '@solrift/shared';
 import { GameRoom } from './room';
 import { MemoryRoomStore } from './roomStore';
 
@@ -163,5 +163,39 @@ describe('the Stash on a server', () => {
     send(room, c, { t: 'stash', a: 'take', slot: 0, count: 1 });
     expect(room.realm.stashes.peek(WALLET, 0)).not.toBeNull();
     expect(c.toasts().some((t) => t.includes('bags'))).toBe(true);
+  });
+});
+describe('the Stash with tabs bought', () => {
+  it('has the room of the tabs the wallet owns, also when one was bought while it was in play, and keeps what is stored in it', () => {
+    const store = new MemoryRoomStore();
+    let tabs = 0;
+    const room = new GameRoom({ seed: 1, kind: 'adventure', naturalSpawning: false, rand: mulberry32(3), store, stashTabs: () => tabs });
+    const c = new Client(room);
+    c.join('mage', 'char-mage', WALLET);
+    const p = room.player(c.id)!;
+    p.clearInventory();
+    visit(room, c);
+    expect(c.view()!.slots).toHaveLength(STASH_SLOTS);
+
+    // Fill the plain stash; with no tab the next item has nowhere to go.
+    const stash = room.realm.stashes.of(WALLET);
+    for (let i = 0; i < STASH_SLOTS; i++) stash.set(i, makeStack(I.DIAMOND, 1, i + 1));
+    p.giveItem(I.EMERALD, 1);
+    const held = p.inventory.countOf(I.EMERALD);
+    send(room, c, { t: 'stash', a: 'put', slot: p.inventory.slots.findIndex((x) => x && x.damage === 0), count: 1 });
+    expect(p.inventory.countOf(I.EMERALD)).toBe(held);
+    expect(c.toasts().some((t) => /full/i.test(t))).toBe(true);
+
+    tabs = 1; // bought at the token page, with the game running
+    const slot = p.inventory.slots.findIndex((x) => x && x.id === (I.EMERALD) && x.damage === 0);
+    send(room, c, { t: 'stash', a: 'put', slot, count: 1 });
+    expect(c.view()!.slots).toHaveLength(STASH_SLOTS + STASH_TAB_SLOTS);
+    expect(c.view()!.slots[STASH_SLOTS]).not.toBeNull();
+    expect((store.getJson(`stash:${WALLET}`) as unknown[]).length).toBe(STASH_SLOTS + STASH_TAB_SLOTS);
+
+    send(room, c, { t: 'stash', a: 'take', slot: STASH_SLOTS, count: 64 });
+    expect(c.view()!.slots[STASH_SLOTS]).toBeNull();
+    // the lobby reads it the same size
+    expect(room.stashOf(WALLET).slots).toHaveLength(STASH_SLOTS + STASH_TAB_SLOTS);
   });
 });

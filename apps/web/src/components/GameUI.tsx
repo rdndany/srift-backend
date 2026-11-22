@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { useUi } from '../ui/store';
 import { ResourceBar } from './ClassUI';
 import { ExperienceBar } from './ExperienceBar';import { Hotbar } from './Hotbar';
-import { MiniMap } from './MapUI';
 import { MenuScreen } from './MenuScreen';
 import { QuestUI } from './QuestUI';
 import { PartyUI } from './PartyUI';
@@ -17,6 +16,8 @@ import { RecipeToast } from './RecipeToast';
 import { PlayerFrame } from './PlayerFrame';
 import { BossBanner, BossFrame } from './BossFrame';
 import { AirBubbles } from './Vitals';
+import { TokenSync } from './TokenPurse';
+import { HudScale } from './HudScale';
 
 function DeathScreen() {
   const screen = useUi((s) => s.screen);
@@ -102,6 +103,8 @@ export function GameUI() {
         <ResourceBar />
         <Hotbar />
       </div>
+      <HudScale />
+      <TokenSync />
       <PlayerFrame />
       <BossFrame />
       <BossBanner />
@@ -118,7 +121,6 @@ export function GameUI() {
       <CodexUI />
       <PlayerUI />
       <TradeUI />
-      <MiniMap />
     </>
   );
 }

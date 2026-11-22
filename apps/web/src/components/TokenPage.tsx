@@ -4,15 +4,19 @@ import { ACHIEVEMENTS, ACH_CATEGORIES, ACH_TIERS, ACH_TIER_ORDER, B, GAME_VERSIO
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { AccountPanel } from './AccountPanel';
 import { Blocks } from './BlockCube';
+import { TokenWallet, useTokenBalance } from './TokenWallet';
+import { TokenEconomy } from './TokenEconomy';
+import { useToken, type TokenLiveInfo } from '../token/store';
 import { ClickSparks, Embers, Reveal, useFrontMotion } from './fx';
 import { lobbyUrl } from '../game/route';
-import { SCROLL_KEY, goMarket } from './frontNav';
+import { SCROLL_KEY, goMarket, goCamp } from './frontNav';
 import { ART } from './homeAssets';
-import { CASHOUT, EARNINGS, FAIR_PLAY, ROADMAP, STAGE_LABEL, TOKEN, UTILITIES } from './tokenInfo';
+import { CASHOUT, FAIR_PLAY, STAGE_LABEL, TOKEN, earningsFor, roadmapFor, utilitiesFor } from './tokenInfo';
 import './home.css';
 import './front.css';
 import './classPage.css';
 import './tokenPage.css';
+import './responsive.css';
 
 /** Goes to a part of the front page (its menu leads there too). */
 const toFront = (id: string | null) => {
@@ -27,18 +31,18 @@ const toFront = (id: string | null) => {
 const SOON = 'Announced at launch';
 
 /** The one official address, with a button to copy it (or the plain words, until there is one). */
-function Mint() {
+function Mint({ mint }: { mint: string | null }) {
   const [copied, setCopied] = useState(false);
-  if (!TOKEN.mint) return <span className="tk-soon">{SOON}</span>;
+  if (!mint) return <span className="tk-soon">{SOON}</span>;
   const copy = () => {
-    void navigator.clipboard?.writeText(TOKEN.mint!).then(() => {
+    void navigator.clipboard?.writeText(mint).then(() => {
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1600);
     });
   };
   return (
     <span className="tk-mint">
-      <code data-testid="token-mint">{TOKEN.mint}</code>
+      <code data-testid="token-mint">{mint}</code>
       <button type="button" onClick={copy}>
         {copied ? 'Copied' : 'Copy'}
       </button>
@@ -50,6 +54,18 @@ function Mint() {
 export function TokenPage() {
   const root = useRef<HTMLDivElement>(null);
   useFrontMotion(root);
+  // The mint, supply and decimals come from the game server (its TOKEN_MINT), so the page and the game agree.
+  const info: TokenLiveInfo | null = useToken((s) => s.info);
+  const loadInfo = useToken((s) => s.loadInfo);
+  useEffect(() => {
+    void loadInfo();
+  }, [loadInfo]);
+  useTokenBalance();
+  const live = info?.live ?? false;
+  const progress = { live, withdrawals: info?.withdrawals ?? false, clearRewards: info?.limits.clearRewards ?? [], slotPrices: info?.limits.slotPrices ?? [], stashPrices: info?.limits.stashPrices ?? [], bountyRewards: info?.limits.bountyRewards ?? [], keyPrice: info?.limits.keyPrice ?? 0, outfitPrices: info?.limits.outfitPrices ?? [] };
+  const earnings = earningsFor(progress);
+  const utilities = utilitiesFor(progress);
+  const roadmap = roadmapFor(progress);
   const scrollTo = (to: string) => document.getElementById(to)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
   // The page opens at the top, whatever the last page was scrolled to.
@@ -68,12 +84,13 @@ export function TokenPage() {
     ['Name', `${TOKEN.name} ($${TOKEN.ticker})`],
     ['Network', TOKEN.network],
     ['Standard', TOKEN.standard],
-    ['Total supply', TOKEN.supply ?? <span className="tk-soon">{SOON}</span>],
-    ['Decimals', TOKEN.decimals ?? <span className="tk-soon">{SOON}</span>],
-    ['Official address', <Mint key="mint" />],
+    ['Total supply', info?.supply ?? <span className="tk-soon">{SOON}</span>],
+    ['Decimals', info?.decimals ?? <span className="tk-soon">{SOON}</span>],
+    ['Official address', <Mint key="mint" mint={info?.mint ?? null} />],
   ];
+  if (info?.live && info.cluster && info.cluster !== 'mainnet-beta') facts.splice(2, 0, ['Test network', `This is the ${info.cluster} test token, not the real one.`]);
   const links = [
-    ['Explorer', TOKEN.links.explorer],
+    ['Explorer', info?.explorer?.token ?? TOKEN.links.explorer],
     ['Where to trade', TOKEN.links.trade],
     ['X', TOKEN.links.x],
     ['Discord', TOKEN.links.discord],
@@ -96,6 +113,7 @@ export function TokenPage() {
             <button onClick={() => toFront('site-world')}>The World</button>
             <button onClick={() => toFront('site-features')}>Classes</button>
             <button onClick={() => toFront('l-expansions')}>Expansions</button>
+            <button className="fp-link-camp" onClick={goCamp}>Camp</button>
             <button className="fp-link-market" onClick={goMarket}>
               Market
             </button>
@@ -104,7 +122,7 @@ export function TokenPage() {
             </button>
           </nav>
           <div className="fp-account">
-            <AccountPanel />
+            <AccountPanel bar />
           </div>
           <i className="fp-progress" aria-hidden="true" />
         </header>
@@ -174,6 +192,25 @@ export function TokenPage() {
           <i />
         </div>
 
+        {/* ---------------------------------------------------------------- your balance (only once there is a token) */}
+        {live && (
+          <section className="fp-sec tk-sec" id="tk-wallet">
+            <Reveal className="fp-head">
+              <div>
+                <small>
+                  <b>00</b>
+                  Yours
+                </small>
+                <h2>
+                  Your <em>$SOLRIFT</em>
+                </h2>
+              </div>
+              <Blocks ids={[B.GOLD_ORE, B.DIAMOND_ORE]} />
+            </Reveal>
+            <TokenWallet />
+          </section>
+        )}
+
         {/* ---------------------------------------------------------------- the idea */}
         <section className="fp-sec tk-sec" id="tk-why">
           <Reveal className="fp-head">
@@ -200,9 +237,9 @@ export function TokenPage() {
               </ul>
             </Reveal>
             <Reveal className="tk-coinbox gold fp-px" delay={0.08}>
-              <small>The scarce one</small>
+              <small>The one you can keep</small>
               <h3>$SOLRIFT</h3>
-              <p>A Solana token held in your own wallet. You earn it by playing, spend it on the things worth owning, or swap it for other crypto. Some of what is spent is taken out of circulation for good.</p>
+              <p>A Solana token held in your own wallet. You earn it by playing, spend it on the things worth owning, or swap it for other crypto. What is spent in the game goes back to the treasury that pays the rewards.</p>
               <ul>
                 <li>Earned by playing, paid from a fixed pool</li>
                 <li>Lives on Solana, in your wallet</li>
@@ -229,7 +266,7 @@ export function TokenPage() {
             <Blocks ids={[B.DIAMOND_ORE, B.GOLD_ORE, B.GLOWSTONE]} />
           </Reveal>
           <ul className="tk-uses tk-earns">
-            {EARNINGS.map((u, i) => (
+            {earnings.map((u, i) => (
               <Reveal as="li" key={u.id} delay={i * 0.05} className={`tk-use ${u.stage}`}>
                 <div className="tk-use-top">
                   <span className="tk-tag">{u.how}</span>
@@ -241,7 +278,11 @@ export function TokenPage() {
               </Reveal>
             ))}
           </ul>
-          <p className="tk-fine">How much each one pays is set by the daily reward pool and shown here once the token is live. It will change with the pool and with how many people play.</p>
+          <p className="tk-fine">
+            {live && info
+              ? `${info.limits.clearRewards.length > 0 ? 'Achievements and dungeon clears pay' : 'Achievements pay'} today, from a pool of ${info.limits.dailyPool.toLocaleString()} $SOLRIFT a day (${info.pool.paidToday.toLocaleString()} paid so far today). The rest is set by the daily reward pool and shown here as it goes live. It will change with the pool and with how many people play.`
+              : 'How much each one pays is set by the daily reward pool and shown here once the token is live. It will change with the pool and with how many people play.'}
+          </p>
         </section>
 
         {/* ---------------------------------------------------------------- achievements */}
@@ -259,13 +300,14 @@ export function TokenPage() {
             <Blocks ids={[B.GOLD_ORE, B.DIAMOND_ORE, B.EMERALD_ORE]} />
           </Reveal>
           <p className="tk-lead">
-            {ACHIEVEMENTS.length} achievements to win, from reaching level 5 to clearing the Hollow Deep twenty times. Each is won once per character, is kept with the character, and shows up in the game (open the quest log with L). Its tier decides the reward: Bronze for a first step, Mythic for a feat few will do.
+            {ACHIEVEMENTS.length} achievements to win, from reaching level 5 to clearing the Hollow Deep twenty times. Each is won once per character, is kept with the character, pays once per wallet, and shows up in the game (open the quest log with L). Its tier decides the reward: Bronze for a first step, Mythic for a feat few will do.
           </p>
           <div className="tk-tiers">
             {ACH_TIER_ORDER.map((t) => (
               <span key={t} className={`tk-tier ${t}`}>
                 {ACH_TIERS[t].name}
                 <small>{ACHIEVEMENTS.filter((a) => a.tier === t).length}</small>
+                {live && info && <small className="tk-pays">+{info.tiers[t].toLocaleString()}</small>}
               </span>
             ))}
           </div>
@@ -283,14 +325,21 @@ export function TokenPage() {
                         <b>{a.name}</b>
                         <span>{a.text}</span>
                       </div>
-                      <i className={`tk-tier ${a.tier}`}>{ACH_TIERS[a.tier].name}</i>
+                      <i className={`tk-tier ${a.tier}`}>
+                        {ACH_TIERS[a.tier].name}
+                        {live && info ? ` +${info.tiers[a.tier].toLocaleString()}` : ''}
+                      </i>
                     </li>
                   ))}
                 </ul>
               </Reveal>
             ))}
           </div>
-          <p className="tk-fine">Achievements are tracked by the game server, not by your browser, and cannot be bought or traded. The reward for each tier will be set with the token's reward pool and shown here once the token is live. Until then achievements are won and kept, and nothing is paid out.</p>
+          <p className="tk-fine">
+            {live
+              ? 'Achievements are tracked by the game server, not by your browser, and cannot be bought or traded. The reward is paid into your balance the moment you win it, once per wallet (a hero you delete and make again cannot win it twice), and only in honest play. It counts against the day\'s pool and your own daily limit.'
+              : 'Achievements are tracked by the game server, not by your browser, and cannot be bought or traded. The reward for each tier will be set with the token\'s reward pool and shown here once the token is live. Until then achievements are won and kept, and nothing is paid out.'}
+          </p>
         </section>
 
         {/* ---------------------------------------------------------------- cashing out */}
@@ -343,6 +392,7 @@ export function TokenPage() {
               </Reveal>
             ))}
           </ul>
+          {live && <TokenEconomy />}
         </section>
 
         {/* ---------------------------------------------------------------- the uses */}
@@ -360,7 +410,7 @@ export function TokenPage() {
             <Blocks ids={[B.PLANKS, B.GOLD_ORE, B.GLOWSTONE]} />
           </Reveal>
           <ul className="tk-uses">
-            {UTILITIES.map((u, i) => (
+            {utilities.map((u, i) => (
               <Reveal as="li" key={u.id} delay={i * 0.05} className={`tk-use ${u.stage}`}>
                 <div className="tk-use-top">
                   <span className="tk-tag">{u.tag}</span>
@@ -390,9 +440,9 @@ export function TokenPage() {
           <ol className="cp-steps">
             {[
               ['Play', 'Fight bosses, clear dungeons and finish quests. The game pays Auren, and $SOLRIFT from the day\'s reward pool.'],
-              ['Trade', 'Sell what you find and make to other players at the Auction House. With $SOLRIFT live, prices can be set in it.'],
-              ['Spend or keep', 'Crafting, keys, outfits and services ask for $SOLRIFT, or you send it to your wallet. What is spent in the game is not paid back out.'],
-              ['Burn', 'A share of every house cut and sink is taken out of circulation, so use makes the token scarcer, not more common.'],
+              ['Trade', 'Sell what you find and make to other players at the Auction House. Prices can be set in $SOLRIFT as well as Auren; a sale pays the seller at once.'],
+              ['Spend or keep', 'Crafting, keys, outfits and services ask for $SOLRIFT, or you send it to your wallet. What is spent in the game goes back to the treasury.'],
+              ['Back to the treasury', 'Everything spent in the game, from the house\'s cut to keys and crafting, returns to the treasury that funds the reward pool, so the loop keeps going.'],
             ].map(([t, text], i) => (
               <Reveal as="li" key={t} delay={i * 0.07}>
                 <span className="n">{i + 1}</span>
@@ -456,7 +506,7 @@ export function TokenPage() {
             <Blocks ids={[B.GRASS, B.STONE, B.GOLD_ORE]} />
           </Reveal>
           <ol className="tk-road">
-            {ROADMAP.map((r, i) => (
+            {roadmap.map((r, i) => (
               <Reveal as="li" key={r.title} delay={i * 0.05} className={r.stage}>
                 <span className={`tk-stage ${r.stage}`}>{STAGE_LABEL[r.stage]}</span>
                 <h3>{r.title}</h3>

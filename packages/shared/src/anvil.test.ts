@@ -260,11 +260,12 @@ describe('the repair-cost penalty', () => {
   });
 
   it('is passed on in the result, and a bare rename leaves it alone', () => {
-    const r = anvilResult(sword(), book([ENCH.SHARPNESS, 3]))!;
+    const roomy = (): ItemStack => ({ ...sword(), gear: { r: 2, l: 1, s: [['might', 3]] } }); // three sockets
+    const r = anvilResult(roomy(), book([ENCH.SHARPNESS, 3]))!;
     expect(r.result.rc).toBe(1);
     const again = anvilResult(r.result, book([ENCH.UNBREAKING, 2]))!;
     expect(again.result.rc).toBe(3);
-    expect(again.cost).toBeGreaterThan(anvilResult(sword(), book([ENCH.UNBREAKING, 2]))!.cost);
+    expect(again.cost).toBeGreaterThan(anvilResult(roomy(), book([ENCH.UNBREAKING, 2]))!.cost);
     expect(anvilResult(again.result, null, 'Sting')!.result.rc).toBe(3);
   });
 });
@@ -555,25 +556,14 @@ describe("bottle o' enchanting", () => {
   });
 });
 
-describe('the enchant seed in a save', () => {
-  it('survives a save and a load, so offers stay the same across sessions', () => {
-    const { s, world } = make();
-    world.setBlock(CX + 3, FLOOR + 1, CZ, B.ENCHANTING_TABLE);
-    s.useBlock(CX + 3, FLOOR + 1, CZ);
-    s.inventory.set(0, sword());
-    s.apply({ t: 'shift', slot: 0 });
-    const saved = s.savePlayer();
-    expect(saved.es).toBeGreaterThan(0);
-    const offers = JSON.stringify((s.menu as unknown as { offers: unknown }).offers);
-    const parsed = parsePlayerSave(JSON.parse(JSON.stringify(saved)))!;
-    expect(parsed.es).toBe(saved.es);
-
+describe('glyphs in a save', () => {
+  it('survive a save and a load', () => {
+    const { s } = make();
+    s.inventory.set(0, makeStack(toolId('sword', 'iron'), 1, 0, [[ENCH.SHARPNESS, 2], [ENCH.SIPHON, 1]]));
+    const parsed = parsePlayerSave(JSON.parse(JSON.stringify(s.savePlayer())))!;
     const other = make(99);
-    other.world.setBlock(CX + 3, FLOOR + 1, CZ, B.ENCHANTING_TABLE);
     other.s.loadPlayer(parsed);
-    other.s.useBlock(CX + 3, FLOOR + 1, CZ);
-    other.s.inventory.set(0, sword());
-    other.s.apply({ t: 'shift', slot: 0 });
-    expect(JSON.stringify((other.s.menu as unknown as { offers: unknown }).offers)).toBe(offers);
+    const found = [...Array(36).keys()].map((i) => other.s.inventory.get(i)).find((x) => x?.id === toolId('sword', 'iron'));
+    expect(found?.ench).toEqual([[ENCH.SHARPNESS, 2], [ENCH.SIPHON, 1]]);
   });
 });

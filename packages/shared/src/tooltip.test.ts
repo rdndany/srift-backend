@@ -30,13 +30,13 @@ describe('item tooltips', () => {
 
   it('an enchanted book is named for what it holds', () => {
     const one = tooltipLines({ id: I.ENCHANTED_BOOK, count: 1, damage: 0, ench: [[ENCH.SHARPNESS, 1]] });
-    expect(one[0]).toEqual({ text: 'Book of Sharpness', color: 'rare' });
-    expect(one[1].text).toBe('Enchanted Book');
-    expect(one[2].text).toBe('Sharpness I');
+    expect(one[0]).toEqual({ text: 'Tome of Keen Edge', color: 'rare' });
+    expect(one[1].text).toBe('Glyph Tome');
+    expect(one[2].text).toBe('Keen Edge I (Ember)');
     const two = tooltipLines({ id: I.ENCHANTED_BOOK, count: 1, damage: 0, ench: [[ENCH.SHARPNESS, 1], [ENCH.UNBREAKING, 2]] });
-    expect(two[0].text).toBe('Book of Sharpness & Unbreaking');
+    expect(two[0].text).toBe('Tome of Keen Edge & Temper');
     const three = tooltipLines({ id: I.ENCHANTED_BOOK, count: 1, damage: 0, ench: [[ENCH.SHARPNESS, 1], [ENCH.UNBREAKING, 2], [ENCH.MENDING, 1]] });
-    expect(three[0].text).toBe('Book of Sharpness +2');
+    expect(three[0].text).toBe('Tome of Keen Edge +2');
   });
 
   it('shows durability left and enchantments, and colours enchanted items', () => {

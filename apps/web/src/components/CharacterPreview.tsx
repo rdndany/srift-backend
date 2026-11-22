@@ -5,12 +5,13 @@ import { CharacterPreview as Scene } from '../game/characterPreview';
 import { paletteOfCode, paletteOfLook } from '../game/lookPalette';
 import { useProfile } from '../profile/store';
 
-/** The character in the inventory screen, wearing `armor` (the clothes of a class too: they are items) (item ids: helmet, chestplate, leggings, boots) and holding a shield. `lookCode` draws that saved look instead of the one being edited. */
-export function CharacterPreview({ armor, shield = 0, shieldIcon = null, turntable = false, grounded = false, lookCode }: { armor: number[]; shield?: number; shieldIcon?: string | null; turntable?: boolean; grounded?: boolean; lookCode?: number }) {
+/** The character in the inventory screen, wearing `armor` (the clothes of a class too: they are items) (item ids: helmet, chestplate, leggings, boots) and holding a shield. `wings` and `companion` are the numbers the wire gives (0: none). `lookCode` draws that saved look instead of the one being edited. */
+export function CharacterPreview({ armor, shield = 0, shieldIcon = null, turntable = false, grounded = false, lookCode, wings = 0, companion = 0 }: { armor: number[]; shield?: number; shieldIcon?: string | null; turntable?: boolean; grounded?: boolean; lookCode?: number; wings?: number; companion?: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<Scene | null>(null);
   const key = armor.join(',');
   const profileLook = useProfile((s) => s.look);
+  const profileOutfit = useProfile((s) => s.outfit);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -22,11 +23,13 @@ export function CharacterPreview({ armor, shield = 0, shieldIcon = null, turntab
       return; // no WebGL: the inventory still works without the picture
     }
     sceneRef.current = scene;
-    scene.setLook(lookCode === undefined ? paletteOfLook(useProfile.getState().look) : paletteOfCode(lookCode));
+    scene.setLook(lookCode === undefined ? paletteOfLook(useProfile.getState().look, useProfile.getState().outfit) : paletteOfCode(lookCode));
     scene.setGrounded(grounded);
     scene.setArmor(key ? key.split(',').map(Number) : []);
     scene.setTurntable(turntable);
     scene.setShield(shield, shieldIcon);
+    scene.setWings(wings);
+    scene.setCompanion(companion);
     const onMove = (e: MouseEvent) => {
       const r = canvas.getBoundingClientRect();
       scene.look(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height * 0.28));
@@ -42,12 +45,20 @@ export function CharacterPreview({ armor, shield = 0, shieldIcon = null, turntab
   }, []);
 
   useEffect(() => {
-    sceneRef.current?.setLook(lookCode === undefined ? paletteOfLook(profileLook) : paletteOfCode(lookCode));
-  }, [lookCode, profileLook]);
+    sceneRef.current?.setLook(lookCode === undefined ? paletteOfLook(profileLook, profileOutfit) : paletteOfCode(lookCode));
+  }, [lookCode, profileLook, profileOutfit]);
 
   useEffect(() => {
     sceneRef.current?.setArmor(key ? key.split(',').map(Number) : []);
   }, [key]);
+
+  useEffect(() => {
+    sceneRef.current?.setWings(wings);
+  }, [wings]);
+
+  useEffect(() => {
+    sceneRef.current?.setCompanion(companion);
+  }, [companion]);
 
   useEffect(() => {
     sceneRef.current?.setTurntable(turntable);

@@ -1,7 +1,7 @@
 import type { EntityLight } from './entityLight';
 import * as THREE from 'three';
 import { BASH_ANIM, type MountId } from '@solrift/shared';
-import { Character, DEFAULT_PALETTE, STAB_TIME, SWING_TIME, figureLoadout, layDown, standUp, type Palette, type SkinVoxel } from './character';
+import { Character, DEFAULT_PALETTE, STAB_TIME, SWING_TIME, figureGlows, figureLoadout, layDown, standUp, type Palette, type SkinVoxel } from './character';
 import type { StepHandler } from './fenrir';
 import { MountRig } from './mountRig';
 import { BEHIND_DISTANCE, ChaseCamera, MOUNTED_EXTRA, SHOULDER_SIDE, SHOULDER_UP, clearRun } from './chaseCamera';
@@ -115,10 +115,19 @@ export interface SelfState {
   sneaking: boolean;
   /** In the water with the feet off the bottom: the figure swims (or treads water when still). */
   afloat?: boolean;
+  /** The wings worn (1 + their place in WINGS, 0 or left out: none), and whether the figure flies on them. */
+  wing?: number;
+  winged?: boolean;
+  /** The room over the head (blocks, see `roofGap`; left out: plenty). */
+  roof?: number;
   /** Item ids worn: helmet, chestplate, leggings, boots (0 = none). */
   armor: readonly number[];
   /** Item id in hand (0 = empty). */
   held: number;
+  /** The colour the held item glows with (it carries glyphs), or null. */
+  glow?: string | null;
+  /** The same for the off-hand item. */
+  offGlow?: string | null;
   /** Off-hand item id (a shield) and whether it is raised. */
   offhand: number;
   blocking: boolean;
@@ -189,9 +198,15 @@ export class SelfView {
   }
 
   /** Start the arm swing (attack, place). Ignored while one is already in its first half. */
-  swing(): void {
-    if (this.attack > 0.5) this.attack = 0;
+  swing(rate = 1): void {
+    if (this.attack > 0.5) {
+      this.attack = 0;
+      this.attackRate = rate;
+    }
   }
+
+  /** How much faster than usual the swing in progress runs (the attack speed of the weapon). */
+  private attackRate = 1;
 
   /** A Shield Bash was thrown: the figure draws its shield back and drives it forward. */
   bash(): void {
@@ -222,7 +237,10 @@ export class SelfView {
 
   /** Keep swinging while mining: a new swing starts only when the last one has finished. */
   swingIfIdle(): void {
-    if (this.attack >= 1) this.attack = 0;
+    if (this.attack >= 1) {
+      this.attack = 0;
+      this.attackRate = 1;
+    }
   }
 
   /** The mount does what its rider's skill says (a bite, the howl). */
@@ -249,7 +267,7 @@ export class SelfView {
       this.bodyYaw = s.yaw;
       this.placed = true;
     }
-    this.attack = Math.min(1, this.attack + dt / SWING_TIME);
+    this.attack = Math.min(1, this.attack + (dt * this.attackRate) / SWING_TIME);
     this.bashAge = Math.min(9, this.bashAge + dt);
     const moving = s.speed > 0.3;
     const before = this.bodyYaw;
@@ -261,6 +279,8 @@ export class SelfView {
     if (mounted) this.bodyYaw = s.yaw;
     else if (acting) this.bodyYaw = turnToward(this.bodyYaw, s.yaw, dt, 24, 22);
     else if (s.vx === undefined || s.vz === undefined) this.bodyYaw = followBodyYaw(this.bodyYaw, s.yaw, moving, dt);
+    // On the wings it faces where the view looks (it flies the way the keys push it, along the view, and the crosshair is where it is going).
+    else if (s.winged && (s.wing ?? 0) > 0) this.bodyYaw = turnToward(this.bodyYaw, s.yaw, dt, 9, 12);
     else if (s.speed > 0.5 && !s.airborne) this.bodyYaw = turnToward(this.bodyYaw, motionYaw(s.vx, s.vz), dt, 14);
     else if (!s.airborne) {
       const gap = Math.abs(wrapAngle(s.yaw - this.bodyYaw));
@@ -307,10 +327,16 @@ export class SelfView {
     c.aimDraw = mounted ? 0 : (s.bowDraw ?? 0);
     c.aimPitch = s.pitch;
     c.afloat = !mounted && !!s.afloat;
+    c.setWings(mounted ? 0 : (s.wing ?? 0));
+    c.roof = s.roof ?? 4;
+    c.wingFlying = !mounted && !!s.winged;
     c.animate(dt, s.speed, this.turn, this.attack, load.hand !== 0, s.blocking && !mounted, s.vy, s.airborne, !!s.eating && !mounted);
     c.setArmor(s.armor);
     c.setHeld(load.hand, this.models);
+    const fx = figureGlows(s.held, s.offhand, s.glow ?? null, s.offGlow ?? null);
+    c.setHeldGlow(load.hand ? fx.hand : null);
     c.setShield(load.shield, this.models);
+    c.setShieldGlow(load.shield ? fx.shield : null);
     this.lit(s);
   }
 

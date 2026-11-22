@@ -1,7 +1,7 @@
 'use client';
 
-import type { CSSProperties } from 'react';
-import { ABILITY_BY_ID, abilityCost, ATTR_INFO, ATTR_KEYS, CLASSES, CraftingMenu, POINTS_PER_LEVEL, abilitiesOf, computeStats, gearModifiers, offhandModifier, pointModifier, xpToNext, type ItemStack } from '@solrift/shared';
+import { useEffect, useRef, type CSSProperties } from 'react';
+import { ABILITY_BY_ID, abilityCost, ATTR_INFO, ATTR_KEYS, CLASSES, CraftingMenu, POINTS_PER_LEVEL, abilitiesOf, accessoryModifiers, computeStats, gearModifiers, glyphModifiers, MAX_DEFENSE, offhandModifier, pointModifier, xpToNext, type ItemStack } from '@solrift/shared';
 import { useUi } from '../ui/store';
 import { AbilityIcon } from './AbilityIcon';
 import { StatBars, statLines } from './ClassPicker';
@@ -82,29 +82,113 @@ export function AbilityBar() {
     </div>
   );
 }
-/** What the class adds up to now (health, damage, defense, speed...): in the inventory window, beside the character. */
-export function ClassAttributes() {
+/**
+ * What the class adds up to now (null without a class): its stats with everything worn counted: the item in hand, the off hand, the armor
+ * (a piece that needs a higher level or another class adds nothing), the rings and the necklace, the off-hand bonus and the spent stat points.
+ */
+function useWornStats() {
   const cls = useUi((s) => s.cls);
   const api = useUi((s) => s.api);
   const armor = useUi((s) => s.armor);
   const selected = useUi((s) => s.selected);
+  const warm = useUi((s) => s.warmMenu);
   useUi((s) => s.version); // the gear may change under the window (an item moved in or out of a slot)
   if (!cls) return null;
-  const def = CLASSES[cls.id];
   // What is in the off hand adds to the numbers (an orb to the spells, a dagger to the critical hits).
   const bonus = offhandModifier(api?.offhand.get(0)?.id ?? 0);
-  // The gear counts as it does for the character itself: the item in hand, the off hand and the armor worn, each with its bonus stats
-  // (a piece that needs a higher level or another class adds nothing).
-  const warm = useUi((s) => s.warmMenu);
   const menu = warm ?? api?.menu();
   const worn: (ItemStack | null)[] = [api?.inventory.get(selected) ?? null, api?.offhand.get(0) ?? null];
   if (menu instanceof CraftingMenu && menu.armor) for (let i = 0; i < menu.armor.size; i++) worn.push(menu.armor.get(i));
-  const gear = gearModifiers(worn, { id: cls.id, level: cls.level });
+  const who = { id: cls.id, level: cls.level };
+  // The rings and the necklace: fixed stats of their own.
+  const jewelry: (ItemStack | null)[] = [];
+  if (api) for (let i = 0; i < api.accessories.size; i++) jewelry.push(api.accessories.get(i));
+  const gear = [...gearModifiers(worn, who), ...accessoryModifiers(jewelry, who), ...glyphModifiers(worn, who), ...glyphModifiers(jewelry, who)];
   const spent = pointModifier(cls.pts);
+  const stats = computeStats(cls.id, cls.level, [...(bonus ? [bonus] : []), ...gear, ...(spent ? [spent] : [])]);
+  return { cls, def: CLASSES[cls.id], stats, armor };
+}
+
+/** The numbers of the class, as lines (the Attributes tab). */
+export function ClassAttributes() {
+  const w = useWornStats();
+  if (!w) return null;
   return (
     <div className="cs-attrs" data-testid="class-attributes">
-      <StatBars lines={statLines(computeStats(cls.id, cls.level, [...(bonus ? [bonus] : []), ...gear, ...(spent ? [spent] : [])]), def.resource.name, armor)} />
+      <StatBars lines={statLines(w.stats, w.def.resource.name, w.armor)} />
     </div>
+  );
+}
+
+/** The four numbers that matter most, as a strip under the character on the Inventory tab (the rest is on the Attributes tab). */
+export function QuickStats() {
+  const w = useWornStats();
+  if (!w) return null;
+  const chips: { label: string; value: string; color?: string }[] = [
+    { label: 'Health', value: `${Math.round(w.stats.maxHealth)}`, color: '#e5645c' },
+    { label: 'Armor', value: `${w.armor} / ${MAX_DEFENSE}`, color: '#c9d3e0' },
+    { label: w.def.resource.name, value: `${Math.round(w.stats.maxResource)}`, color: w.def.resource.color },
+    { label: 'Crit', value: `${Math.round(w.stats.critChance * 100)}%`, color: '#ffe49a' },
+  ];
+  return (
+    <div className="quick-stats" data-testid="quick-stats">
+      {chips.map((c) => (
+        <div key={c.label} className="quick-stat" style={{ '--qs': c.color } as CSSProperties}>
+          <b>{c.value}</b>
+          <span>{c.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The + of a stat: a click adds a point (Shift: five); keep the button pressed and it keeps adding, faster the longer it is held,
+ * until the points run out. Keyboard presses (Enter or Space) add one each.
+ */
+function AttrAddButton({ attr, name }: { attr: (typeof ATTR_KEYS)[number]; name: string }) {
+  const free = useUi((st) => st.cls?.free ?? 0);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stop = (): void => {
+    if (timer.current !== null) clearTimeout(timer.current);
+    timer.current = null;
+  };
+  useEffect(() => stop, []);
+  // Each step reads the points left from the store, so it stops by itself when they run out (the server has the last word on every spend).
+  const press = (shift: boolean): void => {
+    stop();
+    let n = 0;
+    const step = (): void => {
+      const st = useUi.getState();
+      if ((st.cls?.free ?? 0) <= 0) return stop();
+      st.api?.spendStat(attr, shift ? POINTS_PER_LEVEL : 1);
+      n++;
+      timer.current = setTimeout(step, n === 1 ? 380 : Math.max(45, 130 - n * 8));
+    };
+    step();
+  };
+  return (
+    <button
+      type="button"
+      className="attr-add"
+      data-testid={`attr-add-${attr}`}
+      disabled={free <= 0}
+      aria-label={`Add a point to ${name}`}
+      title={`Add a point (hold to keep adding, Shift: ${POINTS_PER_LEVEL} at a time)`}
+      onPointerDown={(e) => {
+        if (e.button !== 0) return;
+        e.currentTarget.setPointerCapture?.(e.pointerId);
+        press(e.shiftKey);
+      }}
+      onPointerUp={stop}
+      onPointerCancel={stop}
+      onLostPointerCapture={stop}
+      onClick={(e) => {
+        if (e.detail === 0) useUi.getState().api?.spendStat(attr, e.shiftKey ? POINTS_PER_LEVEL : 1); // the keyboard
+      }}
+    >
+      +
+    </button>
   );
 }
 
@@ -137,17 +221,7 @@ export function AttrPoints() {
             <b className="attr-val" data-testid={`attr-val-${k}`}>
               {cls.pts[i]}
             </b>
-            <button
-              type="button"
-              className="attr-add"
-              data-testid={`attr-add-${k}`}
-              disabled={cls.free <= 0}
-              aria-label={`Add a point to ${ATTR_INFO[k].name}`}
-              title={`Add a point (Shift-click: ${POINTS_PER_LEVEL})`}
-              onClick={(e) => api?.spendStat(k, e.shiftKey ? POINTS_PER_LEVEL : 1)}
-            >
-              +
-            </button>
+            <AttrAddButton attr={k} name={ATTR_INFO[k].name} />
           </div>
           <p className="attr-blurb">{say(ATTR_INFO[k].blurb)}</p>
         </div>

@@ -427,3 +427,19 @@ button.auc-row:hover {
   padding: 4px 12px;
   font-size: 12px;
 }
+.auc-price.token {
+  color: #d9b8ff;
+}
+.auc-tokens {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 14px;
+  color: #d9b8ff;
+  font-weight: 600;
+}
+.auc-tokens small {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  opacity: 0.75;
+}

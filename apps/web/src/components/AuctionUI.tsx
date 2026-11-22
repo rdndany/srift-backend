@@ -27,6 +27,8 @@ import {
 import { useUi } from '../ui/store';
 import { ItemView, Tip } from './ItemView';
 import { CoinIcon, CoinPurse } from './ShopUI';
+import { TokenIcon } from './TokenPurse';
+import { useToken } from '../token/store';
 import './shop.css';
 import './auction.css';
 
@@ -42,10 +44,10 @@ const TABS: { id: Tab; name: string }[] = [
 /** The ledger refreshes by itself this often (ms), as other players bid and buy. */
 const REFRESH_MS = 5000;
 
-const Price = ({ n, title }: { n: number; title?: string }) => (
-  <span className="auc-price" title={title}>
+const Price = ({ n, title, token }: { n: number; title?: string; token?: boolean }) => (
+  <span className={`auc-price${token ? ' token' : ''}`} title={token ? `${title ?? 'Price'} (in $SOLRIFT)` : title}>
     {n.toLocaleString('en-US')}
-    <CoinIcon size={14} />
+    {token ? <TokenIcon size={14} /> : <CoinIcon size={14} />}
   </span>
 );
 
@@ -64,9 +66,17 @@ export function AuctionWindow({ npc }: { npc: NpcDef }) {
   const api = useUi((s) => s.api);
   const view = useUi((s) => s.auction);
   const coins = useUi((s) => s.coins);
+  /** Your $SOLRIFT, as the server counts it for trading (null: you cannot trade in it here). */
+  const tokens = view?.tokens ? view.tokens.balance : null;
+  /** What you can pay for an auction: its own currency. */
+  const funds = (r: { token: boolean }) => (r.token ? (tokens ?? 0) : coins);
   useUi((s) => s.version);
   const cls = useUi((s) => s.cls);
   const [tab, setTab] = useState<Tab>('browse');
+  useEffect(() => {
+    // the balance in the corner of the game follows what the house says it is now
+    if (tokens !== null) void useToken.getState().loadMe();
+  }, [tokens]);
   const [tip, setTip] = useState<TipLine[]>([]);
   const [text, setText] = useState('');
   const [picked, setPicked] = useState<number | null>(null);
@@ -77,6 +87,7 @@ export function AuctionWindow({ npc }: { npc: NpcDef }) {
   const [startBid, setStartBid] = useState('');
   const [buyout, setBuyout] = useState('');
   const [hours, setHours] = useState<AuctionHours>(24);
+  const [inTokens, setInTokens] = useState(false);
   const tipRef = useRef<HTMLDivElement>(null);
   const mouse = useRef({ x: 0, y: 0 });
   const query = useRef<AuctionQuery | null>(null);
@@ -150,10 +161,10 @@ export function AuctionWindow({ npc }: { npc: NpcDef }) {
         </span>
         <span className="auc-cell auc-seller">{r.yours ? 'You' : r.seller}</span>
         <span className="auc-cell auc-num">
-          <Price n={r.top > 0 ? r.top : r.bid} title={r.top > 0 ? 'Current bid' : 'Starting bid'} />
+          <Price n={r.top > 0 ? r.top : r.bid} title={r.top > 0 ? 'Current bid' : 'Starting bid'} token={r.token} />
           {r.leading ? <small className="auc-lead">your bid</small> : r.top > 0 ? <small>bid on</small> : null}
         </span>
-        <span className="auc-cell auc-num">{r.buyout > 0 ? <Price n={r.buyout} title="Buyout" /> : <small>no buyout</small>}</span>
+        <span className="auc-cell auc-num">{r.buyout > 0 ? <Price n={r.buyout} title="Buyout" token={r.token} /> : <small>no buyout</small>}</span>
         {extra}
       </>
     );
@@ -229,13 +240,13 @@ export function AuctionWindow({ npc }: { npc: NpcDef }) {
               <button
                 className="quest-btn small"
                 data-testid="auction-bid"
-                disabled={chosen.yours || chosen.leading || chosenBid > coins || (chosen.buyout > 0 && chosenBid > chosen.buyout)}
+                disabled={chosen.yours || chosen.leading || chosenBid > funds(chosen) || (chosen.buyout > 0 && chosenBid > chosen.buyout)}
                 title={chosen.yours ? 'Your own auction' : chosen.leading ? 'You hold the highest bid' : `At least ${chosen.next}`}
                 onClick={() => api.auction({ a: 'bid', id: chosen.id, amount: chosenBid })}
               >
                 Bid
               </button>
-              <button className="quest-btn small" data-testid="auction-buyout" disabled={chosen.yours || chosen.buyout <= 0 || chosen.pay > coins} onClick={() => api.auction({ a: 'buyout', id: chosen.id })}>
+              <button className="quest-btn small" data-testid="auction-buyout" disabled={chosen.yours || chosen.buyout <= 0 || chosen.pay > funds(chosen)} onClick={() => api.auction({ a: 'buyout', id: chosen.id })}>
                 Buyout{chosen.buyout > 0 ? ` (${chosen.pay.toLocaleString('en-US')})` : ''}
               </button>
             </>
@@ -257,7 +268,9 @@ export function AuctionWindow({ npc }: { npc: NpcDef }) {
   const deposit = offered ? depositFor(offered, hours) : 0;
   const bidNum = whole(startBid);
   const buyNum = whole(buyout);
-  const problem = !held ? 'Choose an item from your bags.' : sellBlocker(held) ?? (bidNum < 1 ? 'Set a starting bid.' : buyNum > 0 && buyNum < bidNum ? 'The buyout is under the starting bid.' : deposit > coins ? 'You cannot afford the deposit.' : view.mine.length >= AUCTION_RULES.maxListings ? 'You have too many auctions up.' : null);
+  const payToken = inTokens && tokens !== null;
+  const top = payToken ? AUCTION_RULES.maxToken : 999_999_999;
+  const problem = !held ? 'Choose an item from your bags.' : sellBlocker(held) ?? (bidNum < 1 ? 'Set a starting bid.' : bidNum > top || buyNum > top ? `The most is ${top.toLocaleString('en-US')} $SOLRIFT.` : buyNum > 0 && buyNum < bidNum ? 'The buyout is under the starting bid.' : deposit > coins ? 'You cannot afford the deposit.' : view.mine.length >= AUCTION_RULES.maxListings ? 'You have too many auctions up.' : null);
 
   const pick = (i: number) => {
     const s = api.inventory.get(i);
@@ -305,6 +318,19 @@ export function AuctionWindow({ npc }: { npc: NpcDef }) {
           </span>
           <span className="auc-name">{offered ? tooltipName(offered) : 'Nothing chosen'}</span>
         </div>
+        {tokens !== null ? (
+          <div className="auc-field">
+            <span>Price in</span>
+            <div className="auc-hours" data-testid="auction-currency">
+              <button className={`auc-hour${!payToken ? ' on' : ''}`} data-testid="auction-currency-auren" onClick={() => setInTokens(false)}>
+                Auren
+              </button>
+              <button className={`auc-hour${payToken ? ' on' : ''}`} data-testid="auction-currency-token" onClick={() => setInTokens(true)}>
+                $SOLRIFT
+              </button>
+            </div>
+          </div>
+        ) : null}
         <label className="auc-field">
           <span>Quantity</span>
           <input value={count} inputMode="numeric" data-testid="auction-count" disabled={!held || held.count < 2} onChange={(e) => setCount(e.target.value.replace(/[^\d]/g, ''))} />
@@ -336,10 +362,13 @@ export function AuctionWindow({ npc }: { npc: NpcDef }) {
           {buyNum > 0 ? (
             <div>
               <span>You get at a buyout</span>
-              <Price n={buyNum - houseCut(buyNum)} />
+              <Price n={buyNum - houseCut(buyNum)} token={payToken} />
             </div>
           ) : null}
-          <small>The house keeps {Math.round(AUCTION_RULES.cut * 100)}% of a sale.</small>
+          <small>
+            The house keeps {Math.round(AUCTION_RULES.cut * 100)}% of a sale.
+            {payToken ? ' You are paid in $SOLRIFT, straight into your wallet balance; the deposit is still in Auren.' : ''}
+          </small>
         </div>
         <button
           className="quest-btn"
@@ -348,7 +377,7 @@ export function AuctionWindow({ npc }: { npc: NpcDef }) {
           title={problem ?? undefined}
           onClick={() => {
             if (slot === null || problem) return;
-            api.auction({ a: 'post', slot, count: saleCount, bid: bidNum, buyout: buyNum, hours });
+            api.auction({ a: 'post', slot, count: saleCount, bid: bidNum, buyout: buyNum, hours, ...(payToken ? { token: true } : {}) });
             setSlot(null);
           }}
         >
@@ -399,13 +428,13 @@ export function AuctionWindow({ npc }: { npc: NpcDef }) {
         <span className="auc-sort static auc-act" />
       </div>
       <div className="auc-list tall" data-testid="auction-bids">
-        {view.bids.length === 0 ? <p className="auc-empty">You hold no bids. When you are outbid, your coins come back by mail.</p> : null}
+        {view.bids.length === 0 ? <p className="auc-empty">You hold no bids. When you are outbid, your coins come back by mail (your $SOLRIFT, straight to your balance).</p> : null}
         {view.bids.map((r) => (
           <div key={r.id} className="auc-row static" data-testid={`auction-bid-${r.id}`}>
             {rowCells(
               r,
               <span className="auc-cell auc-act">
-                <button className="quest-btn small" disabled={r.buyout <= 0 || r.pay > coins} onClick={() => api.auction({ a: 'buyout', id: r.id })}>
+                <button className="quest-btn small" disabled={r.buyout <= 0 || r.pay > funds(r)} onClick={() => api.auction({ a: 'buyout', id: r.id })}>
                   Buyout
                 </button>
               </span>,
@@ -477,6 +506,13 @@ export function AuctionWindow({ npc }: { npc: NpcDef }) {
             </button>
             <span className="wow-foot-label">You carry</span>
             <CoinPurse always />
+            {tokens !== null ? (
+              <span className="auc-tokens" data-testid="auction-tokens" data-balance={tokens} title="Your $SOLRIFT, for auctions priced in it">
+                <TokenIcon size={16} />
+                {tokens.toLocaleString('en-US')}
+                <small>$SOLRIFT</small>
+              </span>
+            ) : null}
           </div>
         </div>
       </div>

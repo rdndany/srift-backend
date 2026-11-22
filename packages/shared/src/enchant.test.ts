@@ -26,8 +26,23 @@ import {
   conflicts,
   efficiencyBonus,
   enchantName,
-  enchantOffers,
-  enchantability,
+  canInscribe,
+  glyphLore,
+  glyphOptions,
+  glyphPrice,
+  glyphSockets,
+  inscribed,
+  erased,
+  glyphModifiers,
+  wildGlyphs,
+  dominantElement,
+  glowCode,
+  glowColor,
+  inscribeChance,
+  failedPrice,
+  ELEMENTS,
+  ELEMENT_LIST,
+  siphonShare,
   findRecipe,
   getItem,
   levelOf,
@@ -45,9 +60,11 @@ import {
   totalForLevel,
   wearAfterUnbreaking,
   withEnchants,
+  type AltarContext,
   type Enchant,
   type InputFrame,
   type ItemStack,
+  tomeBlocked,
 } from './index';
 
 const SEED = 1337;
@@ -72,7 +89,7 @@ const idle = (over: Partial<InputFrame> = {}): InputFrame => ({
 });
 
 /** A flat stone floor with air above; the player stands in the middle looking toward -z. */
-function make(seed = 7) {
+function make(seed = 7, rand: () => number = mulberry32(seed)) {
   const generator = new WorldGenerator(SEED);
   const world = new HeadlessWorld(generator);
   for (let x = CX - 12; x <= CX + 12; x++)
@@ -80,7 +97,7 @@ function make(seed = 7) {
       for (let y = FLOOR + 1; y < FLOOR + 14; y++) world.setBlock(x, y, z, B.AIR);
       world.setBlock(x, FLOOR, z, B.STONE);
     }
-  const s = new GameSession({ seed: SEED, world, generator, naturalSpawning: false, rand: mulberry32(seed) });
+  const s = new GameSession({ seed: SEED, world, generator, naturalSpawning: false, rand });
   s.finishLoading();
   s.teleport(CX + 0.5, FLOOR + 1, CZ + 0.5, 0, 0);
   return { s, world };
@@ -127,8 +144,8 @@ describe('enchanting recipes and items', () => {
 
 describe('the enchantment model', () => {
   it('names enchantments with roman numerals, and leaves single-level ones bare', () => {
-    expect(enchantName(ENCH.SHARPNESS, 3)).toBe('Sharpness III');
-    expect(enchantName(ENCH.SILK_TOUCH, 1)).toBe('Silk Touch');
+    expect(enchantName(ENCH.SHARPNESS, 3)).toBe('Keen Edge III');
+    expect(enchantName(ENCH.SILK_TOUCH, 1)).toBe('Gentle Hand');
     expect(enchantName(999, 1)).toBe('');
   });
 
@@ -141,9 +158,15 @@ describe('the enchantment model', () => {
     expect(canCarry(diamondPick, sharp)).toBe(false);
     expect(canCarry(diamondPick, eff)).toBe(true);
     expect(canCarry(ironSword, eff)).toBe(false);
-    expect(enchantability(I.STICK)).toBe(0);
-    expect(enchantability(I.BOOK)).toBeGreaterThan(0);
-    expect(enchantability(toolId('sword', 'gold'))).toBeGreaterThan(enchantability(toolId('sword', 'diamond')));
+    expect(canInscribe(I.STICK)).toBe(false);
+    expect(canInscribe(I.BOOK)).toBe(true);
+    expect(canInscribe(toolId('sword', 'gold'))).toBe(true);
+    // The class weapons and the off hand take glyphs now too: a staff the spells ones, a shield the worn ones.
+    const staff = getItem(I.STAFF);
+    expect(canCarry(staff, ENCHANTS.find((d) => d.id === ENCH.SORCERY)!)).toBe(true);
+    expect(canCarry(staff, sharp)).toBe(false);
+    expect(canCarry(getItem(I.SHIELD), ENCHANTS.find((d) => d.id === ENCH.VIGOR)!)).toBe(true);
+    expect(canCarry(getItem(I.SHIELD), ENCHANTS.find((d) => d.id === ENCH.UNBREAKING)!)).toBe(true);
   });
 
   it('keeps protection kinds, and silk touch and fortune, from sharing an item', () => {
@@ -168,64 +191,163 @@ describe('the enchantment model', () => {
   });
 });
 
-describe('the table offers', () => {
-  it('are the same for the same seed, shelves and item, and change with the seed', () => {
-    const a = enchantOffers(42, 10, toolId('sword', 'iron'));
-    const b = enchantOffers(42, 10, toolId('sword', 'iron'));
-    expect(JSON.stringify(a)).toBe(JSON.stringify(b));
-    const seen = new Set<string>();
-    for (let seed = 1; seed < 40; seed++) seen.add(JSON.stringify(enchantOffers(seed, 10, toolId('sword', 'iron')).map((o) => o.cost)));
-    expect(seen.size).toBeGreaterThan(5);
+describe('the altar offers', () => {
+  const ctx: AltarContext = { shelves: 15, lapis: 99, auren: 99999 };
+  const opt = (item: ItemStack, id: number, c = ctx) => glyphOptions(item, c).find((o) => o.def.id === id)!;
+
+  it('lists every glyph that fits the piece, and nothing for what cannot take one', () => {
+    expect(glyphOptions(null, ctx)).toEqual([]);
+    expect(glyphOptions(makeStack(B.DIRT), ctx)).toEqual([]);
+    expect(glyphOptions(makeStack(I.STICK), ctx)).toEqual([]);
+    expect(glyphOptions(makeStack(toolId('sword', 'iron'), 2), ctx)).toEqual([]); // one piece at a time
+    const names = glyphOptions(sword(), ctx).map((o) => o.def.id);
+    expect(names).toContain(ENCH.SHARPNESS);
+    expect(names).toContain(ENCH.SIPHON);
+    expect(names).toContain(ENCH.MIGHT);
+    expect(names).not.toContain(ENCH.EFFICIENCY);
+    expect(names).not.toContain(ENCH.MENDING); // a treasure: found, never inscribed
   });
 
-  it('cost more with more bookshelves, up to thirty with fifteen', () => {
-    const top = (shelves: number) => {
-      let best = 0;
-      let sum = 0;
-      for (let seed = 1; seed <= 200; seed++) {
-        const c = enchantOffers(seed, shelves, toolId('pickaxe', 'iron'))[2].cost;
-        best = Math.max(best, c);
-        sum += c;
-      }
-      return { best, avg: sum / 200 };
-    };
-    const none = top(0);
-    const full = top(MAX_SHELVES);
-    expect(none.best).toBeLessThanOrEqual(8);
-    expect(full.avg).toBeGreaterThan(none.avg * 3);
-    expect(full.best).toBe(30);
-    for (let seed = 1; seed <= 50; seed++) expect(enchantOffers(seed, 99, toolId('pickaxe', 'iron'))[2].cost).toBeLessThanOrEqual(30);
+  it('shows the same offers every time: nothing is rolled', () => {
+    expect(JSON.stringify(glyphOptions(sword(), ctx))).toBe(JSON.stringify(glyphOptions(sword(), ctx)));
   });
 
-  it('offer nothing for things that cannot be enchanted or already are', () => {
-    expect(enchantOffers(5, 15, I.STICK).every((o) => o.cost === 0 && o.list.length === 0)).toBe(true);
-    expect(enchantOffers(5, 15, toolId('sword', 'iron'), true).every((o) => o.cost === 0)).toBe(true);
-    expect(enchantOffers(5, 15, 0).every((o) => o.cost === 0)).toBe(true);
+  it('prices a glyph by tier and rank, in lapis and Auren, and asks lore for the high ranks', () => {
+    const keen = ENCHANTS.find((d) => d.id === ENCH.SHARPNESS)!;
+    expect(glyphPrice(keen, 1)).toEqual({ auren: 30, lapis: 1 });
+    expect(glyphPrice(keen, 5).auren).toBeGreaterThan(glyphPrice(keen, 4).auren);
+    expect(glyphPrice(keen, 3).lapis).toBe(3);
+    const brand = ENCHANTS.find((d) => d.id === ENCH.FIRE_ASPECT)!;
+    expect(glyphPrice(brand, 1).auren).toBeGreaterThan(glyphPrice(keen, 1).auren);
+    expect(glyphLore(keen, 1)).toBe(0);
+    expect(glyphLore(keen, 5)).toBeGreaterThan(glyphLore(keen, 2));
+    expect(glyphLore(brand, 1)).toBeGreaterThan(glyphLore(keen, 1));
+    for (const d of ENCHANTS) for (let r = 1; r <= d.max; r++) expect(glyphLore(d, r)).toBeLessThanOrEqual(MAX_SHELVES);
   });
 
-  it('only roll enchantments that fit the item, never a conflicting pair, never a treasure one', () => {
-    const items = [toolId('sword', 'diamond'), toolId('pickaxe', 'iron'), I.BOW, armorId(0, 'iron'), armorId(3, 'diamond'), I.BOOK];
-    for (const id of items) {
-      for (let seed = 1; seed <= 120; seed++) {
-        for (const o of enchantOffers(seed, 15, id)) {
-          if (o.cost === 0) continue;
-          expect(o.list.length).toBeGreaterThan(0);
-          expect(o.clue).not.toBeNull();
-          expect(o.list.some(([a, b]) => a === o.clue![0] && b === o.clue![1])).toBe(true);
-          for (const [eid, level] of o.list) {
-            const d = ENCHANTS.find((x) => x.id === eid)!;
-            expect(d.treasure).toBeFalsy();
-            expect(level).toBeGreaterThanOrEqual(1);
-            expect(level).toBeLessThanOrEqual(d.max);
-            if (id !== I.BOOK) expect(canCarry(getItem(id), d)).toBe(true);
-          }
-          for (let i = 0; i < o.list.length; i++)
-            for (let j = i + 1; j < o.list.length; j++) expect(conflicts(o.list[i][0], o.list[j][0])).toBe(false);
+  it('says what stands in the way, first reason first', () => {
+    const base = sword();
+    expect(opt(base, ENCH.SHARPNESS).state).toBe('ok');
+    expect(opt(base, ENCH.SHARPNESS, { ...ctx, lapis: 0 }).state).toBe('lapis');
+    expect(opt(base, ENCH.SHARPNESS, { ...ctx, auren: 0 }).state).toBe('auren');
+    expect(opt(base, ENCH.FIRE_ASPECT, { ...ctx, shelves: 0 }).state).toBe('lore');
+    expect(opt(base, ENCH.SHARPNESS, { shelves: 0, lapis: 0, auren: 0, creative: true }).state).toBe('ok');
+    // An item holds one glyph per socket; one that is on it can still be raised.
+    const full = sword([ENCH.SHARPNESS, 2]);
+    expect(glyphSockets(full)).toBe(1);
+    expect(opt(full, ENCH.KNOCKBACK).state).toBe('sockets');
+    expect(opt(full, ENCH.SHARPNESS)).toMatchObject({ state: 'ok', have: 2, rank: 3 });
+    expect(opt(sword([ENCH.SHARPNESS, 5]), ENCH.SHARPNESS).state).toBe('maxed');
+  });
+
+  it('keeps the protections apart, and says which glyph is in the way', () => {
+    const helm = makeStack(armorId(0, 'iron'), 1, 0, [[ENCH.PROTECTION, 2]]);
+    const gear = { ...helm, gear: { r: 3 as const, l: 1, s: [['vit', 3] as ['vit', number]] } };
+    const o = opt(gear, ENCH.FIRE_PROTECTION);
+    expect(o.state).toBe('conflict');
+    expect(o.blockedBy).toBe(ENCH.PROTECTION);
+  });
+
+  it('puts the best options first: what can be done now, then what is short of something', () => {
+    const list = glyphOptions(sword(), { shelves: 0, lapis: 0, auren: 0 });
+    const states = list.map((o) => o.state);
+    expect(states.every((st) => st !== 'ok')).toBe(true);
+    const rich = glyphOptions(sword(), ctx).map((o) => o.state);
+    expect(rich[0]).toBe('ok');
+  });
+
+  it('gives rarer pieces more sockets', () => {
+    expect(glyphSockets(sword())).toBe(1);
+    for (const r of [1, 2, 3] as const) expect(glyphSockets({ ...sword(), gear: { r, l: 1, s: [['might', 3]] } })).toBe(1 + r);
+    expect(glyphSockets(makeStack(I.BOOK))).toBe(1);
+    expect(glyphSockets(null)).toBe(0);
+  });
+
+  it('inscribes one rank at a time, and a plain book becomes a Glyph Tome', () => {
+    let s = inscribed(sword(), ENCH.SHARPNESS)!;
+    expect(s.ench).toEqual([[ENCH.SHARPNESS, 1]]);
+    s = inscribed(s, ENCH.SHARPNESS)!;
+    expect(levelOf(s, ENCH.SHARPNESS)).toBe(2);
+    expect(inscribed(s, ENCH.KNOCKBACK)).toBeNull(); // no socket
+    expect(inscribed(sword(), ENCH.EFFICIENCY)).toBeNull(); // does not fit
+    expect(inscribed(sword(), ENCH.MENDING)).toBeNull(); // a treasure
+    const tome = inscribed(makeStack(I.BOOK), ENCH.SIPHON)!;
+    expect(tome.id).toBe(I.ENCHANTED_BOOK);
+    expect(erased(tome, ENCH.SIPHON)!.id).toBe(I.BOOK);
+  });
+
+  it('erases a glyph, all of its ranks', () => {
+    const s = erased(sword([ENCH.SHARPNESS, 3]), ENCH.SHARPNESS)!;
+    expect(s.ench).toBeUndefined();
+    expect(erased(sword(), ENCH.SHARPNESS)).toBeNull();
+  });
+
+  it('sends glyphs found in the wild only where they fit, one at a time', () => {
+    for (let seed = 1; seed < 60; seed++) {
+      for (const id of [toolId('sword', 'diamond'), I.BOW, armorId(1, 'iron'), I.FISHING_ROD, I.BOOK]) {
+        const list = wildGlyphs(id, mulberry32(seed), 2);
+        for (const [gid, rank] of list) {
+          const d = ENCHANTS.find((x) => x.id === gid)!;
+          expect(d.treasure).toBeFalsy();
+          expect(rank).toBeGreaterThanOrEqual(1);
+          expect(rank).toBeLessThanOrEqual(d.max);
+          if (id !== I.BOOK) expect(canCarry(getItem(id), d)).toBe(true);
         }
+        for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) expect(conflicts(list[i][0], list[j][0])).toBe(false);
       }
     }
   });
 
+  it('works out the chance of a glyph: rarer and higher ranks fail more, spare lore helps, always within 15 to 95', () => {
+    const d = (id: number) => ENCHANTS.find((x) => x.id === id)!;
+    const sharp = d(ENCH.SHARPNESS);
+    const rare = ENCHANTS.filter((x) => x.tier === 4)[0];
+    expect(inscribeChance(sharp, 1, 15)).toBeGreaterThan(inscribeChance(rare, 1, 15));
+    expect(inscribeChance(sharp, 1, 15)).toBeGreaterThan(inscribeChance(sharp, sharp.max, 15));
+    expect(inscribeChance(sharp, 1, 15)).toBeGreaterThan(inscribeChance(sharp, 1, 2));
+    for (const x of ENCHANTS) for (let r = 1; r <= x.max; r++) for (const sh of [0, 2, 8, 15, 40]) {
+      const c = inscribeChance(x, r, sh);
+      expect(c).toBeGreaterThanOrEqual(15);
+      expect(c).toBeLessThanOrEqual(95);
+    }
+    expect(failedPrice({ auren: 335, lapis: 4 })).toEqual({ auren: 168, lapis: 4 });
+  });
+
+  it('knows each glyph by element, and the one a piece glows with', () => {
+    expect(dominantElement(sword())).toBeNull();
+    expect(dominantElement(sword([ENCH.FIRE_ASPECT, 2]))).toBe('ember');
+    expect(dominantElement(makeStack(I.BOW, 1, 0, [[ENCH.POWER, 3], [ENCH.FLAME, 1]]))).toBe('storm');
+  });
+
+  it('sends the glow of a piece as a small code, and turns it back into the colour', () => {
+    expect(glowCode(sword())).toBe(0);
+    expect(glowCode(null)).toBe(0);
+    expect(glowColor(0)).toBeNull();
+    expect(glowColor(undefined)).toBeNull();
+    expect(glowColor(99)).toBeNull();
+    const fire = sword([ENCH.FIRE_ASPECT, 2]);
+    expect(glowColor(glowCode(fire))).toBe(ELEMENTS.ember.color);
+    // every element has its own code, and each one maps back to its own colour
+    ELEMENT_LIST.forEach((el, i) => expect(glowColor(i + 1)).toBe(ELEMENTS[el].color));
+    expect(new Set(ELEMENT_LIST.map((_, i) => glowColor(i + 1))).size).toBe(ELEMENT_LIST.length);
+  });
+
+  it('adds the stats of the glyphs of a stat to the class, for a wearer who may use the piece', () => {
+    const who = { id: 'warrior' as const, level: 1 };
+    expect(glyphModifiers([sword([ENCH.MIGHT, 2])], who)).toHaveLength(1);
+    expect(glyphModifiers([sword([ENCH.SHARPNESS, 2])], who)).toHaveLength(0); // a mechanic, not a stat
+    expect(glyphModifiers([sword([ENCH.MIGHT, 2])], null)).toHaveLength(0);
+    expect(glyphModifiers([makeStack(I.ENCHANTED_BOOK, 1, 0, [[ENCH.MIGHT, 2]])], who)).toHaveLength(0); // a tome does nothing
+    // A found piece for a higher level adds nothing until it is reached.
+    const high = { ...sword([ENCH.MIGHT, 2]), gear: { r: 1 as const, l: 12, s: [['might', 3] as ['might', number]] } };
+    expect(glyphModifiers([high], who)).toHaveLength(0);
+    expect(glyphModifiers([high], { id: 'warrior', level: 12 })).toHaveLength(1);
+  });
+
+  it('Siphon gives back a share of the blow', () => {
+    expect(siphonShare(0)).toBe(0);
+    expect(siphonShare(3)).toBeCloseTo(0.12);
+  });
 });
 
 describe('items carry enchantments through storage', () => {
@@ -264,10 +386,10 @@ describe('the effects', () => {
     expect(breakTime(BLOCKS[B.STONE], shovel, efficiencyBonus(5))).toBe(breakTime(BLOCKS[B.STONE], shovel));
   });
 
-  it('Protection takes a share of damage, to at most eighty percent', () => {
+  it('Aegis takes a share of damage, three percent a point, to at most sixty percent', () => {
     expect(protectionFactor(0)).toBe(1);
-    expect(protectionFactor(16)).toBeCloseTo(0.36);
-    expect(protectionFactor(99)).toBeCloseTo(0.2);
+    expect(protectionFactor(16)).toBeCloseTo(0.52);
+    expect(protectionFactor(99)).toBeCloseTo(0.4);
     const boots = makeStack(armorId(3, 'iron'), 1, 0, [[ENCH.FEATHER_FALLING, 4], [ENCH.FIRE_PROTECTION, 2]]);
     expect(protectionPoints(boots, 'fall')).toBe(12);
     expect(protectionPoints(boots, 'fire')).toBe(4);
@@ -331,27 +453,27 @@ describe('the effects', () => {
     const v = new Vitals();
     expect(v.land(12, { eyeInWater: false, invulnerable: false })).toBe(9);
     const w = new Vitals();
-    expect(w.land(12, { eyeInWater: false, invulnerable: false }, protectionFactor(12))).toBe(5);
+    expect(w.land(12, { eyeInWater: false, invulnerable: false }, protectionFactor(12))).toBe(6);
     expect(new Vitals().land(3, { eyeInWater: false, invulnerable: false }, 0.2)).toBe(0);
   });
 });
 
-describe('the enchanting table screen', () => {
-  const rig = (o: { level?: number; creative?: boolean; shelves?: number } = {}) => {
-    const st = { level: o.level ?? 30, seed: 12345, spent: 0, done: 0 };
+describe('the Runic Altar screen', () => {
+  const rig = (o: { auren?: number; creative?: boolean; shelves?: number; roll?: number } = {}) => {
+    const st = { auren: o.auren ?? 5000, spent: 0, done: 0, last: null as null | { glyph: number; rank: number; erase: boolean; fail?: boolean } };
     const inv = new Container(PLAYER_SLOTS);
     const menu = new EnchantMenu(inv, {
       shelves: o.shelves ?? 15,
-      seed: () => st.seed,
-      level: () => st.level,
       creative: () => !!o.creative,
+      coins: () => st.auren,
       spend: (n) => {
-        st.level -= n;
+        st.auren -= n;
         st.spent += n;
       },
-      done: () => {
+      rand: () => o.roll ?? 0,
+      done: (w) => {
         st.done++;
-        st.seed++;
+        st.last = w;
       },
     });
     return { st, inv, menu };
@@ -361,24 +483,18 @@ describe('the enchanting table screen', () => {
     menu.click(slot, 0);
   };
 
-  it('shows nothing until an item is in', () => {
+  it('offers nothing until a piece is in', () => {
     const { menu } = rig();
-    expect(menu.offers.every((o) => o.cost === 0)).toBe(true);
+    expect(menu.options()).toEqual([]);
     put(menu, menu.itemSlot, sword());
-    expect(menu.offers.some((o) => o.cost > 0)).toBe(true);
+    expect(menu.options().length).toBeGreaterThan(5);
   });
 
-  it('takes only enchantable items in the item slot and only lapis in the other', () => {
+  it('takes only what can carry a glyph', () => {
     const { menu } = rig();
     put(menu, menu.itemSlot, makeStack(B.DIRT));
     expect(menu.item).toBeNull();
     expect(menu.cursor?.id).toBe(B.DIRT);
-    menu.cursor = makeStack(I.DIAMOND);
-    menu.click(menu.lapisSlot, 0);
-    expect(menu.lapis).toBeNull();
-    menu.cursor = makeStack(LAPIS, 4);
-    menu.click(menu.lapisSlot, 0);
-    expect(menu.lapis?.count).toBe(4);
   });
 
   it('puts one book down at a time', () => {
@@ -392,84 +508,132 @@ describe('the enchanting table screen', () => {
     expect(menu.cursor?.count).toBe(4);
   });
 
-  it('enchants for the slot number in lapis and levels, and moves the seed on', () => {
-    const { menu, st } = rig();
+  it('fails by chance: the lapis and half the Auren are gone, the piece is as it was', () => {
+    const { menu, inv, st } = rig({ roll: 0.99 });
+    inv.set(0, makeStack(LAPIS, 10));
     put(menu, menu.itemSlot, sword());
-    put(menu, menu.lapisSlot, makeStack(LAPIS, 10));
-    const offer = menu.offers[2];
-    expect(offer.cost).toBeGreaterThan(0);
-    expect(menu.enchant(2)).toBe(true);
-    expect(menu.item!.ench).toEqual(offer.list);
-    expect(menu.lapis?.count).toBe(7);
-    expect(st.spent).toBe(3);
-    expect(st.level).toBe(27);
-    expect(st.done).toBe(1);
-    // It cannot be enchanted twice.
-    expect(menu.offers.every((o) => o.cost === 0)).toBe(true);
-    expect(menu.enchant(0)).toBe(false);
+    const o = menu.options().find((x) => x.def.id === ENCH.SHARPNESS)!;
+    expect(o.chance).toBeLessThan(100);
+    expect(menu.inscribe(ENCH.SHARPNESS)).toBe(true); // true: the attempt was made and paid
+    expect(menu.item!.ench).toBeUndefined();
+    expect(menu.lapis).toBe(10 - o.price.lapis);
+    expect(st.spent).toBe(failedPrice(o.price).auren);
+    expect(st.spent).toBeLessThan(o.price.auren);
+    expect(st.last).toEqual({ glyph: ENCH.SHARPNESS, rank: 0, erase: false, fail: true });
+    // It can be tried again at the same price, and a roll that takes writes the glyph.
+    expect(menu.options().find((x) => x.def.id === ENCH.SHARPNESS)!.state).toBe('ok');
   });
 
-  it('refuses without enough lapis or levels', () => {
-    const a = rig();
-    put(a.menu, a.menu.itemSlot, sword());
-    put(a.menu, a.menu.lapisSlot, makeStack(LAPIS, 2));
-    expect(a.menu.enchant(2)).toBe(false);
-    expect(a.menu.item!.ench).toBeUndefined();
-    const b = rig({ level: 2 });
-    put(b.menu, b.menu.itemSlot, sword());
-    put(b.menu, b.menu.lapisSlot, makeStack(LAPIS, 5));
-    expect(b.menu.offers[2].cost).toBeGreaterThan(2);
-    expect(b.menu.enchant(2)).toBe(false);
-    expect(b.st.spent).toBe(0);
-    expect(b.menu.lapis?.count).toBe(5);
+  it('takes when the roll is under the chance, and fails at the chance and above', () => {
+    for (const [roll, takes] of [[0, true], [0.5, true], [0.999, false]] as const) {
+      const { menu, inv } = rig({ roll });
+      inv.set(0, makeStack(LAPIS, 10));
+      put(menu, menu.itemSlot, sword());
+      const chance = menu.options().find((x) => x.def.id === ENCH.SHARPNESS)!.chance;
+      menu.inscribe(ENCH.SHARPNESS);
+      expect(!!menu.item!.ench).toBe(roll * 100 < chance);
+      expect(!!menu.item!.ench).toBe(takes);
+    }
+  });
+
+  it('never fails in creative, and a failure of a rank-up keeps the rank', () => {
+    const c = rig({ creative: true, roll: 0.999 });
+    put(c.menu, c.menu.itemSlot, sword());
+    expect(c.menu.options().every((o) => o.chance === 100)).toBe(true);
+    c.menu.inscribe(ENCH.SHARPNESS);
+    expect(c.menu.item!.ench).toEqual([[ENCH.SHARPNESS, 1]]);
+    const { menu, inv, st } = rig({ roll: 0.9999 });
+    inv.set(0, makeStack(LAPIS, 20));
+    put(menu, menu.itemSlot, sword([ENCH.SHARPNESS, 2]));
+    menu.inscribe(ENCH.SHARPNESS);
+    expect(menu.item!.ench).toEqual([[ENCH.SHARPNESS, 2]]);
+    expect(st.last).toMatchObject({ rank: 2, fail: true });
+  });
+
+  it('inscribes for its lapis (from the bags) and its Auren, and says so', () => {
+    const { menu, inv, st } = rig();
+    inv.set(0, makeStack(LAPIS, 10));
+    put(menu, menu.itemSlot, sword());
+    const o = menu.options().find((x) => x.def.id === ENCH.SHARPNESS)!;
+    expect(o.state).toBe('ok');
+    expect(menu.inscribe(ENCH.SHARPNESS)).toBe(true);
+    expect(menu.item!.ench).toEqual([[ENCH.SHARPNESS, 1]]);
+    expect(menu.lapis).toBe(10 - o.price.lapis);
+    expect(st.spent).toBe(o.price.auren);
+    expect(st.done).toBe(1);
+    // The same glyph again is a rank up, and costs the dearer price.
+    const o2 = menu.options().find((x) => x.def.id === ENCH.SHARPNESS)!;
+    expect(o2).toMatchObject({ have: 1, rank: 2, state: 'ok' });
+    expect(o2.price.auren).toBeGreaterThan(o.price.auren);
+    expect(menu.inscribe(ENCH.SHARPNESS)).toBe(true);
+    expect(levelOf(menu.item, ENCH.SHARPNESS)).toBe(2);
+  });
+
+  it('refuses without the lapis, the Auren, the lore, a socket or a fitting piece, and takes nothing', () => {
+    const noLapis = rig();
+    put(noLapis.menu, noLapis.menu.itemSlot, sword());
+    expect(noLapis.menu.inscribe(ENCH.SHARPNESS)).toBe(false);
+    const poor = rig({ auren: 3 });
+    poor.inv.set(0, makeStack(LAPIS, 10));
+    put(poor.menu, poor.menu.itemSlot, sword());
+    expect(poor.menu.inscribe(ENCH.SHARPNESS)).toBe(false);
+    expect(poor.menu.lapis).toBe(10);
+    const bare = rig({ shelves: 0 });
+    bare.inv.set(0, makeStack(LAPIS, 10));
+    put(bare.menu, bare.menu.itemSlot, sword());
+    expect(bare.menu.inscribe(ENCH.FIRE_ASPECT)).toBe(false); // wants lore
+    expect(bare.menu.inscribe(ENCH.EFFICIENCY)).toBe(false); // does not fit
+    expect(bare.menu.inscribe(ENCH.MENDING)).toBe(false); // a treasure
+    for (const id of [-1, 0, 1.5, NaN, 9999]) expect(bare.menu.inscribe(id)).toBe(false);
+    expect(bare.menu.inscribe(ENCH.SHARPNESS)).toBe(true);
+    expect(bare.menu.inscribe(ENCH.KNOCKBACK)).toBe(false); // no socket left
+    expect(bare.menu.item!.ench).toEqual([[ENCH.SHARPNESS, 1]]);
   });
 
   it('is free in creative', () => {
-    const { menu, st } = rig({ level: 0, creative: true });
+    const { menu, st } = rig({ auren: 0, creative: true, shelves: 0 });
     put(menu, menu.itemSlot, sword());
-    expect(menu.enchant(1)).toBe(true);
+    expect(menu.inscribe(ENCH.SHARPNESS)).toBe(true);
     expect(st.spent).toBe(0);
-    expect(menu.item!.ench).toBeDefined();
   });
 
-  it('ignores indexes that are not offers', () => {
-    const { menu } = rig();
-    put(menu, menu.itemSlot, sword());
-    for (const i of [-1, 3, 1.5, NaN]) expect(menu.enchant(i)).toBe(false);
-  });
-
-  it('turns a book into an enchanted book, and hands everything back on close', () => {
+  it('erases a glyph for nothing, freeing its socket', () => {
     const { menu, inv } = rig();
+    inv.set(0, makeStack(LAPIS, 10));
+    put(menu, menu.itemSlot, sword([ENCH.SHARPNESS, 2]));
+    expect(menu.inscribe(ENCH.KNOCKBACK)).toBe(false);
+    expect(menu.erase(ENCH.SHARPNESS)).toBe(true);
+    expect(menu.item!.ench).toBeUndefined();
+    expect(menu.erase(ENCH.SHARPNESS)).toBe(false);
+    expect(menu.inscribe(ENCH.KNOCKBACK)).toBe(true);
+  });
+
+  it('turns a book into a Glyph Tome, and hands everything back on close', () => {
+    const { menu, inv } = rig();
+    inv.set(0, makeStack(LAPIS, 3));
     put(menu, menu.itemSlot, makeStack(I.BOOK));
-    put(menu, menu.lapisSlot, makeStack(LAPIS, 3));
-    expect(menu.enchant(2) || menu.enchant(1) || menu.enchant(0)).toBe(true);
+    expect(menu.inscribe(ENCH.PROTECTION)).toBe(true);
     expect(menu.item!.id).toBe(I.ENCHANTED_BOOK);
     const back = menu.close();
     expect(back.some((s) => s.id === I.ENCHANTED_BOOK && s.ench)).toBe(true);
-    expect(inv.totalItems()).toBe(0);
+    expect(inv.countOf(LAPIS)).toBe(2);
   });
 
-  it('shift-click sends one item to the table and lapis to its own slot', () => {
+  it('shift-click sends one item to the altar and back', () => {
     const { menu, inv } = rig();
     inv.set(0, makeStack(I.BOOK, 3));
-    inv.set(1, makeStack(LAPIS, 7));
     menu.shiftClick(0);
     expect(menu.item?.count).toBe(1);
     expect(inv.get(0)?.count).toBe(2);
-    menu.shiftClick(1);
-    expect(menu.lapis?.count).toBe(7);
-    expect(inv.get(1)).toBeNull();
     menu.shiftClick(menu.itemSlot);
     expect(menu.item).toBeNull();
     expect(inv.countOf(I.BOOK)).toBe(3);
   });
 
-  it('copies the offers a server sent, hint only', () => {
+  it('takes the shelves a server counted', () => {
     const { menu } = rig({ shelves: 0 });
-    menu.adopt(7, [{ cost: 9, clue: [ENCH.SHARPNESS, 2] }, { cost: 0, clue: null }]);
+    menu.adopt(7);
     expect(menu.shelves).toBe(7);
-    expect(menu.offers.map((o) => o.cost)).toEqual([9, 0, 0]);
-    expect(menu.offers[0].clue).toEqual([ENCH.SHARPNESS, 2]);
   });
 });
 
@@ -593,7 +757,7 @@ describe('the anvil', () => {
   });
 
   it('calls a job past thirty-nine levels too expensive', () => {
-    const left = makeStack(toolId('sword', 'diamond'), 1, 500);
+    const left: ItemStack = { ...makeStack(toolId('sword', 'diamond'), 1, 500), gear: { r: 3, l: 1, s: [['might', 3]] } };
     const right = makeStack(toolId('sword', 'diamond'), 1, 1, [
       [ENCH.SHARPNESS, 5],
       [ENCH.LOOTING, 3],
@@ -657,8 +821,8 @@ describe('enchanting in a game session', () => {
     expect(s.countShelves(tx, ty, tz)).toBe(MAX_SHELVES);
   });
 
-  it('opens from the block, enchants over the command channel and takes the price', () => {
-    const { s, world } = make();
+  it('opens from the block, inscribes over the command channel and takes the price', () => {
+    const { s, world } = make(7, () => 0); // a roll that always takes
     const { tx, ty, tz } = table(s, world);
     expect(s.useBlock(tx, ty, tz)).toBe(true);
     expect(s.screen).toBe('enchant');
@@ -667,40 +831,61 @@ describe('enchanting in a game session', () => {
     s.inventory.set(0, sword());
     s.inventory.set(1, makeStack(LAPIS, 6));
     s.apply({ t: 'shift', slot: 0 });
-    s.apply({ t: 'shift', slot: 1 });
     expect(menu.item).not.toBeNull();
-    expect(menu.lapis?.count).toBe(6);
-    s.xp.add(totalForLevel(30));
-    const before = s.xp.level;
-    const offer = menu.offers[2];
-    s.apply({ t: 'enchant', index: 2 });
-    expect(menu.item!.ench).toEqual(offer.list);
-    expect(s.xp.level).toBe(before - 3);
-    expect(menu.lapis?.count).toBe(3);
-    // Closing gives the item back to the inventory, enchantments and all.
+    s.addCoins(500);
+    const o = menu.options().find((x) => x.def.id === ENCH.SHARPNESS)!;
+    s.apply({ t: 'enchant', id: ENCH.SHARPNESS });
+    expect(menu.item!.ench).toEqual([[ENCH.SHARPNESS, 1]]);
+    expect(s.coins).toBe(500 - o.price.auren);
+    expect(s.inventory.countOf(LAPIS)).toBe(6 - o.price.lapis);
+    // Closing gives the item back to the inventory, glyph and all.
     s.apply({ t: 'closeMenu' });
     expect(s.screen).toBe('none');
     const found = [...Array(PLAYER_SLOTS).keys()].map((i) => s.inventory.get(i)).find((x) => x?.id === toolId('sword', 'iron'));
-    expect(found?.ench).toEqual(offer.list);
+    expect(found?.ench).toEqual([[ENCH.SHARPNESS, 1]]);
   });
 
-  it('keeps the same offers until something is enchanted', () => {
-    const { s, world } = make();
+  it('will not take a price that is not there, and erases for nothing', () => {
+    const { s, world } = make(7, () => 0); // a roll that always takes
+    const { tx, ty, tz } = table(s, world);
+    s.useBlock(tx, ty, tz);
+    const menu = s.menu as EnchantMenu;
+    s.inventory.set(0, sword());
+    s.apply({ t: 'shift', slot: 0 });
+    s.apply({ t: 'enchant', id: ENCH.SHARPNESS });
+    expect(menu.item!.ench).toBeUndefined(); // no lapis, no coins
+    s.inventory.set(1, makeStack(LAPIS, 6));
+    s.addCoins(500);
+    s.apply({ t: 'enchant', id: ENCH.SHARPNESS });
+    expect(menu.item!.ench).toBeDefined();
+    const coins = s.coins;
+    s.apply({ t: 'enchant', id: ENCH.SHARPNESS, erase: true });
+    expect(menu.item!.ench).toBeUndefined();
+    expect(s.coins).toBe(coins);
+  });
+
+  it('tells what was inscribed or erased, for the sound of it', () => {
+    const { s, world } = make(7, () => 0); // a roll that always takes
     const { tx, ty, tz } = table(s, world);
     s.useBlock(tx, ty, tz);
     s.inventory.set(0, sword());
+    s.inventory.set(1, makeStack(LAPIS, 20));
     s.apply({ t: 'shift', slot: 0 });
-    const first = JSON.stringify((s.menu as EnchantMenu).offers);
-    s.apply({ t: 'closeMenu' });
-    s.useBlock(tx, ty, tz);
-    const at = [...Array(PLAYER_SLOTS).keys()].find((i) => s.inventory.get(i)?.id === toolId('sword', 'iron'))!;
-    s.apply({ t: 'shift', slot: at });
-    expect(JSON.stringify((s.menu as EnchantMenu).offers)).toBe(first);
+    s.addCoins(2000);
+    s.drainEvents();
+    s.apply({ t: 'enchant', id: ENCH.SHARPNESS });
+    s.apply({ t: 'enchant', id: ENCH.SHARPNESS });
+    s.apply({ t: 'enchant', id: ENCH.SHARPNESS, erase: true });
+    expect(s.drainEvents().filter((e) => e.t === 'enchant')).toEqual([
+      { t: 'enchant', glyph: ENCH.SHARPNESS, rank: 1 },
+      { t: 'enchant', glyph: ENCH.SHARPNESS, rank: 2 },
+      { t: 'enchant', glyph: ENCH.SHARPNESS, rank: 0, erase: true },
+    ]);
   });
 
-  it('ignores the command when no table is open', () => {
+  it('ignores the command when no altar is open', () => {
     const { s } = make();
-    s.apply({ t: 'enchant', index: 0 });
+    s.apply({ t: 'enchant', id: ENCH.SHARPNESS });
     expect(s.screen).toBe('none');
   });
 
@@ -721,10 +906,11 @@ describe('enchanting in a game session', () => {
     expect(s.xp.level).toBe(3);
   });
 
-  it('refuses a command that is not a plain offer index', () => {
+  it('refuses a command that is not a glyph id', () => {
     expect(parseSessionMessage({ t: 'cmd' })).toBeNull();
-    expect(parseSessionMessage({ t: 'enchant', index: 2 })).toEqual({ t: 'enchant', index: 2 });
-    for (const index of [-1, 3, 1.5, '1', null, NaN, Infinity]) expect(parseSessionMessage({ t: 'enchant', index })).toBeNull();
+    expect(parseSessionMessage({ t: 'enchant', id: 7 })).toEqual({ t: 'enchant', id: 7 });
+    expect(parseSessionMessage({ t: 'enchant', id: 7, erase: true })).toEqual({ t: 'enchant', id: 7, erase: true });
+    for (const id of [-1, 0, 256, 1.5, '1', null, NaN, Infinity]) expect(parseSessionMessage({ t: 'enchant', id })).toBeNull();
   });
 });
 
@@ -932,12 +1118,23 @@ describe('enchanted books in loot', () => {
     expect(new Set(books.map((b) => b.ench![0][0])).size).toBeGreaterThan(5);
   });
 
-  it('can be Mending, which no table offers', () => {
+  it('can be Renewal, which no altar offers', () => {
     const seen = new Set<number>();
     const rand = mulberry32(2);
-    for (let i = 0; i < 500; i++) seen.add(randomEnchantedBook(rand).ench![0][0]);
+    for (let i = 0; i < 1500; i++) seen.add(randomEnchantedBook(rand).ench![0][0]);
     expect(seen.has(ENCH.MENDING)).toBe(true);
-    for (let seed = 1; seed < 200; seed++)
-      for (const o of enchantOffers(seed, 15, toolId('pickaxe', 'diamond'))) expect(o.list.some(([id]) => id === ENCH.MENDING)).toBe(false);
+    for (const o of glyphOptions(makeStack(toolId('pickaxe', 'diamond')), { shelves: 15, lapis: 99, auren: 99999 })) expect(o.def.id).not.toBe(ENCH.MENDING);
+  });
+
+  it('moves a tomes Temper onto a shield, and explains when a tome cannot be used', () => {
+    const tome: ItemStack = { id: I.ENCHANTED_BOOK, count: 1, damage: 0, ench: [[ENCH.UNBREAKING, 1]] };
+    const shield: ItemStack = { id: I.SHIELD, count: 1, damage: 0 };
+    expect(anvilResult(shield, tome)?.result.ench).toEqual([[ENCH.UNBREAKING, 1]]);
+    expect(tomeBlocked(shield, tome)).toBeNull();
+    const sharp: ItemStack = { id: I.ENCHANTED_BOOK, count: 1, damage: 0, ench: [[ENCH.SHARPNESS, 1]] };
+    expect(anvilResult(shield, sharp)).toBeNull();
+    expect(tomeBlocked(shield, sharp)).toMatch(/None of this tome/);
+    const full: ItemStack = { ...shield, ench: [[ENCH.VIGOR, 1]] };
+    expect(tomeBlocked(full, tome)).toMatch(/no free glyph socket/);
   });
 });

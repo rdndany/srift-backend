@@ -185,7 +185,7 @@ export function installDebugHooks(parts: DebugParts): void {
     },
     /** Hide the first-person hand (for clean screenshots). */
     setHandHidden: (v: boolean) => parts.setHandHidden(v),
-    mapState: () => ({ inside: !!mapData.inside, up: useUi.getState().mapUp, mini: useUi.getState().minimap, zoom: useUi.getState().mapZoom, painted: mapData.painted, underground: mapData.underground }),
+    mapState: () => ({ inside: !!mapData.inside, up: useUi.getState().mapUp, zoom: useUi.getState().mapZoom, painted: mapData.painted, underground: mapData.underground }),
     setMapUp: (up: boolean) => setMapUp(up),
     /** Pretend the server has sent these map pins (for looking at them). */
     setMapPins(party: { name: string; x: number; z: number }[]) {
@@ -242,9 +242,9 @@ export function installDebugHooks(parts: DebugParts): void {
     useBlock: (x: number, y: number, z: number) => act(() => L().useBlock(x, y, z)),
     useOn: (x: number, y: number, z: number, nx: number, ny: number, nz: number, fy?: number) => act(() => L().useOn(x, y, z, nx, ny, nz, fy)),
     growCrops: (seconds: number) => world.growCrops(seconds),
-    swingHand: () => {
-      hand.swing();
-      selfView.swing();
+    swingHand: (rate = 1) => {
+      hand.swing(rate);
+      selfView.swing(rate);
     },
     /** Hold/release the right mouse button without pointer lock. */
     setRight: (down: boolean) => void (input.rightDown = down),
@@ -278,6 +278,8 @@ export function installDebugHooks(parts: DebugParts): void {
     /** Lay items in a row on the ground (nobody can pick them up): `ids` along +x from (x, y, z). */
     spawnDrops: (ids: number[], x: number, y: number, z: number, gap = 0.9) =>
       ids.forEach((id, i) => L().realm.drops.spawn(makeStack(id, 1), x + i * gap, y, z, 0, 0, 0, 999)),
+    /** Lay one enchanted item on the ground (nobody can pick it up): `ench` is a list of [glyph id, rank]. */
+    spawnEnchantedDrop: (id: number, ench: [number, number][], x: number, y: number, z: number) => L().realm.drops.spawn(makeStack(id, 1, 0, ench), x, y, z, 0, 0, 0, 999),
     // ---- view hooks ----
     view: () => selfView.mode,
     /** Put a mount's horn in the mount slot (and be high enough level to ride it); `summon()` then calls it as the key does. */
@@ -320,8 +322,27 @@ export function installDebugHooks(parts: DebugParts): void {
     blast: (x: number, y: number, z: number, radius: number) => act(() => L().hurtByExplosion(x, y, z, radius, 'creeper')),
     shield: () => ({ offhand: L().offhand.toJSON()[0], blocking: session.blocking, blockTime: L().blockTime, held: session.held ? session.held.id : 0, health: session.vitals.health }),
     swapHands: () => act(() => L().swapHands()),
-    setOffhand: (id: number) => act(() => L().offhand.set(0, id ? { id, count: 1, damage: 0 } : null)),
+    setOffhand: (id: number, ench?: [number, number][]) => act(() => L().offhand.set(0, id ? makeStack(id, 1, 0, ench) : null)),
     sendCommand: (c: Command) => act(() => L().apply(c)),
+    // ---- rift hooks ----
+    /** Open a rift now near the player (a grade, or a random one). Returns whether one opened. */
+    startRift: (grade?: 'uncommon' | 'rare' | 'epic') => act(() => L().realm.startRift(grade)),
+    /** What the rift is doing (its phase, wave, the monsters left, where), or null. */
+    riftState: () => L().riftView(),
+    /** Let the rift's clock run on by this many seconds (the world is not stepped: monsters stay as they are). */
+    riftSkip: (seconds: number) =>
+      act(() => {
+        for (let t = 0; t < seconds; t += 0.5) L().realm.rifts?.update(0.5);
+      }),
+    /** Kill every monster of the rift (as the player: credit goes to those near). */
+    riftKillAll: () =>
+      act(() => {
+        const r = L().realm;
+        for (const m of [...r.mobs.mobs]) if (m.rift !== 0 && !m.dead) {
+          m.sincePlayerHit = 0;
+          r.mobs.damage(m, 9999, 0, 0, r.mobEvents, true, false, true);
+        }
+      }),
     // ---- enchanting hooks ----
     /** The id of an item by its name (`iron_sword`, `blue_dye`), or -1. */
     itemId: (name: string) => allItems().find((i) => i.name === name)?.id ?? -1,
@@ -348,7 +369,7 @@ export function installDebugHooks(parts: DebugParts): void {
     /** The open enchanting table or anvil: what it shows. */
     enchantScreen: () => {
       const m = session.menu;
-      if (m instanceof EnchantMenu) return { kind: 'enchant', shelves: m.shelves, offers: m.offers.map((o) => ({ cost: o.cost, clue: o.clue })), item: m.item, lapis: m.lapis?.count ?? 0 };
+      if (m instanceof EnchantMenu) return { kind: 'enchant', shelves: m.shelves, options: m.options().map((o) => ({ id: o.def.id, name: o.def.name, rank: o.rank, have: o.have, state: o.state, price: o.price, lore: o.lore })), item: m.item, lapis: m.lapis };
       if (m instanceof AnvilMenu) return { kind: 'anvil', cost: m.cost, tooExpensive: m.tooExpensive, name: m.name };
       if (m instanceof GrindstoneMenu) return { kind: 'grindstone', xp: m.xp };
       return null;
@@ -410,6 +431,9 @@ export function installDebugHooks(parts: DebugParts): void {
         return picked;
       }),
     // ---- mob hooks ----
+    /** The attack speed of the class now (with gear and glyphs) and the pace of the last swing. */
+    attackSpeed: () => L().cls?.stats.attackSpeed ?? 1,
+    swingRate: () => L().swingRate,
     spawnMob: (kind: MobKind, x: number, y: number, z: number, variant = 0) => L().spawnMob(kind, x, y, z, variant),
     mobs: () =>
       session.mobs.mobs.map((m) => ({

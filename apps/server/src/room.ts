@@ -10,16 +10,25 @@ import {
   GrindstoneMenu,
   CraftingMenu,
   EnchantMenu,
+  glowCode,
   TradeMenu,
   ADVENTURE_LAYOUT,
   GENERATOR_VERSION,
   ADVENTURE_SEED,
   CHUNK_VOLUME,
   lookCode,
+  parseWornCode,
+  plainCodeOf,
+  wornCode,
+  outfitSetFits,
+  outfitSetOfItem,
+  makeStack,
+  Container,
   lookFromName,
   parseLookCode,
   makeGenerator,
   parsePlayerSave,
+  parseNetClientMessage,
   type PlayerSave,
   type StashView,
   stashViewOf,
@@ -70,6 +79,7 @@ import {
   memberOf,
   motdError,
   rankError,
+  type GuildCard,
   type GuildData,
   type ChatChannel,
   type SocialAction,
@@ -82,11 +92,14 @@ import {
   type TradeView,
 } from '@solrift/shared';
 
-import { cleanQuery, type AuctionQuery, type AuctionView } from '@solrift/shared';
+import { cleanQuery, type AuctionQuery, type AuctionView, type TokenMove } from '@solrift/shared';
 import type { RoomStore } from './roomStore';
 import { BANS_KEY, findItem, isAdminIdentity, itemMatches, parseBans, type AdminEvent, type AdminOptions, type Bans } from './admin';
 import { entryOf, findMember, inspectView, socialView, splitTarget } from './social';
 import { GuildRegistry } from './guilds';
+
+/** What a Camp action says for itself: done (with a line for the player) or refused (with the reason). */
+export type DeskResult = { ok: true; message: string } | { ok: false; error: string };
 
 /** The room's view of one connection. */
 export interface RoomConnection {
@@ -120,12 +133,46 @@ export interface RoomOptions {
   /** Game mode new players start in. */
   mode?: SaveMode;
   naturalSpawning?: boolean;
+  /** Rifts (timed co-op world events): on whenever natural spawning is, unless said. */
+  rifts?: boolean;
   /** Allow cheat commands in chat (/time, /weather, /gamemode, /tp). Off on shared servers. */
   cheats?: boolean;
   /** Who may switch on admin mode with `/admin on` (see `admin.ts`). Nobody, when absent. */
   admins?: AdminOptions;
   /** Called for every admin act (and every refused try at `/admin`), for the log. */
   onAdmin?: (e: AdminEvent) => void;
+  /**
+   * An achievement was won by a signed-in wallet in honest play (never in creative, in admin mode, or on a cheats server).
+   * Returns the whole $SOLRIFT it paid into the wallet's balance, which the player is told about (0: nothing).
+   */
+  onAchievement?: (e: { wallet: string; account: string | null; id: string }) => number;
+  /**
+   * A dungeon was cleared by a signed-in wallet that fought in it in the last minute (same rules as `onAchievement`: honest play only).
+   * Returns the whole $SOLRIFT it paid into the wallet's balance (0: nothing).
+   */
+  onClear?: (e: { wallet: string; account: string | null; id: string }) => number;
+  /**
+   * A daily bounty was finished by a signed-in wallet in honest play (same rules as `onAchievement`). `day` is the UTC day it was posted for.
+   * Returns the whole $SOLRIFT it paid into the wallet's balance (0: nothing).
+   */
+  onBounty?: (e: { wallet: string; account: string | null; id: string; day: number }) => number;
+  /**
+   * Lets a player into a dungeon with a Hollow Key bought with $SOLRIFT (absent: the dungeon's own item only). `count` is how many the wallet holds,
+   * `take` uses one up and returns how many are left (-1: none).
+   */
+  keys?: { count(wallet: string): number; take(wallet: string): number };
+  /** How many extra stash tabs a wallet has bought (absent: none, the plain stash). */
+  stashTabs?: (wallet: string) => number;
+  /** The wall clock in ms (default `Date.now`): what the day's bounties are cut by. Tests set their own. */
+  now?: () => number;
+  /**
+   * Lets players trade in $SOLRIFT at the Auction House (absent: Auren only). `balance` is a wallet's spendable balance; `commit` writes the
+   * house's token moves to the ledger and calls `save` (which writes the house), all in one transaction, and throws if it cannot.
+   */
+  tokens?: {
+    balance(wallet: string): number;
+    commit(scope: string, moves: readonly TokenMove[], save: () => void): void;
+  };
   rand?: () => number;
 
   /** Where the world and signed-in players' progress are kept. Without it nothing survives a restart. */
@@ -162,6 +209,11 @@ export interface RoomStats {
   kicks: number;
 }
 
+/** What a member looks like to everyone: the look it chose and, over it, the glowing set in its outfit slot (read live, so putting one on shows at once). */
+function lookOf(m: { look: number; player: Player }): number {
+  return wornCode(plainCodeOf(m.look), m.player.wornOutfit);
+}
+
 type QueueItem = { k: 'input'; f: NetInput } | { k: 'cmd'; c: Command };
 
 interface Member {
@@ -175,6 +227,8 @@ interface Member {
   admin: boolean;
   /** The wallet that signed in (null for a guest). */
   wallet: string | null;
+  /** The tick at which this player last landed a hit on a mob (-Infinity: never). A dungeon clear only pays those who were fighting. */
+  fightTick: number;
   /** Admin mode is on (`/admin on`). Always off at join, and only ever turned on for an `admin`. */
   adminOn: boolean;
   /** The tick until which they may not chat (`/mute`). */
@@ -220,6 +274,8 @@ const ADMIN_COMMANDS = new Set(['players', 'kick', 'ban', 'unban', 'bans', 'mute
 const CHAT_COMMANDS = new Set(['w', 'whisper', 'tell', 'r', 'reply', 'g', 'p', 'me', 'emote']);
 
 /** Most input a player may bank while the network stalls, in seconds. */
+/** A dungeon clear pays a player who landed a hit on a mob within this many seconds of the kill. */
+const CLEAR_ENGAGED_SECONDS = 60;
 const MAX_BUDGET = 0.25;
 const MAX_QUEUE = 240;
 /** Commands per second a player may send (a burst of CMD_BURST is allowed). */
@@ -299,9 +355,28 @@ export class GameRoom {
     this.tickHz = opts.tickHz ?? 20;
     const generator = makeGenerator(this.seed, this.kind);
     this.world = new HeadlessWorld(generator);
-    this.realm = new Realm({ seed: this.seed, world: this.world, generator, naturalSpawning: opts.naturalSpawning ?? true, rand: opts.rand, sleeping: false, auctionStock: false });
+    this.realm = new Realm({ seed: this.seed, world: this.world, generator, naturalSpawning: opts.naturalSpawning ?? true, rifts: opts.rifts ?? opts.naturalSpawning ?? true, rand: opts.rand, sleeping: false, auctionStock: false });
+    if (opts.now) this.realm.clock = opts.now;
     if (opts.store) this.loadWorld(opts.store);
     if (opts.store) this.realm.auctions.load(opts.store.getJson(this.auctionKey));
+    if (opts.stashTabs) this.realm.stashes.tabsOf = opts.stashTabs;
+    const keys = opts.keys;
+    if (keys) {
+      const wallet = (p: Player): string | null => this.walletOf(p);
+      this.realm.keyDesk = {
+        allowed: (p) => this.honestTrader(p),
+        has: (p) => this.honestTrader(p) && keys.count(wallet(p)!) > 0,
+        take: (p) => (this.honestTrader(p) ? keys.take(wallet(p)!) : -1),
+      };
+    }
+    const tokens = opts.tokens;
+    if (tokens) {
+      this.realm.tokenDesk = {
+        allowed: (p) => this.honestTrader(p),
+        balance: (wallet) => tokens.balance(wallet) + this.realm.auctions.pendingTokens(wallet),
+        flush: () => this.commitAuctionMoves(),
+      };
+    }
     this.guilds = new GuildRegistry(opts.store ?? null);
     this.world.onChange = (x, y, z, id) => {
       this.pendingBlocks.push(x, y, z, id);
@@ -320,9 +395,60 @@ export class GameRoom {
   }
 
   /** What a wallet's Stash holds right now (the live one when a character has it open, else the saved one), for the lobby. */
+  /** The stash tabs a wallet has (0 when it cannot be told). */
+  private safeTabs(wallet: string): number {
+    try {
+      return this.opts.stashTabs?.(wallet) ?? 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  /** A wallet's stash as the realm holds it, read in from the store first when none of its heroes has been in the world since the server started. */
+  private stashFor(wallet: string): Container {
+    this.realm.stashes.load(wallet, this.opts.store?.getJson(`stash:${wallet}`) ?? null);
+    return this.realm.stashes.of(wallet);
+  }
+
+  /** How many slots of a wallet's stash are empty. */
+  stashFree(wallet: string): number {
+    const c = this.stashFor(wallet);
+    let n = 0;
+    for (let i = 0; i < c.size; i++) if (!c.get(i) && c.isUsable(i)) n++;
+    return n;
+  }
+
+  /** How many of an item a wallet's stash holds. */
+  stashCount(wallet: string, itemId: number): number {
+    return this.stashFor(wallet).countOf(itemId);
+  }
+
+  /** Put one of an item in a wallet's stash, and write it down at once (it is something the wallet paid for). False when it does not fit: nothing is put in. */
+  stashGive(wallet: string, itemId: number): boolean {
+    const stack = makeStack(itemId, 1);
+    if (!this.stashFor(wallet).canFit(stack)) return false;
+    if (this.realm.stashes.put(wallet, stack, 1) < 1) return false;
+    if (this.opts.store) {
+      this.opts.store.setJson(`stash:${wallet}`, this.realm.stashes.toJSON(wallet));
+      this.realm.stashes.dirty.delete(wallet);
+    }
+    return true;
+  }
+
+  /** The id of the glowing set a character of this class has on in its saved record (null: none, or not one of its class). */
+  wornOutfitOf(accountId: string, cls: ClassId | null): string | null {
+    const save = this.characterSave(accountId);
+    if (!save) return null;
+    const slot = new Container(1);
+    slot.loadJSON(save.outfitSlot);
+    const s = slot.get(0);
+    const def = s ? outfitSetOfItem(s.id) : null;
+    return def && outfitSetFits(s!.id, cls) ? def.id : null;
+  }
+
   stashOf(wallet: string): StashView {
     if (this.realm.stashes.has(wallet)) return this.realm.stashes.view(wallet);
-    return stashViewOf(this.opts.store?.getJson(`stash:${wallet}`) ?? null);
+    return stashViewOf(this.opts.store?.getJson(`stash:${wallet}`) ?? null, this.safeTabs(wallet));
   }
 
   /**
@@ -342,6 +468,118 @@ export class GameRoom {
   hasAccount(accountId: string): boolean {
     for (const m of this.members.values()) if (m.key === accountId) return true;
     return false;
+  }
+
+  /** Is any character of this wallet in the room right now (its Stash is open to them, so nobody else may change it)? */
+  hasWallet(wallet: string): boolean {
+    for (const m of this.members.values()) if (m.wallet === wallet) return true;
+    return false;
+  }
+
+  /** The names of the people in the room, for the website's chat. */
+  onlineNames(): string[] {
+    return [...this.members.values()].map((m) => m.name).sort((a, b) => a.localeCompare(b));
+  }
+
+  // ---- the website's Camp (see desk.ts) -------------------------------------------------------------------------------
+
+  /** The guild of an account, for the Camp page: the roster with who is in the room now (leaders first), or null. */
+  guildCard(accountId: string): GuildCard | null {
+    const g = this.guilds.of(accountId);
+    if (!g) return null;
+    const here = new Set<string>();
+    for (const m of this.members.values()) if (m.key) here.add(m.key);
+    const me = g.members.find((x) => x.key === accountId);
+    return {
+      name: g.name,
+      tag: g.tag,
+      motd: g.motd,
+      you: me ? me.rank : 2,
+      members: [...g.members].sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name)).map((x) => ({ name: x.name, rank: x.rank, online: here.has(x.key) })),
+    };
+  }
+
+  /** The last lines of public chat, newest last, each with a number that only grows (a page asks for what came after the last it has). */
+  private readonly chatLog: { n: number; at: number; from: string; text: string }[] = [];
+  private chatSeq = 0;
+  private readonly webChatAt = new Map<string, number>();
+
+  private logChat(from: string, text: string): void {
+    this.chatLog.push({ n: ++this.chatSeq, at: Date.now(), from, text });
+    if (this.chatLog.length > 100) this.chatLog.shift();
+  }
+
+  /** Chat lines after number `since` (`from` is empty for a notice such as "Ann joined"). */
+  chatSince(since: number): { n: number; at: number; from: string; text: string }[] {
+    return this.chatLog.filter((l) => l.n > since).slice(-60);
+  }
+
+  /** The number of the last chat line (0: none yet). */
+  get chatHead(): number {
+    return this.chatSeq;
+  }
+
+  /**
+   * A line of chat from the website, as if the hero had said it in the game (only the public channel: commands, whispers and guild talk
+   * stay in the game). Returns why it was not sent, or null. A signed-in hero only, one line every two seconds, and a muted or banned one is not heard.
+   */
+  webSay(accountId: string, wallet: string, name: string, raw: string): string | null {
+    const msg = parseNetClientMessage({ t: 'chat', text: raw });
+    if (!msg || msg.t !== 'chat') return 'Write something first.';
+    const text = msg.text;
+    if (text.startsWith('/')) return 'Commands only work in the game.';
+    const now = Date.now();
+    if (now - (this.webChatAt.get(accountId) ?? 0) < 2000) return 'Slow down a little.';
+    const bans = this.bans();
+    if (bans[accountId] || bans[wallet]) return 'You cannot talk here.';
+    for (const m of this.members.values()) if (m.key === accountId && this.muted(m)) return 'You are muted.';
+    this.webChatAt.set(accountId, now);
+    if (this.webChatAt.size > 2000) this.webChatAt.clear();
+    this.broadcast({ t: 'chat', from: name, text, ch: 'say' });
+    this.logChat(name, text);
+    return null;
+  }
+
+  /**
+   * Do something to a hero that is saved but not in the game (what the Camp page does from a phone). The saved hero is read into a Player
+   * with no body in the world, `fn` asks it things (it may stand at a counter), and only what changed in the bags, the worn slots and the purse
+   * is written back, together with the Stash and the Auction House when they were touched. A hero that is in the game, and its wallet's Stash
+   * while another hero of the wallet is, are left alone: the game holds the live copy.
+   */
+  withSavedHero(hero: { id: string; wallet: string; name: string; cls: ClassId | null }, fn: (p: Player) => DeskResult): DeskResult {
+    const store = this.opts.store;
+    if (!store) return { ok: false, error: 'This server does not keep heroes.' };
+    if (this.hasAccount(hero.id) || this.hasWallet(hero.wallet)) return { ok: false, error: 'A hero of yours is in the game right now. Leave the game first (the Camp cannot change what the game is holding).' };
+    const save = parsePlayerSave(store.getJson(`player:${hero.id}`));
+    if (!save) return { ok: false, error: 'Play this hero once in the game first.' };
+    if (save.mode === 'creative') return { ok: false, error: 'Heroes in creative mode have no Camp.' };
+    const p = new Player(this.realm, { mode: 'survival', name: hero.name, classId: hero.cls, account: hero.id, wallet: hero.wallet });
+    try {
+      this.realm.stashes.load(hero.wallet, store.getJson(`stash:${hero.wallet}`));
+      p.loadPlayer(save);
+      p.finishLoading();
+      p.drainEvents();
+      const res = fn(p);
+      if (!res.ok) return res;
+      const out = p.savePlayer();
+      const next: PlayerSave = { ...save, inv: out.inv, armor: out.armor, offhand: out.offhand, mountSlot: out.mountSlot, outfitSlot: out.outfitSlot, companionSlot: out.companionSlot, wingSlot: out.wingSlot, accessories: out.accessories };
+      if (out.bags) next.bags = out.bags;
+      else delete next.bags;
+      if (out.coins) next.coins = out.coins;
+      else delete next.coins;
+      store.setJson(`player:${hero.id}`, next);
+      if (this.realm.stashes.dirty.has(hero.wallet)) {
+        store.setJson(`stash:${hero.wallet}`, this.realm.stashes.toJSON(hero.wallet));
+        this.realm.stashes.dirty.delete(hero.wallet);
+      }
+      if (p.auctionTouched) {
+        this.commitAuctionMoves();
+        this.saveAuctions();
+      }
+      return res;
+    } finally {
+      p.leave();
+    }
   }
 
   /** How many players the room takes (`MAX_PLAYERS`). */
@@ -384,6 +622,40 @@ export class GameRoom {
   /** Where the Auction House is kept (one per world, like the world itself). */
   private get auctionKey(): string {
     return `auction:${this.storeSeed}`;
+  }
+
+  /** The wallet a player signed in with (null for a guest). */
+  private walletOf(player: object): string | null {
+    for (const m of this.members.values()) if (m.player === player) return m.wallet;
+    return null;
+  }
+
+  /** May this player trade in $SOLRIFT: a signed-in wallet in honest play (never creative, admin mode, or a cheats server). */
+  private honestTrader(player: object): boolean {
+    for (const m of this.members.values()) {
+      if (m.player === player) return !!m.wallet && !m.adminOn && !this.opts.cheats && m.player.mode !== 'creative';
+    }
+    return false;
+  }
+
+  /**
+   * Hand the house's waiting $SOLRIFT moves to the ledger, and write the house with them in the same transaction. The moves stay in the
+   * house (and in what is saved) until the ledger has them, so a failure here, or a crash, is made good by sending them again.
+   */
+  private commitAuctionMoves(): void {
+    const tokens = this.opts.tokens;
+    const house = this.realm.auctions;
+    if (!tokens || house.moves.length === 0) return;
+    const batch = [...house.moves];
+    try {
+      tokens.commit(this.auctionKey, batch, () => {
+        const store = this.opts.store;
+        if (store) store.setJson(this.auctionKey, house.toJSON());
+      });
+      house.ackMoves(batch);
+    } catch (err) {
+      console.error('[solrift] writing the auction house token moves failed (they will be retried)', err);
+    }
   }
 
   /** Write the Auction House down now (what a player did there is money and items: it is not left for the next autosave). */
@@ -497,17 +769,19 @@ export class GameRoom {
     player.finishLoading();
     const id = this.nextId++;
     // A look nobody chose (an old client, a bot) is made from the name, so players still tell apart.
-    const look = parseLookCode(wantedLook) ? (wantedLook as number) : lookCode(lookFromName(name));
-    const m: Member = { id, name, look, key, admin, wallet, adminOn: false, mutedUntil: 0, player, conn, queue: [], budget: 0, ack: 0, lastSeq: 0, invDirty: true, chatTokens: 5, socialTokens: SOCIAL_BURST, book: key && this.opts.store ? parseSocialBook(this.opts.store.getJson(`social:${key}`)) : new SocialBook(), replyTo: null, guildInvite: null, trade: null, tradeAsk: null, tradeTokens: TRADE_BURST, cmdTokens: CMD_BURST, score: 0, warned: false, messages: 0, fxSent: new Map() };
+    // (The server alone passes an outfit: a guest's look came through `parseNetClientMessage`, which takes a plain look only.)
+    const look = parseWornCode(wantedLook) !== null ? (wantedLook as number) : lookCode(lookFromName(name));
+    const m: Member = { id, name, look, key, admin, wallet, fightTick: -Infinity, adminOn: false, mutedUntil: 0, player, conn, queue: [], budget: 0, ack: 0, lastSeq: 0, invDirty: true, chatTokens: 5, socialTokens: SOCIAL_BURST, book: key && this.opts.store ? parseSocialBook(this.opts.store.getJson(`social:${key}`)) : new SocialBook(), replyTo: null, guildInvite: null, trade: null, tradeAsk: null, tradeTokens: TRADE_BURST, cmdTokens: CMD_BURST, score: 0, warned: false, messages: 0, fxSent: new Map() };
     this.members.set(id, m);
 
-    conn.send({ t: 'joined', id, name, look, seed: this.seed, kind: this.kind, tickHz: this.tickHz, time: this.realm.time });
+    conn.send({ t: 'joined', id, name, look: lookOf(m), seed: this.seed, kind: this.kind, tickHz: this.tickHz, time: this.realm.time });
     const edits = this.world.diffAgainstTerrain();
     if (edits.length === 0) conn.send({ t: 'edits', blocks: [], last: true });
     for (let i = 0; i < edits.length; i += EDITS_PER_MESSAGE) {
       conn.send({ t: 'edits', blocks: edits.slice(i, i + EDITS_PER_MESSAGE), last: i + EDITS_PER_MESSAGE >= edits.length });
     }
     this.broadcast({ t: 'notice', text: `${name} joined` }, id);
+    this.logChat('', `${name} joined`);
     this.presence(m, true);
     player.drainEvents();
     player.syncQuests(); // the log was among the events just thrown away
@@ -529,6 +803,7 @@ export class GameRoom {
     this.members.delete(id);
     if (m.trade) this.endTrade(m, `${m.name} left: the trade was called off.`);
     this.broadcast({ t: 'notice', text: `${m.name} left` });
+    this.logChat('', `${m.name} left`);
     this.presence(m, false);
   }
 
@@ -639,6 +914,7 @@ export class GameRoom {
     }
     if (this.muted(m)) return this.tell(m, 'You are muted.');
     this.say(m, { t: 'chat', from: m.name, text, ch: 'say' });
+    this.logChat(m.name, text);
   }
 
   /** Send a line of chat to everyone except the people who ignore its sender. */
@@ -1007,7 +1283,7 @@ export class GameRoom {
     if (CHAT_COMMANDS.has(cmd) && this.muted(m)) return this.tell(m, 'You are muted.');
     switch (cmd) {
       case 'help':
-        this.tell(m, `Commands: /help /who /home /w /r /me /friend /ignore /inspect /trade /guild /g /party /p${this.cheatsFor(m) ? ' /time /weather /gamemode /tp /xp /coins' : ''}${m.adminOn ? ' (admin: /admin help)' : m.admin ? ' /admin' : ''}`);
+        this.tell(m, `Commands: /help /who /home /w /r /me /friend /ignore /inspect /trade /guild /g /party /p${this.cheatsFor(m) ? ' /time /weather /gamemode /tp /xp /coins /rift' : ''}${m.adminOn ? ' (admin: /admin help)' : m.admin ? ' /admin' : ''}`);
         return;
       case 'who':
         this.tell(m, `Online (${this.members.size}): ${[...this.members.values()].map((x) => x.name).join(', ')}`);
@@ -1091,6 +1367,7 @@ export class GameRoom {
       case 'tp':
       case 'xp':
       case 'coins':
+      case 'rift':
         if (!this.cheatsFor(m)) {
           this.tell(m, 'Cheats are off on this server');
           this.strike(m, STRIKES.forbidden, 'cheat command without cheats');
@@ -1328,6 +1605,11 @@ export class GameRoom {
       if (n <= 0) return this.tell(m, 'Usage: /coins <amount>');
       p.addCoins(n);
       this.tell(m, `You carry ${p.coins} coins`);
+    } else if (name === 'rift') {
+      const g = (args[0] ?? '').toLowerCase();
+      const grade = g === 'uncommon' || g === 'rare' || g === 'epic' ? g : undefined;
+      if (args[0] && !grade) return this.tell(m, 'Usage: /rift [uncommon|rare|epic]');
+      this.tell(m, this.realm.startRift(grade) ? 'A rift is tearing open nearby' : this.realm.rifts?.current ? 'A rift is already open' : 'No place for a rift here');
     } else if (name === 'tp') {
       const [x, y, z] = args.map(Number);
       if (![x, y, z].every((v) => Number.isFinite(v) && Math.abs(v) < 30_000_000)) return this.tell(m, 'Usage: /tp x y z');
@@ -1422,6 +1704,7 @@ export class GameRoom {
         console.error(`[solrift] saving player ${m.name} failed`, err);
       }
     }
+    this.commitAuctionMoves();
     if (this.realm.auctions.dirty) this.saveAuctions();
   }
 
@@ -1501,7 +1784,7 @@ export class GameRoom {
       view: {
         id: o.id,
         name: o.name,
-        look: o.look,
+        look: lookOf(o),
         x: round(ob.x),
         y: round(ob.y),
         z: round(ob.z),
@@ -1510,18 +1793,23 @@ export class GameRoom {
         sneaking: o.player.sneaking,
         onGround: ob.onGround,
         held: o.player.held?.id ?? 0,
+        ...(glowCode(o.player.held) ? { hg: glowCode(o.player.held) } : {}),
+        ...(glowCode(o.player.offhand.get(0)) ? { og: glowCode(o.player.offhand.get(0)) } : {}),
         armor: o.player.armorIds(),
         offhand: o.player.offhand.get(0)?.id ?? 0,
         blocking: o.player.blocking,
         ...(o.player.eatProgress > 0 ? { ea: 1 as const } : {}),
         ...(o.player.screen === 'dead' ? { dd: 1 as const } : {}),
-        ...(o.player.swingAge < 0.35 ? { sw: round(o.player.swingAge) } : {}),
+        ...(o.player.swingAge * o.player.swingRate < 0.35 ? { sw: round(o.player.swingAge), ...(o.player.swingRate !== 1 ? { sr: o.player.swingRate } : {}) } : {}),
         ...(o.player.slamPhase ? { sl: o.player.slamPhase } : {}),
         ...(o.player.charging ? { rs: 1 as const } : {}),
         ...(o.player.emberProgress > 0 ? { em: round(o.player.emberProgress) } : {}),
         ...(o.player.bashAge < BASH_ANIM ? { bs: round(o.player.bashAge) } : {}),
         sleeping: o.player.sleeping ? o.player.sleeping.dir + 1 : 0,
         ...(o.player.mountId ? { mt: o.player.mountView().mount } : {}),
+        ...(o.player.companionNumber > 0 ? { pt: o.player.companionNumber } : {}),
+        ...(o.player.wingNumber > 0 ? { wg: o.player.wingNumber } : {}),
+        ...(o.player.wingFlying ? { fl: 1 as const } : {}),
         ...(o.player.cls ? { cls: o.player.cls.classId, clv: o.player.cls.level } : {}),
         ...(o.key && this.guilds.of(o.key) ? { gt: this.guilds.of(o.key)!.tag } : {}),
       },
@@ -1539,11 +1827,51 @@ export class GameRoom {
     m.fxSent.clear();
   }
 
+  /**
+   * Pay what the achievements won this tick (and the dungeon clears) are worth in $SOLRIFT, and tell the player (the amount is the
+   * server's, never the client's). Events are read in order, so a blow and the kill it made in the same tick count as fighting.
+   */
+  private payAchievements(m: Member, events: SessionEvent[]): void {
+    // A hit this player landed on a mob (not damage they took): they are fighting. Noted for everyone, paid or not, so it is true when it matters.
+    const engaged = (): boolean => this.tickCount - m.fightTick <= CLEAR_ENGAGED_SECONDS * this.tickHz;
+    const honest = !!m.wallet && !m.adminOn && !this.opts.cheats && m.player.mode !== 'creative';
+    for (const e of events) {
+      if (e.t === 'dmg' && !e.taken) {
+        m.fightTick = this.tickCount;
+        continue;
+      }
+      if (!honest) continue;
+      if (e.t === 'bounty') {
+        let paid = 0;
+        try {
+          paid = this.opts.onBounty?.({ wallet: m.wallet!, account: m.key, id: e.id, day: e.day }) ?? 0;
+        } catch (err) {
+          console.error('[solrift] paying a bounty failed', err);
+        }
+        if (paid > 0) m.conn.send({ t: 'notice', text: `+${paid} $SOLRIFT added to your balance (daily bounty: ${e.name})` });
+        continue;
+      }
+      if (e.t !== 'achievement' && e.t !== 'clear') continue;
+      // Standing near a boss while others kill it earns nothing: only a player who landed a hit lately is paid for a clear.
+      if (e.t === 'clear' && !engaged()) continue;
+      const pay = e.t === 'achievement' ? this.opts.onAchievement : this.opts.onClear;
+      if (!pay) continue;
+      let paid = 0;
+      try {
+        paid = pay({ wallet: m.wallet!, account: m.key, id: e.id });
+      } catch (err) {
+        console.error(`[solrift] paying ${e.t === 'achievement' ? 'an achievement' : 'a clear'} failed`, err);
+      }
+      if (paid > 0) m.conn.send({ t: 'notice', text: e.t === 'achievement' ? `+${paid} $SOLRIFT added to your balance (${e.name})` : `+${paid} $SOLRIFT added to your balance for clearing ${e.name}` });
+    }
+  }
+
   private sendState(m: Member): void {
     const events: SessionEvent[] = m.player.drainEvents();
     if (events.length > 0) {
       if (events.some((e) => e.t === 'inv')) m.invDirty = true;
       m.conn.send({ t: 'events', events });
+      this.payAchievements(m, events);
     }
     if (m.conn.sendSnapshot && this.frames) {
       const snap = this.snapshot(m, true);
@@ -1621,6 +1949,10 @@ export class GameRoom {
       bowDraw: round(p.bowDraw),
       offhand: itemView(p.offhand.get(0)),
       mountSlot: itemView(p.mountSlot.get(0)),
+      outfitSlot: itemView(p.outfitSlot.get(0)),
+      companionSlot: itemView(p.companionSlot.get(0)),
+      wingSlot: itemView(p.wingSlot.get(0)),
+      accessories: [0, 1, 2].map((i) => itemView(p.accessories.get(i))),
       blocking: p.blocking,
       ...(p.eatProgress > 0 ? { eat: round(p.eatProgress) } : {}),
       ...(p.emberProgress > 0 ? { emb: Math.max(0.01, round(p.emberProgress)) } : {}),
@@ -1632,6 +1964,7 @@ export class GameRoom {
       ...(p.cls ? { cls: p.classView()! } : {}),
       ...(p.bossView() ? { boss: p.bossView()! } : {}),
       ...(p.dungeonView() ? { dungeon: p.dungeonView()! } : {}),
+      ...(p.riftView() ? { rift: p.riftView()! } : {}),
     };
 
     const players: PlayerView[] = noPlayers ? [] : this.visibleFrames(m).map((f) => f.view);
@@ -1661,6 +1994,8 @@ export class GameRoom {
         ...(mob.sheared ? { sheared: 1 as const } : {}),
         ...(mob.love > 0 ? { love: 1 as const } : {}),
         ...(mob.gear ? { gear: [...mob.gear] } : {}),
+        ...(mob.health < mob.maxHealth || mob.elite ? { hp: Math.max(0, Math.ceil(mob.health)), mx: Math.round(mob.maxHealth) } : {}),
+        ...(mob.elite ? { el: 1 as const } : {}),
       });
     }
 
@@ -1761,7 +2096,7 @@ export class GameRoom {
         cursor: itemView(p.menu.cursor),
         furnace: p.furnaceState(),
         trade: p.menu instanceof TradeMenu ? { profession: p.menu.villager.profession, level: p.menu.villager.level, xp: p.menu.villager.xp, offers: p.menu.villager.offers, selected: p.menu.selected } : null,
-        enchant: p.menu instanceof EnchantMenu ? { shelves: p.menu.shelves, offers: p.menu.offers.map((o) => ({ cost: o.cost, clue: o.clue })) } : null,
+        enchant: p.menu instanceof EnchantMenu ? { shelves: p.menu.shelves } : null,
         anvil: p.menu instanceof AnvilMenu ? { cost: p.menu.cost, tooExpensive: p.menu.tooExpensive, name: p.menu.name } : null,
         grindstone: p.menu instanceof GrindstoneMenu ? { xp: p.menu.xp } : null,
         craft: p.menu instanceof CraftingMenu ? { forging: p.menu.forging ? { duration: p.menu.forging.duration, sets: p.menu.forging.sets } : null, made: p.menu.hasMade } : null,

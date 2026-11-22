@@ -570,3 +570,180 @@
   padding: 3px 7px;
   font-size: 10px;
 }
+
+/* ---- your balance ---- */
+#home .fp.tk .tk-wallet {
+  --s: 6px;
+  --e: 3px;
+  --edge: linear-gradient(135deg, #fff1a0, #ffb02e 50%, #b8640c);
+  --fill: rgba(10, 7, 18, 0.94);
+  padding: 22px 24px 20px;
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.5);
+}
+#home .fp.tk .tk-wallet-in {
+  margin: 0;
+  font-family: var(--body);
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+#home .fp.tk .tk-wallet-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px 32px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+#home .fp.tk .tk-wallet-top small {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+#home .fp.tk .tk-balance {
+  display: block;
+  margin-top: 6px;
+  font-size: clamp(34px, 6vw, 56px);
+  line-height: 1;
+  color: #fff;
+}
+#home .fp.tk .tk-balance em {
+  font-style: normal;
+  font-size: 0.4em;
+  letter-spacing: 0.08em;
+  color: #ffb02e;
+}
+#home .fp.tk .tk-wallet-top p {
+  margin: 0;
+  max-width: 420px;
+  font-family: var(--body);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+#home .fp.tk .tk-send {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}
+#home .fp.tk .tk-send label {
+  flex: 1 1 220px;
+  display: grid;
+  gap: 6px;
+}
+#home .fp.tk .tk-send label span {
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+#home .fp.tk .tk-send input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  font: inherit;
+  font-family: var(--body);
+  font-size: 16px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.06);
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  outline: 0;
+}
+#home .fp.tk .tk-send input:focus {
+  border-color: #ffb02e;
+}
+#home .fp.tk .tk-send input:disabled {
+  opacity: 0.5;
+}
+#home .fp.tk .tk-send button {
+  padding: 12px 18px;
+  font: inherit;
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  cursor: pointer;
+}
+#home .fp.tk .tk-send button.tk-go {
+  color: #1b1000;
+  background: linear-gradient(#ffe39a, #ffae3d);
+  border-color: #b8640c;
+}
+#home .fp.tk .tk-send button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+#home .fp.tk .tk-wallet-msg {
+  margin: 12px 0 0;
+  font-family: var(--body);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+#home .fp.tk .tk-wallet-msg.warn {
+  color: #ff9a8a;
+}
+#home .fp.tk .tk-wallet-msg.ok {
+  color: #8be39b;
+}
+#home .fp.tk .tk-ledger {
+  list-style: none;
+  margin: 20px 0 0;
+  padding: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+#home .fp.tk .tk-ledger li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(86px, auto);
+  gap: 14px;
+  align-items: center;
+  padding: 11px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  font-family: var(--body);
+}
+#home .fp.tk .tk-ledger .tk-l-what b {
+  display: block;
+  font-weight: 600;
+  font-size: 14px;
+  color: #fff;
+}
+#home .fp.tk .tk-ledger .tk-l-what small {
+  font-size: 11px;
+  color: var(--muted);
+}
+#home .fp.tk .tk-ledger .tk-l-amt {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  color: #8be39b;
+}
+#home .fp.tk .tk-ledger li.withdraw .tk-l-amt {
+  color: #fff;
+}
+#home .fp.tk .tk-ledger li.failed {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+#home .fp.tk .tk-ledger .tk-l-state {
+  text-align: right;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+#home .fp.tk .tk-ledger .tk-l-state.pending {
+  color: #ffb02e;
+}
+#home .fp.tk .tk-ledger .tk-l-state a {
+  color: inherit;
+  text-decoration: underline;
+}
+#home .fp.tk .tk-tier .tk-pays {
+  color: #ffe39a;
+}

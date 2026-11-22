@@ -4,6 +4,7 @@ import {
   AuctionHouse,
   DEFAULT_AUCTION_QUERY,
   HOUSE_ACCOUNT,
+  HOUSE_WALLET,
   I,
   MAX_COINS,
   categoryOf,
@@ -99,7 +100,7 @@ describe('bidding', () => {
     const { house, told } = make();
     const a = put(house);
     expect(house.bid(a.id, 'bob', 'Bob', 99, 1000)).toMatchObject({ ok: false });
-    expect(house.bid(a.id, 'bob', 'Bob', 100, 1000)).toEqual({ ok: true, pay: 100, bought: false });
+    expect(house.bid(a.id, 'bob', 'Bob', 100, 1000)).toEqual({ ok: true, pay: 100, bought: false, token: false });
     expect(house.bid(a.id, 'cat', 'Cat', 104, 1000)).toMatchObject({ ok: false });
     expect(house.bid(a.id, 'cat', 'Cat', 105, 1000)).toMatchObject({ ok: true, pay: 105 });
     expect(house.mailOf('bob').map((m) => [m.kind, m.coins])).toEqual([['outbid', 100]]);
@@ -125,7 +126,7 @@ describe('bidding', () => {
     const a = put(house);
     house.bid(a.id, 'bob', 'Bob', 100, 1000);
     // the leading bidder pays only what is left of the buyout
-    expect(house.buyout(a.id, 'bob', 'Bob', 200)).toEqual({ ok: true, pay: 200, bought: true });
+    expect(house.buyout(a.id, 'bob', 'Bob', 200)).toEqual({ ok: true, pay: 200, bought: true, token: false });
     expect(house.get(a.id)).toBeNull();
     expect(house.mailOf('bob').map((m) => m.kind)).toEqual(['won']);
     expect(house.mailOf('bob')[0].item).toMatchObject({ id: I.IRON_INGOT, count: 4 });
@@ -133,7 +134,7 @@ describe('bidding', () => {
     expect(house.mailOf('ann').map((m) => [m.kind, m.coins])).toEqual([['sold', 300 - 15 + 10]]);
 
     const b = put(house);
-    expect(house.bid(b.id, 'cat', 'Cat', 500, 1000)).toEqual({ ok: true, pay: 300, bought: true });
+    expect(house.bid(b.id, 'cat', 'Cat', 500, 1000)).toEqual({ ok: true, pay: 300, bought: true, token: false });
     const none = put(house, { buyout: 0 });
     expect(house.buyout(none.id, 'cat', 'Cat', 1000)).toMatchObject({ ok: false });
   });
@@ -328,5 +329,112 @@ describe('the auction commands of a session', () => {
     expect(parseSessionMessage({ t: 'auction', a: 'cancel', id: 0 })).toBeNull();
     expect(parseSessionMessage({ t: 'auction', a: 'take', id: 0 })).toEqual({ t: 'auction', a: 'take', id: 0 });
     expect(parseSessionMessage({ t: 'auction', a: 'sell everything' })).toBeNull();
+  });
+
+  it('say $SOLRIFT only with a plain yes', () => {
+    const post = { t: 'auction', a: 'post', slot: 3, count: 5, bid: 10, buyout: 0, hours: 24 };
+    expect(parseSessionMessage({ ...post, token: true })).toEqual({ ...post, token: true });
+    expect(parseSessionMessage({ ...post, token: false })).toEqual(post);
+    expect(parseSessionMessage({ ...post, token: 'yes' })).toBeNull();
+    expect(parseSessionMessage({ ...post, token: 1 })).toBeNull();
+  });
+});
+
+describe('an auction in $SOLRIFT', () => {
+  const ann = { wallet: 'W-ann', tokens: 0 };
+  const bob = { wallet: 'W-bob', tokens: 1_000 };
+  const cat = { wallet: 'W-cat', tokens: 1_000 };
+  const sellToken = (house: AuctionHouse, over: Partial<Parameters<AuctionHouse['post']>[0]> = {}) => put(house, { token: true, sellerWallet: ann.wallet, bid: 100, buyout: 400, ...over });
+  /** What each wallet ends up with from the moves (the ledger's own sum). */
+  const sums = (house: AuctionHouse) => {
+    const out = new Map<string, number>();
+    for (const m of house.moves) out.set(m.wallet, (out.get(m.wallet) ?? 0) + m.amount);
+    return out;
+  };
+
+  it('needs a wallet to sell and sets its prices in whole tokens up to a million', () => {
+    const { house } = make();
+    expect(house.post({ seller: 'ann', sellerName: 'Ann', item: makeStack(I.IRON_INGOT, 4), bid: 100, buyout: 0, hours: 12, deposit: 10, token: true }).ok).toBe(false);
+    expect(house.post({ seller: 'ann', sellerName: 'Ann', item: makeStack(I.IRON_INGOT, 4), bid: AUCTION_RULES.maxToken + 1, buyout: 0, hours: 12, deposit: 10, token: true, sellerWallet: ann.wallet }).ok).toBe(false);
+    const a = sellToken(house);
+    expect(a).toMatchObject({ token: true, sellerWallet: 'W-ann' });
+    expect(house.view({ ...DEFAULT_AUCTION_QUERY }, 'bob').rows.find((r) => r.id === a.id)?.token).toBe(true);
+  });
+
+  it('is paid from the wallet, never from the purse, and refuses what the wallet cannot cover', () => {
+    const { house } = make();
+    const a = sellToken(house);
+    expect(house.bid(a.id, 'bob', 'Bob', 100, 1_000_000, { wallet: null, tokens: 0 })).toMatchObject({ ok: false });
+    expect(house.bid(a.id, 'bob', 'Bob', 100, 1_000_000, { wallet: bob.wallet, tokens: 50 })).toMatchObject({ ok: false, error: 'Not enough $SOLRIFT.' });
+    expect(house.bid(a.id, 'bob', 'Bob', 100, 0, bob)).toMatchObject({ ok: true, pay: 100, token: true });
+    expect(house.moves).toMatchObject([{ wallet: 'W-bob', amount: -100, kind: 'trade' }]);
+  });
+
+  it('cannot be bid on from the seller\'s own wallet, under another name', () => {
+    const { house } = make();
+    const a = sellToken(house);
+    expect(house.bid(a.id, 'ann2', 'Ann II', 100, 0, { wallet: ann.wallet, tokens: 1_000 })).toMatchObject({ ok: false, error: 'You cannot bid on your own auction.' });
+    expect(house.moves).toEqual([]);
+  });
+
+  it('sends the outbid wallet its tokens back at once, in the ledger and not by mail', () => {
+    const { house } = make();
+    const a = sellToken(house);
+    house.bid(a.id, 'bob', 'Bob', 100, 0, bob);
+    expect(house.bid(a.id, 'cat', 'Cat', 105, 0, cat)).toMatchObject({ ok: true });
+    expect(sums(house).get('W-bob')).toBe(0);
+    expect(sums(house).get('W-cat')).toBe(-105);
+    expect(house.mailOf('bob')).toEqual([]);
+  });
+
+  it('pays the seller the price less the cut and the house the cut, so a sale adds up to nothing', () => {
+    const { house, clock } = make();
+    const a = sellToken(house);
+    house.bid(a.id, 'bob', 'Bob', 200, 0, bob);
+    clock.t += 13 * HOUR;
+    expect(house.update()).toBe(1);
+    const sum = sums(house);
+    expect(sum.get('W-bob')).toBe(-200);
+    expect(sum.get('W-ann')).toBe(190);
+    expect(sum.get(HOUSE_WALLET)).toBe(10);
+    expect([...sum.values()].reduce((x, y) => x + y, 0)).toBe(0);
+    expect(house.moves.find((m) => m.wallet === HOUSE_WALLET)?.kind).toBe('fee');
+    // the Auren deposit still comes back by mail, with no Auren from the sale; the winner is mailed the item
+    expect(house.mailOf('ann').map((m) => [m.kind, m.coins])).toEqual([['sold', 10]]);
+    expect(house.mailOf('bob').map((m) => m.kind)).toEqual(['won']);
+  });
+
+  it('is bought out whole, or by what is left of an earlier bid, and adds up to nothing too', () => {
+    const { house } = make();
+    const a = sellToken(house);
+    house.bid(a.id, 'bob', 'Bob', 100, 0, bob);
+    expect(house.buyout(a.id, 'bob', 'Bob', 0, { wallet: bob.wallet, tokens: 299 })).toMatchObject({ ok: false });
+    expect(house.buyout(a.id, 'bob', 'Bob', 0, { wallet: bob.wallet, tokens: 300 })).toMatchObject({ ok: true, pay: 300, bought: true, token: true });
+    expect(house.size).toBe(0);
+    const sum = sums(house);
+    expect([sum.get('W-bob'), sum.get('W-ann'), sum.get(HOUSE_WALLET)]).toEqual([-400, 380, 20]);
+  });
+
+  it('is not paid twice: the moves wait until the ledger has them, and then they are gone', () => {
+    const { house } = make();
+    const a = sellToken(house);
+    house.bid(a.id, 'bob', 'Bob', 100, 0, bob);
+    expect(house.pendingTokens('W-bob')).toBe(-100);
+    const copy = new AuctionHouse();
+    copy.load(JSON.parse(JSON.stringify(house.toJSON())));
+    expect(copy.moves).toEqual(house.moves);
+    expect(copy.get(a.id)).toMatchObject({ token: true, sellerWallet: 'W-ann', bidderWallet: 'W-bob', top: 100 });
+    house.ackMoves(house.moves);
+    expect(house.moves).toEqual([]);
+    expect(house.pendingTokens('W-bob')).toBe(0);
+  });
+
+  it('is an Auren auction when it says so: no moves at all', () => {
+    const { house, clock } = make();
+    const a = put(house);
+    house.bid(a.id, 'bob', 'Bob', 100, 1_000, bob);
+    clock.t += 13 * HOUR;
+    house.update();
+    expect(house.moves).toEqual([]);
   });
 });

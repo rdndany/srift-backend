@@ -17,7 +17,6 @@ const CONTROLS: readonly (readonly [readonly string[], string])[] = [
   [['Q'], 'Drop (Ctrl+Q the stack)'],
   [['F4'], 'Survival / creative'],
   [['F'], 'Fly (creative)'],
-  [['J'], 'Show / hide the minimap'],
   [['M'], 'Music on / off'],
   [['F3'], 'Debug info'],
   [['F2'], 'Admin bar (frame rate, load)'],
@@ -140,23 +139,11 @@ function GraphicsTab({ s }: { s: Settings }) {
 }
 function GameplayTab({ s }: { s: Settings }) {
   const r = SETTING_RANGE;
-  const minimap = useUi((u) => u.minimap);
-  const toggleMinimap = (next: boolean) => {
-    useUi.setState({ minimap: next });
-    try {
-      localStorage.setItem('solrift-minimap', next ? 'on' : 'off');
-    } catch {
-      /* storage may be blocked; the choice then lasts until the page is closed */
-    }
-  };
   return (
     <>
       <Group title="Mouse" reset={() => resetSettings(['sensitivity', 'invertY'])}>
         <Slider id="sensitivity" label="Sensitivity" hint="How fast the view turns" value={s.sensitivity} min={r.sensitivity[0]} max={r.sensitivity[1]} step={0.05} show={(v) => `${Math.round(v * 100)}%`} onChange={(sensitivity) => setSettings({ sensitivity })} />
         <Switch id="invert-y" label="Invert Y" hint="Move the mouse up to look down" on={s.invertY} onChange={(invertY) => setSettings({ invertY })} />
-      </Group>
-      <Group title="Screen">
-        <Switch id="minimap-toggle" label="Minimap" hint="The corner map (J)" on={minimap} onChange={toggleMinimap} />
       </Group>
     </>
   );

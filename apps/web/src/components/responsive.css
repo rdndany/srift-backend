@@ -1,0 +1,263 @@
+/*
+ * One pass over every size and kind of screen, for the website's pages (front page, token, market, classes, the
+ * World Beyond, the character lobby and the presentation page). It is imported LAST by each of them, and its
+ * selectors are as heavy as the ones they refine, so that it wins by coming later. What each page does at its own
+ * breakpoints stays in its own stylesheet; this file only holds what is shared:
+ *
+ *   - phones with a notch or a home bar (safe areas) and landscape phones (short screens)
+ *   - the menu bar on very narrow screens (a shorter sign-in, a lighter bar)
+ *   - touch: bigger targets, no double-tap zoom, no sticky hover
+ *   - tidier headings and paragraphs at every width
+ *   - large and tall screens, so that nothing stretches
+ */
+
+/* ---------- every screen ---------- */
+
+#home-layer,
+.landing {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  overscroll-behavior-y: contain;
+}
+#home .fp h1,
+#home .fp h2,
+#home .fp h3,
+.landing h1,
+.landing h2 {
+  text-wrap: balance;
+}
+#home .fp p,
+.landing p {
+  text-wrap: pretty;
+}
+/* long words and addresses never push a card wider than the screen */
+#home .fp p,
+#home .fp li,
+#home .fp h1,
+#home .fp h2,
+#home .fp h3,
+#home .fp code {
+  overflow-wrap: anywhere;
+}
+#home .fp img,
+#home .fp video,
+#home .fp canvas {
+  max-width: 100%;
+}
+
+/* ---------- the menu bar: the sign-in button ---------- */
+
+#home .fp .fp-account .account-panel button .acc-short {
+  display: none;
+}
+#home .fp .fp-account .account-panel button#signin {
+  white-space: nowrap;
+}
+#home .fp .fp-account #account-name {
+  display: inline-flex;
+  align-items: baseline;
+  min-width: 0;
+  white-space: nowrap;
+}
+#home .fp .fp-account .acc-who {
+  min-width: 0;
+  max-width: 18ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- phones: the portrait ones and the narrow window ---------- */
+
+@media (max-width: 700px) {
+  /* a long label does not fit beside the logo and the links: "Sign in" does */
+  #home .fp .fp-account .account-panel button .acc-long {
+    display: none;
+  }
+  #home .fp .fp-account .account-panel button .acc-short {
+    display: inline;
+  }
+  #home .fp .fp-account .account-panel button#signin {
+    min-height: 40px;
+    padding: 0 14px;
+  }
+  /* signed in: the name alone, the address and the balance have the account page */
+  #home .fp .fp-account .acc-pre,
+  #home .fp .fp-account .acc-more {
+    display: none;
+  }
+  #home .fp .fp-account .acc-who {
+    max-width: 11ch;
+  }
+  #home .fp .fp-account .account-panel {
+    gap: 8px;
+  }
+}
+
+@media (max-width: 600px) {
+  /* the bar keeps clear of a notch in landscape and of the screen's edge */
+  #home .fp .fp-nav {
+    width: min(1120px, calc(100% - 24px - env(safe-area-inset-left) - env(safe-area-inset-right)));
+    margin-top: max(26px, calc(env(safe-area-inset-top) + 12px));
+  }
+  #home .fp .fp-rail .fp-brand {
+    top: max(29px, calc(env(safe-area-inset-top) + 15px));
+  }
+}
+
+@media (max-width: 400px) {
+  #home .fp .fp-nav {
+    padding: 0 10px;
+    gap: 6px;
+  }
+  #home .fp .fp-brand img {
+    height: 48px;
+    width: 48px;
+  }
+  #home .fp .fp-brand-gap {
+    width: 50px;
+  }
+  #home .fp .fp-links {
+    gap: 2px;
+  }
+  #home .fp .fp-links button {
+    padding-inline: 8px;
+    font-size: 12px;
+  }
+  #home .fp .fp-account .account-panel button#signin {
+    padding: 0 10px;
+  }
+}
+
+@media (max-width: 340px) {
+  /* a 320 px phone: Play is the page the visitor is on or one tap away, the Market keeps its place */
+  #home .fp .fp-links .fp-link-play {
+    display: none;
+  }
+}
+
+/* ---------- touch screens ---------- */
+
+/* a phone or a tablet cannot play: the Camp is what it is for, so it takes Play's place in the menu */
+@media (hover: none) and (pointer: coarse) and (max-width: 900px) {
+  #home .fp .fp-links .fp-link-play {
+    display: none;
+  }
+}
+
+@media (pointer: coarse) {
+  #home button,
+  #home a,
+  #home input,
+  #home select,
+  #home [role='tab'],
+  .landing a,
+  .landing button {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: rgba(240, 188, 76, 0.16);
+  }
+  /* a finger needs 44 px */
+  #home .fp .fp-links button,
+  #home .fp.mk .mk-tabs button,
+  #home .fp.mk .mk-cats button,
+  #home .fp.mk .mk-search button,
+  #home .fp.mk .mk-search input,
+  #home .fp.mk .mk-pager button {
+    min-height: 44px;
+  }
+  #home .fp .fp-account .account-panel button {
+    min-height: 44px;
+  }
+  .landing a {
+    min-height: 48px;
+  }
+  /* the character maker: the colour squares and the pills are made for a mouse, so they grow */
+  #home .fp.gamepage .lb-swatches {
+    gap: 8px;
+  }
+  #home .fp.gamepage .lb-swatches .swatch {
+    width: 36px;
+    height: 36px;
+  }
+  #home .fp.gamepage .lb-swatches .pill {
+    min-height: 40px;
+    padding: 8px 14px;
+    font-size: 11px;
+  }
+}
+
+/* the game needs a keyboard: a phone or a tablet without one is told so, kindly, on the character screen */
+#home .fp.gamepage .gp-touch {
+  display: none;
+}
+@media (hover: none) and (pointer: coarse) {
+  #home .fp.gamepage .gp-touch {
+    display: block;
+    margin: 0 0 12px;
+    padding: 12px 14px;
+    border: 2px solid rgba(240, 188, 76, 0.45);
+    background: rgba(240, 188, 76, 0.1);
+    font-size: 12px;
+    line-height: 1.5;
+    text-align: center;
+    color: #f6e3b4;
+  }
+}
+/* no hover on a touch screen: a tap must not leave a hovered button behind */
+@media (hover: none) {
+  #home .fp .fp-account .account-panel button:hover:not(:disabled) {
+    background: #1c1331;
+    transform: none;
+    box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.55);
+  }
+}
+
+/* ---------- short screens: a phone on its side, a small laptop window ---------- */
+
+@media (max-height: 520px) and (orientation: landscape) {
+  #home .fp .fp-nav {
+    margin-top: 12px;
+  }
+  #home .fp .fp-hero {
+    min-height: max(100svh, 460px);
+  }
+  .landing-hero {
+    padding: 6vh 0 4vh;
+  }
+}
+
+/* notches on the sides (landscape): the whole layer clears them */
+@supports (padding: max(0px)) {
+  #home-layer,
+  .landing {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+    scroll-padding-top: 90px;
+  }
+  .landing {
+    padding-left: max(20px, env(safe-area-inset-left));
+    padding-right: max(20px, env(safe-area-inset-right));
+    padding-bottom: max(40px, calc(env(safe-area-inset-bottom) + 24px));
+  }
+}
+
+/* ---------- large screens ---------- */
+
+@media (min-width: 1800px) {
+  #home .fp .fp-nav {
+    width: min(1280px, calc(100% - 64px));
+  }
+}
+
+/* ---------- people who asked for less movement ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  #home-layer,
+  .landing {
+    scroll-behavior: auto;
+  }
+}
+
+/* "Signed in as" and the name: the space between them does not survive the bar's flex layout */
+#home .fp .account-panel .acc-pre {
+  margin-right: 0.4em;
+}

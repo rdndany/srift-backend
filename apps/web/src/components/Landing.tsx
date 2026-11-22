@@ -8,11 +8,12 @@ import { COUNTS } from './beyondGuide';
 import { Blocks } from './BlockCube';
 import { BlurWords, ClickSparks, CountUp, Embers, Marquee, Reveal, Spot, useFrontMotion } from './fx';
 import { ItemSprite } from './ItemSprite';
-import { SCROLL_KEY, goMarket, goToken } from './frontNav';
+import { SCROLL_KEY, goMarket, goToken, goCamp } from './frontNav';
 import { ART, SHOT } from './homeAssets';
 import { MODES, type HomeMode } from './modes';
 import { WayDialog, type Way } from './WayDialog';
 import './front.css';
+import './responsive.css';
 
 /** Pictures of the World Beyond (small copies in /public/beyond/thumbs) under the two worlds, to show what is there. */
 const REEL = [
@@ -31,7 +32,7 @@ const FEATURES: { title: string; text: string; shot: string; span: number }[] = 
   { title: 'Forge your gear', text: 'Mine, smelt, craft and enchant. The recipe book shows what your bags can make.', shot: SHOT.recipes, span: 2 },
   { title: 'A world that changes', text: 'The sun sets, rain rolls in, and torches hold the dark. Caves, villages and dungeons wait under it.', shot: SHOT.dusk, span: 4 },
   { title: 'Bring your friends', text: 'One shared realm, a party of four, and the Hollow Cellar to walk into together.', shot: SHOT.party, span: 3 },
-  { title: 'Never lose the way', text: 'A minimap in the corner, a map you can hold, and quest markers on both.', shot: SHOT.hud, span: 3 },
+  { title: 'Never lose the way', text: 'A map you can hold and unfold, a compass, and quest markers on the map.', shot: SHOT.hud, span: 3 },
 ];
 
 const ROMAN = ['', 'I', 'II', 'III', 'IV'] as const;
@@ -118,11 +119,12 @@ export function Landing({ onEnter }: { onEnter: (way: Way, mode: HomeMode | null
             <button onClick={() => scrollTo('site-world')}>The World</button>
             <button onClick={() => scrollTo('site-features')}>Classes</button>
             <button onClick={() => scrollTo('l-expansions')}>Expansions</button>
+            <button className="fp-link-camp" onClick={goCamp}>Camp</button>
             <button className="fp-link-market" onClick={goMarket}>Market</button>
             <button className="fp-link-token" onClick={goToken}>Token</button>
           </nav>
           <div className="fp-account">
-            <AccountPanel />
+            <AccountPanel bar />
           </div>
           <i className="fp-progress" aria-hidden="true" />
         </header>

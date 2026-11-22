@@ -1,4 +1,6 @@
 import {
+  wingOfItem,
+  ACCESSORY_SLOT_COUNT,
   BAG_MENU_SLOTS,
   BAG_SLOTS,
   ChestMenu,
@@ -37,6 +39,7 @@ import {
   type BlockReader,
   type ClassId,
   type BossView,
+  type RiftView,
   type DungeonView,
   type ClassView,
   parseGear,
@@ -82,6 +85,10 @@ export interface OtherPlayer {
   pitch: number;
   sneaking: boolean;
   held: number;
+  /** The glow of the held item (see `glowCode`), 0 or left out: none. */
+  hg?: number;
+  /** The glow of the off-hand item, the same way. */
+  og?: number;
   armor: number[];
   /** Off-hand item id (0 = none) and whether the shield is raised. */
   offhand: number;
@@ -92,6 +99,8 @@ export interface OtherPlayer {
   dead?: boolean;
   /** Seconds since the arm last swung (it runs on by itself between snapshots; a new swing restarts it). */
   swingT?: number;
+  /** How much faster than usual that swing runs (the attack speed of their weapon). */
+  swingR?: number;
   /** Seconds since a Shield Bash was thrown (runs on by itself between snapshots; a new one restarts it). */
   bashT?: number;
   /** Running at a Charge. */
@@ -109,6 +118,11 @@ export interface OtherPlayer {
   gt?: string;
   /** The mount they ride (1 + its place in MOUNTS), none when on foot. */
   mount?: number;
+  /** The companion that follows them (1 + its place in COMPANIONS), none without one. */
+  pet?: number;
+  /** The wings they wear (1 + their place in WINGS), none without, and whether they fly on them. */
+  wing?: number;
+  winged?: boolean;
   /** Horizontal speed, for the walking animation. */
   speed: number;
   tx: number;
@@ -187,6 +201,14 @@ export class RemoteSession implements ClientSession {
   readonly offhand = new Container(1);
   /** The mount slot (a mount horn), mirrored from the server. */
   readonly mountSlot = new Container(1);
+  /** The outfit slot (a glowing set), mirrored from the server. */
+  readonly outfitSlot = new Container(1);
+  /** The companion slot (a companion), mirrored from the server. */
+  readonly companionSlot = new Container(1);
+  /** The wing slot (a pair of wings), mirrored from the server. */
+  readonly wingSlot = new Container(1);
+  /** The rings and the necklace (ring, ring, necklace), mirrored from the server. */
+  readonly accessories = new Container(ACCESSORY_SLOT_COUNT);
   blocking = false;
   eatProgress = 0;
   emberProgress = 0;
@@ -206,6 +228,7 @@ export class RemoteSession implements ClientSession {
   private cls: ClassView | null = null;
   private boss: BossView | null = null;
   private dungeon: DungeonView | null = null;
+  private rift: RiftView | null = null;
   readonly others = new Map<number, OtherPlayer>();
   readonly generator: WorldGenerator;
 
@@ -500,7 +523,10 @@ export class RemoteSession implements ClientSession {
     // A mount runs at its own speed, and a rider neither sprints nor sneaks (see Player.simulateStep).
     const mount = this.mountIdx > 0 ? MOUNTS[this.mountIdx - 1] : null;
     const canSprint = (this.mode === 'creative' || this.vitals.hunger > 6) && !this.blocking && !mount;
-    const move = buildMove({ t: 'frame', dt: STEP, locked: true, ...input }, this.flying, canSprint, false, (mount ? mount.speed : (this.cls?.speedMul ?? 1)) * (this.moveMul > 0 ? this.moveMul : 1));
+    // Wings make the wearer quicker, and carry them in the air at their own pace (see Player.wingFlying).
+    const wingStack = this.wingSlot.get(0);
+    const wings = wingStack ? (wingOfItem(wingStack.id) ?? null) : null;
+    const move = buildMove({ t: 'frame', dt: STEP, locked: true, ...input }, this.flying, canSprint, false, (mount ? mount.speed : (this.cls?.speedMul ?? 1)) * (this.moveMul > 0 ? this.moveMul : 1), wings, this.mode === 'survival' && !this.spectating);
     if (this.moveMul <= 0 && !this.flying) rooted(move);
     if (mount) {
       move.sneak = false;
@@ -527,6 +553,9 @@ export class RemoteSession implements ClientSession {
   }
   dungeonView(): DungeonView | null {
     return this.dungeon;
+  }
+  riftView(): RiftView | null {
+    return this.rift;
   }
 
   /** Smooth other players, mobs and arrows between snapshots. Call once per frame. */
@@ -667,6 +696,10 @@ export class RemoteSession implements ClientSession {
     this.bowDraw = y.bowDraw;
     this.offhand.set(0, stackOf(y.offhand));
     this.mountSlot.set(0, stackOf(y.mountSlot));
+    this.outfitSlot.set(0, stackOf(y.outfitSlot));
+    this.companionSlot.set(0, stackOf(y.companionSlot));
+    this.wingSlot.set(0, stackOf(y.wingSlot));
+    for (let i = 0; i < ACCESSORY_SLOT_COUNT; i++) this.accessories.set(i, stackOf(y.accessories?.[i] ?? null));
     this.blocking = y.blocking;
     this.eatProgress = y.eat ?? 0;
     this.emberProgress = y.emb ?? 0;
@@ -682,6 +715,7 @@ export class RemoteSession implements ClientSession {
     this.cls = y.cls ?? null;
     this.boss = y.boss ?? null;
     this.dungeon = y.dungeon ?? null;
+    this.rift = y.rift ?? null;
     this.applyFx(s);
     this.time = s.time;
     this.weather.kind = s.weather.kind;
@@ -722,7 +756,7 @@ export class RemoteSession implements ClientSession {
     });
     menu.cursor = stackOf(mv.cursor);
     if (menu instanceof TradeMenu && mv.trade) menu.adopt({ ...mv.trade }, mv.trade.selected);
-    if (menu instanceof EnchantMenu && mv.enchant) menu.adopt(mv.enchant.shelves, mv.enchant.offers);
+    if (menu instanceof EnchantMenu && mv.enchant) menu.adopt(mv.enchant.shelves);
     if (menu instanceof AnvilMenu && mv.anvil) menu.adopt(mv.anvil.cost, mv.anvil.tooExpensive, mv.anvil.name ?? null);
     if (menu instanceof GrindstoneMenu && mv.grindstone) menu.adopt(mv.grindstone.xp);
     if (menu instanceof CraftingMenu) menu.adoptCraft(mv.craft ?? null);
@@ -742,13 +776,13 @@ export class RemoteSession implements ClientSession {
       case 'trade':
         return new TradeMenu(this.inventory, newBook('unemployed'));
       case 'enchant':
-        return new EnchantMenu(this.inventory, { shelves: 0, seed: () => 1, level: () => 0, creative: () => false, spend: () => {}, done: () => {} });
+        return new EnchantMenu(this.inventory, { shelves: 0, creative: () => false, coins: () => 0, spend: () => {}, done: () => {} });
       case 'anvil':
         return new AnvilMenu(this.inventory, { level: () => 0, creative: () => false, spend: () => {}, done: () => {} });
       case 'grindstone':
         return new GrindstoneMenu(this.inventory, { creative: () => false, xp: () => {}, rand: () => 0, done: () => {} });
       default:
-        return new CraftingMenu(this.inventory, 2, this.armor, this.offhand, this.mountSlot);
+        return new CraftingMenu(this.inventory, 2, this.armor, this.offhand, this.mountSlot, this.outfitSlot, () => this.cls?.id ?? null, this.companionSlot, this.wingSlot, this.accessories);
     }
   }
 
@@ -781,6 +815,7 @@ export class RemoteSession implements ClientSession {
         p = { id: v.id, name: v.name, look: v.look, x: v.x, y: v.y, z: v.z, yaw: v.yaw, pitch: v.pitch, sneaking: v.sneaking, held: v.held, armor: v.armor, offhand: v.offhand, blocking: v.blocking, sleeping: v.sleeping, speed: 0, tx: v.x, ty: v.y, tz: v.z, tyaw: v.yaw, tpitch: v.pitch };
         this.others.set(v.id, p);
       }
+      p.look = v.look; // (a set put on or taken off shows at once)
       p.tx = v.x;
       p.ty = v.y;
       p.tz = v.z;
@@ -788,12 +823,15 @@ export class RemoteSession implements ClientSession {
       p.tpitch = v.pitch;
       p.sneaking = v.sneaking;
       p.held = v.held;
+      p.hg = v.hg;
+      p.og = v.og;
       p.armor = v.armor;
       p.offhand = v.offhand;
       p.blocking = v.blocking;
       p.eating = v.ea === 1;
       p.dead = v.dd === 1;
       if (v.sw !== undefined && v.sw < (p.swingT ?? 9)) p.swingT = v.sw;
+      if (v.sw !== undefined) p.swingR = v.sr ?? 1;
       if (v.bs !== undefined && v.bs < (p.bashT ?? 9)) p.bashT = v.bs;
       p.slam = v.sl ?? 0;
       p.charging = v.rs === 1;
@@ -803,6 +841,9 @@ export class RemoteSession implements ClientSession {
       p.clv = v.clv;
       p.gt = v.gt;
       p.mount = v.mt;
+      p.pet = v.pt;
+      p.wing = v.wg;
+      p.winged = v.fl === 1;
     }
     for (const id of this.others.keys()) if (!seen.has(id)) this.others.delete(id);
   }
@@ -839,6 +880,9 @@ export class RemoteSession implements ClientSession {
       o.sheared = v.sheared === 1;
       o.love = v.love === 1 ? 1 : 0;
       o.gear = v.gear;
+      o.health = v.hp;
+      o.maxHealth = v.mx;
+      o.elite = v.el === 1;
       o.fuse = v.fuse;
       o.fuseFraction = v.fuse < 0 ? 0 : Math.min(1, v.fuse / 1.5);
       list.push(o);

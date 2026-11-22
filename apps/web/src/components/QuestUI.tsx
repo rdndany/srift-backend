@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ACHIEVEMENTS, ACH_CATEGORIES, ACH_TIERS, AUCTIONEER, QUESTS, STASHKEEPER, formatCoins, getItem, makeStack, npcById, questById, rewardCoins, rewardItems, shopOf, skillBookAbility, tooltipName, zoneDef, type AchCategory, type QuestDef, type QuestLog } from '@solrift/shared';
+import { ACHIEVEMENTS, ACH_CATEGORIES, ACH_TIERS, AUCTIONEER, BOUNTY_TIERS, BOUNTY_TIER_NAME, QUESTS, RIFT_GRADE_DEFS, STASHKEEPER, formatCoins, getItem, makeStack, npcById, questById, rewardCoins, rewardItems, shopOf, skillBookAbility, tooltipName, zoneDef, type AchCategory, type QuestDef, type QuestLog } from '@solrift/shared';
 import './achievements.css';
 import { useUi } from '../ui/store';
+import { useToken } from '../token/store';
 import { ItemView } from './ItemView';
 import { AuctionWindow } from './AuctionUI';
 import { StashWindow } from './StashUI';
@@ -160,6 +161,40 @@ function DialogPanel() {
   );
 }
 
+/** The rift that is open near the player: what it is, the wave it is at, how many monsters are left, the time, where it lies and what you have done in it. */
+function RiftBlock() {
+  const rift = useUi((s) => s.rift);
+  if (!rift) return null;
+  const color = RIFT_GRADE_DEFS[rift.grade].color;
+  const near = rift.dist <= 48;
+  const mins = Math.floor(rift.seconds / 60);
+  const secs = String(rift.seconds % 60).padStart(2, '0');
+  return (
+    <div className="tracker-quest tracker-rift" data-testid="rift-tracker" data-phase={rift.phase} style={{ ['--rift' as string]: color }}>
+      <div className="tracker-name" style={{ color }}>
+        {rift.name}
+      </div>
+      {rift.phase === 'omen' && <div className="tracker-line">Tearing open: {rift.seconds}s</div>}
+      {rift.phase === 'fighting' && (
+        <>
+          <div className="tracker-line">
+            Wave {rift.wave}/{rift.waves}: {rift.left} left
+          </div>
+          <div className="tracker-line">
+            Time left {mins}:{secs}
+          </div>
+        </>
+      )}
+      {rift.phase === 'sealed' && <div className="tracker-line done">Sealed! Rewards given</div>}
+      {rift.phase === 'collapsed' && <div className="tracker-line">It collapsed...</div>}
+      {(rift.phase === 'omen' || rift.phase === 'fighting') && (
+        <div className={`tracker-line${near ? ' done' : ''}`}>{near ? 'You are at the rift' : `${rift.dist} blocks ${rift.dir}`}</div>
+      )}
+      {rift.phase === 'fighting' && rift.score > 0 && <div className="tracker-line">Your part: {rift.score}</div>}
+    </div>
+  );
+}
+
 /** The quests under way, in the top right, like WoW's objective tracker: each one's title and what it asks for, and nothing at all without a quest. */
 function QuestTracker() {
   const adventure = useUi((s) => s.adventure);
@@ -167,12 +202,15 @@ function QuestTracker() {
   const screen = useUi((s) => s.screen);
   const logOpen = useUi((s) => s.questLogOpen);
   const dungeon = useUi((s) => s.dungeon);
+  const rift = useUi((s) => s.rift);
   useUi((s) => s.questsVersion);
-  if (!adventure || screen === 'dead' || logOpen) return null;
-  const active = log.activeQuests();
+  // (A rift is told of everywhere, in any world; the quests only in Adventure.)
+  if ((!adventure && !rift) || screen === 'dead' || (adventure && logOpen && !rift)) return null;
+  const active = adventure && !logOpen ? log.activeQuests() : [];
   // (The element stays, empty and invisible, so there is always a place for the first quest to appear.)
   return (
     <div id="quest-tracker" data-testid="quest-tracker">
+      {rift && <RiftBlock />}
       {dungeon && (
         <div className="tracker-quest tracker-dungeon" data-testid="dungeon-tracker">
           <div className="tracker-name">{dungeon.name}</div>
@@ -247,6 +285,12 @@ function ZoneBanner() {
 function AchievementList() {
   const ach = useUi((s) => s.ach);
   const done = new Set(ach.done);
+  // With a token on the server each tier shows what it pays ("Gold +40"); without one, just the tier.
+  const pays = useToken((s) => (s.info?.live ? s.info.tiers : null));
+  const loadInfo = useToken((s) => s.loadInfo);
+  useEffect(() => {
+    void loadInfo();
+  }, [loadInfo]);
   return (
     <div className="ach-list" data-testid="ach-list">
       <div className="ach-total">
@@ -276,12 +320,70 @@ function AchievementList() {
                     </div>
                   ) : null}
                 </div>
-                <span className="ach-tier">{ACH_TIERS[a.tier].name}</span>
+                <span className="ach-tier">
+                  {ACH_TIERS[a.tier].name}
+                  {pays ? ` +${pays[a.tier].toLocaleString()}` : ''}
+                </span>
               </div>
             );
           })}
         </div>
       ))}
+    </div>
+  );
+}
+
+/** "7h 20m", "42m" */
+const leftLabel = (ms: number): string => {
+  const m = Math.max(1, Math.ceil(ms / 60_000));
+  return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`;
+};
+
+/** The day's three bounties: what each asks, how far along it is, and what it pays (with a token on the server and a signed-in wallet). */
+function BountyList() {
+  const view = useUi((s) => s.bounties);
+  const at = useUi((s) => s.bountiesAt);
+  const rewards = useToken((s) => (s.info?.live && s.info.limits.bountyRewards.length === BOUNTY_TIERS.length ? s.info.limits.bountyRewards : null));
+  const loadInfo = useToken((s) => s.loadInfo);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    void loadInfo();
+    const id = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, [loadInfo]);
+  if (!view) return <div className="ach-list" data-testid="bounty-list"><p className="log-empty">The bounty board is being posted…</p></div>;
+  const done = view.rows.filter((r) => r.done).length;
+  const left = Math.max(0, view.resetIn - (now - at));
+  return (
+    <div className="ach-list bounty-list" data-testid="bounty-list">
+      <div className="ach-total">
+        {done}/{view.rows.length} done today <em>new bounties in {leftLabel(left)}</em>
+      </div>
+      {view.rows.map((r) => {
+        const pay = rewards ? rewards[BOUNTY_TIERS.indexOf(r.tier)] : 0;
+        return (
+          <div key={r.id} className={`ach-row bounty-${r.tier}${r.done ? ' won' : ''}`} data-bounty={r.id}>
+            <span className="ach-mark">{r.done ? '\u2713' : ''}</span>
+            <div className="ach-body">
+              <div className="ach-name">{r.name}</div>
+              <div className="ach-text">{r.text}</div>
+              {!r.done ? (
+                <div className="ach-bar">
+                  <i style={{ width: `${(r.have / r.goal) * 100}%` }} />
+                  <b>
+                    {r.have.toLocaleString()}/{r.goal.toLocaleString()}
+                  </b>
+                </div>
+              ) : null}
+            </div>
+            <span className="ach-tier">
+              {BOUNTY_TIER_NAME[r.tier]}
+              {pay > 0 ? ` +${pay.toLocaleString()}` : ''}
+            </span>
+          </div>
+        );
+      })}
+      <p className="bounty-note">The same three for everyone, new every day (UTC). Each one done pays once per wallet a day, however many heroes you play.</p>
     </div>
   );
 }
@@ -293,7 +395,8 @@ function QuestLogPanel() {
   const api = useUi((s) => s.api);
   useUi((s) => s.questsVersion);
   const [pick, setPick] = useState<string | null>(null);
-  const [tab, setTab] = useState<'quests' | 'ach'>('quests');
+  const [tab, setTab] = useState<'quests' | 'ach' | 'bounties'>('quests');
+  const bounties = useUi((s) => s.bounties);
   if (!open || !api) return null;
 
   const known = QUESTS.filter((q) => log.status(q.id) !== 'locked' && log.status(q.id) !== 'available');
@@ -322,9 +425,13 @@ function QuestLogPanel() {
           <button role="tab" aria-selected={tab === 'ach'} className={tab === 'ach' ? 'sel' : ''} onClick={() => setTab('ach')} data-testid="ach-tab">
             Achievements
           </button>
+          <button role="tab" aria-selected={tab === 'bounties'} className={tab === 'bounties' ? 'sel' : ''} onClick={() => setTab('bounties')} data-testid="bounty-tab">
+            Daily{bounties ? ` ${bounties.rows.filter((r) => r.done).length}/${bounties.rows.length}` : ''}
+          </button>
         </div>
         {tab === 'ach' ? <AchievementList /> : null}
-        <div className="log-cols" style={tab === 'ach' ? { display: 'none' } : undefined}>
+        {tab === 'bounties' ? <BountyList /> : null}
+        <div className="log-cols" style={tab !== 'quests' ? { display: 'none' } : undefined}>
           <div className="log-list">
             {shown.length === 0 ? <p className="log-empty">No active quests. Talk to the people of the village.</p> : null}
             {chapters.map((ch) => (
@@ -393,7 +500,9 @@ function QuestLogPanel() {
 /** Everything the Adventure mode adds to the screen. Draws nothing in the other worlds. */
 export function QuestUI() {
   const adventure = useUi((s) => s.adventure);
-  if (!adventure) return null;
+  const rift = useUi((s) => !!s.rift);
+  // (Only the tracker is shown outside Adventure, and only for a rift.)
+  if (!adventure) return rift ? <QuestTracker /> : null;
   return (
     <>
       <QuestTracker />

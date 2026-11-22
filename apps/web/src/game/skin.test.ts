@@ -173,3 +173,32 @@ describe('parts', () => {
     expect(PARTS.armL.w * 2 + PARTS.body.w).toBe(16);
   });
 });
+
+describe('an outfit trim', () => {
+  const BRASS = [232, 190, 74];
+  const brassCount = (data: Uint8ClampedArray): number => {
+    let n = 0;
+    for (let i = 0; i < data.length; i += 4) if (data[i + 3] > 0 && Math.abs(data[i] - BRASS[0]) < 2 && Math.abs(data[i + 1] - BRASS[1]) < 2 && Math.abs(data[i + 2] - BRASS[2]) < 2) n++;
+    return n;
+  };
+  const colourCount = (data: Uint8ClampedArray, c: number[]): number => {
+    let n = 0;
+    for (let i = 0; i < data.length; i += 4) if (data[i + 3] > 0 && data[i] === c[0] && data[i + 1] === c[1] && data[i + 2] === c[2]) n++;
+    return n;
+  };
+
+  it('takes the place of the brass of the buckles and the badge, and nothing else changes shape', () => {
+    const plain = paintSkin(look());
+    const dressed = paintSkin(look({ trim: [255, 63, 208] }));
+    expect(brassCount(plain)).toBeGreaterThan(0);
+    expect(brassCount(dressed)).toBe(0);
+    expect(colourCount(dressed, [255, 63, 208])).toBeGreaterThanOrEqual(brassCount(plain) / 2);
+    let differ = 0;
+    for (let i = 0; i < plain.length; i += 4) {
+      expect(dressed[i + 3]).toBe(plain[i + 3]); // (the same shape)
+      if (dressed[i] !== plain[i] || dressed[i + 1] !== plain[i + 1] || dressed[i + 2] !== plain[i + 2]) differ++;
+    }
+    expect(differ).toBeGreaterThan(0);
+    expect(differ).toBeLessThan(40);
+  });
+});

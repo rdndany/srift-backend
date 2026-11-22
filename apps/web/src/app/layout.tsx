@@ -11,6 +11,9 @@ export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   themeColor: '#000000',
+  // (draw under the notch and the home bar; the pages clear them with the safe-area insets, see components/responsive.css)
+  viewportFit: 'cover',
+  colorScheme: 'dark',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

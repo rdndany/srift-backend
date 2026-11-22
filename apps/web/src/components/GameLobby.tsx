@@ -1,5 +1,6 @@
 'use client';
 
+import { WalletLinks } from './WalletLinks';
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react';
 import {
   B,
@@ -15,6 +16,9 @@ import {
   SKIN_TONES,
   CURRENCY,
   cleanPlayerName,
+  companionIndex,
+  companionOfItem,
+  wingNumberOf,
   computeStats,
   formatCoins,
   getItem,
@@ -37,13 +41,14 @@ import { shortAddress, useAuth } from '../auth/store';
 import { hydrateProfile, useProfile } from '../profile/store';
 import { LocalSaveStore, type SavedWorld } from '../game/storage';
 import { AccountPanel } from './AccountPanel';
+import { TokenShop } from './TokenWallet';
 import { BlockCube } from './BlockCube';
 import { CharacterPreview } from './CharacterPreview';
 import { CharacterSheet } from './CharacterSheet';
 import { ClassSkills } from './ClassSkills';
 import { statLines } from './ClassPicker';
 import { ClickSparks, Embers, useFrontMotion } from './fx';
-import { FRONT_MENU, SCROLL_KEY, frontUrl, goMarket, goToken } from './frontNav';
+import { FRONT_MENU, SCROLL_KEY, frontUrl, goMarket, goToken, goCamp } from './frontNav';
 import { HANDOFF_KEYS, siteUrl, whereAmI } from '../game/route';
 import { ART } from './homeAssets';
 import { ItemSprite } from './ItemSprite';
@@ -53,6 +58,7 @@ import { serverUrl, useRealmStatus } from './realmStatus';
 import type { Way } from './WayDialog';
 import './front.css';
 import './lobby.css';
+import './responsive.css';
 
 /** What the lobby hands to the game: a world of your own, or the shared realm. */
 export type PlayTarget = { kind: 'single'; seed: number; mode: HomeMode; world?: 'beyond' } | { kind: 'multi' };
@@ -100,9 +106,10 @@ function readLobbyChoice(): LobbyChoice {
 
 
 /** Put a saved character on the page: its name and look are what the preview and the game use. */
-function showCharacter(c: { displayName: string; look: number }): void {
+function showCharacter(c: { displayName: string; look: number; outfit?: string | null }): void {
   useProfile.setState({ name: c.displayName });
   useProfile.getState().replaceLook(lookOfCode(c.look));
+  useProfile.getState().setOutfit(c.outfit ?? null);
 }
 
 /** Marks a scrolling column with data-more="1" while there is more of it below what shows, so that its foot can fade out and say so. */
@@ -309,6 +316,11 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
   const hasCharacter = signedIn && account.look !== null;
   /** The name, look and class are being made (a guest always; a wallet when it has no character yet, or asked for one more). */
   const creating = (who === 'guest' && !guestMade) || (signedIn && (account.look === null || makingNew));
+  // The figure wears the set the hero has on in the world (it is in the hero's outfit slot).
+  const wornOutfit = signedIn ? (account.outfit ?? null) : null;
+  useEffect(() => {
+    if (signedIn && !creating && hasCharacter) useProfile.getState().setOutfit(wornOutfit);
+  }, [wornOutfit, signedIn, creating, hasCharacter]);
   const characterId = hasCharacter ? account.id : null;
 
   useEffect(() => init(), [init]);
@@ -332,7 +344,7 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
     setTyped('');
     setError('');
     setArmed(false);
-    if (account.look !== null) showCharacter({ displayName: account.displayName, look: account.look });
+    if (account.look !== null) showCharacter({ displayName: account.displayName, look: account.look, outfit: account.outfit });
     else {
       useProfile.setState({ name: '' });
       setPick(null);
@@ -415,7 +427,7 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
   };
   const cancelNewCharacter = () => {
     setMakingNew(false);
-    if (account && account.look !== null) showCharacter({ displayName: account.displayName, look: account.look });
+    if (account && account.look !== null) showCharacter({ displayName: account.displayName, look: account.look, outfit: account.outfit });
   };
   const selectSlot = async (id: string) => {
     if (working || id === account?.id) return;
@@ -626,6 +638,12 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
   const viewDef = viewClass ? CLASSES[viewClass] : null;
   /** The figure wears what the saved character really wears once that is known, else the class's own clothes. While the character is being made it wears none: the class is chosen, not put on. */
   const wornIds = !creating && sheet ? sheet.armor.flatMap((s) => (s ? [s.id] : [])) : null;
+  // What the character has on besides armor: its wings and its companion show beside it, as they do in the game.
+  const figureWings = !creating && sheet?.wings ? wingNumberOf(sheet.wings.id) : 0;
+  const figurePet = (() => {
+    const def = !creating && sheet?.companion ? companionOfItem(sheet.companion.id) : null;
+    return def ? companionIndex(def.id) + 1 : 0;
+  })();
   const figureArmor = creating ? [] : (wornIds ?? (viewClass ? outfitItems(viewClass) : []));
   const weaponName = shownDef ? getItem(shownDef.startingWeapon).name.replace(/_/g, ' ') : '';
   const iconOf = (c: ClassId | null | undefined): number => (c ? CLASSES[c].startingWeapon : toolId('sword', 'diamond'));
@@ -663,11 +681,12 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
                 {m.label}
               </button>
             ))}
+            <button className="fp-link-camp" onClick={goCamp}>Camp</button>
             <button className="fp-link-market" onClick={goMarket}>Market</button>
             <button className="fp-link-token" onClick={goToken}>Token</button>
           </nav>
           <div className="fp-account">
-            <AccountPanel />
+            <AccountPanel bar />
           </div>
           <i className="fp-progress" aria-hidden="true" />
         </header>
@@ -686,7 +705,7 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
                 <i className="ring" />
               </div>
               <div className="gp-build">
-                <CharacterPreview armor={figureArmor} grounded turntable={spin} />
+                <CharacterPreview armor={figureArmor} grounded turntable={spin} wings={figureWings} companion={figurePet} />
               </div>
             </div>
           ) : (
@@ -711,6 +730,10 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
       </div>
 
       <main className="gp-main">
+        {/* (shown on touch screens only, see responsive.css) */}
+        <p className="gp-touch" role="note">
+          SolRift is played with a keyboard and a mouse. Look around here, and open it on a computer to play.
+        </p>
         {/* ---------------------------------------------------- your characters (left) */}
         <section className="gp-roster" id="lb-slots" aria-label="Characters" ref={rosterRef}>
           {!(who === 'wallet' && !signedIn) && (
@@ -758,6 +781,7 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
               ) : wallets.length === 0 ? (
                 <p className="lb-warn" id="who-no-wallet">
                   No Solana wallet found. Install Phantom, Solflare or Backpack, then reload this page.
+                  <WalletLinks />
                 </p>
               ) : (
                 <>
@@ -903,9 +927,12 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
             </div>
           )}
           {who === 'wallet' && signedIn && !creating && account.characters.length >= account.maxCharacters && (
-            <p className="lb-hint" id="char-full">
-              {account.maxCharacters} of {account.maxCharacters} characters: delete one to make another.
-            </p>
+            <>
+              <p className="lb-hint" id="char-full">
+                {account.maxCharacters} of {account.maxCharacters} characters: delete one to make another.
+              </p>
+              <TokenShop compact />
+            </>
           )}
           {/* What is being played, chosen on the front page (and changed there). */}
           <div className="gp-mode" id="lb-how" data-way={way} data-mode={way === 'single' ? mode : 'realm'}>

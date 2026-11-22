@@ -1,0 +1,942 @@
+/*
+ * The Camp (/camp): what a hero can do from a phone or a tablet. Phone first: one column, big tap targets, a tab bar at the thumb's
+ * end of the screen and sheets that slide up from it. It sits on the front page's bar (front.css) and reuses the item pictures of
+ * the character sheet; everything here starts with `.camp`. `--c` is the page's colour (gold).
+ * (The sheets and the tab bar are fixed to the screen, so their selectors do not depend on `#home .fp`.)
+ */
+
+#home .fp.camp {
+  background-image: linear-gradient(rgba(255, 255, 255, 0.022) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+  background-size: 48px 48px;
+  min-height: 100svh;
+}
+
+/* ---------- the page ---------- */
+#home .fp.camp .camp-main {
+  width: min(880px, 100%);
+  margin: 0 auto;
+  padding: 118px max(14px, env(safe-area-inset-right)) calc(96px + env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+#home .fp.camp .camp-top {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+#home .fp.camp .camp-crumbs {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+#home .fp.camp .camp-crumbs a {
+  color: var(--soft);
+  text-decoration: none;
+}
+#home .fp.camp .camp-top h1 {
+  margin: 0;
+  font-size: clamp(34px, 9vw, 64px);
+  line-height: 1;
+  text-shadow: 0 4px 0 rgba(0, 0, 0, 0.6);
+}
+#home .fp.camp .camp-top h1 em {
+  font-style: normal;
+  color: #fff;
+  text-shadow:
+    0 4px 0 rgba(0, 0, 0, 0.6),
+    0 0 36px color-mix(in srgb, var(--c) 80%, transparent);
+}
+#home .fp.camp .camp-lead,
+#home .fp.camp .camp-fine {
+  margin: 0;
+  max-width: 560px;
+  font-family: var(--body);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--soft);
+}
+#home .fp.camp .camp-fine {
+  font-size: 12px;
+  color: var(--muted);
+}
+#home .fp.camp .camp-who {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  margin: 0;
+  font-size: 14px;
+  color: var(--soft);
+}
+#home .fp.camp .camp-who b {
+  font-size: 18px;
+  color: #fff;
+}
+#home .fp.camp .camp-coins {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--gold);
+}
+#home .fp.camp .camp-heroes {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 2px 0 6px;
+  scrollbar-width: thin;
+}
+#home .fp.camp .camp-heroes button {
+  flex: 0 0 auto;
+  display: grid;
+  gap: 1px;
+  min-height: 44px;
+  padding: 6px 14px;
+  border: none;
+  font-size: 13px;
+  text-align: left;
+  color: #d9d0ea;
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+}
+#home .fp.camp .camp-heroes button small {
+  font-size: 10px;
+  text-transform: capitalize;
+  color: var(--muted);
+}
+#home .fp.camp .camp-heroes button.on {
+  color: #fff;
+  background: color-mix(in srgb, var(--c) 24%, #0c0817);
+  box-shadow: inset 0 0 0 2px var(--c);
+}
+
+#home .fp.camp .camp-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+#home .fp.camp .camp-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ---------- panels and words ---------- */
+#home .fp.camp .camp-block,
+#home .fp.camp .camp-daily,
+#home .fp.camp .camp-signin,
+#home .fp.camp .camp-trip-now,
+#home .fp.camp .camp-guild {
+  padding: 14px;
+  background: rgba(10, 7, 18, 0.9);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.13),
+    0 14px 34px rgba(0, 0, 0, 0.35);
+}
+#home .fp.camp h2,
+#home .fp.camp h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+#home .fp.camp .camp-signin h2 {
+  font-size: 18px;
+}
+#home .fp.camp h3 small {
+  margin-left: 8px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: var(--muted);
+}
+#home .fp.camp .camp-h3 {
+  margin: 6px 0 0;
+}
+#home .fp.camp p {
+  margin: 0;
+}
+#home .fp.camp .camp-signin p,
+#home .fp.camp .camp-daily p,
+#home .fp.camp .camp-trip p,
+#home .fp.camp .camp-trip-now p {
+  font-family: var(--body);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--soft);
+}
+#home .fp.camp .camp-hint,
+#home .fp.camp .camp-empty {
+  font-family: var(--body);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+#home .fp.camp .camp-empty {
+  padding: 18px 8px;
+  text-align: center;
+}
+#home .fp.camp .camp-warn {
+  padding: 10px 12px;
+  font-family: var(--body);
+  font-size: 13px;
+  line-height: 1.45;
+  color: #ffd9b0;
+  background: rgba(255, 140, 40, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(255, 160, 70, 0.4);
+}
+#home .fp.camp .camp-warn.small {
+  padding: 8px 10px;
+  font-size: 12px;
+}
+#home .fp.camp .camp-link {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  text-decoration: underline;
+  color: var(--soft);
+}
+
+/* ---------- buttons ---------- */
+#home .fp.camp .camp-btn,
+.camp-sheet .camp-btn {
+  min-height: 48px;
+  padding: 10px 16px;
+  border: none;
+  font-family: var(--pixel, monospace);
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #efe9f7;
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+#home .fp.camp .camp-btn.primary,
+.camp-sheet .camp-btn.primary {
+  color: #1a1000;
+  background: var(--c, #f0b020);
+  box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.25);
+}
+#home .fp.camp .camp-btn:disabled,
+.camp-sheet .camp-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+@media (hover: hover) {
+  #home .fp.camp .camp-btn:hover:not(:disabled),
+  .camp-sheet .camp-btn:hover:not(:disabled) {
+    filter: brightness(1.15);
+  }
+}
+#home .fp.camp .camp-wallets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 12px 0;
+}
+#home .fp.camp .camp-wallets .camp-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+#home .fp.camp .camp-wallet-links,
+.wallet-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.wallet-links .wallet-links-note {
+  flex: 1 1 100%;
+  font-family: var(--body, system-ui);
+  font-size: 12px;
+  color: var(--muted, #a79fb8);
+}
+.wallet-links a.wallet-option {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 14px;
+  font-size: 13px;
+  text-decoration: none;
+  color: #fff;
+  background: rgba(138, 92, 245, 0.35);
+  box-shadow: inset 0 0 0 1px rgba(180, 150, 255, 0.5);
+}
+
+/* ---------- item slots and grids ---------- */
+.camp-slot {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 1;
+  min-width: 44px;
+  padding: 0;
+  border: 2px solid #1c1c26;
+  border-right-color: rgba(128, 128, 148, 0.5);
+  border-bottom-color: rgba(128, 128, 148, 0.5);
+  background: linear-gradient(rgba(120, 120, 140, 0.34), rgba(80, 80, 96, 0.3));
+  color: #fff;
+  cursor: default;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.camp-slot.coin {
+  cursor: default;
+}
+.camp-slot.full {
+  cursor: pointer;
+}
+.camp-slot.on {
+  border-color: var(--c, #f0b020);
+  box-shadow: 0 0 0 2px var(--c, #f0b020);
+}
+.camp-slot:disabled {
+  opacity: 0.75;
+}
+.camp-slot small {
+  font-size: 9px;
+  line-height: 1.1;
+  color: rgba(255, 255, 255, 0.4);
+}
+.camp-slot .cs-icon {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+.camp-slot .camp-count,
+.camp-slot .camp-plus {
+  position: absolute;
+  font-size: 11px;
+  font-weight: 700;
+  text-shadow:
+    1px 1px #000,
+    0 0 3px #000;
+}
+.camp-slot .camp-count {
+  right: 3px;
+  bottom: 1px;
+}
+.camp-slot .camp-plus {
+  left: 3px;
+  top: 1px;
+  color: #ffd24a;
+}
+.camp-slot .camp-wear {
+  position: absolute;
+  left: 2px;
+  bottom: 2px;
+  height: 3px;
+  background: #5f5;
+}
+#home .fp.camp .camp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
+  gap: 5px;
+}
+#home .fp.camp .camp-worn {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: 8px;
+}
+#home .fp.camp .camp-worn-cell {
+  display: grid;
+  gap: 3px;
+  text-align: center;
+}
+#home .fp.camp .camp-worn-cell span {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+/* ---------- the daily check-in ---------- */
+#home .fp.camp .camp-daily {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+#home .fp.camp .camp-daily > div {
+  flex: 1 1 220px;
+}
+#home .fp.camp .camp-daily .camp-btn {
+  flex: 0 0 auto;
+}
+#home .fp.camp .camp-days {
+  display: flex;
+  gap: 5px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+#home .fp.camp .camp-days li {
+  width: 22px;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.14);
+}
+#home .fp.camp .camp-days li.done {
+  background: var(--c);
+}
+#home .fp.camp .camp-days li.now {
+  background: color-mix(in srgb, var(--c) 35%, transparent);
+  box-shadow: inset 0 0 0 1px var(--c);
+}
+
+/* ---------- lists: offers, mail, trips ---------- */
+#home .fp.camp .camp-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+}
+#home .fp.camp .camp-offer,
+#home .fp.camp .camp-letter,
+#home .fp.camp .camp-trip {
+  display: grid;
+  grid-template-columns: 52px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px;
+  border: none;
+  text-align: left;
+  color: var(--text);
+  background: rgba(10, 7, 18, 0.9);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.13);
+}
+#home .fp.camp .camp-offer {
+  min-height: 72px;
+  cursor: pointer;
+}
+#home .fp.camp .camp-offer.mine {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.3);
+}
+#home .fp.camp .camp-offer.lead {
+  box-shadow: inset 0 0 0 2px #5f5;
+}
+#home .fp.camp .camp-offer-main {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+#home .fp.camp .camp-offer-main b {
+  overflow: hidden;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #fff;
+}
+#home .fp.camp .camp-offer-main small,
+#home .fp.camp .camp-offer-price small {
+  font-family: var(--body);
+  font-size: 12px;
+  color: var(--muted);
+}
+#home .fp.camp .camp-offer-price {
+  display: grid;
+  gap: 2px;
+  justify-items: end;
+  text-align: right;
+}
+#home .fp.camp .camp-price {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--gold);
+}
+#home .fp.camp .camp-letter {
+  grid-template-columns: 52px 1fr auto;
+}
+#home .fp.camp .camp-letter .camp-slot.coin {
+  display: grid;
+  place-items: center;
+}
+#home .fp.camp .camp-trip {
+  grid-template-columns: 1fr auto;
+  align-items: start;
+}
+#home .fp.camp .camp-trip b {
+  color: #fff;
+}
+#home .fp.camp .camp-trip small {
+  font-size: 12px;
+  color: var(--muted);
+}
+#home .fp.camp .camp-trip .camp-btn {
+  min-width: 92px;
+}
+#home .fp.camp .camp-found {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 8px 0 12px;
+  font-family: var(--body);
+  font-size: 14px;
+  color: var(--text);
+}
+#home .fp.camp .camp-found li {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+#home .fp.camp .camp-bar {
+  height: 10px;
+  margin: 10px 0 8px;
+  background: rgba(255, 255, 255, 0.12);
+}
+#home .fp.camp .camp-bar i {
+  display: block;
+  height: 100%;
+  background: var(--c);
+  transition: width 1s linear;
+}
+
+/* ---------- market controls ---------- */
+#home .fp.camp .camp-subtabs,
+#home .fp.camp .camp-cats {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+#home .fp.camp .camp-subtabs::-webkit-scrollbar,
+#home .fp.camp .camp-cats::-webkit-scrollbar {
+  display: none;
+}
+#home .fp.camp .camp-subtabs button,
+#home .fp.camp .camp-cats button,
+#home .fp.camp .camp-search button,
+#home .fp.camp .camp-pager button,
+.camp-hours button,
+.camp-stepper button {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: none;
+  font-family: var(--pixel, monospace);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #d9d0ea;
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+#home .fp.camp .camp-subtabs button.on,
+#home .fp.camp .camp-cats button.on,
+.camp-hours button.on {
+  color: #fff;
+  background: color-mix(in srgb, var(--c, #f0b020) 26%, #0c0817);
+  box-shadow: inset 0 0 0 2px var(--c, #f0b020);
+}
+#home .fp.camp .camp-subtabs button b {
+  padding: 1px 6px;
+  font-size: 11px;
+  color: #1a1000;
+  background: var(--c);
+}
+#home .fp.camp .camp-search,
+#home .fp.camp .camp-say {
+  display: flex;
+  gap: 8px;
+}
+#home .fp.camp .camp-search input,
+#home .fp.camp .camp-say input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 48px;
+  padding: 0 12px;
+  border: none;
+  /* 16 px: a smaller one makes iOS zoom the page when the box is tapped */
+  font-size: 16px;
+  font-family: var(--body);
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+}
+#home .fp.camp .camp-say button {
+  min-width: 80px;
+  color: #1a1000;
+  background: var(--c);
+}
+#home .fp.camp .camp-say button:disabled {
+  opacity: 0.45;
+}
+#home .fp.camp .camp-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--muted);
+}
+#home .fp.camp .camp-pager button:disabled {
+  opacity: 0.35;
+}
+
+/* ---------- the realm: guild and chat ---------- */
+#home .fp.camp .camp-guild summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  min-height: 32px;
+  cursor: pointer;
+  color: var(--text);
+}
+#home .fp.camp .camp-guild summary b {
+  font-size: 15px;
+  color: #fff;
+}
+#home .fp.camp .camp-guild summary small,
+#home .fp.camp .camp-guild summary span {
+  font-family: var(--body);
+  font-size: 12px;
+  color: var(--muted);
+}
+#home .fp.camp .camp-motd {
+  margin: 8px 0;
+  font-family: var(--body);
+  font-size: 13px;
+  font-style: italic;
+  color: var(--soft);
+}
+#home .fp.camp .camp-roster {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 4px 12px;
+  margin: 8px 0 0;
+}
+#home .fp.camp .camp-roster li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  font-size: 13px;
+  color: var(--muted);
+}
+#home .fp.camp .camp-roster li.on {
+  color: #fff;
+}
+#home .fp.camp .camp-roster li i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #555;
+}
+#home .fp.camp .camp-roster li.on i {
+  background: #5f5;
+}
+#home .fp.camp .camp-roster small {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--muted);
+}
+#home .fp.camp .camp-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  height: min(46vh, 420px);
+  min-height: 220px;
+  margin: 0;
+  padding: 10px 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  font-family: var(--body);
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--text);
+  background: rgba(10, 7, 18, 0.9);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.13);
+  overflow-wrap: anywhere;
+}
+#home .fp.camp .camp-lines li b {
+  color: var(--gold);
+}
+#home .fp.camp .camp-lines li.me b {
+  color: #9fe8ff;
+}
+#home .fp.camp .camp-lines li.note {
+  font-style: italic;
+  color: var(--muted);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ---------- sheets (fixed to the screen) ---------- */
+.camp-sheet-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  animation: camp-fade 0.15s both;
+}
+.camp-sheet {
+  position: relative;
+  width: min(560px, 100%);
+  max-height: 88svh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
+  color: #efe9f7;
+  background: #0d0919;
+  box-shadow:
+    0 -12px 40px rgba(0, 0, 0, 0.6),
+    inset 0 2px 0 var(--c, #f0b020);
+  animation: camp-up 0.2s both cubic-bezier(0.2, 0.8, 0.2, 1);
+  font-family: var(--body, system-ui);
+}
+.camp-sheet-x {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 44px;
+  height: 44px;
+  border: none;
+  font-size: 26px;
+  line-height: 1;
+  color: #d9d0ea;
+  background: none;
+  cursor: pointer;
+}
+.camp-card-item {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 14px;
+  align-items: start;
+  padding-right: 40px;
+}
+.camp-card-item .camp-slot {
+  width: 64px;
+}
+.camp-tip {
+  font-family: var(--pixel, monospace);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-shadow: 1px 1px 0 #1c1c1c;
+}
+.camp-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+.camp-actions label {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  color: #cfc6e0;
+}
+.camp-actions .camp-hint,
+.camp-sheet .camp-hint {
+  font-size: 13px;
+  color: #a79fb8;
+  line-height: 1.5;
+}
+.camp-sheet .camp-warn {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: #ffd9b0;
+  background: rgba(255, 140, 40, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(255, 160, 70, 0.4);
+}
+.camp-hours {
+  display: flex;
+  gap: 8px;
+}
+.camp-hours button {
+  flex: 1;
+  justify-content: center;
+}
+.camp-stepper {
+  display: flex;
+  gap: 6px;
+}
+.camp-stepper input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 10px;
+  border: none;
+  text-align: center;
+  font-size: 16px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+}
+.camp-stepper button {
+  min-width: 44px;
+  justify-content: center;
+  padding: 0 10px;
+  font-size: 16px;
+}
+.camp-stepper button.all {
+  font-size: 11px;
+}
+.camp-stepper button:disabled {
+  opacity: 0.35;
+}
+
+/* ---------- the notice and the tab bar ---------- */
+.camp-notice {
+  position: fixed;
+  left: 50%;
+  bottom: calc(86px + env(safe-area-inset-bottom));
+  z-index: 90;
+  max-width: min(520px, calc(100vw - 24px));
+  padding: 12px 16px;
+  transform: translateX(-50%);
+  font-family: var(--body, system-ui);
+  font-size: 14px;
+  line-height: 1.4;
+  color: #eaffea;
+  background: #0f2a14;
+  box-shadow:
+    inset 0 0 0 1px #3c8a4a,
+    0 10px 30px rgba(0, 0, 0, 0.5);
+  animation: camp-up 0.2s both;
+}
+.camp-notice.bad {
+  color: #ffe3e3;
+  background: #301212;
+  box-shadow:
+    inset 0 0 0 1px #a04444,
+    0 10px 30px rgba(0, 0, 0, 0.5);
+}
+.camp-tabbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 70;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  width: min(620px, 100%);
+  margin: 0 auto;
+  padding-bottom: env(safe-area-inset-bottom);
+  background: rgba(8, 5, 16, 0.96);
+  box-shadow:
+    0 -1px 0 rgba(255, 255, 255, 0.14),
+    0 -10px 30px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+}
+.camp-tabbar button {
+  position: relative;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 2px;
+  min-height: 62px;
+  padding: 6px 4px;
+  border: none;
+  font-family: var(--pixel, monospace);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #a79fb8;
+  background: none;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.camp-tabbar button i {
+  font-style: normal;
+  font-size: 20px;
+  line-height: 1;
+}
+.camp-tabbar button.on {
+  color: #fff;
+  box-shadow: inset 0 3px 0 var(--c, #f0b020);
+  background: rgba(255, 255, 255, 0.05);
+}
+.camp-tabbar button b {
+  position: absolute;
+  top: 6px;
+  left: calc(50% + 10px);
+  min-width: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+  color: #1a1000;
+  background: var(--c, #f0b020);
+}
+
+@keyframes camp-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes camp-up {
+  from {
+    opacity: 0;
+    transform: translate(var(--tx, 0), 14px);
+  }
+}
+.camp-notice {
+  --tx: -50%;
+}
+
+/* ---------- bigger screens ---------- */
+@media (min-width: 900px) {
+  #home .fp.camp .camp-main {
+    padding-top: 140px;
+  }
+  .camp-sheet-wrap {
+    align-items: center;
+  }
+  .camp-sheet {
+    max-height: 80vh;
+  }
+  .camp-tabbar {
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    margin: 0;
+  }
+}
+@media (max-width: 380px) {
+  #home .fp.camp .camp-offer {
+    grid-template-columns: 44px 1fr;
+  }
+  #home .fp.camp .camp-offer-price {
+    grid-column: 1 / -1;
+    grid-auto-flow: column;
+    justify-content: space-between;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .camp-sheet,
+  .camp-sheet-wrap,
+  .camp-notice {
+    animation: none;
+  }
+  #home .fp.camp .camp-bar i {
+    transition: none;
+  }
+}

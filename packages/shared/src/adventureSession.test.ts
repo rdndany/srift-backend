@@ -610,6 +610,16 @@ describe('an Adventure player', () => {
     expect(synced.length).toBeGreaterThan(0);
   });
 
+  it('says when a dungeon was cleared (the Hollow King fell), and for nothing else', () => {
+    const s = make();
+    run(s, 1.5);
+    s.drainEvents();
+    s.achKill({ kind: 'zombie', elite: false, def: { hostile: true } });
+    expect(s.drainEvents().some((e) => e.t === 'clear')).toBe(false);
+    s.achKill({ kind: 'hollow_king', elite: false, def: { hostile: true, boss: true } });
+    expect(s.drainEvents().filter((e) => e.t === 'clear')).toEqual([{ t: 'clear', id: 'hollow-deep', name: 'the Hollow Deep' }]);
+  });
+
   it('is told the quest commands are well formed or not at all', () => {
     expect(parseSessionMessage({ t: 'quest', a: 'accept', id: 'welcome' })).toEqual({ t: 'quest', a: 'accept', id: 'welcome' });
     expect(parseSessionMessage({ t: 'quest', a: 'complete', id: 'x' })).not.toBeNull();

@@ -9,7 +9,7 @@ import { itemKind } from './tooltip';
  * player arranged it, and nothing is lost: the stacks only get fewer, so they always fit.
  */
 
-const KIND_ORDER = ['Equipment', 'Bag', 'Special', 'Skill Book', 'Enchanted Book', 'Food', 'Item', 'Nature', 'Block', 'Dye', 'Material'];
+const KIND_ORDER = ['Equipment', 'Bag', 'Special', 'Skill Book', 'Glyph Tome', 'Food', 'Item', 'Nature', 'Block', 'Dye', 'Material'];
 
 const rank = (s: ItemStack): number => {
   const r = KIND_ORDER.indexOf(itemKind(s.id));

@@ -14,6 +14,10 @@ import { tooltipName } from './tooltip';
  *  - A buyout ends the auction at once.
  *  - Everything that is owed (items, coins) waits in the owner's mail until they collect it at the Auctioneer, so nothing is
  *    lost when a bag is full or the owner is away.
+ *  - An auction can be priced in $SOLRIFT instead of Auren (`token`). Tokens are not mailed: every payment, refund and sale is a
+ *    `TokenMove` that the house queues and the server writes to the token ledger together with the house (see `moves`). The deposit
+ *    is still paid in Auren, and the house's cut of a token sale goes to the house's own ledger account, so what a sale moves
+ *    always adds up to nothing and the cut stays in the treasury.
  *
  * This file is only the rules and the ledger. Who may do what, where, and with whose coins and bags is the `Player`'s to check;
  * the shared server keeps one house for the realm and stores it (see `AuctionHouse.toJSON`).
@@ -34,6 +38,8 @@ export const AUCTION_RULES = {
   raise: 0.05,
   /** How many auctions one account can have up at once. */
   maxListings: 30,
+  /** The highest price an auction in $SOLRIFT can have (whole tokens). */
+  maxToken: 1_000_000,
   /** Rows to a page of results. */
   pageSize: 12,
   /** The most mail an account is shown (everything stays safe: older letters appear as these are collected). */
@@ -43,6 +49,19 @@ export const AUCTION_RULES = {
 /** The seller of the stock the house itself puts up (it has no mail). */
 export const HOUSE_ACCOUNT = 'house';
 export const HOUSE_NAME = 'Dawnwatch Trading Co.';
+/** The ledger account that keeps the house's cut of sales in $SOLRIFT (no wallet can be signed in as it). */
+export const HOUSE_WALLET = 'house';
+
+/** One movement of $SOLRIFT the house asks the ledger to make: negative takes from the wallet, positive gives to it. */
+export interface TokenMove {
+  /** Unique within this house, kept with it: the ledger writes a move once however many times it is sent. */
+  id: number;
+  wallet: string;
+  amount: number;
+  /** `fee` is the house's cut. */
+  kind: 'trade' | 'fee';
+  note: string;
+}
 
 export type AuctionCategory = 'all' | 'weapon' | 'armor' | 'tool' | 'food' | 'jewel' | 'book' | 'bag' | 'block' | 'other';
 
@@ -63,10 +82,11 @@ export const AUCTION_CATEGORIES: readonly { id: AuctionCategory; name: string }[
 export function categoryOf(stack: ItemStack): AuctionCategory {
   const item = getItem(stack.id);
   if (item.kind === 'Jewel') return 'jewel';
-  if (item.kind === 'Skill Book' || item.kind === 'Enchanted Book') return 'book';
-  if (item.kind === 'Bag' || item.kind === 'Mount') return 'bag';
+  if (item.kind === 'Skill Book' || item.kind === 'Glyph Tome') return 'book';
+  if (item.kind === 'Bag' || item.kind === 'Mount' || item.kind === 'Companion' || item.kind === 'Wings') return 'bag';
+  if (item.kind === 'Ring' || item.kind === 'Necklace') return 'armor';
   if (item.weapon || item.tool?.kind === 'sword' || item.use === 'bow' || item.use === 'crossbow') return 'weapon';
-  if (item.armor || item.shield) return 'armor';
+  if (item.armor || item.shield || item.kind === 'Outfit') return 'armor';
   if (item.tool) return 'tool';
   if (item.food) return 'food';
   if (item.block !== null) return 'block';
@@ -115,6 +135,11 @@ export interface Auction {
   deposit: number;
   /** When it ends (ms). */
   end: number;
+  /** Priced in $SOLRIFT (whole tokens) instead of Auren. */
+  token: boolean;
+  /** The wallets that are paid and that paid, for an auction in $SOLRIFT (the ledger knows wallets, the house knows characters). */
+  sellerWallet: string | null;
+  bidderWallet: string | null;
 }
 
 export type MailKind = 'sold' | 'won' | 'outbid' | 'expired' | 'cancelled';
@@ -147,6 +172,8 @@ export interface AuctionRow {
   left: number;
   /** The coins it takes to buy it out (what you owe if you hold the highest bid is already counted). */
   pay: number;
+  /** Priced in $SOLRIFT: every number on this row is whole tokens, not Auren. */
+  token: boolean;
 }
 
 export interface MailRow {
@@ -168,12 +195,14 @@ export interface AuctionView {
   mail: MailRow[];
   /** The player may sell and bid (an account), or can only look. */
   member: boolean;
+  /** The player may trade in $SOLRIFT here, with this balance to spend (null: they may not, or there is no token). */
+  tokens: { balance: number } | null;
 }
 
 /** What a command to the house can ask for (the `auction` command of a session). */
 export type AuctionCommand =
   | { a: 'search'; q: string; cat: AuctionCategory; sort: AuctionSort; desc: boolean; page: number }
-  | { a: 'post'; slot: number; count: number; bid: number; buyout: number; hours: AuctionHours }
+  | { a: 'post'; slot: number; count: number; bid: number; buyout: number; hours: AuctionHours; token?: boolean }
   | { a: 'bid'; id: number; amount: number }
   | { a: 'buyout'; id: number }
   | { a: 'cancel'; id: number }
@@ -207,6 +236,26 @@ export function sellBlocker(stack: ItemStack | null): string | null {
   return null;
 }
 
+/** What a bidder has to pay an auction in $SOLRIFT with: the wallet, and the whole tokens it can spend now. */
+export interface TokenFunds {
+  wallet: string | null;
+  tokens: number;
+}
+const NO_FUNDS: TokenFunds = { wallet: null, tokens: 0 };
+
+/**
+ * What the server lends the realm so that players can trade in $SOLRIFT. The realm only asks; the ledger, the wallets and the honest-play
+ * rules (no creative mode, no admin, no cheats server) are the server's.
+ */
+export interface TokenDesk {
+  /** May this player trade in $SOLRIFT: a signed-in wallet, in honest play. */
+  allowed(player: object): boolean;
+  /** Whole tokens the wallet can spend now: its ledger balance, counting the house's moves that are still waiting to be written. */
+  balance(wallet: string): number;
+  /** Write the house's waiting token moves to the ledger now, together with the house. */
+  flush(): void;
+}
+
 export type Outcome<T = object> = ({ ok: true } & T) | { ok: false; error: string };
 
 const fail = (error: string): { ok: false; error: string } => ({ ok: false, error });
@@ -223,6 +272,9 @@ interface SavedAuction {
   bidderName: string | null;
   deposit: number;
   end: number;
+  token?: boolean;
+  sellerWallet?: string | null;
+  bidderWallet?: string | null;
 }
 
 interface SavedMail {
@@ -237,6 +289,8 @@ export interface AuctionHouseJSON {
   next: number;
   auctions: SavedAuction[];
   mail: Record<string, SavedMail[]>;
+  /** Token moves not yet written to the ledger (kept so that a restart sends them again; the ledger ignores a move it has). */
+  moves?: TokenMove[];
 }
 
 const stackJson = (s: ItemStack): SerializedStack => {
@@ -293,6 +347,8 @@ const HOUSE_TARGET = 16;
 export class AuctionHouse {
   private readonly auctions = new Map<number, Auction>();
   private readonly mailbox = new Map<string, Mail[]>();
+  /** $SOLRIFT movements waiting for the server to write them to the ledger (see `TokenMove`). */
+  readonly moves: TokenMove[] = [];
   private next = 1;
   private readonly now: () => number;
   private readonly hourMs: number;
@@ -324,6 +380,26 @@ export class AuctionHouse {
     this.dirty = true;
   }
 
+  private move(wallet: string, amount: number, note: string, kind: 'trade' | 'fee' = 'trade'): void {
+    if (!Number.isInteger(amount) || amount === 0) return;
+    this.moves.push({ id: this.next++, wallet, amount, kind, note });
+    this.dirty = true;
+  }
+
+  /** What the wallet has coming in (positive) or going out (negative) that the ledger has not been told yet. */
+  pendingTokens(wallet: string): number {
+    let n = 0;
+    for (const m of this.moves) if (m.wallet === wallet) n += m.amount;
+    return n;
+  }
+
+  /** The ledger has these moves: forget them here (the next save no longer carries them). */
+  ackMoves(done: readonly TokenMove[]): void {
+    const ids = new Set(done.map((m) => m.id));
+    for (let i = this.moves.length - 1; i >= 0; i--) if (ids.has(this.moves[i].id)) this.moves.splice(i, 1);
+    this.dirty = true;
+  }
+
   private tell(owner: string, text: string): void {
     if (owner !== HOUSE_ACCOUNT) this.notify?.(owner, text);
   }
@@ -337,23 +413,34 @@ export class AuctionHouse {
   private settle(a: Auction, price: number): void {
     const cut = houseCut(price);
     const name = this.nameOf(a);
-    this.mailTo(a.seller, 'sold', `Auction successful: ${name}`, null, price - cut + a.deposit);
+    if (a.token) {
+      // Paid in $SOLRIFT straight into the ledger: the seller gets the price less the cut, the house's own account the cut, and the
+      // buyer already paid the price (so the three moves add up to nothing). Only the deposit, in Auren, goes by mail.
+      this.move(a.sellerWallet ?? HOUSE_WALLET, price - cut, `Sold: ${name}`);
+      this.move(HOUSE_WALLET, cut, `House cut: ${name}`, 'fee');
+      this.mailTo(a.seller, 'sold', `Auction successful: ${name}`, null, a.deposit);
+    } else {
+      this.mailTo(a.seller, 'sold', `Auction successful: ${name}`, null, price - cut + a.deposit);
+    }
     if (a.bidder) this.mailTo(a.bidder, 'won', `Auction won: ${name}`, a.item, 0);
     this.auctions.delete(a.id);
     this.dirty = true;
-    this.tell(a.seller, `Your auction of ${name} sold for ${price} Auren.`);
+    this.tell(a.seller, `Your auction of ${name} sold for ${price} ${a.token ? '$SOLRIFT' : 'Auren'}.`);
     if (a.bidder) this.tell(a.bidder, `You won the auction for ${name}.`);
   }
 
   // ---- what players do -----------------------------------------------------------------
 
   /** Put an item up. The deposit is the caller's to take (it has checked the coins); `deposit` is what it took. */
-  post(p: { seller: string; sellerName: string; item: ItemStack; bid: number; buyout: number; hours: number; deposit: number }): Outcome<{ auction: Auction }> {
+  post(p: { seller: string; sellerName: string; item: ItemStack; bid: number; buyout: number; hours: number; deposit: number; token?: boolean; sellerWallet?: string | null }): Outcome<{ auction: Auction }> {
     const blocked = sellBlocker(p.item);
     if (blocked) return fail(blocked);
     if (!AUCTION_HOURS.includes(p.hours as AuctionHours)) return fail('Choose how long it runs.');
-    if (!Number.isInteger(p.bid) || p.bid < 1 || p.bid > MAX_COINS) return fail('Set a starting bid of at least 1.');
-    if (!Number.isInteger(p.buyout) || p.buyout < 0 || p.buyout > MAX_COINS || (p.buyout > 0 && p.buyout < p.bid)) return fail('The buyout cannot be less than the starting bid.');
+    const token = p.token === true;
+    if (token && !p.sellerWallet) return fail('You cannot trade in $SOLRIFT here.');
+    const top = token ? AUCTION_RULES.maxToken : MAX_COINS;
+    if (!Number.isInteger(p.bid) || p.bid < 1 || p.bid > top) return fail(token ? `Set a starting bid between 1 and ${top.toLocaleString('en-US')} $SOLRIFT.` : 'Set a starting bid of at least 1.');
+    if (!Number.isInteger(p.buyout) || p.buyout < 0 || p.buyout > top || (p.buyout > 0 && p.buyout < p.bid)) return fail('The buyout cannot be less than the starting bid.');
     let mine = 0;
     for (const a of this.auctions.values()) if (a.seller === p.seller) mine++;
     if (p.seller !== HOUSE_ACCOUNT && mine >= AUCTION_RULES.maxListings) return fail(`You can have only ${AUCTION_RULES.maxListings} auctions up at once.`);
@@ -369,6 +456,9 @@ export class AuctionHouse {
       bidderName: null,
       deposit: p.deposit,
       end: this.now() + p.hours * this.hourMs,
+      token,
+      sellerWallet: token ? (p.sellerWallet ?? null) : null,
+      bidderWallet: null,
     };
     this.auctions.set(auction.id, auction);
     this.dirty = true;
@@ -387,44 +477,69 @@ export class AuctionHouse {
     return { ok: true, auction: a };
   }
 
-  /** Bid `amount` (every coin of it paid now). A bid at or over the buyout buys it. `coins` are what the bidder has: the call refuses what they cannot pay. */
-  bid(id: number, who: string | null, name: string, amount: number, coins: number): Outcome<{ pay: number; bought: boolean }> {
+  /**
+   * Bid `amount` (every coin of it paid now). A bid at or over the buyout buys it. `coins` are what the bidder has: the call refuses what
+   * they cannot pay. For an auction in $SOLRIFT the bidder's `funds` count instead (their wallet, and the tokens it can spend), and the
+   * payment and the refund of whoever was outbid are queued as `moves` (so the caller must not take any coins for it: see `token`).
+   */
+  bid(id: number, who: string | null, name: string, amount: number, coins: number, funds: TokenFunds = NO_FUNDS): Outcome<{ pay: number; bought: boolean; token: boolean }> {
     const c = this.check(this.auctions.get(id) ?? null, who);
     if (!c.ok || !who) return c.ok ? fail('Sign in to bid or sell.') : c;
     const a = c.auction;
-    if (a.buyout > 0 && amount >= a.buyout) return this.buyout(id, who, name, coins);
-    if (!Number.isInteger(amount) || amount > MAX_COINS) return fail('That is not a bid.');
+    const blocked = this.tokenBlocker(a, funds);
+    if (blocked) return fail(blocked);
+    if (a.buyout > 0 && amount >= a.buyout) return this.buyout(id, who, name, coins, funds);
+    if (!Number.isInteger(amount) || amount > (a.token ? AUCTION_RULES.maxToken : MAX_COINS)) return fail('That is not a bid.');
     if (a.bidder === who) return fail('You already hold the highest bid.');
     if (amount < nextBid(a.bid, a.top)) return fail(`The lowest bid is ${nextBid(a.bid, a.top)}.`);
-    if (coins < amount) return fail('Not enough coins.');
-    if (a.bidder) {
-      this.mailTo(a.bidder, 'outbid', `Outbid: ${this.nameOf(a)}`, null, a.top);
-      this.tell(a.bidder, `You were outbid on ${this.nameOf(a)}.`);
-    }
+    if ((a.token ? funds.tokens : coins) < amount) return fail(a.token ? 'Not enough $SOLRIFT.' : 'Not enough coins.');
+    this.outbid(a);
+    if (a.token) this.move(funds.wallet as string, -amount, `Bid: ${this.nameOf(a)}`);
     a.top = amount;
     a.bidder = who;
     a.bidderName = name;
+    a.bidderWallet = a.token ? funds.wallet : null;
     this.dirty = true;
-    return { ok: true, pay: amount, bought: false };
+    return { ok: true, pay: amount, bought: false, token: a.token };
   }
 
   /** Buy it out now. */
-  buyout(id: number, who: string | null, name: string, coins: number): Outcome<{ pay: number; bought: boolean }> {
+  buyout(id: number, who: string | null, name: string, coins: number, funds: TokenFunds = NO_FUNDS): Outcome<{ pay: number; bought: boolean; token: boolean }> {
     const c = this.check(this.auctions.get(id) ?? null, who);
     if (!c.ok || !who) return c.ok ? fail('Sign in to bid or sell.') : c;
     const a = c.auction;
+    const blocked = this.tokenBlocker(a, funds);
+    if (blocked) return fail(blocked);
     if (a.buyout <= 0) return fail('There is no buyout on that.');
     const pay = this.buyoutPay(a, who);
-    if (coins < pay) return fail('Not enough coins.');
-    if (a.bidder && a.bidder !== who) {
-      this.mailTo(a.bidder, 'outbid', `Outbid: ${this.nameOf(a)}`, null, a.top);
-      this.tell(a.bidder, `You were outbid on ${this.nameOf(a)}.`);
-    }
+    if ((a.token ? funds.tokens : coins) < pay) return fail(a.token ? 'Not enough $SOLRIFT.' : 'Not enough coins.');
+    if (a.bidder && a.bidder !== who) this.outbid(a);
+    if (a.token) this.move(funds.wallet as string, -pay, `Bought: ${this.nameOf(a)}`);
     a.bidder = who;
     a.bidderName = name;
+    a.bidderWallet = a.token ? funds.wallet : null;
     a.top = a.buyout;
     this.settle(a, a.buyout);
-    return { ok: true, pay, bought: true };
+    return { ok: true, pay, bought: true, token: a.token };
+  }
+
+  /** What stops this bidder from bidding on an auction in $SOLRIFT (null: nothing). */
+  private tokenBlocker(a: Auction, funds: TokenFunds): string | null {
+    if (!a.token) return null;
+    if (!funds.wallet) return 'You cannot trade in $SOLRIFT here.';
+    if (a.sellerWallet === funds.wallet) return 'You cannot bid on your own auction.';
+    return null;
+  }
+
+  /** The highest bidder so far is outbid: their coins come back by mail, their $SOLRIFT straight to their balance. */
+  private outbid(a: Auction): void {
+    if (!a.bidder) return;
+    if (a.token) {
+      if (a.bidderWallet) this.move(a.bidderWallet, a.top, `Outbid: ${this.nameOf(a)}`);
+    } else {
+      this.mailTo(a.bidder, 'outbid', `Outbid: ${this.nameOf(a)}`, null, a.top);
+    }
+    this.tell(a.bidder, `You were outbid on ${this.nameOf(a)}.`);
   }
 
   /** Take an auction down: only the seller can, and only while nobody has bid. The item comes back by mail, and the deposit is lost. */
@@ -491,6 +606,7 @@ export class AuctionHouse {
       next: nextBid(a.bid, a.top),
       left: Math.max(0, Math.round((a.end - this.now()) / 1000)),
       pay: a.buyout > 0 ? this.buyoutPay(a, viewer ?? '') : 0,
+      token: a.token,
     };
   }
 
@@ -528,6 +644,7 @@ export class AuctionHouse {
         .slice(0, AUCTION_RULES.maxMail)
         .map((m) => ({ id: m.id, kind: m.kind, subject: m.subject, item: m.item ? cloneStack(m.item) : null, coins: m.coins })),
       member: viewer !== null,
+      tokens: null,
     };
   }
 
@@ -556,8 +673,9 @@ export class AuctionHouse {
     for (const [owner, list] of this.mailbox) mail[owner] = list.map((m) => ({ id: m.id, kind: m.kind, subject: m.subject, item: m.item ? stackJson(m.item) : null, coins: m.coins }));
     return {
       next: this.next,
-      auctions: [...this.auctions.values()].map((a) => ({ id: a.id, seller: a.seller, sellerName: a.sellerName, item: stackJson(a.item), bid: a.bid, buyout: a.buyout, top: a.top, bidder: a.bidder, bidderName: a.bidderName, deposit: a.deposit, end: a.end })),
+      auctions: [...this.auctions.values()].map((a) => ({ id: a.id, seller: a.seller, sellerName: a.sellerName, item: stackJson(a.item), bid: a.bid, buyout: a.buyout, top: a.top, bidder: a.bidder, bidderName: a.bidderName, deposit: a.deposit, end: a.end, token: a.token, sellerWallet: a.sellerWallet, bidderWallet: a.bidderWallet })),
       mail,
+      moves: this.moves.map((m) => ({ ...m })),
     };
   }
 
@@ -581,7 +699,15 @@ export class AuctionHouse {
         bidderName: typeof s.bidderName === 'string' ? s.bidderName.slice(0, 32) : null,
         deposit: whole(s.deposit),
         end: typeof s.end === 'number' && Number.isFinite(s.end) ? s.end : 0,
+        token: s.token === true,
+        sellerWallet: s.token === true && typeof s.sellerWallet === 'string' ? s.sellerWallet.slice(0, 64) : null,
+        bidderWallet: s.token === true && typeof s.bidderWallet === 'string' && whole(s.top) > 0 ? s.bidderWallet.slice(0, 64) : null,
       };
+      if (a.token) {
+        a.bid = Math.min(a.bid, AUCTION_RULES.maxToken);
+        a.buyout = Math.min(a.buyout, AUCTION_RULES.maxToken);
+        a.top = Math.min(a.top, AUCTION_RULES.maxToken);
+      }
       if (!a.bidder) a.top = 0;
       this.auctions.set(a.id, a);
       top = Math.max(top, a.id + 1);
@@ -598,6 +724,11 @@ export class AuctionHouse {
         top = Math.max(top, m.id + 1);
       }
       if (kept.length > 0) this.mailbox.set(owner, kept);
+    }
+    for (const m of Array.isArray(d.moves) ? d.moves : []) {
+      if (!m || typeof m !== 'object' || typeof m.id !== 'number' || !Number.isInteger(m.id) || typeof m.wallet !== 'string' || typeof m.amount !== 'number' || !Number.isInteger(m.amount) || m.amount === 0) continue;
+      this.moves.push({ id: m.id, wallet: m.wallet.slice(0, 64), amount: m.amount, kind: m.kind === 'fee' ? 'fee' : 'trade', note: typeof m.note === 'string' ? m.note.slice(0, 120) : '' });
+      top = Math.max(top, m.id + 1);
     }
     this.next = Math.max(top, typeof d.next === 'number' && Number.isInteger(d.next) ? d.next : 1);
   }

@@ -3,14 +3,18 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import { PROTOCOL_VERSION, isClientMessage, parseNetClientMessage, type NetServerMessage, type ServerMessage } from '@solrift/shared';
 import { AuthService, SESSION_COOKIE, createAuthRouter, readCookie } from './auth';
 import { CloudService, createCloudRouter, type CloudServiceOptions } from './cloud';
+import { Desk, createDeskRouter } from './desk';
 import { SqliteRepo, type Repo } from './db';
 import { GameRoom, STRIKES, type RoomOptions } from './room';
+import { TokenService, createTokenRouter, type TradeMove } from './token';
 
 export interface GameServer {
   http: Server;
   wss: WebSocketServer;
   auth: AuthService;
   cloud: CloudService;
+  /** The $SOLRIFT ledger and payouts (inert until a token is configured). */
+  token: TokenService;
   /** The shared multiplayer world. */
   room: GameRoom;
   listen(port: number): Promise<number>;
@@ -31,6 +35,8 @@ export interface GameServerOptions {
   rateLimitPerMinute?: number;
   /** Cloud save limits and clock (tests shrink the limits). */
   cloud?: CloudServiceOptions;
+  /** The $SOLRIFT token. Defaults to none: nothing is paid and the website says "Announced at launch". */
+  token?: (repo: Repo) => TokenService;
   /** Multiplayer room settings (the seed is the server's). */
   room?: Partial<Omit<RoomOptions, 'seed'>>;
   /** Connection limits (tests and load tests change them). */
@@ -123,7 +129,27 @@ export function createGameServer(opts: GameServerOptions): GameServer {
   const cloud = new CloudService(repo.cloud, opts.cloud);
   const cloudRoutes = createCloudRouter(auth, cloud);
 
-  const room = new GameRoom({ seed: opts.seed, store: repo.room, ...opts.room });
+  const token = opts.token ? opts.token(repo) : new TokenService(repo.tokens);
+  const tokenRoutes = createTokenRouter(auth, token, { trustProxy: opts.trustProxy ?? false });
+
+  const room = new GameRoom({
+    seed: opts.seed,
+    store: repo.room,
+    onAchievement: (e) => token.reward(e.wallet, e.account, e.id),
+    onClear: (e) => token.rewardClear(e.wallet, e.account),
+    onBounty: (e) => token.rewardBounty(e.wallet, e.account, e.day, e.id),
+    ...(token.live ? { stashTabs: (wallet: string) => token.stashTabs(wallet) } : {}),
+    ...(token.live ? { keys: { count: (wallet: string) => token.keyCount(wallet), take: (wallet: string) => token.takeKey(wallet) } } : {}),
+    ...(token.live ? { tokens: { balance: (wallet: string) => token.balance(wallet), commit: (scope: string, moves: readonly TradeMove[], save: () => void) => token.commitTrades(scope, moves, save) } } : {}),
+    ...opts.room,
+  });
+
+  // The Camp: what a hero can do from a phone (see desk.ts).
+  const deskRoutes = createDeskRouter(auth, new Desk(room, repo.room), room, { trustProxy: opts.trustProxy ?? false });
+
+  // What the token shop puts in a wallet's Stash, and what the lobby shows a hero wearing (it is in the outfit slot of the saved hero).
+  token.stash = { free: (wallet) => room.stashFree(wallet), count: (wallet, itemId) => room.stashCount(wallet, itemId), give: (wallet, itemId) => room.stashGive(wallet, itemId) };
+  auth.outfitOf = (accountId, _wallet, cls) => room.wornOutfitOf(accountId, cls);
 
   const http = createServer((req, res) => {
     if (req.url === '/health') {
@@ -157,6 +183,8 @@ export function createGameServer(opts: GameServerOptions): GameServer {
     }
     void authRoutes(req, res)
       .then((handled) => handled || cloudRoutes(req, res))
+      .then((handled) => handled || tokenRoutes(req, res))
+      .then((handled) => handled || deskRoutes(req, res))
       .then((handled) => {
         if (!handled) res.writeHead(404).end();
       });
@@ -295,7 +323,7 @@ export function createGameServer(opts: GameServerOptions): GameServer {
           account?.displayName ?? msg.name,
           account?.id ?? null,
           // An account's saved character wins; a guest (or an account that never made one) brings its own.
-          account?.look ?? msg.look ?? null,
+          account?.look != null ? account.look : (msg.look ?? null),
           // An account's class was chosen when its character was made and never changes; only a guest picks one here.
           account ? (account.class ?? null) : (msg.class ?? null),
           account?.wallet ?? null,
@@ -322,11 +350,13 @@ export function createGameServer(opts: GameServerOptions): GameServer {
     wss,
     auth,
     cloud,
+    token,
     room,
     listen: (port) =>
       new Promise((resolve) => {
         http.listen(port, () => {
           room.start();
+          token.start();
           const addr = http.address();
           resolve(typeof addr === 'object' && addr ? addr.port : port);
         });
@@ -334,6 +364,7 @@ export function createGameServer(opts: GameServerOptions): GameServer {
     close: () =>
       new Promise((resolve) => {
         clearInterval(purge);
+        token.stop();
         room.stop();
         for (const c of wss.clients) c.terminate();
         wss.close(() =>

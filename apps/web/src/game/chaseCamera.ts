@@ -28,6 +28,9 @@ export const FOLLOW_RATE = 12;
 export const SHOULDER_SIDE = 0.7;
 export const SHOULDER_UP = 0.6;
 export const BEHIND_DISTANCE = 5.2;
+/** Flying on wings: the camera stands this much further back and this much higher, so the wings, the whole figure and the way ahead are in the picture. */
+export const FLY_PULL = 1.7;
+export const FLY_UP = 0.55;
 /** A rider is higher and the mount long: the camera sits this much further back. */
 export const MOUNTED_EXTRA = 1.6;
 /** Drawing a bow brings the camera in by up to this share of the distance. */
@@ -104,6 +107,8 @@ export class ChaseCamera {
   private followX = 0;
   private followZ = 0;
   private run = 0;
+  /** How far into a flight on wings the camera is (0..1, eased). */
+  private fly = 0;
   /** How long the liked shoulder has been free; the camera goes back to it after a moment, not at once. */
   private freeFor = 0;
   private hidden = false;
@@ -123,20 +128,23 @@ export class ChaseCamera {
   /**
    * One frame. `eye` is the head, the look angles are the player's. `tight` (0..1) brings the camera in (drawing a bow).
    */
-  update(dt: number, eye: Point3, yaw: number, pitch: number, solid: Solid, mounted = false, tight = 0, speed = 0): ChasePose {
+  update(dt: number, eye: Point3, yaw: number, pitch: number, solid: Solid, mounted = false, tight = 0, speed = 0, flying = false): ChasePose {
     const cp = Math.cos(pitch);
     const f = { x: -Math.sin(yaw) * cp, y: Math.sin(pitch), z: -Math.cos(yaw) * cp };
     const right = { x: Math.cos(yaw), y: 0, z: -Math.sin(yaw) };
     const snap = !this.placed || dt <= 0 || Math.abs(eye.y - this.headY) > 2.5 || Math.hypot(eye.x - this.followX, eye.z - this.followZ) > 6;
     // Running (more than a walk) lets the camera out a little further, eased in and out.
     this.run = snap ? 0 : this.run + (Math.max(0, Math.min(1, (speed - 3.5) / 4)) - this.run) * ease(dt, 2.5);
-    const wantBack = ((mounted ? BEHIND_DISTANCE + MOUNTED_EXTRA : BEHIND_DISTANCE) + RUN_PULL * this.run) * (1 - AIM_ZOOM * tight);
+    this.fly = snap ? (flying ? 1 : 0) : this.fly + ((flying ? 1 : 0) - this.fly) * ease(dt, 2.2);
+    const wantBack = ((mounted ? BEHIND_DISTANCE + MOUNTED_EXTRA : BEHIND_DISTANCE) + RUN_PULL * this.run + FLY_PULL * this.fly) * (1 - AIM_ZOOM * tight);
 
     // The head's height is followed smoothly: steps, stairs and sneaking move it by a little each time. On the ground the camera trails the
     // player on a short elastic: it is a little behind at a run and catches up when the player stops.
-    this.headY = snap ? eye.y : this.headY + (eye.y - this.headY) * ease(dt, 16);
-    this.followX = snap ? eye.x : this.followX + (eye.x - this.followX) * ease(dt, FOLLOW_RATE);
-    this.followZ = snap ? eye.z : this.followZ + (eye.z - this.followZ) * ease(dt, FOLLOW_RATE);
+    // (On the wings it trails further: the figure pulls ahead of the picture as it speeds up, and a climb or a dive is felt before it is seen.)
+    const rate = FOLLOW_RATE * (1 - 0.55 * this.fly);
+    this.headY = snap ? eye.y : this.headY + (eye.y - this.headY) * ease(dt, 16 - 8 * this.fly);
+    this.followX = snap ? eye.x : this.followX + (eye.x - this.followX) * ease(dt, rate);
+    this.followZ = snap ? eye.z : this.followZ + (eye.z - this.followZ) * ease(dt, rate);
     // (Never trailing into a wall at a corner: there it holds on to the player.)
     if (solid(Math.floor(this.followX), Math.floor(this.headY), Math.floor(this.followZ))) {
       this.followX = eye.x;
@@ -162,7 +170,7 @@ export class ChaseCamera {
 
     // Out to the shoulder, then up: a wall in the way ends the step at once; the way back out is eased.
     const wantSide = this.sign === 1 ? runRight : -runLeft;
-    const wantUp = clearRun({ x: head.x + right.x * wantSide, y: head.y, z: head.z + right.z * wantSide }, { x: 0, y: 1, z: 0 }, SHOULDER_UP, solid);
+    const wantUp = clearRun({ x: head.x + right.x * wantSide, y: head.y, z: head.z + right.z * wantSide }, { x: 0, y: 1, z: 0 }, SHOULDER_UP + FLY_UP * this.fly, solid);
     if (snap) {
       this.side = wantSide;
       this.up = wantUp;

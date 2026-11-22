@@ -23,7 +23,7 @@ export interface FigureWarmParts {
   mobs: () => { group: THREE.Group; free: () => void };
   /** Builds the shaders of the inventory figure (see `warmPreview`). */
   inventory: () => void;
-  /** Puts up one window of the interface for the loading screen (steps 0 to 2: the tabs of the inventory; 3: the log, codex, social and party windows), and takes them down (-1). */
+  /** Puts up one window of the interface for the loading screen (steps 0 to 3: the tabs of the inventory; 4: the log, codex, social and party windows), and takes them down (-1). */
   windows: (step: number) => void;
   /** A fishing line with all its parts (see BobberRenderer.warm). */
   bobber: () => { group: THREE.Group; free: () => void };
@@ -67,6 +67,7 @@ export class FigureWarm {
       { name: 'the windows', frames: 3, run: () => this.parts.windows(1) },
       { name: 'the windows', frames: 3, run: () => this.parts.windows(2) },
       { name: 'the windows', frames: 3, run: () => this.parts.windows(3) },
+      { name: 'the windows', frames: 3, run: () => this.parts.windows(4) },
       { name: 'the windows', frames: 1, run: () => this.parts.windows(-1) },
       { name: 'the mount', frames: 1, run: () => this.buildMount() },
       { name: 'creatures', frames: 1, run: () => this.buildCreatures() },
