@@ -5,8 +5,9 @@ import { DatabaseSync } from 'node:sqlite';
 import { isClassId, type ClassId } from '@solrift/shared';
 import { SqliteCloud, type CloudRepo } from './cloudRepo';
 import { SqliteRoomStore, type RoomStore } from './roomStore';
+import { PERK_HERO_SLOT, SqliteTokenRepo, type TokenRepo } from './tokenRepo';
 
-/** Most characters one wallet can have. */
+/** Characters every wallet can have. Hero slots bought with $SOLRIFT add to it (`Repo.maxCharacters`). */
 export const MAX_CHARACTERS = 3;
 
 /**
@@ -41,15 +42,19 @@ export interface Repo {
   readonly cloud: CloudRepo;
   /** The multiplayer room's world and player progress. */
   readonly room: RoomStore;
+  /** The $SOLRIFT ledger (rewards and withdrawals, per wallet). */
+  readonly tokens: TokenRepo;
   /** Log a wallet in: the character it played last, or a fresh one on first login. Refreshes `lastLoginAt`. */
   upsertAccount(wallet: string, now: number): Account;
   getAccount(id: string): Account | null;
   /** The wallet's characters (the ones that have a look), oldest first. */
   listCharacters(wallet: string): Account[];
+  /** How many characters this wallet may have: `MAX_CHARACTERS` and the hero slots it has bought. */
+  maxCharacters(wallet: string): number;
   /**
    * Make a character (name and look) for the wallet that `fromId` belongs to. It fills the wallet's empty account
    * when there is one, otherwise it becomes a new account of the wallet. Returns the character, or null when
-   * `fromId` is unknown. Throws `CharacterLimitError` (already `MAX_CHARACTERS`) or `NameTakenError`. A character
+   * `fromId` is unknown. Throws `CharacterLimitError` (already `maxCharacters`) or `NameTakenError`. A character
    * cannot be edited or renamed afterwards.
    */
   createCharacter(fromId: string, character: { displayName: string; look: number; class: ClassId }, now: number): Account | null;
@@ -76,8 +81,8 @@ export class NameTakenError extends Error {
 }
 
 export class CharacterLimitError extends Error {
-  constructor() {
-    super(`a wallet can have ${MAX_CHARACTERS} characters`);
+  constructor(readonly max: number = MAX_CHARACTERS) {
+    super(`a wallet can have ${max} characters`);
   }
 }
 
@@ -108,6 +113,7 @@ export class SqliteRepo implements Repo {
   private readonly db: DatabaseSync;
   readonly cloud: CloudRepo;
   readonly room: RoomStore;
+  readonly tokens: TokenRepo;
 
   constructor(file: string = ':memory:') {
     if (file !== ':memory:') mkdirSync(path.dirname(path.resolve(file)), { recursive: true });
@@ -144,6 +150,7 @@ export class SqliteRepo implements Repo {
     `);
     this.cloud = new SqliteCloud(this.db);
     this.room = new SqliteRoomStore(this.db);
+    this.tokens = new SqliteTokenRepo(this.db);
   }
 
   /**
@@ -194,11 +201,16 @@ export class SqliteRepo implements Repo {
     return rows.map(toAccount);
   }
 
+  maxCharacters(wallet: string): number {
+    return MAX_CHARACTERS + this.tokens.perkCount(wallet, PERK_HERO_SLOT);
+  }
+
   createCharacter(fromId: string, character: { displayName: string; look: number; class: ClassId }, now: number): Account | null {
     const from = this.getAccount(fromId);
     if (!from) return null;
     const mine = this.listCharacters(from.wallet);
-    if (mine.length >= MAX_CHARACTERS) throw new CharacterLimitError();
+    const max = this.maxCharacters(from.wallet);
+    if (mine.length >= max) throw new CharacterLimitError(max);
     // Names are unique across everyone (case-insensitive); the empty account's own placeholder name does not count.
     const emptyRow = from.look === null ? { id: from.id } : (this.db.prepare('SELECT id FROM accounts WHERE wallet = ? AND look IS NULL').get(from.wallet) as unknown as { id: string } | undefined);
     const emptyId = emptyRow?.id ?? null;

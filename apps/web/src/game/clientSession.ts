@@ -1,4 +1,4 @@
-import type { BobberDraw, BossView, DungeonView, Body, ClassView, Container, Fx, GearRoll, ItemStack, Menu, MobKind, SessionScreen, WeatherKind } from '@solrift/shared';
+import type { BobberDraw, RiftView, BossView, DungeonView, Body, ClassView, Container, Fx, GearRoll, ItemStack, Menu, MobKind, SessionScreen, WeatherKind } from '@solrift/shared';
 import type { MountView, SaveMode } from '@solrift/shared';
 
 /** A mob as the renderer needs it. The shared `Mob` fits, and so does an interpolated network copy. */
@@ -27,6 +27,10 @@ export interface MobLike {
   love?: number;
   /** An armor stand's worn item ids: helmet, chestplate, leggings, boots, hand. */
   gear?: readonly number[];
+  /** Its health and its most (a local game's Mob has both; over the network they are only known while it is hurt, otherwise it is at full health), and whether it is a strong one of a dungeon. */
+  health?: number;
+  maxHealth?: number;
+  elite?: boolean;
 }
 
 export interface ArrowLike {
@@ -121,6 +125,14 @@ export interface ClientSession {
   readonly offhand: Container;
   /** The mount slot: the horn of the mount the mount key summons. */
   readonly mountSlot: Container;
+  /** The outfit slot: the glowing set the hero wears. */
+  readonly outfitSlot: Container;
+  /** The companion slot: the companion that follows the hero. */
+  readonly companionSlot: Container;
+  /** The wing slot: the wings the hero wears. */
+  readonly wingSlot: Container;
+  /** The rings and the necklace worn: ring, ring, necklace. */
+  readonly accessories: Container;
   readonly blocking: boolean;
   /** How far into a meal you are (0..1): 0 when not eating. */
   readonly eatProgress: number;
@@ -168,6 +180,8 @@ export interface ClientSession {
   bossView(): BossView | null;
   /** How far the player is in the dungeon they are in, for its tracker (null outside one). */
   dungeonView(): DungeonView | null;
+  /** The rift open near the player, for its tracker and its beam (null when none is within sight). */
+  riftView(): RiftView | null;
   /** The mount ridden (1 + its place in MOUNTS, 0 on foot), the one the mount key summons (the same way) and a bit for each mount learned. */
   mountView(): MountView;
   eye(): { x: number; y: number; z: number };

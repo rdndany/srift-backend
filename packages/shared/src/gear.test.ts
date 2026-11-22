@@ -24,6 +24,7 @@ import {
   gearSuffix,
   gearUsable,
   gearValue,
+  swingRate,
   getItem,
   makeGenerator,
   makeStack,
@@ -335,12 +336,57 @@ describe('wearing it', () => {
     expect(s.cls!.stats.critChance).toBe(plain);
   });
 
+  it('a weapon of haste swings faster than a plain one: the swing event says by how much, the pace of blows follows', () => {
+    const swingOf = (weapon: ItemStack) => {
+      const s = make('warrior');
+      s.inventory.set(0, weapon);
+      s.selectSlot(0);
+      s.tick(idle());
+      s.drainEvents();
+      const m = s.mobs.spawn('zombie', s.body.x + 1, s.body.y, s.body.z);
+      s.attackMob(m);
+      const ev = s.drainEvents().find((e): e is Extract<SessionEvent, { t: 'swing' }> => e.t === 'swing');
+      return { ev, rate: s.swingRate, cooldown: (s as unknown as { attackCooldown: number }).attackCooldown };
+    };
+    const plain = swingOf(piece(I.GREATSWORD, 1, 1, 'warrior', [['might', 2]]));
+    const quick = swingOf(piece(I.GREATSWORD, 3, 1, 'warrior', [['might', 2], ['haste', 15], ['haste', 5]]));
+    expect(plain.ev).toBeDefined();
+    expect(plain.ev!.rate).toBeUndefined();
+    expect(plain.rate).toBe(1);
+    expect(quick.ev!.rate).toBeGreaterThan(1.2);
+    expect(quick.rate).toBe(quick.ev!.rate);
+    expect(quick.cooldown).toBeLessThan(plain.cooldown);
+  });
+
+  it('mining and placing swing at the usual pace, whatever the haste', () => {
+    const s = make('warrior');
+    s.inventory.set(0, piece(I.GREATSWORD, 3, 1, 'warrior', [['might', 2], ['haste', 15], ['haste', 5]]));
+    s.inventory.set(1, makeStack(I.STICK, 1));
+    s.selectSlot(1);
+    s.tick(idle());
+    s.drainEvents();
+    s.emit({ t: 'swing' });
+    expect(s.swingRate).toBe(1);
+    expect(s.drainEvents().find((e) => e.t === 'swing' && e.rate !== undefined)).toBeUndefined();
+  });
+
   it('a full resource pool stays full when gear deepens it', () => {
     const s = make('mage');
     s.cls!.resource = s.cls!.stats.maxResource;
     s.armor.set(1, piece(armorId(1, 'iron'), 3, 1, undefined, [['focus', 30], ['arcane', 10], ['vit', 5]]));
     s.tick(idle());
     expect(s.cls!.resource).toBeCloseTo(s.cls!.stats.maxResource, 5);
+  });
+});
+
+describe('the pace of a swing', () => {
+  it('follows the attack speed a little more than one for one, within bounds', () => {
+    expect(swingRate(1)).toBe(1);
+    expect(swingRate(1.2)).toBeGreaterThan(1.2);
+    expect(swingRate(1.5)).toBeGreaterThan(swingRate(1.2));
+    expect(swingRate(0.5)).toBeLessThan(0.5);
+    expect(swingRate(50)).toBe(swingRate(2));
+    expect(swingRate(0)).toBe(swingRate(0.4));
   });
 });
 

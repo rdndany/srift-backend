@@ -214,7 +214,8 @@ describe('the use button, by what the item table says the item does', () => {
       const o = press(I.STICK, scene);
       expect(o.count(I.STICK)).toBe(3);
       expect(o.changed).toEqual([]);
-      expect([...o.events]).toEqual([]);
+      // (the daily bounty board is sent to every player a second after they join: that is not the item doing something)
+      expect([...o.events].filter((e) => e !== 'bounties')).toEqual([]);
     }
   });
 

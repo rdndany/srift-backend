@@ -31,6 +31,8 @@ import {
   MOUNTS,
   IS_LIQUID,
   isWaterBlock,
+  roofGap,
+  createBody,
   type SaveMode,
   showcaseFind,
   SHOWCASE_BOX,
@@ -38,6 +40,16 @@ import {
   SHOWCASE_HEIGHT,
   type DiscoveryLog,
   type WorldState,
+  outfitOfCode,
+  outfitSetFits,
+  outfitSetOfItem,
+  companionOfItem,
+  COMPANIONS,
+  plainCodeOf,
+  wornCode,
+  wingNumberOf,
+  glowCode,
+  glowColor,
 } from '@solrift/shared';
 import { bumpUi, showZone, useUi, type CodexView } from '../ui/store';
 import { BeyondClient } from './beyondClient';
@@ -60,6 +72,7 @@ import { MobRenderer, disposeMobAssets } from './mobRenderer';
 import { VehicleRenderer, disposeVehicleAssets } from './vehicleRenderer';
 import { NetClient } from './net';
 import { Particles } from './particles';
+import { CompanionFollowers, type PetOwner } from './companionRenderer';
 import { PlayerRenderer } from './playerRenderer';
 import { DeathFx } from './deathFx';
 import { SelfView, cameraPose } from './selfView';
@@ -85,6 +98,7 @@ import { LocalSaveStore } from './storage';
 import { paletteOfCode } from './lookPalette';
 import { hydrateProfile, useProfile } from '../profile/store';
 import { useAuth } from '../auth/store';
+import { useToken } from '../token/store';
 import { AbilityFx } from './abilityFx';
 import { EmberFx } from './emberFx';
 import { MOUNT_LOOK } from './mountFx';
@@ -98,6 +112,7 @@ import { getSettings, subscribeSettings, type Settings } from './settings';
 import { warmPreview } from './characterPreview';
 import { RushLines } from './spellFx';
 import { ARCANE_VEIL, GuardVeil } from './guardFx';
+import { RiftFx } from './riftFx';
 import { FireParticles } from './fireFx';
 import { World } from './world';
 import { installDebugHooks } from './debugHooks';
@@ -109,6 +124,7 @@ import { RecipeMemory } from './recipeMemory';
 import { makeUiApi } from './uiApi';
 import { makeUiSync } from './uiSync';
 import { TargetPicker } from './targeting';
+import { MobTargetPicker } from './mobTargeting';
 import { ViewFeel, type FeelFrame } from './viewFeel';
 
 
@@ -320,7 +336,11 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
         onInspect: (name, view) => useUi.setState({ inspect: { name, view } }),
         onTrade: (view) => showTrade(view),
         onTradeAsk: (from) => useUi.setState({ tradeAsk: from }),
-        onNotice: (text) => chat.add(text, 'notice'),
+        onNotice: (text) => {
+          chat.add(text, 'notice');
+          // A reward was added to the wallet's balance: read it again so the number on screen is the true one.
+          if (text.includes('$SOLRIFT')) void useToken.getState().loadMe();
+        },
         onAdmin: (on) => (adminMode = on),
         onClose: (reason) => {
           onlineError = reason;
@@ -384,6 +404,8 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
         classId: myClass,
         /** `?nomobs` turns off natural spawning (used by deterministic tests). */
         naturalSpawning: !params.has('nomobs'),
+        /** Rifts come with the monsters (and `?norifts` keeps them away). */
+        rifts: !params.has('nomobs') && !params.has('norifts'),
         /** ?villagers brings the villages' people back into a ?nomobs world. */
         villagers: !params.has('nomobs') || params.has('villagers'),
       });
@@ -490,6 +512,9 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   const levelFx = new LevelUpFx();
   scene.add(levelFx.group);
   levelFx.viewer = camera.position;
+  /** The rift near the player: its column of light. */
+  const riftFx = new RiftFx();
+  scene.add(riftFx.group);
   const levelSeen = new Set<number>();
   // The Emberstone: the runes and the column of light while it is cast, the flash when it takes hold and the one at the bed.
   const emberFx = new EmberFx();
@@ -580,6 +605,8 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   const figureOf = (id: number): THREE.Object3D | null => (getItem(id).shield ? hand.figureShield(id) : hand.figureModel(id));
   const players = new PlayerRenderer(figureOf);
   scene.add(players.group);
+  const companions = new CompanionFollowers();
+  scene.add(companions.group);
   players.onMountStep = mountStep;
   const selfView = new SelfView(figureOf);
   selfView.onMountStep = mountStep;
@@ -600,7 +627,9 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   const myLook = remote ? remote.look : lookCode(useProfile.getState().look);
   selfView.setLook(paletteOfCode(myLook));
   hand.setLook(paletteOfCode(myLook));
-  useProfile.setState({ look: lookOfCode(myLook) });
+  useProfile.setState({ look: lookOfCode(myLook), outfit: outfitOfCode(myLook)?.id ?? null });
+  /** The set in the outfit slot that your body is drawn in (-1: not yet read): putting one on, or taking it off, dresses you at once. */
+  let wornShown = -1;
   scene.add(selfView.group);
   // When someone dies the body comes apart into the little cubes it is made of (one of three ways, picked at random).
   const deathFx = new DeathFx((x, y, z) => world.getBlock(x, y, z));
@@ -621,7 +650,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   const heldLightDir = new THREE.Vector3();
   let debugHideHand = false;
 
-  // The map: painted from the chunks around you and remembered. The minimap in the corner and the map item draw from it.
+  // The map: painted from the chunks around you and remembered. The map item draws from it.
   const mapData = new MapData({ chunk: (cx, cz) => world.chunkData(cx, cz) }, blockColors(atlas.canvas), (cx, cz) => world.chunkRev(cx, cz));
   /** The picture of the map item, as it is painted on the sheet in the hand (see HeldItem). */
   const mapSheet = new MapSheet();
@@ -643,16 +672,16 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
       useUi.setState({ warmMenu: null, invTab: 'inventory', questLogOpen: false, codexOpen: false, socialOpen: false, partyOpen: false });
       return;
     }
-    if (step === 3) {
+    if (step === 4) {
       // The windows of the store's own flags, in the games that have them (nothing else about the game changes: only the flags).
       const s = useUi.getState();
       document.documentElement.dataset.uiWarm = '1';
       useUi.setState({ warmMenu: null, questLogOpen: s.adventure, codexOpen: !!s.codex, socialOpen: !!remote, partyOpen: !!remote && s.adventure });
       return;
     }
-    const tabs = ['inventory', 'crafting', 'spells'] as const;
+    const tabs = ['inventory', 'attributes', 'crafting', 'spells'] as const;
     if (tabs[step] === 'spells' && !session.classView()) return;
-    const menu = new CraftingMenu(session.inventory, 2, session.armor, session.offhand, session.mountSlot);
+    const menu = new CraftingMenu(session.inventory, 2, session.armor, session.offhand, session.mountSlot, session.outfitSlot, () => session.classView()?.id ?? null, session.companionSlot, session.wingSlot, session.accessories);
     menu.attachBags(session.inventory, session.bags);
     useUi.setState({ warmMenu: menu, invTab: tabs[step] });
   }
@@ -676,18 +705,10 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   function setMapUp(up: boolean): void {
     if (useUi.getState().mapUp !== up) useUi.setState({ mapUp: up });
   }
-  function toggleMinimap(): void {
-    const next = !useUi.getState().minimap;
-    useUi.setState({ minimap: next });
-    try {
-      localStorage.setItem('solrift-minimap', next ? 'on' : 'off');
-    } catch {
-      /* storage may be blocked; the choice then lasts until the page is closed */
-    }
-  }
   const entityLight = new EntityLight((x, z) => world.surfaceY(x, z), torchGlow);
   mobRenderer.setEnvironment(entityLight);
   players.setEnvironment(entityLight);
+  players.roofAt = (x, y, z) => roofGap(world, createBody(x, y, z));
   players.isWater = (x, y, z) => isWaterBlock(world.getBlock(Math.floor(x), Math.floor(y), Math.floor(z)));
   drops.setEnvironment(entityLight);
   campfireFood.setEnvironment(entityLight);
@@ -812,10 +833,12 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   const windows = makeWindows({ session, remote, online, input, chat, overlay, sendCommand });
   const { toggleQuestLog, togglePartyWindow, toggleSocialWindow, showTrade, openPlayerMenu, closePlayerMenu } = windows;
 
-  // The needle of the compass, and whether the map is carried (the Adventure minimap needs it): see compassNeedle.ts.
+  // The needle of the compass, and whether the map is carried : see compassNeedle.ts.
   const compassNeedle = new CompassNeedle(session, input, hand, KIND);
   // The target frame (online): the player the crosshair rests on. See targeting.ts.
   const targets = remote ? new TargetPicker(remote, session, input, camera) : null;
+  // ...and the same for a creature (an animal, a monster, a person), in any game: the frame shows its tier, level and health.
+  const mobTargets = new MobTargetPicker(session, input, camera, (x, y, z) => BLOCKS[world.getBlock(x, y, z)]?.opaque === true);
   /** The spellbook (key K): the third tab of the inventory window, which opens on it. */
   function openSpellbook(): void {
     if (!session.classView() || session.screen !== 'none' || session.mode === 'creative') return;
@@ -855,13 +878,6 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     adventure: KIND === 'adventure',
     map: mapData,
     mapUp: false,
-    minimap: (() => {
-      try {
-        return localStorage.getItem('solrift-minimap') !== 'off';
-      } catch {
-        return true;
-      }
-    })(),
     questLogOpen: false,
     partyOpen: false,
     social: null,
@@ -1038,7 +1054,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
 
   // Keys that start something (as opposed to held keys, which go in the frame): see gameKeys.ts.
   const keys = new KeyActions({
-    session, remote, online, input, world, hud, admin, chat, audio, selfView, chase, windows, sendCommand, toggleMinimap, openSpellbook,
+    session, remote, online, input, world, hud, admin, chat, audio, selfView, chase, windows, sendCommand, openSpellbook,
     quality: () => qualityLevel,
   });
 
@@ -1181,9 +1197,11 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     }
     const view = session.viewPos();
     const viewEye = session.eyeAt(view);
+    // Flying on wings (the flight of creative mode has no wings, and no change of view).
+    const wingFlight = session.flying && session.mode === 'survival' && !!session.wingSlot.get(0) && session.mountView().mount === 0;
     const chasing =
       selfView.mode === 1 && session.ready
-        ? chase.update(dt, viewEye, input.yaw, input.pitch, cameraSolid, session.mountView().mount > 0, zoomShown, Math.hypot(body.vx, body.vz))
+        ? chase.update(dt, viewEye, input.yaw, input.pitch, cameraSolid, session.mountView().mount > 0, zoomShown, Math.hypot(body.vx, body.vz), wingFlight)
         : null;
     if (link) link.send(buildFrame(dt, chasing));
     else remote!.frame(buildFrame(dt, chasing));
@@ -1231,13 +1249,22 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     const eye = session.eye();
     // The view stays as it is when mounting (first person: you see the head of the mount ahead of you, from the saddle).
     const mountNow = session.mountView().mount;
+    const wornNow = session.outfitSlot.get(0)?.id ?? 0;
+    if (wornNow !== wornShown) {
+      wornShown = wornNow;
+      const set = outfitSetFits(wornNow, session.classView()?.id ?? null) ? (outfitSetOfItem(wornNow)?.id ?? null) : null;
+      const dressed = paletteOfCode(wornCode(plainCodeOf(myLook), set));
+      selfView.setLook(dressed);
+      hand.setLook(dressed);
+      useProfile.setState({ outfit: set });
+    }
     const pose = chasing ?? cameraPose(selfView.mode, viewEye, input.yaw, input.pitch, cameraSolid, undefined, mountNow > 0);
     selfView.cameraInHead = !!chasing?.bodyHidden;
     camera.position.set(pose.x, pose.y, pose.z);
     camera.rotation.set(pose.pitch, pose.yaw, 0);
     // What the view does on top of that (see ViewFeel): first the shake, the dip of a landing and the kick of a blow...
     const classNow = session.classView();
-    const feelNow: FeelFrame = { dt, ready: session.ready, firstPerson: selfView.mode === 0, body, yaw: input.yaw, bowDraw: zoomShown, rush: classNow?.rush, slam: classNow?.slam ?? 0 };
+    const feelNow: FeelFrame = { dt, ready: session.ready, firstPerson: selfView.mode === 0, body, yaw: input.yaw, bowDraw: zoomShown, rush: classNow?.rush, slam: classNow?.slam ?? 0, flying: wingFlight };
     feel.jolt(camera, feelNow);
     // (the warrior's Charge streaks light past; the ranger's roll has its own look, the wind at the sides)
     rushLines.update(dt, !!classNow?.rush && !classNow.rush.roll, camera);
@@ -1369,6 +1396,18 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
       players.sync(remote.others.values(), dt, camera.position);
       targets?.update();
     }
+    mobTargets.update();
+    {
+      // The companions: yours (the one in your companion slot) and those of the players in view.
+      const owners: PetOwner[] = [];
+      const mine = companionOfItem(session.companionSlot.get(0)?.id ?? 0);
+      if (mine && session.screen !== 'dead' && !session.spectating) {
+        const at = session.viewPos();
+        owners.push({ key: -1, pet: COMPANIONS.indexOf(mine) + 1, x: at.x, y: at.y, z: at.z, yaw: selfView.mode !== 0 ? selfView.facing : input.yaw, lift: session.mountView().mount > 0 ? 0.8 : 0 });
+      }
+      if (remote) for (const o of remote.others.values()) if (o.pet && !o.dead) owners.push({ key: o.id, pet: o.pet, x: o.x, y: o.y, z: o.z, yaw: o.yaw, lift: o.mount ? 0.8 : 0 });
+      companions.sync(owners, dt);
+    }
     const heldId = session.held ? session.held.id : 0;
     compassNeedle.sync(dt);
     selfView.update(dt, {
@@ -1387,9 +1426,14 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
       // Swimming: in water that comes up to the chest or has none under the feet (floating at the surface); wading in a shallow is still walking.
       afloat: body.inWater && !body.inLava && !body.onLadder && !session.flying && (isWaterBlock(world.getBlock(Math.floor(view.x), Math.floor(view.y + 1), Math.floor(view.z))) || isWaterBlock(world.getBlock(Math.floor(view.x), Math.floor(view.y - 0.5), Math.floor(view.z)))),
       sneaking: session.sneaking,
+      wing: wingNumberOf(session.wingSlot.get(0)?.id ?? 0),
+      winged: wingFlight,
+      roof: session.wingSlot.get(0) ? roofGap(world, body) : 4,
       armor: [0, 1, 2, 3].map((i) => session.armor.get(i)?.id ?? 0),
       // A bow is held with both hands: the figure shows the dagger only while it stabs, with the bow put away.
       held: stabbing() ? 0 : heldId,
+      glow: stabbing() ? null : glowColor(glowCode(session.held)),
+      offGlow: glowColor(glowCode(session.offhand.get(0))),
       offhand: bowHeld() && hasStabDagger() && !stabbing() ? 0 : session.offhand.get(0)?.id ?? 0,
       blocking: session.blocking,
       eating: session.eatProgress > 0,
@@ -1429,6 +1473,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     }
     for (const id of levelSeen) if (!session.fx.some((f) => f.id === id)) levelSeen.delete(id);
     levelFx.update(dt);
+    riftFx.update(dt, session.riftView());
     emberFx.update(dt, performance.now() / 1000);
     mountFx.update(dt, performance.now() / 1000);
     books.update(dt, eye, (x, y, z) => world.getBlock(x, y, z));
@@ -1534,6 +1579,8 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     hand.offAway = bowHeld() && hasStabDagger() && !stabbing();
     // (the bow is put away, as nothing at all, while the dagger of the left hand stabs)
     const shownId = stabbing() ? -2 : heldNow ? heldNow.id : 0;
+    hand.setGlow(stabbing() ? null : glowColor(glowCode(heldNow)));
+    hand.setOffGlow(glowColor(glowCode(session.offhand.get(0))));
     hand.update(feel.hitStop > 0 ? dt * 0.1 : dt, shownId, body.onGround && session.ready ? Math.hypot(body.vx, body.vz) : 0, camera.aspect, session.offhand.get(0)?.id ?? 0, session.blocking, session.eatProgress, session.emberProgress);
     // Eating: a bite every quarter of a second, each with its crunch and a few crumbs of the food falling from the mouth.
     if (session.eatProgress > 0 && heldNow) {
@@ -1834,6 +1881,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     remote?.leave();
     chat.dispose();
     players.dispose();
+    companions.dispose();
     selfView.dispose();
     deathFx.dispose();
     audio.dispose();
@@ -1852,6 +1900,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     bobbers.dispose();
     eatFx.dispose();
     levelFx.dispose();
+    riftFx.dispose();
     abilityFx.destroy();
     emberFx.destroy();
     mountFx.destroy();
@@ -1877,7 +1926,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     atlas.dispose();
     postfx.dispose();
     renderer.dispose();
-    useUi.setState({ api: null, screen: 'none', adventure: false, codex: null, codexOpen: false, beyondNotes: [], questLogOpen: false, partyOpen: false, socialOpen: false, social: null, inspect: null, target: null, playerMenu: null, trade: null, tradeAsk: null, invTab: 'inventory', mount: { mount: 0, pick: 0, cd: [0, 0] }, cls: null, party: [], partyInvite: null, dialogNpc: null, shopOpen: false, auction: null, stash: null, zone: null, questNotes: [], map: null, mapUp: false, poison: 0, foodSick: 0 });
+    useUi.setState({ api: null, screen: 'none', adventure: false, codex: null, codexOpen: false, beyondNotes: [], questLogOpen: false, partyOpen: false, socialOpen: false, social: null, inspect: null, target: null, mobTarget: null, playerMenu: null, trade: null, tradeAsk: null, invTab: 'inventory', mount: { mount: 0, pick: 0, cd: [0, 0] }, cls: null, party: [], partyInvite: null, dialogNpc: null, shopOpen: false, auction: null, stash: null, zone: null, questNotes: [], map: null, mapUp: false, poison: 0, foodSick: 0 });
     mapData.dispose();
     mapSheet.dispose();
     useUi.getState().quests.loadJSON(null);

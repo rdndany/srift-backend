@@ -98,7 +98,7 @@ export function StashWindow({ npc }: { npc: NpcDef }) {
           <div className="wow-head">
             <span>Stash</span>
             <span className="shop-sub" data-testid="stash-count" title="Shared by every character of your wallet. Nobody else can open it.">
-              {used} / {STASH_SLOTS} - shared by your wallet's characters
+              {used} / {slots.length} - shared by your wallet's characters
             </span>
           </div>
           <div className="vendor-list">

@@ -1,5 +1,5 @@
 import { B, BLOCKS } from './blocks';
-import { ENCH, levelOf, randomEnchantedBook, rollEnchants, withEnchants } from './enchant';
+import { ENCH, levelOf, randomEnchantedBook, wildGlyphs, withEnchants } from './enchant';
 import { fluidSurface, isLavaId, isWaterId } from './fluids';
 import { makeStack, type ItemStack } from './inventory';
 import { FISHING_ROD_DURABILITY, I, armorId, getItem } from './items';
@@ -418,13 +418,13 @@ const JUNK: readonly [Junk, number][] = [
 const enchanted = (id: number, rand: () => number, damage = 0): ItemStack => {
   const s = makeStack(id, 1);
   s.damage = damage;
-  const list = rollEnchants(id, 30, rand);
+  const list = wildGlyphs(id, rand);
   return list.length > 0 ? withEnchants(s, list) : s;
 };
 const TREASURE: readonly Junk[] = [
   (r) => enchanted(I.BOW, r, Math.floor(r() * getItem(I.BOW).durability * 0.25)),
   (r) => {
-    const book = withEnchants(makeStack(I.BOOK, 1), rollEnchants(I.BOOK, 30, r));
+    const book = withEnchants(makeStack(I.BOOK, 1), wildGlyphs(I.BOOK, r));
     return book.id === I.ENCHANTED_BOOK ? book : randomEnchantedBook(r);
   },
   (r) => enchanted(I.FISHING_ROD, r, Math.floor(r() * FISHING_ROD_DURABILITY * 0.25)),

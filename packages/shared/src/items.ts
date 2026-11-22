@@ -1,5 +1,10 @@
 import type { AbilityId } from './abilities';
 import { MOUNTS, type MountId } from './mounts';
+import type { ClassId } from './classes';
+import { COMPANIONS, type CompanionDef } from './companions';
+import { WINGS, type WingDef } from './wings';
+import { ACCESSORY_KINDS, ACCESSORY_MATERIALS, accessoryDef, type AccessoryDef, type AccessoryKind, type AccessoryMaterial } from './accessories';
+import { OUTFITS, type OutfitDef } from './outfitData';
 import { ARMOR_MATERIALS, ARMOR_SLOTS, OUTFIT_CLASSES, armorDef, outfitDef, type ArmorDef, type ArmorMaterial, type OutfitClass } from './armor';
 import {
   B,
@@ -101,7 +106,7 @@ export const I = {
   ENCHANTED_BOOK: 382,
   /** Lights fire where you click (64 uses). */
   FLINT_AND_STEEL: 383,
-  /** Lapis lazuli: what lapis ore drops and an enchanting table is paid in; it also grinds into blue dye (see crafting.ts). */
+  /** Lapis lazuli: what lapis ore drops and a Runic Altar is paid in (with Auren); it also grinds into blue dye (see crafting.ts). */
   LAPIS_LAZULI: 384,
   /** A bottle that bursts into experience when thrown; never made, only found. */
   EXPERIENCE_BOTTLE: 385,
@@ -139,6 +144,21 @@ export const I = {
   MOUNT_BASE: 440,
   /** The clothes of the classes (460 + class * 4 + slot, see `outfitId`): worn in the armor slots, and taken off like armor. */
   OUTFIT_BASE: 460,
+  /** The glowing sets of the token shop (520 + the place in `OUTFITS`, see `outfitSetItemId`): right-click one to put it in the outfit slot, and the hero wears it. */
+  OUTFIT_SET_BASE: 520,
+  /** The parts the companions are crafted from (see crafting.ts), and the companions themselves (560 + the place in `COMPANIONS`, see `companionItemId`): right-click one to put it in the companion slot, and it follows you. */
+  IMP_HORN: 550,
+  CINDER_HEART: 551,
+  SERAPH_FEATHER: 552,
+  HALO_RING: 553,
+  COMPANION_BASE: 560,
+  /** The frame and the storm feather the wings are crafted from (see crafting.ts), and the wings themselves (570 + the place in `WINGS`, see `wingItemId`): right-click a pair to put it in the wing slot, and it carries you into the air. */
+  WING_FRAME: 554,
+  STORM_FEATHER: 555,
+  WING_BASE: 570,
+  /** The rings (580 + the place in `ACCESSORY_MATERIALS`, see `ringId`) and the necklaces (590 + the same, see `necklaceId`): right-click one to wear it (two rings, one necklace; see accessories.ts and `Player.equipAccessory`). */
+  RING_BASE: 580,
+  NECKLACE_BASE: 590,
   /** A raw potato. Eaten as it is; the same hunger as in Minecraft. */
   POTATO: 472,
   BAKED_POTATO: 473,
@@ -243,6 +263,73 @@ export function mountItemId(id: MountId): number {
 export function mountOfItem(id: number): MountId | null {
   const i = id - I.MOUNT_BASE;
   return Number.isInteger(i) && i >= 0 && i < MOUNTS.length ? MOUNTS[i].id : null;
+}
+
+/** The item of a set of the token shop (an `OUTFITS` id): it is carried, kept in the stash and traded like any item, and worn from the outfit slot. */
+export function outfitSetItemId(id: string): number {
+  const i = OUTFITS.findIndex((o) => o.id === id);
+  if (i < 0) throw new Error(`no item for the outfit ${id}`);
+  return I.OUTFIT_SET_BASE + i;
+}
+
+/** The set an item is (null for anything else). */
+export function outfitSetOfItem(id: number): OutfitDef | null {
+  const i = id - I.OUTFIT_SET_BASE;
+  return Number.isInteger(i) && i >= 0 && i < OUTFITS.length ? OUTFITS[i] : null;
+}
+
+/** May a hero of this class wear that item in the outfit slot? (Only a set of its class; a hero with no class wears any.) */
+export function outfitSetFits(id: number, cls: ClassId | null | undefined): boolean {
+  const def = outfitSetOfItem(id);
+  return !!def && (!cls || def.cls === cls);
+}
+
+/** The item of a companion (a `COMPANIONS` id). */
+export function companionItemId(id: string): number {
+  const i = COMPANIONS.findIndex((c) => c.id === id);
+  if (i < 0) throw new Error(`no item for the companion ${id}`);
+  return I.COMPANION_BASE + i;
+}
+
+/** The companion an item is (null for anything else). */
+export function companionOfItem(id: number): CompanionDef | null {
+  const i = id - I.COMPANION_BASE;
+  return Number.isInteger(i) && i >= 0 && i < COMPANIONS.length ? COMPANIONS[i] : null;
+}
+
+/** The item of a pair of wings (a `WINGS` id). */
+export function wingItemId(id: string): number {
+  const i = WINGS.findIndex((w) => w.id === id);
+  if (i < 0) throw new Error(`no item for the wings ${id}`);
+  return I.WING_BASE + i;
+}
+
+/** The wings an item is (null for anything else). */
+export function wingOfItem(id: number): WingDef | null {
+  const i = id - I.WING_BASE;
+  return Number.isInteger(i) && i >= 0 && i < WINGS.length ? WINGS[i] : null;
+}
+
+/** The number the wire gives for a pair of wings (1 + their place in `WINGS`), 0 for anything else. */
+export function wingNumberOf(id: number): number {
+  const w = wingOfItem(id);
+  return w ? WINGS.indexOf(w) + 1 : 0;
+}
+
+/** The item of a ring or a necklace of a material. */
+export function accessoryItemId(kind: AccessoryKind, material: AccessoryMaterial): number {
+  return (kind === 'ring' ? I.RING_BASE : I.NECKLACE_BASE) + ACCESSORY_MATERIALS.indexOf(material);
+}
+export const ringId = (material: AccessoryMaterial): number => accessoryItemId('ring', material);
+export const necklaceId = (material: AccessoryMaterial): number => accessoryItemId('necklace', material);
+
+/** The ring or necklace an item is (null for anything else). */
+export function accessoryOfItem(id: number): AccessoryDef | null {
+  for (const kind of ACCESSORY_KINDS) {
+    const i = id - (kind === 'ring' ? I.RING_BASE : I.NECKLACE_BASE);
+    if (Number.isInteger(i) && i >= 0 && i < ACCESSORY_MATERIALS.length) return accessoryDef(kind, ACCESSORY_MATERIALS[i]);
+  }
+  return null;
 }
 
 /**
@@ -394,6 +481,10 @@ export type ItemUse =
   | 'crossbow' // held to wind, shoots when it is wound all the way
   | 'skill_book' // teaches its ability
   | 'horn' // goes in the mount slot
+  | 'outfit' // goes in the outfit slot
+  | 'companion' // goes in the companion slot
+  | 'wings' // goes in the wing slot
+  | 'accessory' // a ring or a necklace: goes in a ring slot or the necklace slot
   | 'map' // read: the hand that holds it does nothing else (it does not hit, dig, build or use), and the off hand takes it too
   // On the block the crosshair is on:
   | 'flint' // lights a fire
@@ -413,7 +504,7 @@ export interface HeldLight {
 }
 
 /** What the tooltip calls an item under its name (see `itemKind` in tooltip.ts). */
-export type ItemKind = 'Enchanted Book' | 'Skill Book' | 'Mount' | 'Bag' | 'Special' | 'Jewel' | 'Equipment' | 'Food' | 'Item' | 'Nature' | 'Block' | 'Dye' | 'Material';
+export type ItemKind = 'Glyph Tome' | 'Skill Book' | 'Mount' | 'Outfit' | 'Companion' | 'Wings' | 'Ring' | 'Necklace' | 'Bag' | 'Special' | 'Jewel' | 'Equipment' | 'Food' | 'Item' | 'Nature' | 'Block' | 'Dye' | 'Material';
 
 export interface ItemDef {
   id: number;
@@ -641,7 +732,7 @@ DYE_NAMES.forEach((n, c) => add({ id: dyeId(c), name: `${n}_dye`, tile: tileInde
 add({ id: I.EMERALD, name: 'emerald', tile: tileIndex('emerald') });
 add({ id: I.PAPER, name: 'paper', tile: tileIndex('paper') });
 add({ id: I.BOOK, name: 'book', tile: tileIndex('book') });
-add({ id: I.ENCHANTED_BOOK, name: 'enchanted_book', tile: tileIndex('enchanted_book'), maxStack: 1, storesEnchants: true, kind: 'Enchanted Book' });
+add({ id: I.ENCHANTED_BOOK, name: 'enchanted_book', tile: tileIndex('enchanted_book'), maxStack: 1, storesEnchants: true, kind: 'Glyph Tome' });
 add({ id: I.FLINT_AND_STEEL, name: 'flint_and_steel', tile: tileIndex('flint_and_steel'), maxStack: 1, durability: 64, use: 'flint', kind: 'Item' });
 add({ id: I.LAPIS_LAZULI, name: 'lapis_lazuli', tile: tileIndex('lapis_lazuli') });
 /** Points of damage an ender pearl's trip costs the one who throws it. */
@@ -694,6 +785,26 @@ add({ id: I.ORB, name: 'orb', tile: tileIndex('orb'), maxStack: 1, offhand: true
 SKILL_BOOKS.forEach((b, i) => add({ id: I.SKILL_BOOK_BASE + i, name: `skill_book_${b.ability}`, tile: tileIndex(`skillbook_${b.classId}`), maxStack: 1, use: 'skill_book', kind: 'Skill Book' }));
 // Mount horns: right-click to put the horn in the mount slot (see `Player.equipHorn`). One horn, one mount.
 MOUNTS.forEach((m, i) => add({ id: I.MOUNT_BASE + i, name: m.id === 'fenrir' ? 'horn_of_fenrir' : `horn_of_${m.id}`, tile: tileIndex(`horn_${m.id}`), maxStack: 1, use: 'horn', kind: 'Mount' }));
+// The glowing sets: right-click to put one in the outfit slot (see `Player.equipOutfit`). One item, one set; the class it is for is on the set.
+OUTFITS.forEach((o, i) => add({ id: I.OUTFIT_SET_BASE + i, name: `outfit_${o.id.replace(/-/g, '_')}`, tile: tileIndex(`outfit_set_${o.id}`), maxStack: 1, use: 'outfit', kind: 'Outfit' }));
+// The parts of the companions, crafted from what is gathered (see crafting.ts).
+add({ id: I.IMP_HORN, name: 'imp_horn', tile: tileIndex('imp_horn'), maxStack: 64, kind: 'Material' });
+add({ id: I.CINDER_HEART, name: 'cinder_heart', tile: tileIndex('cinder_heart'), maxStack: 64, kind: 'Material' });
+add({ id: I.SERAPH_FEATHER, name: 'seraph_feather', tile: tileIndex('seraph_feather'), maxStack: 64, kind: 'Material' });
+add({ id: I.HALO_RING, name: 'halo_ring', tile: tileIndex('halo_ring'), maxStack: 64, kind: 'Material' });
+// The companions: right-click one to put it in the companion slot (see `Player.equipCompanion`). One item, one companion.
+COMPANIONS.forEach((c, i) => add({ id: I.COMPANION_BASE + i, name: c.id.replace(/-/g, '_'), tile: tileIndex(`companion_${c.id}`), maxStack: 1, use: 'companion', kind: 'Companion' }));
+// The frame and the feather of the wings, and the wings: right-click a pair to put it in the wing slot (see `Player.equipWings`).
+add({ id: I.WING_FRAME, name: 'wing_frame', tile: tileIndex('wing_frame'), maxStack: 64, kind: 'Material' });
+add({ id: I.STORM_FEATHER, name: 'storm_feather', tile: tileIndex('storm_feather'), maxStack: 64, kind: 'Material' });
+WINGS.forEach((w, i) => add({ id: I.WING_BASE + i, name: w.id, tile: tileIndex(`wings_${w.id}`), maxStack: 1, use: 'wings', kind: 'Wings' }));
+// The rings and the necklaces: right-click one to wear it (see `Player.equipAccessory`). One item, one material.
+for (const kind of ACCESSORY_KINDS) {
+  ACCESSORY_MATERIALS.forEach((material) => {
+    const def = accessoryDef(kind, material);
+    add({ id: accessoryItemId(kind, material), name: def.name, tile: tileIndex(def.name), maxStack: 1, use: 'accessory', kind: kind === 'ring' ? 'Ring' : 'Necklace' });
+  });
+}
 // Bags: worn in a bag slot of the inventory screen, never stacked.
 BAGS.forEach((b, i) => add({ id: I.BAG_BASE + i, name: b.name, tile: tileIndex(`bag_${i + 1}`), maxStack: 1, kind: 'Bag' }));
 

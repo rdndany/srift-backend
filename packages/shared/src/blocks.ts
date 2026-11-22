@@ -1,4 +1,8 @@
 import { ARMOR_MATERIALS, ARMOR_SLOTS, OUTFIT_CLASSES } from './armor';
+import { COMPANIONS } from './companions';
+import { WINGS } from './wings';
+import { ACCESSORY_KINDS, ACCESSORY_MATERIALS } from './accessories';
+import { OUTFITS } from './outfitData';
 import { layoutMasonry, MASONRY_SPECS, MASONRY_TILE_RGB, type MasonryRow } from './masonry';
 import { IRON_KIND, JOINERY_TILE_RGB, layoutJoinery, type JoineryLayout } from './joinery';
 import { GROVE_TILE_RGB, layoutGrove, type GroveLayout, type GroveWood } from './grove';
@@ -430,6 +434,20 @@ export const ITEM_TILES = [
   'warden_scroll',
   'hollow_bone',
   'hollow_sigil',
+  // the glowing sets of the token shop, one picture each (new sets go at the end of OUTFITS, so the pictures keep their places)
+  ...OUTFITS.map((o) => `outfit_set_${o.id}`),
+  // the parts of the companions and the companions (new ones go at the end of COMPANIONS)
+  'imp_horn',
+  'cinder_heart',
+  'seraph_feather',
+  'halo_ring',
+  ...COMPANIONS.map((c) => `companion_${c.id}`),
+  // the frame and the feather of the wings, and the wings (new ones go at the end of WINGS)
+  'wing_frame',
+  'storm_feather',
+  ...WINGS.map((w) => `wings_${w.id}`),
+  // the rings and the necklaces (the same materials as the armor, see accessories.ts)
+  ...ACCESSORY_KINDS.flatMap((k) => ACCESSORY_MATERIALS.map((m) => `${m}_${k}`)),
 ] as const;
 
 /** All atlas tiles: block textures first (stable indices), then item sprites. */

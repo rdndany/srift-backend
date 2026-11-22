@@ -15,17 +15,21 @@ import {
   ANVIL_MAX_COST,
   anvilResult,
   grindResult,
-  enchantOffers,
-  enchantability,
+  canInscribe,
+  erased,
+  glyphOptions,
+  inscribed,
+  failedPrice,
   withEnchants,
   type AnvilResult,
   type GrindResult,
-  type Enchant,
-  type EnchantOffer,
+  type GlyphOption,
 } from './enchant';
+import type { ClassId } from './classes';
 import type { CreativeAmount } from './creative';
 import { canRollGear } from './gear';
-import { I, allItems, bagSlotsOf, getItem, holdsInOffhand, mountOfItem, prefersOffhand } from './items';
+import { ACCESSORY_SLOT_COUNT, NECKLACE_SLOT, accessorySlotsOf } from './accessories';
+import { I, accessoryOfItem, allItems, bagSlotsOf, companionOfItem, getItem, holdsInOffhand, mountOfItem, outfitSetFits, outfitSetOfItem, prefersOffhand, wingOfItem } from './items';
 import { FORGE_CHANCE, FORGE_TIME, canForge, forgeCells, forgeCost, forgeLayout, forgeOutcome, forgePiece, forgeTarget, jewelKind, useJewel, type ForgeOutcome } from './jewels';
 import { FURNACE_FUEL, FURNACE_INPUT, FURNACE_OUTPUT, SMELTING, isFuel, type Furnace } from './smelting';
 import { addVillagerXp, canTradeOffer, type Offer, type TradeBook } from './trading';
@@ -323,6 +327,14 @@ export class CraftingMenu extends Menu {
   readonly offhandSlot: number;
   /** The mount slot (it takes a mount horn), right after the off-hand slot; -1 when there is none. */
   readonly mountSlot: number;
+  /** The outfit slot (it takes a glowing set of the hero's class), right after the mount slot; -1 when there is none. */
+  readonly outfitSlot: number;
+  /** The companion slot (it takes a companion), right after the outfit slot; -1 when there is none. */
+  readonly companionSlot: number;
+  /** The wing slot (it takes a pair of wings), right after the companion slot; -1 when there is none. */
+  readonly wingSlot: number;
+  /** The first of the three jewelry slots (ring, ring, necklace), right after the wing slot; -1 when there is none. */
+  readonly accessoryStart: number;
 
   constructor(
     player: Container,
@@ -333,6 +345,16 @@ export class CraftingMenu extends Menu {
     readonly offhand: Container | null = null,
     /** The mount, shown beside the off hand on the inventory screen. */
     readonly mount: Container | null = null,
+    /** The outfit, shown beside the mount on the inventory screen. */
+    readonly outfit: Container | null = null,
+    /** The class of the hero (the slot takes only the sets of its class; null: any). */
+    readonly outfitClass: () => ClassId | null = () => null,
+    /** The companion, shown beside the outfit on the inventory screen. */
+    readonly companion: Container | null = null,
+    /** The wings, shown beside the companion on the inventory screen. */
+    readonly wings: Container | null = null,
+    /** The rings and the necklace (slots 0, 1 and 2), shown beside the wings on the inventory screen. */
+    readonly accessories: Container | null = null,
   ) {
     super(player);
     this.kind = size === 2 ? 'inventory' : 'crafting';
@@ -351,10 +373,24 @@ export class CraftingMenu extends Menu {
     if (this.offhandSlot >= 0) this.slots.push({ container: offhand!, index: 0, kind: 'normal', accepts: (s) => holdsInOffhand(s.id) });
     this.mountSlot = this.offhandSlot >= 0 && mount ? this.slots.length : -1;
     if (this.mountSlot >= 0) this.slots.push({ container: mount!, index: 0, kind: 'normal', accepts: (s) => mountOfItem(s.id) !== null });
+    this.outfitSlot = this.mountSlot >= 0 && outfit ? this.slots.length : -1;
+    if (this.outfitSlot >= 0) this.slots.push({ container: outfit!, index: 0, kind: 'normal', accepts: (s) => outfitSetFits(s.id, this.outfitClass()) });
+    this.companionSlot = this.outfitSlot >= 0 && companion ? this.slots.length : -1;
+    if (this.companionSlot >= 0) this.slots.push({ container: companion!, index: 0, kind: 'normal', accepts: (s) => companionOfItem(s.id) !== null });
+    this.wingSlot = this.companionSlot >= 0 && wings ? this.slots.length : -1;
+    if (this.wingSlot >= 0) this.slots.push({ container: wings!, index: 0, kind: 'normal', accepts: (s) => wingOfItem(s.id) !== null });
+    this.accessoryStart = this.wingSlot >= 0 && accessories ? this.slots.length : -1;
+    if (this.accessoryStart >= 0) {
+      // Two ring slots and a necklace slot: each takes only its own kind.
+      for (let i = 0; i < ACCESSORY_SLOT_COUNT; i++) {
+        const kind = i === NECKLACE_SLOT ? 'necklace' : 'ring';
+        this.slots.push({ container: accessories!, index: i, kind: 'normal', accepts: (s) => accessoryOfItem(s.id)?.kind === kind });
+      }
+    }
   }
 
   protected override jewelContainers(): Container[] {
-    return [this.player, ...(this.armor ? [this.armor] : []), ...(this.offhand ? [this.offhand] : []), ...(this.mount ? [this.mount] : [])];
+    return [this.player, ...(this.armor ? [this.armor] : []), ...(this.offhand ? [this.offhand] : []), ...(this.mount ? [this.mount] : []), ...(this.outfit ? [this.outfit] : []), ...(this.companion ? [this.companion] : []), ...(this.wings ? [this.wings] : []), ...(this.accessories ? [this.accessories] : [])];
   }
 
   /** Shift-click puts armor on (into an empty slot of its kind) instead of moving it around the inventory. */
@@ -363,6 +399,14 @@ export class CraftingMenu extends Menu {
     if (def && this.armorStart >= 0 && from < PLAYER_SLOTS && !this.armor!.get(def.slotIndex)) return [this.armorStart + def.slotIndex];
     if (prefersOffhand(stack.id) && this.offhandSlot >= 0 && from < PLAYER_SLOTS && !this.offhand!.get(0)) return [this.offhandSlot];
     if (mountOfItem(stack.id) !== null && this.mountSlot >= 0 && from < PLAYER_SLOTS && !this.mount!.get(0)) return [this.mountSlot];
+    if (outfitSetOfItem(stack.id) && this.outfitSlot >= 0 && from < PLAYER_SLOTS && !this.outfit!.get(0) && outfitSetFits(stack.id, this.outfitClass())) return [this.outfitSlot];
+    if (companionOfItem(stack.id) && this.companionSlot >= 0 && from < PLAYER_SLOTS && !this.companion!.get(0)) return [this.companionSlot];
+    if (wingOfItem(stack.id) && this.wingSlot >= 0 && from < PLAYER_SLOTS && !this.wings!.get(0)) return [this.wingSlot];
+    const jewelry = accessoryOfItem(stack.id);
+    if (jewelry && this.accessoryStart >= 0 && from < PLAYER_SLOTS) {
+      const free = accessorySlotsOf(jewelry.kind).find((i) => !this.accessories!.get(i));
+      if (free !== undefined) return [this.accessoryStart + free];
+    }
     return super.quickTargets(from, stack);
   }
 
@@ -592,7 +636,7 @@ export class CraftingMenu extends Menu {
   }
 
   totalItems(): number {
-    return (this.forged?.count ?? 0) + this.player.totalItems() + this.grid.totalItems() + (this.armor?.totalItems() ?? 0) + (this.offhand?.totalItems() ?? 0) + (this.mount?.totalItems() ?? 0) + (this.cursor?.count ?? 0);
+    return (this.forged?.count ?? 0) + this.player.totalItems() + this.grid.totalItems() + (this.armor?.totalItems() ?? 0) + (this.offhand?.totalItems() ?? 0) + (this.mount?.totalItems() ?? 0) + (this.outfit?.totalItems() ?? 0) + (this.cursor?.count ?? 0);
   }
 }
 
@@ -806,35 +850,32 @@ export class TradeMenu extends Menu {
   }
 }
 
-/** What an enchanting table needs from the player that opens it (see `Player.openForBlock`). */
+/** What a Runic Altar needs from the player that opens it (see `Player.openForBlock`). */
 export interface EnchantHooks {
-  /** Bookshelves around the table. */
+  /** Shelves of books around the altar: the lore a high rank asks for. */
   shelves: number;
-  /** The player's enchantment seed: the offers stay the same until they enchant something. */
-  seed(): number;
-  /** Levels the player has. */
-  level(): number;
   creative(): boolean;
-  /** Take levels off the player. */
-  spend(levels: number): void;
-  /** Something was enchanted: the seed moves on. */
-  done(): void;
+  /** The Auren the player has, and a payment of it. */
+  coins(): number;
+  spend(auren: number): void;
+  /** Something was inscribed or erased: which glyph, the rank it has now (0 once erased), whether it was erased and whether an inscription failed (`fail`: the price was paid and nothing was written). */
+  done(what: { glyph: number; rank: number; erase: boolean; fail?: boolean }): void;
+  /** A number from 0 up to (not including) 1 for the roll of an inscription; without it every inscription takes. */
+  rand?(): number;
 }
 
-/** What an enchanting table is paid in. */
+/** What a Runic Altar takes besides coins. */
 export const LAPIS = I.LAPIS_LAZULI;
 
 /**
- * The enchanting table's screen: an item and lapis go in, three offers show a level cost and a hint, and
- * choosing one spends that many lapis and levels (one, two or three of each) and enchants the item.
+ * The Runic Altar's screen: one piece goes in, and the glyphs that fit it are listed with their price (see `glyphOptions`). Inscribing one
+ * takes its lapis (from anywhere in the bags) and its Auren and puts the glyph on the piece (or raises it a rank); erasing one frees its
+ * socket. There is nothing to roll: the screen shows exactly what a click will do. A plain book becomes a Glyph Tome.
  */
 export class EnchantMenu extends Menu {
   readonly kind = 'enchant' as const;
-  readonly input = new Container(2);
+  readonly input = new Container(1);
   readonly itemSlot = PLAYER_SLOTS;
-  readonly lapisSlot = PLAYER_SLOTS + 1;
-  /** The three offers for the item in the slot (the server's own have the full list; a client's only the cost and the hint). */
-  offers: EnchantOffer[] = [0, 1, 2].map(() => ({ cost: 0, clue: null, list: [] }));
   shelves: number;
 
   constructor(
@@ -843,23 +884,27 @@ export class EnchantMenu extends Menu {
   ) {
     super(player);
     this.shelves = hooks.shelves;
-    this.slots.push({ container: this.input, index: 0, kind: 'normal', accepts: (s) => enchantability(s.id) > 0 });
-    this.slots.push({ container: this.input, index: 1, kind: 'normal', accepts: (s) => s.id === LAPIS });
-    this.recalc();
+    this.slots.push({ container: this.input, index: 0, kind: 'normal', accepts: (s) => canInscribe(s.id) });
   }
 
   get item(): ItemStack | null {
     return this.input.get(0);
   }
 
-  get lapis(): ItemStack | null {
-    return this.input.get(1);
+  /** Lapis lazuli in the bags. */
+  get lapis(): number {
+    return this.player.countOf(LAPIS);
   }
 
-  /** Only one item goes into the table's slot, whatever the click would have moved. */
+  /** What the altar offers for the piece in the slot now (the server's own read of it, with the player's purse). */
+  options(): GlyphOption[] {
+    return glyphOptions(this.item, { shelves: this.shelves, lapis: this.lapis, auren: this.hooks.coins(), creative: this.hooks.creative() });
+  }
+
+  /** Only one item goes into the altar's slot, whatever the click would have moved. */
   override click(i: number, button: 0 | 1): void {
     if (i === this.itemSlot && this.cursor && this.cursor.count > 1) {
-      if (!this.item && enchantability(this.cursor.id) > 0) super.click(i, 1);
+      if (!this.item && canInscribe(this.cursor.id)) super.click(i, 1);
       return;
     }
     super.click(i, button);
@@ -867,55 +912,53 @@ export class EnchantMenu extends Menu {
 
   override shiftClick(i: number): void {
     const s = i < PLAYER_SLOTS ? this.stackAt(i) : null;
-    if (s && s.id !== LAPIS && enchantability(s.id) > 0 && !this.item) {
+    if (s && canInscribe(s.id) && !this.item) {
       this.input.set(0, cloneStack({ ...s, count: 1 }));
       s.count -= 1;
       if (s.count <= 0) this.slots[i].container.set(this.slots[i].index, null);
       this.changed();
       return;
     }
-    if (s && s.id === LAPIS) {
-      const left = this.insertInto([this.lapisSlot], s);
-      this.slots[i].container.set(this.slots[i].index, left);
-      this.changed();
-      return;
-    }
     super.shiftClick(i);
   }
 
-  protected override changed(): void {
-    this.recalc();
-  }
-
-  recalc(): void {
+  /** Inscribe glyph `id` on the piece (or raise it one rank). Returns whether it was done: the price is paid here. */
+  inscribe(id: number): boolean {
     const it = this.item;
-    this.offers = enchantOffers(this.hooks.seed(), this.shelves, it?.id ?? 0, !!it && (!!it.ench || getItem(it.id).storesEnchants));
-  }
-
-  /** Choose offer `index` (0..2). Returns whether the item was enchanted. */
-  enchant(index: number): boolean {
-    const o = this.offers[index];
-    const it = this.item;
-    if (!Number.isInteger(index) || !o || o.cost <= 0 || !it || it.count !== 1) return false;
-    const need = index + 1;
-    const free = this.hooks.creative();
-    if (!free && ((this.lapis?.count ?? 0) < need || this.hooks.level() < Math.max(o.cost, need))) return false;
-    this.input.set(0, withEnchants(it, o.list));
-    if (!free) {
-      const l = this.lapis!;
-      l.count -= need;
-      if (l.count <= 0) this.input.set(1, null);
-      this.hooks.spend(need);
+    if (!it || !Number.isInteger(id)) return false;
+    const o = this.options().find((x) => x.def.id === id);
+    if (!o || o.state !== 'ok') return false;
+    const next = inscribed(it, id);
+    if (!next) return false;
+    // The roll first: a failure costs all the lapis and half the Auren, and leaves the piece as it was.
+    const fail = o.chance < 100 && (this.hooks.rand?.() ?? 0) * 100 >= o.chance;
+    if (!this.hooks.creative()) {
+      const pay = fail ? failedPrice(o.price) : o.price;
+      if (!this.player.remove(LAPIS, pay.lapis)) return false;
+      this.hooks.spend(pay.auren);
     }
-    this.hooks.done();
-    this.recalc();
+    if (fail) {
+      this.hooks.done({ glyph: id, rank: o.have, erase: false, fail: true });
+      return true;
+    }
+    this.input.set(0, next);
+    this.hooks.done({ glyph: id, rank: o.rank, erase: false });
     return true;
   }
 
-  /** A client's copy: take the server's offers (cost and hint only). */
-  adopt(shelves: number, offers: { cost: number; clue: Enchant | null }[]): void {
+  /** Take glyph `id` off the piece (free: what it cost is gone). Returns whether it was on it. */
+  erase(id: number): boolean {
+    const it = this.item;
+    const next = it && Number.isInteger(id) ? erased(it, id) : null;
+    if (!next) return false;
+    this.input.set(0, next);
+    this.hooks.done({ glyph: id, rank: 0, erase: true });
+    return true;
+  }
+
+  /** A client's copy: the server says how many shelves there are (everything else follows from the item and the purse). */
+  adopt(shelves: number): void {
     this.shelves = shelves;
-    this.offers = [0, 1, 2].map((i) => ({ cost: offers[i]?.cost ?? 0, clue: offers[i]?.clue ?? null, list: [] }));
   }
 
   override close(): ItemStack[] {

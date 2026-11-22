@@ -351,15 +351,7 @@
   flex: none;
 }
 
-/* ---- the mount horn sits in the inventory; while ridden its picture is a buff under the character bars ---- */
-.mount-slot-inv {
-  position: absolute;
-  left: 4px;
-  bottom: 4px;
-}
-#menu-screen .wow .mount-slot-inv {
-  bottom: 30px;
-}
+/* ---- while a mount is ridden its picture is a buff under the character bars ---- */
 .cb-slot.mount-skill {
   cursor: default;
 }

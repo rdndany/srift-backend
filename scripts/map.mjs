@@ -48,19 +48,12 @@ const rightClick = async () => {
   await sleep(150);
 };
 
-console.log('the minimap');
-check(await until(async () => (await page.locator('[data-testid=minimap]').count()) === 1), 'a minimap is in the corner');
+console.log('no minimap in the corner');
 check(await until(async () => (await state()).painted > 30, 20000), `the ground around is painted (${(await state()).painted} chunks)`);
-await sleep(600);
-await page.screenshot({ path: `${outDir}/map-minimap.png` });
-const disc = page.locator('#minimap');
-await disc.screenshot({ path: `${outDir}/map-minimap-close.png` });
-
+check((await page.locator('[data-testid=minimap]').count()) === 0, 'there is no minimap on the screen: the map item is the way to see the map');
 await page.keyboard.press('KeyJ');
-check(await until(async () => (await page.locator('[data-testid=minimap]').count()) === 0), 'J hides it');
-check(!(await state()).mini, 'and it is remembered');
-await page.keyboard.press('KeyJ');
-check(await until(async () => (await page.locator('[data-testid=minimap]').count()) === 1), 'J brings it back');
+await sleep(200);
+check((await page.locator('[data-testid=minimap]').count()) === 0, 'and J brings none up');
 
 console.log('the map item');
 // A new character of the plain game carries a map on the bar; where it does not, hand one over. Either way, start with
@@ -126,9 +119,8 @@ const cave = await hook('findCavePoint', 'cave', Math.floor(pos.x), Math.floor(p
 if (cave) {
   await hook('setMode', 'creative');
   await hook('teleport', cave.x + 0.5, cave.y + 0.1, cave.z + 0.5);
-  check(await until(async () => (await state()).underground, 8000), 'in a cave the minimap shows the level you are on');
+  check(await until(async () => (await state()).underground, 8000), 'in a cave the map shows the level you are on');
   await sleep(1200);
-  await disc.screenshot({ path: `${outDir}/map-minimap-cave.png` });
 } else console.log('  (no cave found near the start, skipped)');
 
 await browser.close();

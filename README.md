@@ -37,7 +37,6 @@ To put it online (page on Vercel, server on a droplet, Caddy for https), see [`d
 | F5 or V | Camera: first person, third person from behind, third person from the front |
 | F3 | Debug overlay |
 | M | Toggle music |
-| J | Show or hide the minimap in the corner |
 | `[` / `]` | Render distance |
 | R | Respawn |
 | Z / X / C / G | Class abilities 1 to 4 (characters with a class; the bar at the bottom right also takes a click or a tap) |

@@ -36,7 +36,6 @@ export interface KeyParts {
   quality(): number;
   windows: ReturnType<typeof makeWindows>;
   sendCommand(c: Command): void;
-  toggleMinimap(): void;
   openSpellbook(): void;
 }
 
@@ -51,7 +50,7 @@ export class KeyActions {
 
   /** Called once a frame while the player has the mouse and no window is open. */
   handle(): void {
-    const { session, remote, online, input, world, hud, admin, chat, audio, selfView, chase, quality, sendCommand, toggleMinimap, openSpellbook } = this.parts;
+    const { session, remote, online, input, world, hud, admin, chat, audio, selfView, chase, quality, sendCommand, openSpellbook } = this.parts;
     const { toggleCodex, toggleQuestLog, togglePartyWindow, toggleSocialWindow, openPlayerMenu } = this.parts.windows;
     for (let i = 0; i < 9; i++) if (input.wasPressed(`Digit${i + 1}`)) sendCommand({ t: 'select', slot: i });
     const w = input.consumeWheel();
@@ -62,7 +61,6 @@ export class KeyActions {
         useUi.setState({ mapZoom: MAP_ZOOMS[Math.max(0, Math.min(MAP_ZOOMS.length - 1, at - Math.sign(w)))] });
       } else sendCommand({ t: 'scroll', delta: w });
     }
-    if (input.wasPressed('KeyJ')) toggleMinimap();
     if (input.wasPressed('F3')) hud.debugVisible = !hud.debugVisible;
     if (input.wasPressed('F2')) {
       admin.visible = !admin.visible;

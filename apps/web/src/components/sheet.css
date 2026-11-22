@@ -170,8 +170,13 @@
   align-items: flex-start;
   gap: 3px;
 }
+/* Nine worn places in a row (4 armor, the off hand, mount, outfit, companion, wings), the gap among them: ten items, so nine 3px gaps and the 12px spacer. */
+.cs-row {
+  min-width: 0;
+}
 .cs-row .cs-slot {
-  flex: 0 0 calc((100% - 6 * 3px - 12px) / 7);
+  box-sizing: border-box; /* (the 2px borders are part of the width) */
+  flex: 0 0 calc((100% - 9 * 3px - 12px) / 9);
 }
 .cs-gap {
   width: 12px;
@@ -485,4 +490,157 @@
 }
 .cs-find:focus-within kbd {
   display: none;
+}
+/* The achievements tab: the deeds of the character, by category (see AchievementsTab in CharacterSheet.tsx). */
+.cs-ach-total {
+  margin: 0;
+}
+.cs-ach-total b {
+  font-size: 15px;
+  color: #ffe58a;
+}
+.cs-ach-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cs-ach {
+  --tc: #b87333;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 9px;
+  background: rgba(6, 4, 14, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 4px solid var(--tc);
+  opacity: 0.72;
+}
+.cs-ach.silver {
+  --tc: #c3ccd6;
+}
+.cs-ach.gold {
+  --tc: #f1c24f;
+}
+.cs-ach.mythic {
+  --tc: #c77dff;
+}
+.cs-ach.won {
+  opacity: 1;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--tc) 16%, rgba(6, 4, 14, 0.7)), rgba(6, 4, 14, 0.55));
+}
+.cs-ach-mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  font-size: 13px;
+  color: #9be564;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+.cs-ach-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.cs-ach-body b {
+  font-size: 13px;
+  font-weight: normal;
+  color: #f4ead2;
+}
+.cs-ach-body span {
+  font-size: 11px;
+  line-height: 1.4;
+  color: #a79dbd;
+}
+.cs-ach-bar {
+  position: relative;
+  display: block;
+  height: 12px;
+  margin-top: 3px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.cs-ach-bar u {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--tc);
+  opacity: 0.55;
+  text-decoration: none;
+}
+.cs-ach-bar em {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-style: normal;
+  font-size: 9px;
+  color: #fff;
+  text-shadow: 1px 1px 0 #000;
+}
+.cs-ach-tier {
+  flex: none;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--tc);
+}
+
+/*
+ * Carried / Achievements / Stash: the three tabs share the row and shrink with the column (they used to keep their own width, which pushed
+ * the page sideways once there were three). Narrower columns lose the icons first, then tighten, so the words stay whole.
+ */
+.cs-controls {
+  container-type: inline-size;
+}
+.cs-tabs {
+  flex: 1 1 100%; /* the tabs have a row to themselves and the search box sits under them */
+  min-width: 0;
+}
+.cs-tabs button {
+  flex: 1 1 auto;
+  justify-content: center;
+  min-width: 0;
+}
+.cs-tabs button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cs-tabs button b {
+  flex: none;
+}
+@container (max-width: 520px) {
+  .cs-tabs button svg {
+    display: none;
+  }
+  .cs-tabs button {
+    gap: 6px;
+    padding: 0 8px;
+  }
+}
+@container (max-width: 400px) {
+  .cs-tabs button {
+    gap: 5px;
+    padding: 0 6px;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+  }
+  .cs-tabs button b {
+    min-width: 0;
+    padding: 2px 4px 1px;
+    font-size: 10px;
+  }
+}
+@container (max-width: 320px) {
+  .cs-tabs button b {
+    display: none;
+  }
 }

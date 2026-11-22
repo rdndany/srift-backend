@@ -1,7 +1,9 @@
+import './loadEnv';
 import { DEFAULT_SERVER_PORT } from '@solrift/shared';
 import { parseIdList } from './admin';
 import { SqliteRepo } from './db';
 import { DEV_ORIGINS, createGameServer } from './server';
+import { TokenService, tokenChainFromEnv, tokenConfigFromEnv } from './token';
 
 const PORT = Number(process.env.PORT ?? DEFAULT_SERVER_PORT);
 const WORLD_SEED = Number(process.env.WORLD_SEED ?? 1337);
@@ -15,10 +17,18 @@ const DATABASE_PATH = process.env.DATABASE_PATH ?? 'data/solrift.db';
 /** Comma-separated browser origins allowed to sign in, e.g. `https://play.example.com`. */
 const ORIGINS = process.env.AUTH_ORIGINS ? process.env.AUTH_ORIGINS.split(',').map((s) => s.trim()) : DEV_ORIGINS;
 
+/**
+ * The $SOLRIFT token is off until TOKEN_MINT is set (with SOLANA_CLUSTER). Then achievements pay into wallets' balances;
+ * add TREASURY_KEYPAIR (a Solana CLI keypair file that holds the tokens) to let players withdraw. See docs/TOKEN.md.
+ */
+const TOKEN_CONFIG = tokenConfigFromEnv(process.env);
+const TOKEN_CHAIN = tokenChainFromEnv(TOKEN_CONFIG, process.env);
+
 const server = createGameServer({
   seed: WORLD_SEED,
   origins: ORIGINS,
   repo: new SqliteRepo(DATABASE_PATH),
+  token: (repo) => new TokenService(repo.tokens, TOKEN_CONFIG, TOKEN_CHAIN),
   room: {
     kind: WORLD_KIND,
     cheats: process.env.CHEATS === '1',
@@ -43,6 +53,7 @@ const server = createGameServer({
 });
 const port = await server.listen(PORT);
 console.log(`[solrift] server listening on :${port} (${WORLD_KIND === 'adventure' ? 'adventure world' : `seed ${WORLD_SEED}`}, db ${DATABASE_PATH})`);
+console.log(`[solrift] token: ${!TOKEN_CONFIG.mint ? 'not live (no TOKEN_MINT)' : `${TOKEN_CONFIG.mint} on ${TOKEN_CONFIG.cluster}, withdrawals ${server.token.canWithdraw ? 'open' : 'closed (no TREASURY_KEYPAIR)'}`}`);
 
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   process.on(sig, () => {

@@ -1,8 +1,10 @@
 import { abilitiesOf, parseClassSave } from './abilities';
+import { AchievementBook, type AchievementView } from './achievements';
 import { BAG_SLOTS, bagInventory, bagOf } from './bags';
 import { CLASSES, CLASS_LEVELS, computeStats, isClassId, type ClassId } from './classes';
 import { Experience, xpToNext } from './experience';
 import { ARMOR_SLOTS } from './armor';
+import { ACCESSORY_SLOT_COUNT, NECKLACE_SLOT } from './accessories';
 import { NO_POINTS, pointModifier } from './statPoints';
 import { Container, HOTBAR_SLOTS, PLAYER_SLOTS, makeStack, type ItemStack } from './inventory';
 import { I, outfitItems } from './items';
@@ -41,9 +43,21 @@ export interface CharacterSheet {
   armor: (ItemStack | null)[];
   offhand: ItemStack | null;
   mount: ItemStack | null;
+  /** The glowing set it wears (the outfit slot). */
+  outfit: ItemStack | null;
+  /** The companion that follows it (the companion slot). */
+  companion: ItemStack | null;
+  /** The wings it wears (the wing slot). */
+  wings: ItemStack | null;
+  /** The two rings it wears (null for an empty finger). */
+  rings: (ItemStack | null)[];
+  /** The necklace it wears. */
+  necklace: ItemStack | null;
   /** Items carried in all (a stack of 20 counts 20). */
   itemCount: number;
   quests: { done: number; total: number; active: { id: string; name: string; progress: number[] }[] };
+  /** The deeds counted and the achievements won (what the game's own list shows, read from the same save). */
+  ach: AchievementView;
 }
 
 const clone = (s: ItemStack | null): ItemStack | null => (s ? { ...s } : null);
@@ -67,6 +81,14 @@ export function sheetOfSave(save: PlayerSave, classId: ClassId | null = null): C
   offhand.loadJSON(save.offhand);
   const mount = new Container(1);
   mount.loadJSON(save.mountSlot);
+  const outfit = new Container(1);
+  outfit.loadJSON(save.outfitSlot);
+  const companion = new Container(1);
+  companion.loadJSON(save.companionSlot);
+  const wings = new Container(1);
+  wings.loadJSON(save.wingSlot);
+  const jewelry = new Container(ACCESSORY_SLOT_COUNT);
+  jewelry.loadJSON(save.accessories);
 
   const slots = (from: number, to: number): (ItemStack | null)[] => Array.from({ length: to - from }, (_, i) => (inv.isUsable(from + i) ? clone(inv.get(from + i)) : null));
   const bags = Array.from({ length: BAG_SLOTS }, (_, b) => {
@@ -96,7 +118,10 @@ export function sheetOfSave(save: PlayerSave, classId: ClassId | null = null): C
     : [];
 
   let itemCount = 0;
-  for (const c of [inv, armor, offhand, mount, bagsC]) itemCount += c.totalItems();
+  for (const c of [inv, armor, offhand, mount, outfit, companion, wings, jewelry, bagsC]) itemCount += c.totalItems();
+
+  const book = new AchievementBook();
+  book.loadJSON(save.ach);
 
   return {
     level: cs ? cs.lvl : xp.level,
@@ -118,8 +143,14 @@ export function sheetOfSave(save: PlayerSave, classId: ClassId | null = null): C
     armor: armor.slots.map(clone),
     offhand: clone(offhand.get(0)),
     mount: clone(mount.get(0)),
+    outfit: clone(outfit.get(0)),
+    companion: clone(companion.get(0)),
+    wings: clone(wings.get(0)),
+    rings: [clone(jewelry.get(0)), clone(jewelry.get(1))],
+    necklace: clone(jewelry.get(NECKLACE_SLOT)),
     itemCount,
     quests: { done, total: QUESTS.length, active },
+    ach: book.view(),
   };
 }
 /**
@@ -159,7 +190,7 @@ export function briefOfSheet(id: string, sheet: CharacterSheet): CharacterBrief 
   const add = (s: ItemStack | null): void => {
     if (s) total.set(s.id, (total.get(s.id) ?? 0) + s.count);
   };
-  for (const s of [...sheet.armor, sheet.offhand, sheet.mount, ...sheet.hotbar, ...sheet.backpack]) add(s);
+  for (const s of [...sheet.armor, sheet.offhand, sheet.mount, sheet.outfit, sheet.companion, sheet.wings, ...sheet.rings, sheet.necklace, ...sheet.hotbar, ...sheet.backpack]) add(s);
   for (const b of sheet.bags) {
     add(b.bag);
     for (const s of b.items) add(s);

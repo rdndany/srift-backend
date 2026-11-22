@@ -1,0 +1,267 @@
+/*
+ * The account in the site's menu bar (AccountMenu.tsx): a small chip, and a card that opens under it. The card is drawn on the page
+ * body (the bar's notched edge would cut it off), so none of these rules depend on `#home .fp`.
+ */
+
+.acm {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  font-family: 'Monocraft', 'Courier New', monospace;
+}
+.acm .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ---------- the chip in the bar ---------- */
+#home .fp .acm .acm-chip,
+.acm .acm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  min-height: 38px;
+  padding: 0 10px 0 6px;
+  border: 2px solid rgba(255, 255, 255, 0.24);
+  background: #1c1331;
+  box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.55);
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+  touch-action: manipulation;
+  transition:
+    background 0.12s,
+    transform 0.12s,
+    box-shadow 0.12s;
+}
+#home .fp .acm .acm-chip.signin,
+.acm .acm-chip.signin {
+  padding: 0 14px;
+}
+#home .fp .acm .acm-chip:hover:not(:disabled),
+.acm .acm-chip:hover:not(:disabled),
+#home .fp .acm .acm-chip.open {
+  background: #2c1d4d;
+  transform: translate(-1px, -1px);
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.55);
+}
+.acm .acm-chip:disabled {
+  opacity: 0.6;
+}
+.acm .acm-chip b {
+  min-width: 0;
+  max-width: 14ch;
+  overflow: hidden;
+  font-weight: 400;
+  text-overflow: ellipsis;
+}
+.acm .acm-bal {
+  padding: 2px 6px;
+  font-size: 10px;
+  color: #ffd978;
+  background: rgba(255, 207, 102, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(255, 207, 102, 0.35);
+}
+.acm .acm-caret {
+  width: 0;
+  height: 0;
+  margin-left: 2px;
+  border: 4px solid transparent;
+  border-top-color: rgba(255, 255, 255, 0.7);
+  border-bottom-width: 0;
+  transition: transform 0.15s;
+}
+.acm .acm-chip.open .acm-caret {
+  transform: rotate(180deg);
+}
+.acm .acm-short {
+  display: none;
+}
+
+/* the letter: the face of the account */
+.acm-avatar {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  font-size: 13px;
+  color: #1a1000;
+  background: linear-gradient(#ffd978, #e0a21c);
+  box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.22);
+}
+.acm-avatar.big {
+  width: 40px;
+  height: 40px;
+  font-size: 20px;
+}
+
+/* ---------- the card ---------- */
+.acm-pop {
+  box-sizing: border-box;
+  position: fixed;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(300px, calc(100vw - 16px));
+  padding: 12px;
+  font-family: 'Monocraft', 'Courier New', monospace;
+  font-size: 12px;
+  color: #efe9f7;
+  background: #120c22;
+  border: 2px solid rgba(255, 255, 255, 0.22);
+  box-shadow:
+    4px 4px 0 rgba(0, 0, 0, 0.6),
+    0 18px 40px rgba(0, 0, 0, 0.55);
+  animation: acm-in 0.14s both ease-out;
+}
+.acm-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+.acm-head b {
+  display: block;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #fff;
+}
+.acm-head small {
+  font-size: 10px;
+  text-transform: capitalize;
+  color: #a79fb8;
+}
+.acm-head > span:last-child {
+  min-width: 0;
+}
+.acm-title {
+  margin: 0 0 2px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #ffd978;
+}
+.acm-note,
+.acm-error {
+  margin: 2px 0 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #a79fb8;
+}
+.acm-error {
+  color: #ff9b9b;
+}
+.acm-row {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 10px;
+  border: none;
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  text-decoration: none;
+  color: #efe9f7;
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+  cursor: pointer;
+}
+.acm-row:hover:not(:disabled) {
+  background: rgba(138, 92, 245, 0.25);
+}
+.acm-row > span:first-child {
+  color: #a79fb8;
+}
+.acm-row code,
+.acm-row strong {
+  margin-left: auto;
+  font-family: inherit;
+  font-weight: 400;
+  color: #ffd978;
+}
+.acm-row em {
+  font-style: normal;
+  font-size: 10px;
+  text-transform: uppercase;
+  color: #a79fb8;
+}
+.acm-row.wallet-option img {
+  image-rendering: auto;
+}
+.acm-out {
+  min-height: 44px;
+  margin-top: 4px;
+  border: none;
+  font-family: inherit;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #ffd9d9;
+  background: rgba(255, 80, 80, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(255, 110, 110, 0.4);
+  cursor: pointer;
+}
+.acm-out:hover:not(:disabled) {
+  background: rgba(255, 80, 80, 0.22);
+}
+.acm-out:disabled {
+  opacity: 0.5;
+}
+.acm-links {
+  margin-top: 4px;
+}
+
+@keyframes acm-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+/* ---------- narrow bars ---------- */
+@media (max-width: 700px) {
+  .acm .acm-long {
+    display: none;
+  }
+  .acm .acm-short {
+    display: inline;
+  }
+  .acm .acm-chip b {
+    max-width: 9ch;
+  }
+  .acm .acm-bal {
+    display: none;
+  }
+}
+@media (max-width: 400px) {
+  .acm .acm-chip b {
+    display: none;
+  }
+  .acm .acm-chip {
+    padding-right: 8px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .acm-pop {
+    animation: none;
+  }
+}

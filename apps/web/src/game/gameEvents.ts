@@ -1,5 +1,5 @@
 import type * as THREE from 'three';
-import { BLOCKS, I, abilitiesOf, getItem, type SessionEvent } from '@solrift/shared';
+import { BLOCKS, ENCHANTS, I, RIFT_GRADE_DEFS, abilitiesOf, getItem, type SessionEvent } from '@solrift/shared';
 import { bumpUi, pushPickup, pushQuestNote, setParty, setQuests, showBossLine, showZone, useUi } from '../ui/store';
 import type { AbilityFx } from './abilityFx';
 import type { GameAudio } from './audio';
@@ -71,6 +71,11 @@ export function makeEventHandler(parts: EventParts): (events: SessionEvent[]) =>
           // His yells are heard as well as read: a deep torn voice, wherever he is in the copy.
           if (e.kind === 'yell') audio.bossYell(e.text);
           break;
+        case 'rift':
+          // Across the screen like a raid warning (in the colour of its grade), with a sound of its own.
+          showBossLine(e.text, 'warn', RIFT_GRADE_DEFS[e.grade].color);
+          audio.rift(e.what, e.grade);
+          break;
         case 'bossFx': {
           // The sound of the fight: how loud and how dull it is follows how far the king is (a roar or his fall is heard in all of the copy).
           // It has no place when it comes without one: the room, then.
@@ -122,7 +127,8 @@ export function makeEventHandler(parts: EventParts): (events: SessionEvent[]) =>
           audio.equip();
           break;
         case 'enchant':
-          audio.enchant(e.anvil === true);
+          audio.enchant(e.anvil === true, { element: e.glyph ? ENCHANTS.find((d) => d.id === e.glyph)?.element : undefined, rank: e.rank, erase: e.erase, fail: e.fail });
+          if (e.fail) useUi.setState({ altarFail: { n: (useUi.getState().altarFail?.n ?? 0) + 1 } });
           break;
         case 'shield':
           audio.ability(e.parry ? 'shield_parry' : e.broke ? 'shield_break' : 'shield_block', e.vol);
@@ -244,8 +250,8 @@ export function makeEventHandler(parts: EventParts): (events: SessionEvent[]) =>
         case 'swing':
           // (A stab of the off hand is started and heard by the client the moment the button goes down, hit or not: see main.ts.)
           if (e.off) break;
-          hand.swing();
-          selfView.swing();
+          hand.swing(e.rate ?? 1);
+          selfView.swing(e.rate ?? 1);
           if (session.held?.id === I.DAGGER) audio.ability('dagger_swish', 0.7);
           break;
         case 'fish': {
@@ -283,6 +289,13 @@ export function makeEventHandler(parts: EventParts): (events: SessionEvent[]) =>
           break;
         case 'ach':
           useUi.setState({ ach: e.view });
+          break;
+        case 'bounties':
+          useUi.setState({ bounties: e.view, bountiesAt: Date.now() });
+          break;
+        case 'bounty':
+          hud.toast(`Daily bounty done: ${e.name}`);
+          pushQuestNote('done', `Daily bounty done: ${e.name}`);
           break;
         case 'achievement':
           hud.toast(`Achievement unlocked: ${e.name} (${e.reward})`);

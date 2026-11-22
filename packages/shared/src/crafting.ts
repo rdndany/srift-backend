@@ -1,7 +1,8 @@
 import { B, BB, BEYOND, BUILD_MATERIALS, CONNECT, DYE_NAMES, DRESS, GROVE, JOINERY, LOG_BLOCKS, woolColor, woolId, terracottaOf, TOOL_KINDS, TOOL_MATERIALS, campfireId, gateId, idByName, ladderId, MASONRY, slabId, stairId, trapdoorId, type ToolKind, type ToolMaterial } from './blocks';
 import { ARMOR_MATERIALS, type ArmorMaterial } from './armor';
 import { BEYOND_SHAPES } from './beyondBlocks';
-import { I, armorId, bagId, bedItemId, dyeId, toolId } from './items';
+import { I, armorId, bagId, bedItemId, companionItemId, dyeId, necklaceId, ringId, toolId, wingItemId } from './items';
+import { ACCESSORY_MATERIALS } from './accessories';
 import type { ItemStack } from './inventory';
 
 export interface Recipe {
@@ -51,6 +52,26 @@ shaped(I.COMPASS, 1, [' I ', 'IRI', ' I '], { I: I.IRON_INGOT, R: I.REDSTONE });
 shapeless(I.FLINT_AND_STEEL, 1, [I.IRON_INGOT, I.FLINT]);
 // The key of the Hollow Cellar, as the Cloak of Invisibility was made in Blood Castle: two pieces, joined.
 shapeless(I.HOLLOW_SIGIL, 1, [I.WARDEN_SCROLL, I.HOLLOW_BONE]);
+// The companions (see companions.ts), from parts that are crafted first. The imp: horns of bone and powder, a heart of coal and red dust round a
+// bar of gold, then two horns, two diamonds, the heart and a Jewel of the Rift. The seraph: feathers bright with glowstone, a ring of gold, then two
+// feathers, the ring, two diamonds and a Jewel of the Dawn.
+shapeless(I.IMP_HORN, 2, [I.BONE, I.BONE, I.GUNPOWDER, I.FLINT]);
+shaped(I.CINDER_HEART, 1, ['RCR', 'CGC', 'RCR'], { R: I.REDSTONE, C: I.COAL, G: I.GOLD_INGOT });
+shapeless(I.SERAPH_FEATHER, 2, [I.FEATHER, I.FEATHER, I.FEATHER, B.GLOWSTONE]);
+shaped(I.HALO_RING, 1, [' G ', 'G G', ' G '], { G: I.GOLD_INGOT });
+shaped(companionItemId('cinder-imp'), 1, ['H H', 'DCD', ' J '], { H: I.IMP_HORN, D: I.DIAMOND, C: I.CINDER_HEART, J: I.JEWEL_RIFT });
+shaped(companionItemId('dawn-seraph'), 1, [' R ', 'FJF', 'D D'], { R: I.HALO_RING, F: I.SERAPH_FEATHER, J: I.JEWEL_DAWN, D: I.DIAMOND });
+// The wings (see wings.ts), as in MU Online: first a frame (and a storm feather for the second wings), then the first wings from the frame, a jewel and the
+// parts of their kind (horns and leather, seraph feathers and gold, feathers and emeralds), then the second wings from a first pair, a storm feather,
+// two diamonds and a stronger jewel. Each kind grows into its own second wings.
+shaped(I.WING_FRAME, 1, ['I I', 'BIB', 'I I'], { I: I.IRON_INGOT, B: I.BONE });
+shaped(I.STORM_FEATHER, 1, [' F ', 'FDF', ' F '], { F: I.SERAPH_FEATHER, D: I.DIAMOND });
+shaped(wingItemId('cinderwings'), 1, ['HHH', 'LWL', ' J '], { H: I.IMP_HORN, L: I.LEATHER, W: I.WING_FRAME, J: I.JEWEL_DAWN });
+shaped(wingItemId('skywings'), 1, ['FFF', 'GWG', ' J '], { F: I.SERAPH_FEATHER, G: I.GOLD_INGOT, W: I.WING_FRAME, J: I.JEWEL_DAWN });
+shaped(wingItemId('gladewings'), 1, ['FFF', 'EWE', ' J '], { F: I.FEATHER, E: I.EMERALD, W: I.WING_FRAME, J: I.JEWEL_DAWN });
+for (const [from, to] of [['cinderwings', 'ruinwings'], ['skywings', 'radiantwings'], ['gladewings', 'stormwings']] as const) {
+  shaped(wingItemId(to), 1, [' S ', 'DWD', ' J '], { S: I.STORM_FEATHER, D: I.DIAMOND, W: wingItemId(from), J: I.JEWEL_RIFT });
+}
 // Six planks round an iron ingot, as in the original.
 shaped(I.SHIELD, 1, ['PIP', 'PPP', ' P '], { P: B.PLANKS, I: I.IRON_INGOT });
 // Class weapons (anyone may make and carry them; see classes.ts).
@@ -275,6 +296,12 @@ const ARMOR_PIECE: Record<ArmorMaterial, number> = {
 const ARMOR_PATTERNS: string[][] = [['MMM', 'M M'], ['M M', 'MMM', 'MMM'], ['MMM', 'M M', 'M M'], ['M M', 'M M']];
 for (const material of ARMOR_MATERIALS) {
   ARMOR_PATTERNS.forEach((pattern, slotIndex) => shaped(armorId(slotIndex, material), 1, pattern, { M: ARMOR_PIECE[material] }));
+}
+// Rings and necklaces, of the same materials as the armor. A ring is four pieces of the material around a thread; a necklace is a loop of four strings with one piece of
+// the material hanging from it. Both are made at the crafting table.
+for (const material of ACCESSORY_MATERIALS) {
+  shaped(ringId(material), 1, [' M ', 'MSM', ' M '], { M: ARMOR_PIECE[material], S: I.STRING });
+  shaped(necklaceId(material), 1, ['S S', 'S S', ' M '], { S: I.STRING, M: ARMOR_PIECE[material] });
 }
 // Six sticks and one smooth stone slab: three across the top, one in the middle, and one on each side of the slab.
 const SMOOTH_STONE = BUILD_MATERIALS.length + MASONRY.findIndex((row) => row.spec.name === 'smooth_stone');

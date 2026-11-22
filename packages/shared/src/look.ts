@@ -61,8 +61,11 @@ export function parseLookCode(code: unknown): CharacterLook | null {
   return look;
 }
 
-/** Any code at all (a bad one gives the default look). */
-export const lookOfCode = (code: unknown): CharacterLook => parseLookCode(code) ?? { ...DEFAULT_LOOK };
+/**
+ * Any code at all (a bad one gives the default look). A code with an outfit on it (see outfits.ts: `look + LOOK_COUNT * n`) is read as its
+ * plain look; `parseLookCode` above stays strict, so it is still only a plain look that a client may send or an account may save.
+ */
+export const lookOfCode = (code: unknown): CharacterLook => parseLookCode(typeof code === 'number' && Number.isInteger(code) && code >= 0 ? code % LOOK_COUNT : code) ?? { ...DEFAULT_LOOK };
 
 function clampIndex(v: unknown, size: number): number {
   const n = typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v) : 0;

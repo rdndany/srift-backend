@@ -17,6 +17,10 @@ export const FRONT_MENU = [
 export const MARKET_PATH = '/market';
 export const goMarket = (): void => location.assign(siteUrl(MARKET_PATH));
 
+/** The Camp (what a hero can do from a phone or a tablet: the Stash, the market, a daily gift, expeditions, chat) is a page of the website too. */
+export const CAMP_PATH = '/camp';
+export const goCamp = (): void => location.assign(siteUrl(CAMP_PATH));
+
 /** The token page (what $SOLRIFT is for) is a page of the website too. */
 export const TOKEN_PATH = '/token';
 export const goToken = (): void => location.assign(siteUrl(TOKEN_PATH));

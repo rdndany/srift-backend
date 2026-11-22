@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useWindowFit } from './HudScale';
 import {
   ARMOR_SLOTS,
   AnvilMenu,
@@ -14,7 +15,7 @@ import {
   HOTBAR_SLOTS,
   I,
   LEVEL_NAMES,
-  LAPIS,
+  OUTFITS,
   LEVEL_XP,
   BAG_MAX,
   BAG_SLOTS,
@@ -22,11 +23,15 @@ import {
   RECIPES,
   TradeMenu,
   armorId,
+  companionIndex,
+  companionOfItem,
+  NECKLACE_SLOT,
+  necklaceId,
+  ringId,
   bagId,
   bagSlotsOf,
   bagTier,
   canTradeOffer,
-  enchantName,
   FORGE_CHANCE,
   forgeGhostLayout,
   forgeGhostPlan,
@@ -35,7 +40,11 @@ import {
   forgeTarget,
   getItem,
   jewelKind,
+  lookCode,
   makeStack,
+  outfitSetOfItem,
+  outfitsOfClass,
+  wornCode,
   plainTip,
   professionName,
   recipeLayout,
@@ -44,28 +53,29 @@ import {
   type ItemStack,
   type StackSpec,
   type TipLine,
+  wingNumberOf,
+  tomeBlocked,
 } from '@solrift/shared';
 import { useUi } from '../ui/store';
+import { useProfile } from '../profile/store';
 import { CharacterPreview } from './CharacterPreview';
-import { Galactic } from './Galactic';
+import { RunicAltar } from './RunicAltar';
 import { ItemView, Tip } from './ItemView';
-import { AttrPoints, ClassAttributes, Spellbook } from './ClassUI';
+import { AttrPoints, ClassAttributes, QuickStats, Spellbook } from './ClassUI';
 import { CreativePanel } from './CreativePanel';
 import { RecipeBookPanel, RecipeDetail } from './RecipeBookPanel';
 import { CoinPurse } from './ShopUI';
+import { TokenPurse } from './TokenPurse';
 
-type InvTab = 'inventory' | 'crafting' | 'spells';
+type InvTab = 'inventory' | 'attributes' | 'crafting' | 'spells';
+
+/** The number the preview takes for a companion (1 + its place in the list, 0: none). */
+const petNumber = (id: number): number => {
+  const def = id ? companionOfItem(id) : null;
+  return def ? companionIndex(def.id) + 1 : 0;
+};
 
 const range = (a: number, b: number): number[] => Array.from({ length: b - a }, (_, i) => a + i);
-
-/** A slot that is not in the game yet (necklace, rings): it takes nothing and says TBA. */
-function LockedSlot({ label }: { label: string }) {
-  return (
-    <div className="slot locked" title={`${label}: to be announced`} data-testid="locked-slot" aria-disabled="true">
-      <span>TBA</span>
-    </div>
-  );
-}
 
 /** How a cell of the grid takes part in the forge animation: the piece is the core, the jewels are pulled into it (dx, dy: where it is, in pixels). */
 interface ForgeCell {
@@ -236,6 +246,7 @@ function Backpack({ onHover }: { onHover: (i: number | null) => void }) {
     <>
       <PlayerInventory onHover={onHover} />
       <div className="wow-foot">
+        <TokenPurse where="bags" />
         <CoinPurse always />
       </div>
     </>
@@ -320,6 +331,7 @@ export function MenuScreen() {
   const mode = useUi((s) => s.mode);
   const selected = useUi((s) => s.selected);
   const cls = useUi((s) => s.cls);
+  const profileLook = useProfile((s) => s.look);
   const invTab = useUi((s) => s.invTab);
   const [hover, setHover] = useState<number | null>(null);
   // The name of the item under the pointer in a villager's offer list.
@@ -334,6 +346,9 @@ export function MenuScreen() {
   const tipRef = useRef<HTMLDivElement>(null);
   const warmMenu = useUi((s) => s.warmMenu);
   const open = !!api && (!!warmMenu || (screen !== 'none' && screen !== 'dead' && !!api.menu()));
+  // The window is scaled down to the room the screen has (with the bags beside it and the hotbar under it).
+  const wrapRef = useRef<HTMLDivElement>(null);
+  useWindowFit(wrapRef, [open, screen]);
 
   // The tabs start over at the bags each time the screen is closed (a request for the spellbook is made before it opens).
   const wasOpen = useRef(false);
@@ -415,64 +430,128 @@ export function MenuScreen() {
   // The inventory (E) has three tabs, as the windows of World of Warcraft do: the bags with the character, the crafting grid,
   // and the spellbook of a class. A crafting table has the grid alone. The hotbar stays on the screen below the window.
   const wornMenu = menu instanceof CraftingMenu && menu.armorStart >= 0;
-  const tab: InvTab = !wornMenu ? 'crafting' : invTab === 'spells' && !cls ? 'inventory' : invTab;
+  const tab: InvTab = !wornMenu ? 'crafting' : (invTab === 'spells' || invTab === 'attributes') && !cls ? 'inventory' : invTab;
   if (menu instanceof CraftingMenu) {
     const n = menu.size;
-    title = !wornMenu ? 'Crafting Table' : tab === 'inventory' ? 'Inventory' : tab === 'crafting' ? 'Crafting' : 'Spellbook';
+    title = !wornMenu ? 'Crafting Table' : tab === 'inventory' ? 'Inventory' : tab === 'attributes' ? 'Attributes' : tab === 'crafting' ? 'Crafting' : 'Spellbook';
     const tabs: { id: InvTab; label: string }[] = [
       { id: 'inventory', label: 'Inventory' },
+      ...(cls ? [{ id: 'attributes' as InvTab, label: 'Attributes' }] : []),
       { id: 'crafting', label: 'Crafting' },
       ...(cls ? [{ id: 'spells' as InvTab, label: 'Spellbook' }] : []),
     ];
+    const freePts = cls && mode !== 'creative' ? cls.free : 0;
     body = (
       <>
+        {wornMenu && (
+          <div className="wow-tabs" role="tablist">
+            {tabs.map((t) => (
+              <button
+                key={t.id}
+                role="tab"
+                aria-selected={tab === t.id}
+                className={`wow-tab${tab === t.id ? ' on' : ''}`}
+                data-testid={`tab-${t.id}`}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  useUi.setState({ invTab: t.id });
+                }}
+              >
+                {t.label}
+                {t.id === 'attributes' && freePts > 0 && (
+                  <i className="tab-badge" data-testid="tab-attr-badge" title={`${freePts} stat point${freePts === 1 ? '' : 's'} to spend`}>
+                    +{freePts} pts
+                  </i>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
         {tab === 'inventory' && (
-          <div className="inv-top">
-            <div className="armor-col">
+          <div className="inv-top doll" style={cls ? ({ '--cls': CLASSES[cls.id].color } as CSSProperties) : undefined}>
+            <div className="doll-col" aria-label="Armor">
               {ARMOR_SLOTS.map((slot, i) => (
-                <Slot key={slot} index={menu.armorStart + i} onHover={setHover} ghost={armorId(i, 'leather')} />
+                <div key={slot} className="doll-slot" title={['Helmet', 'Chestplate', 'Leggings', 'Boots'][i]}>
+                  <Slot index={menu.armorStart + i} onHover={setHover} ghost={armorId(i, 'leather')} />
+                </div>
               ))}
-              <LockedSlot label="Necklace" />
-            </div>
-            <div className="char-col">
-            <div className="char-box">
-              <CharacterPreview
-                armor={ARMOR_SLOTS.map((_, i) => menu.armor?.get(i)?.id ?? 0)}
-                shield={menu.offhand?.get(0)?.id ?? 0}
-                shieldIcon={menu.offhand?.get(0) ? api.icons.url(menu.offhand.get(0)!.id) : null}
-              />
               {menu.offhandSlot >= 0 && (
-                <div className="off-slot" title="Off hand">
+                <div className="doll-slot" title="Off hand">
                   <Slot index={menu.offhandSlot} onHover={setHover} ghost={cls ? CLASSES[cls.id].startingOffhand : I.SHIELD} />
                 </div>
               )}
-              {menu.mountSlot >= 0 && (
-                <div className="mount-slot-inv" title="Mount: put a horn here, then press H to ride">
-                  <Slot index={menu.mountSlot} onHover={setHover} ghost={I.MOUNT_BASE} />
+            </div>
+            <div className="doll-mid">
+              <div className="doll-stage" data-testid="char-stage">
+                <CharacterPreview
+                  lookCode={wornCode(lookCode(profileLook), menu.outfit?.get(0) ? (outfitSetOfItem(menu.outfit.get(0)!.id)?.id ?? null) : null)}
+                  armor={ARMOR_SLOTS.map((_, i) => menu.armor?.get(i)?.id ?? 0)}
+                  shield={menu.offhand?.get(0)?.id ?? 0}
+                  wings={wingNumberOf(menu.wings?.get(0)?.id ?? 0)}
+                  companion={petNumber(menu.companion?.get(0)?.id ?? 0)}
+                  shieldIcon={menu.offhand?.get(0) ? api.icons.url(menu.offhand.get(0)!.id) : null}
+                />
+                {cls && (
+                  <div className="char-class" data-testid="char-class">
+                    {CLASSES[cls.id].name}
+                  </div>
+                )}
+                <div className="char-plate" data-testid="char-plate">
+                  {mode === 'creative' ? 'Creative' : `Level ${level}`}
+                </div>
+              </div>
+              {(menu.mountSlot >= 0 || menu.outfitSlot >= 0) && (
+                <div className="doll-extra" aria-label="Mount and outfit">
+                  {menu.mountSlot >= 0 && (
+                    <div className="doll-slot" title="Mount: put a horn here, then press H to ride">
+                      <Slot index={menu.mountSlot} onHover={setHover} ghost={I.MOUNT_BASE} />
+                    </div>
+                  )}
+                  {menu.outfitSlot >= 0 && (
+                    <div className="doll-slot" title="Outfit: put a glowing set of your class here to wear it">
+                      <Slot index={menu.outfitSlot} onHover={setHover} ghost={(cls ? outfitsOfClass(cls.id)[0] : undefined) ? I.OUTFIT_SET_BASE + OUTFITS.indexOf(outfitsOfClass(cls!.id)[0]) : I.OUTFIT_SET_BASE} />
+                    </div>
+                  )}
                 </div>
               )}
-              {cls && (
-                <div className="char-class" data-testid="char-class">
-                  {CLASSES[cls.id].name}
+            </div>
+            <div className="doll-col" aria-label="Jewelry and companions">
+              {menu.accessoryStart >= 0 && (
+                <>
+                  <div className="doll-slot" title="Necklace: one worn at a time">
+                    <Slot index={menu.accessoryStart + NECKLACE_SLOT} onHover={setHover} ghost={necklaceId('leather')} />
+                  </div>
+                  <div className="doll-slot" title="Ring: two worn at a time">
+                    <Slot index={menu.accessoryStart} onHover={setHover} ghost={ringId('leather')} />
+                  </div>
+                  <div className="doll-slot" title="Ring: two worn at a time">
+                    <Slot index={menu.accessoryStart + 1} onHover={setHover} ghost={ringId('leather')} />
+                  </div>
+                </>
+              )}
+              {menu.wingSlot >= 0 && (
+                <div className="doll-slot" title="Wings: put a pair here, then double-tap jump to fly">
+                  <Slot index={menu.wingSlot} onHover={setHover} ghost={I.WING_BASE} />
                 </div>
               )}
-              <div className="char-plate" data-testid="char-plate">
-                {mode === 'creative' ? 'Creative' : `Level ${level}`}
-              </div>
-            </div>
-            <div className="ring-row">
-              <LockedSlot label="Ring" />
-              <LockedSlot label="Ring" />
-            </div>
-            </div>
-            {cls && (
-              <div className="char-stats" data-testid="char-stats">
-                <div className="wow-head">
-                  <span>Attributes</span>
+              {menu.companionSlot >= 0 && (
+                <div className="doll-slot" title="Companion: put a companion here and it follows you">
+                  <Slot index={menu.companionSlot} onHover={setHover} ghost={I.COMPANION_BASE} />
                 </div>
-                <ClassAttributes />
+              )}
+            </div>
+            {cls && <QuickStats />}
+          </div>
+        )}
+        {tab === 'attributes' && cls && (
+          <div className="attr-page">
+            <div className="char-stats" data-testid="char-stats">
+              <div className="wow-head">
+                <span>Attributes</span>
               </div>
-            )}
+              <ClassAttributes />
+            </div>
+            {mode !== 'creative' && <AttrPoints />}
           </div>
         )}
         {tab === 'crafting' && (
@@ -498,29 +577,10 @@ export function MenuScreen() {
           </div>
         )}
         {tab === 'spells' && <Spellbook />}
-        {tab !== 'spells' && (
+        {tab !== 'spells' && tab !== 'attributes' && (
           <>
             <Backpack onHover={setHover} />
           </>
-        )}
-        {wornMenu && (
-          <div className="wow-tabs" role="tablist">
-            {tabs.map((t) => (
-              <button
-                key={t.id}
-                role="tab"
-                aria-selected={tab === t.id}
-                className={`wow-tab${tab === t.id ? ' on' : ''}`}
-                data-testid={`tab-${t.id}`}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  useUi.setState({ invTab: t.id });
-                }}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
         )}
       </>
     );
@@ -610,75 +670,11 @@ export function MenuScreen() {
       </div>
     );
   } else if (menu instanceof EnchantMenu) {
-    title = 'Enchant';
-    const lapis = menu.lapis?.count ?? 0;
+    title = 'Runic Altar';
     body = (
       <>
-        <Head>Enchanting</Head>
-        <div className="ench-row wow-well">
-          <div className="ench-slots">
-            <Grid indices={[menu.itemSlot]} cols={1} onHover={setHover} />
-            <Grid indices={[menu.lapisSlot]} cols={1} onHover={setHover} ghosts={[LAPIS]} />
-            <div className="label" data-testid="ench-shelves">
-              {menu.shelves} {menu.shelves === 1 ? 'bookshelf' : 'bookshelves'}
-            </div>
-            {mode !== 'creative' && (
-              <div className="label ench-level" data-testid="ench-level">
-                Your level: {level}
-              </div>
-            )}
-          </div>
-          <div className="ench-offers" data-testid="ench-offers">
-            {menu.offers.map((o, i) => {
-              const need = i + 1;
-              const has = o.cost > 0;
-              const ok = has && (mode === 'creative' || (lapis >= need && level >= Math.max(o.cost, need)));
-              return (
-                <button
-                  key={i}
-                  data-offer={i}
-                  className={`ench-offer ${has ? (ok ? 'ok' : 'no') : 'none'}`}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    if (ok) api.enchant(i);
-                  }}
-                  onMouseEnter={() => {
-                    if (has) {
-                      const free = mode === 'creative';
-                      const needLevel = Math.max(o.cost, need);
-                      const lines: TipLine[] = [{ text: o.clue ? `${enchantName(o.clue[0], o.clue[1])} ...?` : 'Enchantment', color: 'name' }];
-                      lines.push({ text: `Needs level ${needLevel}`, color: free || level >= needLevel ? 'good' : 'warn' });
-                      lines.push({ text: `Needs ${need} lapis lazuli`, color: free || lapis >= need ? 'good' : 'warn' });
-                      if (!free && level < needLevel) lines.push({ text: `Not enough levels: you have ${level}`, color: 'warn' });
-                      if (!free && lapis < need) lines.push({ text: `Not enough lapis: you have ${lapis}`, color: 'warn' });
-                      if (!free && level >= needLevel && lapis >= need) lines.push({ text: `Click to spend ${need} level${need === 1 ? '' : 's'}`, color: 'dim' });
-                      setTradeTip(lines);
-                    } else {
-                      setTradeTip(menu.item ? [] : plainTip('Put an item to enchant in the top slot'));
-                    }
-                  }}
-                  onMouseLeave={() => setTradeTip([])}
-                >
-                  <span className="clue" data-clue={o.clue ? `${enchantName(o.clue[0], o.clue[1])} ...?` : ''}>
-                    {o.clue ? <Galactic text={enchantName(o.clue[0], o.clue[1])} size={16} length={9} /> : null}
-                  </span>
-                  <span className="need">{has ? need : ''}</span>
-                  <span className="cost">{has ? o.cost : ''}</span>
-                </button>
-              );
-            })}
-            {(() => {
-              if (mode === 'creative') return null;
-              const priced = menu.offers.filter((o) => o.cost > 0);
-              let msg = '';
-              if (!menu.item) msg = 'Put an item to enchant in the top slot.';
-              else if (priced.length === 0) msg = 'This item cannot be enchanted.';
-              else if (lapis < 1) msg = 'Put lapis lazuli in the second slot.';
-              else if (!menu.offers.some((o, i) => o.cost > 0 && level >= Math.max(o.cost, i + 1))) msg = `Not enough levels: the cheapest offer needs level ${Math.min(...priced.map((o) => o.cost))}, you have ${level}.`;
-              return msg ? <div className="ench-warning" data-testid="ench-warning">{msg}</div> : null;
-            })()}
-          </div>
-        </div>
+        <Head>Runic Altar</Head>
+        <RunicAltar menu={menu} slot={<Grid indices={[menu.itemSlot]} cols={1} onHover={setHover} />} />
         <Backpack onHover={setHover} />
       </>
     );
@@ -694,7 +690,7 @@ export function MenuScreen() {
         ? 'Too Expensive!'
         : menu.cost > 0
           ? `Enchantment Cost: ${menu.cost}`
-          : 'Add a second item to repair or combine, or type a new name.';
+          : tomeBlocked(left, menu.stackAt(menu.rightSlot)) ?? 'Add a second item to repair or combine, or type a new name.';
     body = (
       <>
         <Head>Anvil</Head>
@@ -730,7 +726,7 @@ export function MenuScreen() {
       </>
     );
   } else if (menu instanceof GrindstoneMenu) {
-    title = 'Repair & Disenchant';
+    title = 'Repair & Unbind';
     const has = !!menu.input.get(0) || !!menu.input.get(1);
     body = (
       <>
@@ -744,8 +740,8 @@ export function MenuScreen() {
           {menu.xp > 0
             ? `Experience: ${menu.xp}`
             : has
-              ? 'Nothing to take off. Put in an enchanted item, or two of the same worn item.'
-              : 'Put an enchanted item in to take its enchantments off for experience.'}
+              ? 'Nothing to take off. Put in an item with glyphs, or two of the same worn item.'
+              : 'Put an item with glyphs in to wipe them off for experience.'}
         </div>
         <Backpack onHover={setHover} />
       </>
@@ -761,9 +757,6 @@ export function MenuScreen() {
     );
   }
 
-  // The stat points are a column of the Inventory tab, inside the same frame.
-  const withPoints = wornMenu && tab === 'inventory' && !!cls && mode !== 'creative';
-
   return (
     <div
       id="menu-screen"
@@ -777,8 +770,8 @@ export function MenuScreen() {
         }
       }}
     >
-      <div className="menu-wrap">
-        <div className={`panel ${menu instanceof CraftingMenu && tab === 'crafting' ? 'with-recipes' : ''} ${withPoints ? 'with-points' : ''} ${wowScreen ? 'wow' : ''} menu-${kind}`}>
+      <div className="menu-wrap" ref={wrapRef}>
+        <div className={`panel ${menu instanceof CraftingMenu && tab === 'crafting' ? 'with-recipes' : ''} ${wowScreen ? 'wow' : ''} menu-${kind}`}>
           <div className="title">{title}</div>
           {wowScreen && (
             <button className="wow-close" data-testid="menu-close" aria-label="Close" onMouseDown={(e) => { e.preventDefault(); api.close(); }}>
@@ -786,7 +779,6 @@ export function MenuScreen() {
             </button>
           )}
           {body}
-          {withPoints && <AttrPoints />}
           {menu instanceof CraftingMenu && tab === 'crafting' && <RecipeBookPanel menu={menu} onPreview={setPreview} onPick={setPicked} />}
         </div>
         {menu.cursor && <Trash stack={menu.cursor} />}

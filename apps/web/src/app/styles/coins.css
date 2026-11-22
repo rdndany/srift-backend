@@ -25,3 +25,43 @@
 }
 
 
+
+/* $SOLRIFT where you play: under your bars (frame) and in your bags beside the coins (bags). */
+.token-purse {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #d9b8ff;
+  font-weight: bold;
+  text-shadow: 1px 1px 0 #000;
+}
+.token-purse small {
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: #a98ad6;
+  font-weight: normal;
+}
+.token-purse .tp-gain {
+  font-style: normal;
+  font-size: 12px;
+  color: #8fe07a;
+  animation: tp-gain 4.5s ease-out both;
+}
+@keyframes tp-gain {
+  0% { opacity: 0; transform: translateY(6px); }
+  8% { opacity: 1; transform: translateY(0); }
+  80% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-4px); }
+}
+#player-frame .token-purse.frame {
+  font-size: 11px;
+  line-height: 14px;
+  white-space: nowrap;
+}
+#menu-screen .wow-foot #token-purse {
+  gap: 8px;
+  font-size: 15px;
+  margin-right: auto;
+  text-shadow: 2px 2px 0 #000;
+}

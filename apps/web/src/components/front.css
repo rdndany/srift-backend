@@ -1794,7 +1794,7 @@
   #home .fp .fp-stats li:nth-child(3) {
     border-left: none;
   }
-  #home .fp .fp-links button:nth-child(n + 3):not(.fp-link-market) {
+  #home .fp .fp-links button:nth-child(n + 3):not(.fp-link-market):not(.fp-link-camp) {
     display: none;
   }
 }

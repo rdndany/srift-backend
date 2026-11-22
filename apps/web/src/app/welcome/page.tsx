@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import '@/components/responsive.css';
 
 /**
  * The presentation page: what `solrift.io` shows (see the host rewrite in `next.config.ts`). The game itself

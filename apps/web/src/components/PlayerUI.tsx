@@ -1,7 +1,7 @@
 'use client';
 
 import type { CSSProperties } from 'react';
-import { CLASSES, RANK_OFFICER } from '@solrift/shared';
+import { CLASSES, MOBS, MOB_ROLE_LABEL, MOB_TIER_INFO, NPCS, RANK_OFFICER, mobRole, shownTier } from '@solrift/shared';
 import { useUi } from '../ui/store';
 import './player.css';
 
@@ -31,6 +31,59 @@ function TargetFrame() {
           <span className="tf-hint">
             <kbd>U</kbd> menu
           </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** A creature's name as the frame writes it: a person has their own name, everything else its kind's. */
+function mobName(kind: string, variant: number): { name: string; title?: string } {
+  if (kind === 'npc') {
+    const npc = NPCS[variant];
+    return { name: npc?.name ?? 'Villager', title: npc?.title };
+  }
+  const raw = (MOBS as Record<string, { name: string } | undefined>)[kind]?.name ?? kind;
+  const text = raw.replace(/_/g, ' ');
+  return { name: text.charAt(0).toUpperCase() + text.slice(1) };
+}
+
+/**
+ * The creature the crosshair rests on (an animal, a monster, a person): the colour of its tier, its level, its name, how it treats you
+ * (hostile, neutral, passive...) and a health bar with the numbers. The same place as a player's frame, which wins when both are in view.
+ */
+function MobTargetFrame() {
+  const mob = useUi((s) => s.mobTarget);
+  const player = useUi((s) => !!s.target);
+  const trading = useUi((s) => !!s.trade);
+  const bossShown = useUi((s) => !!s.boss);
+  if (!mob || player || trading) return null;
+  const def = MOBS[mob.kind];
+  if (!def || (def.boss && bossShown)) return null;
+  const tier = MOB_TIER_INFO[shownTier(mob.kind, mob.elite)];
+  const role = mobRole(def);
+  const { name, title } = mobName(mob.kind, mob.variant);
+  const hurtable = !def.invulnerable;
+  const frac = mob.max > 0 ? Math.max(0, Math.min(1, mob.hp / mob.max)) : 0;
+  const bar = frac > 0.5 ? '#5fcf4a' : frac > 0.25 ? '#e0b030' : '#d8402c';
+  return (
+    <div id="target-frame" className="mob" data-testid="mob-target-frame" data-tier={shownTier(mob.kind, mob.elite)} style={{ '--cls': tier.color } as CSSProperties}>
+      <div className="tf-level">{def.boss ? '☠' : mob.level}</div>
+      <div className="tf-plate">
+        <div className="tf-name">
+          <b style={{ color: tier.color }}>{name}</b>
+          <small>{tier.name}</small>
+        </div>
+        {hurtable ? (
+          <div className="tf-hp" data-testid="mob-hp">
+            <i style={{ width: `${frac * 100}%`, background: bar }} />
+            <span>
+              {Math.ceil(mob.hp).toLocaleString('en-US')} / {Math.round(mob.max).toLocaleString('en-US')}
+            </span>
+          </div>
+        ) : null}
+        <div className="tf-sub">
+          <span className={`tf-role ${role}`}>{title ?? MOB_ROLE_LABEL[role]}{mob.elite ? ' · Elite' : ''}</span>
         </div>
       </div>
     </div>
@@ -121,11 +174,12 @@ function PlayerMenu() {
   );
 }
 
-/** The target frame and the menu of a player. Only online. */
+/** The target frames (a player's, online only; a creature's, in every game) and the menu of a player. */
 export function PlayerUI() {
   return (
     <>
       <TargetFrame />
+      <MobTargetFrame />
       <PlayerMenu />
     </>
   );

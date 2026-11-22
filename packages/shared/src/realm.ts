@@ -16,7 +16,7 @@ import { MobManager, MobSpawner, type Mob, type MobEvents, type MobFx, type MobK
 import { hash2 } from './noise';
 import type { Player } from './player';
 import { Parties } from './party';
-import { AuctionHouse } from './auction';
+import { AuctionHouse, type TokenDesk } from './auction';
 import { StashVault } from './stash';
 import { bagDrop } from './bags';
 import { skillBookDrop } from './skillbooks';
@@ -28,7 +28,9 @@ import type { DummyStation, NpcStation } from './quests';
 import { canStayAt } from './plants';
 import { isRail, railRemoved } from './rails';
 import { VEHICLE_ITEM, VehicleWorld, type Vehicle, type VehicleKind } from './vehicles';
-import { FluidSim } from './fluids';
+import { FluidSim, isFluid } from './fluids';
+import { RIFT_GRADE_DEFS, RiftDirector, compass, type RiftGrade, type RiftHost, type RiftPlayer, type RiftView } from './rift';
+import { randomEnchantedBook } from './enchant';
 import { FireSim } from './fire';
 import { RedstoneSim } from './redstone';
 import type { SessionEvent } from './sessionProtocol';
@@ -99,6 +101,19 @@ export const ANVIL_LANDING_WEAR = 0.05;
 export const TNT_FUSE = 4;
 export const TNT_RADIUS = 4;
 
+/**
+ * What lets a player into a dungeon with a key bought with $SOLRIFT instead of the dungeon's own item (see `TokenService.takeKey`). The
+ * realm only asks; whose key it is, and whether they may use one (a signed-in wallet in honest play), is the server's.
+ */
+export interface KeyDesk {
+  /** May this player use a bought key at all (signed in with a wallet, honest play)? */
+  allowed(player: Player): boolean;
+  /** Does this player have one to use? */
+  has(player: Player): boolean;
+  /** Use one up. Returns how many are left, or -1 when there was none. */
+  take(player: Player): number;
+}
+
 export interface RealmOptions {
   seed: number;
   world: WorldAccess;
@@ -108,6 +123,8 @@ export interface RealmOptions {
   naturalSpawning?: boolean;
   /** The villages' people (default: whatever `naturalSpawning` is). */
   villagers?: boolean;
+  /** Rifts: now and then a tear opens near the players and waves of monsters come out of it (see rift.ts). Off by default; the game and the server turn it on. */
+  rifts?: boolean;
   /** Random source for everything the simulation does by chance. Inject a seeded one in tests. */
   rand?: () => number;
   /**
@@ -166,6 +183,12 @@ export class Realm {
   readonly parties = new Parties(this);
   /** The Auction House of Dawnwatch: every auction and every letter owed (see auction.ts). */
   readonly auctions = new AuctionHouse();
+  /** What lets a player into a dungeon with a bought key (set by a server that has a token; null: the dungeon's own item only). */
+  keyDesk: KeyDesk | null = null;
+  /** The wall clock (ms): what the day's bounties are cut by. A server (or a test) may set its own. */
+  clock: () => number = Date.now;
+  /** What lets players trade in $SOLRIFT at the Auction House (set by a server that has a token; null: Auren only). */
+  tokenDesk: TokenDesk | null = null;
   /** The stashes of the wallets that play here (see stash.ts): shared by a wallet's characters, never by other players. */
   readonly stashes = new StashVault();
   private readonly auctionStock: boolean;
@@ -183,6 +206,8 @@ export class Realm {
   time = 0.2;
   naturalSpawning: boolean;
   villagers: boolean;
+  /** The rifts of this world (null: none). */
+  readonly rifts: RiftDirector | null;
   /** False on a shared server: beds are respawn points only and nobody can skip the night. */
   readonly allowSleep: boolean;
 
@@ -234,6 +259,7 @@ export class Realm {
     this.mobs = new MobManager(this.rand);
     this.naturalSpawning = opts.naturalSpawning ?? true;
     this.villagers = opts.villagers ?? this.naturalSpawning;
+    this.rifts = opts.rifts ? new RiftDirector(this.riftHost(), opts.seed) : null;
     this.allowSleep = opts.sleeping ?? true;
     this.auctionStock = opts.auctionStock ?? true;
     this.stockState = (opts.seed ^ 0x5eed1e55) >>> 0;
@@ -353,6 +379,9 @@ export class Realm {
           if (Math.hypot(p.body.x - mob.body.x, p.body.z - mob.body.z) > KILL_CREDIT_RANGE) continue;
           if (p.quests) p.questEvent({ t: 'kill', mob: mob.kind });
           p.achKill(mob);
+        }
+        if (this.rifts && mob.rift !== 0) {
+          this.rifts.onKill(mob, this.riftPlayers().filter((q) => Math.hypot(q.x - mob.body.x, q.z - mob.body.z) <= KILL_CREDIT_RANGE));
         }
       },
       pearl: (x, y, z, owner) => {
@@ -554,6 +583,7 @@ export class Realm {
       const living = view.filter((v) => (v.ref as Player).screen !== 'dead' && !(v.ref as Player).spectating);
       if (living.length > 0) this.updateVillagers(dt, living);
     }
+    this.rifts?.update(dt);
     if (this.stations.length > 0) this.updateNpcs(dt, view);
     if (this.dummySpots.length > 0) this.updateDummies(dt, view);
   }
@@ -765,7 +795,21 @@ export class Realm {
       return;
     }
     const need = this.generator.instanceRequirement();
-    if (need?.item !== undefined && need.consume && !reopen && p.mode === 'survival') p.inventory.remove(need.item, 1);
+    if (need?.item !== undefined && need.consume && !reopen && p.mode === 'survival') {
+      // The dungeon's own item is used first (it costs nothing to keep); without one, a key bought with $SOLRIFT.
+      if (p.inventory.countOf(need.item) >= 1) p.inventory.remove(need.item, 1);
+      else {
+        const left = this.keyDesk?.take(p) ?? -1;
+        if (left < 0) {
+          p.emit({ t: 'toast', text: `${need.name} needs a key you do not have.` });
+          const out = this.generator.instanceExit();
+          if (out) this.sendTo(p, out);
+          else p.portalCooldown = 3;
+          return;
+        }
+        p.emit({ t: 'toast', text: `A Hollow Key opens the way (${left} left).` });
+      }
+    }
     this.sendTo(p, spot);
   }
 
@@ -779,8 +823,9 @@ export class Realm {
     let why = '';
     if (need.level !== undefined && p.xp.level < need.level) {
       why = `${need.name} is for level ${need.level} and up. You are level ${p.xp.level}.`;
-    } else if (need.item !== undefined && !reopen && p.inventory.countOf(need.item) < 1) {
-      why = `${need.name} needs ${getItem(need.item).name.replace(/_/g, ' ').replace(/\b[a-z]/g, (c) => c.toUpperCase())}.`;
+    } else if (need.item !== undefined && !reopen && p.inventory.countOf(need.item) < 1 && !this.keyDesk?.has(p)) {
+      const item = getItem(need.item).name.replace(/_/g, ' ').replace(/\b[a-z]/g, (c) => c.toUpperCase());
+      why = `${need.name} needs ${item}${this.keyDesk?.allowed(p) ? ', or a Hollow Key (you can buy one with $SOLRIFT on the token page)' : ''}.`;
     }
     if (!why) return true;
     p.emit({ t: 'toast', text: why });
@@ -1062,6 +1107,71 @@ export class Realm {
     if (slot < 0) return null;
     const brain = this.bosses.get(slot);
     return brain && brain.state === 'fighting' ? brain.view() : null;
+  }
+
+  /** The players who can be in a rift: alive, in a survival world, and out in the open (not in a dungeon copy). */
+  private riftPlayers(): (RiftPlayer & { player: Player })[] {
+    const out: (RiftPlayer & { player: Player })[] = [];
+    for (const p of this.players) {
+      if (p.screen === 'dead' || p.spectating || p.mode === 'creative' || this.copyAt(p) >= 0) continue;
+      out.push({ ref: p, player: p, x: p.body.x, y: p.body.y, z: p.body.z });
+    }
+    return out;
+  }
+
+  /** What a player's interface shows of the rift (null when there is none near enough to know of). */
+  riftViewFor(p: Player): RiftView | null {
+    if (!this.rifts?.current || p.spectating || this.copyAt(p) >= 0) return null;
+    return this.rifts.viewFor({ ref: p, x: p.body.x, y: p.body.y, z: p.body.z });
+  }
+
+  /** Open a rift right now near the players (a cheat, a test). Returns false when there is no one about or no place for it. */
+  startRift(grade?: RiftGrade): boolean {
+    return !!this.rifts && this.rifts.open(this.riftPlayers(), grade);
+  }
+
+  private riftHost(): RiftHost {
+    return {
+      players: () => this.riftPlayers(),
+      groundAt: (x, z) => this.world.surfaceY(Math.floor(x), Math.floor(z)),
+      standable: (x, y, z) => {
+        const bx = Math.floor(x);
+        const bz = Math.floor(z);
+        const floor = this.world.getBlock(bx, y - 1, bz);
+        return BLOCKS[floor].solid && !BLOCKS[floor].liquid && this.world.getBlock(bx, y, bz) === B.AIR && this.world.getBlock(bx, y + 1, bz) === B.AIR && !isFluid(this.world.getBlock(bx, y, bz));
+      },
+      allowed: (x, z) => !this.generator.safeFromMonsters(x, z, SAFE_BUFFER) && this.generator.instanceAt(x, z) < 0,
+      spawn: (kind, x, y, z) => this.mobs.spawn(kind, x, y, z),
+      remove: (mob) => {
+        const i = this.mobs.mobs.indexOf(mob);
+        if (i >= 0) this.mobs.mobs.splice(i, 1);
+      },
+      puff: (x, y, z) => this.emitNear(x, y, z, { t: 'burst', id: B.OBSIDIAN, x, y, z, count: 8 }),
+      announce: (what, grade, text, x, z) => {
+        for (const p of this.players) {
+          if (p.spectating || this.copyAt(p) >= 0) continue;
+          const dx = x - p.body.x;
+          const dz = z - p.body.z;
+          const far = Math.hypot(dx, dz);
+          // Told where it is, as far as it is from them (only the omen: after that the tracker says).
+          const where = what === 'omen' ? ` (${Math.round(far)} blocks ${compass(dx, dz)})` : '';
+          if (far > 600) continue;
+          p.emit({ t: 'rift', what, grade, text: text + where });
+        }
+      },
+      reward: (rp, grade, rank, helpers) => {
+        const p = (rp as RiftPlayer & { player: Player }).player;
+        const def = RIFT_GRADE_DEFS[grade].reward;
+        const rand = this.rand;
+        const level = def.gearLevel[0] + Math.floor(rand() * (def.gearLevel[1] - def.gearLevel[0] + 1));
+        const piece = randomGear(level, pickRarity(def.gearRarity, rand), p.cls?.classId, rand);
+        p.addXp(def.xp);
+        p.addCoins(def.coins, true);
+        p.giveOrDrop(piece);
+        if (rand() < def.tome) p.giveOrDrop(randomEnchantedBook(rand));
+        p.emit({ t: 'toast', text: rank === 1 && helpers > 1 ? `${RIFT_GRADE_DEFS[grade].name}: you fought the best! +${def.xp} xp, +${def.coins} coins and a piece of gear` : `${RIFT_GRADE_DEFS[grade].name}: +${def.xp} xp, +${def.coins} coins and a piece of gear` });
+      },
+    };
   }
 
   /** The Hollow King's reward: everybody who fought him gets a piece of gear for their own class, rare or better. */

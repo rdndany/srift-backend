@@ -11,12 +11,15 @@ interface ProfileState {
   identity: Identity | null;
   name: string;
   look: CharacterLook;
+  /** The outfit the character shown wears (an id from `OUTFITS`): only a saved wallet character has one. Not kept anywhere: the account has it. */
+  outfit: string | null;
   /** A guest's class for this visit (a wallet character's class is on its account). Null: none chosen. */
   classId: ClassId | null;
   hydrated: boolean;
   setIdentity(identity: Identity | null): void;
   setName(name: string): void;
   setLook(patch: Partial<CharacterLook>): void;
+  setOutfit(outfit: string | null): void;
   setClassId(classId: ClassId | null): void;
   /** Replace the whole look (a random one, or the one saved with an account). */
   replaceLook(look: CharacterLook): void;
@@ -41,6 +44,7 @@ export const useProfile = create<ProfileState>()((set, get) => ({
   identity: null,
   name: '',
   look: { ...DEFAULT_LOOK },
+  outfit: null,
   classId: null,
   hydrated: false,
   setIdentity: (identity) => set({ identity }),
@@ -49,15 +53,16 @@ export const useProfile = create<ProfileState>()((set, get) => ({
     writeGuest(get());
   },
   setLook: (patch) => {
-    set({ look: normalizeLook({ ...get().look, ...patch }) });
+    set({ look: normalizeLook({ ...get().look, ...patch }), outfit: null });
     writeGuest(get());
   },
+  setOutfit: (outfit) => set({ outfit }),
   setClassId: (classId) => {
     set({ classId });
     writeGuest(get());
   },
   replaceLook: (look) => {
-    set({ look: normalizeLook(look) });
+    set({ look: normalizeLook(look), outfit: null });
     writeGuest(get());
   },
 }));

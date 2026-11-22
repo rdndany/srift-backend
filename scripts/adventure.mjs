@@ -62,7 +62,6 @@ const ground = await sc(([x, z]) => window.__solrift.surfaceY(x, z), [p.x, p.z])
 check(p.y < ground - 3, `woke underground, under the village (${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)}; the ground above is at ${ground})`);
 check(await until(async () => (await banner()).includes('Undercroft'), 8000), `the place banner says The Undercroft (${await banner()})`);
 check(await sc(() => window.__solrift.inventory().every((s) => !s)), 'with nothing at all in the bag');
-check(!(await sc(() => !!document.querySelector('[data-testid=minimap]'))), 'and no minimap: there is no map yet');
 check(await sc(() => !!document.querySelector('[data-testid=quest-tracker]')), 'the quest tracker is on screen');
 check((await trackerText()) === '' && (await log()).a.length === 0, 'empty: no quest is under way yet');
 await shot('undercroft', 400);
@@ -124,7 +123,6 @@ await page.click(`[data-quest=${FIRST}] [data-testid=quest-complete]`);
 check(await until(async () => (await log()).d.includes(FIRST), 3000), 'the quest is handed in');
 check((await count('map')) === 1, 'the reward arrived: the map of the lands');
 check((await count('compass')) === 1, 'and a compass');
-check(await until(() => sc(() => !!document.querySelector('[data-testid=minimap]')), 3000), 'with the map carried, the minimap is in the corner');
 check(
   await until(() => sc(() => !!document.querySelector('[data-quest=welcome]') && !!document.querySelector('[data-quest=a_blade_for_the_road]')), 3000),
   'Maren now offers "Welcome to Dawnwatch" and "A Blade for the Road"',

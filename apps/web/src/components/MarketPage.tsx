@@ -26,15 +26,17 @@ import { Blocks } from './BlockCube';
 import { ItemPicture } from './CharacterSheet';
 import { ClickSparks, Embers, Reveal, useFrontMotion } from './fx';
 import { lobbyUrl } from '../game/route';
-import { SCROLL_KEY, goToken } from './frontNav';
+import { SCROLL_KEY, goToken, goCamp } from './frontNav';
 import { ART } from './homeAssets';
 import { Tip } from './ItemView';
 import { CoinIcon } from './ShopUI';
+import { TokenIcon } from './TokenPurse';
 import './home.css';
 import './front.css';
 import './classPage.css';
 import './sheet.css';
 import './marketPage.css';
+import './responsive.css';
 
 /** How often the board asks the server again (ms), so that what others bid and buy shows up without a click. */
 const REFRESH_MS = 5000;
@@ -102,10 +104,10 @@ const leftText = (s: number): string => {
   return h > 0 ? `${h}h ${m}m` : `${Math.max(1, m)}m`;
 };
 
-const Price = ({ n, title }: { n: number; title?: string }) => (
-  <span className="mk-price" title={title}>
+const Price = ({ n, title, token }: { n: number; title?: string; token?: boolean }) => (
+  <span className="mk-price" title={token ? `${title ?? 'Price'} (in $SOLRIFT)` : title}>
     {n.toLocaleString('en-US')}
-    <CoinIcon size={14} />
+    {token ? <TokenIcon size={14} /> : <CoinIcon size={14} />}
   </span>
 );
 
@@ -141,11 +143,11 @@ function Row({ r, show, hide }: { r: AuctionRow; show: Show; hide: () => void })
         {r.yours ? 'You' : r.seller}
       </span>
       <span className="mk-cell mk-num" data-label="Bid">
-        <Price n={r.top > 0 ? r.top : r.bid} title={r.top > 0 ? 'Current bid' : 'Starting bid'} />
+        <Price n={r.top > 0 ? r.top : r.bid} title={r.top > 0 ? 'Current bid' : 'Starting bid'} token={r.token} />
         {r.leading ? <small className="mk-lead">your bid</small> : r.top > 0 ? <small>bid on</small> : <small>no bids</small>}
       </span>
       <span className="mk-cell mk-num" data-label="Buyout">
-        {r.buyout > 0 ? <Price n={r.buyout} title="Buyout price" /> : <small>no buyout</small>}
+        {r.buyout > 0 ? <Price n={r.buyout} title="Buyout price" token={r.token} /> : <small>no buyout</small>}
       </span>
     </li>
   );
@@ -269,13 +271,14 @@ export function MarketPage() {
             <button onClick={() => toFront('site-world')}>The World</button>
             <button onClick={() => toFront('site-features')}>Classes</button>
             <button onClick={() => toFront('l-expansions')}>Expansions</button>
+            <button className="fp-link-camp" onClick={goCamp}>Camp</button>
             <button className="fp-link-market" aria-current="page" onClick={() => scrollTo('mk-top')}>
               Market
             </button>
           <button className="fp-link-token" onClick={goToken}>Token</button>
           </nav>
           <div className="fp-account">
-            <AccountPanel />
+            <AccountPanel bar />
           </div>
           <i className="fp-progress" aria-hidden="true" />
         </header>

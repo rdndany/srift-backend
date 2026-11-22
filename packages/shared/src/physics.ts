@@ -69,6 +69,15 @@ export interface MoveInput {
   noclip?: boolean;
   /** Overrides how high a step the body walks up without jumping (a mount walks up a whole block). */
   stepHeight?: number;
+  /** Flying with wings: how many times the walking speed the body flies at (creative flight: 2.2), and how fast it climbs and sinks (creative flight: 11). */
+  flyBoost?: number;
+  flyRise?: number;
+  /**
+   * Flying with wings is helped past what is in the way: a body that meets a ledge, a lintel or the frame of a door that it would just miss by
+   * a little is carried up or down the little that clears it (up to a block up and half a block down), and under a low roof, indoors, it flies at
+   * little more than a walk. Without this a flier would have to hit a two-block doorway to the half-block.
+   */
+  flyAssist?: boolean;
   /** Characters in the way: the body is pushed out of each of them (never into a wall), so nobody walks through anybody. */
   solids?: readonly Solid[];
 }
@@ -172,7 +181,10 @@ function furthestFree(free: (t: number) => boolean): number {
 /** The highest step a walking body climbs without jumping: stairs, slabs, beds, closed trapdoors. */
 const STEP_HEIGHT = 0.6;
 
-function moveAxis(world: BlockReader, b: Body, axis: Axis, delta: number, sneakGuard: boolean, grounded = false, stepHeight = STEP_HEIGHT): void {
+/** How far a flier is moved, up and down, to clear what it has run into (the smallest first). */
+const ASSIST = [0.1, -0.1, 0.2, -0.2, 0.3, -0.3, 0.4, -0.4, 0.5, -0.5, 0.6, 0.8, 1];
+
+function moveAxis(world: BlockReader, b: Body, axis: Axis, delta: number, sneakGuard: boolean, grounded = false, stepHeight = STEP_HEIGHT, assist = false): void {
   if (delta === 0) return;
   const HW = (b.width ?? PLAYER_WIDTH) / 2;
   const H = b.height ?? PLAYER_HEIGHT;
@@ -206,6 +218,15 @@ function moveAxis(world: BlockReader, b: Body, axis: Axis, delta: number, sneakG
       continue;
     }
 
+    // A flier meets a ledge or a lintel it would clear by a little: it is lifted or lowered the little that frees it, and goes on.
+    if (axis !== 'y' && assist) {
+      const dy = ASSIST.find((o) => !hit(b.x, py + o, b.z));
+      if (dy !== undefined) {
+        b.y = py + dy;
+        continue;
+      }
+    }
+
     const full = hitFull(b.x, b.y, b.z);
     // Snap flush against the block face that was hit.
     if (axis === 'x') {
@@ -235,6 +256,17 @@ const JUMP_VELOCITY = 8.6;
 const TERMINAL = 55;
 const CLIMB = 3;
 const SLIDE = 3;
+
+/** How many blocks of free air there are over the head of `b` before something solid (4 or more: none close). */
+export function roofGap(world: BlockReader, b: Body): number {
+  const top = b.y + (b.height ?? PLAYER_HEIGHT);
+  const bx = Math.floor(b.x);
+  const bz = Math.floor(b.z);
+  for (let by = Math.floor(top - EPS); by <= Math.floor(top) + 4; by++) {
+    if (IS_SOLID[world.getBlock(bx, by, bz)]) return Math.max(0, by - top);
+  }
+  return 4;
+}
 
 /** Advance the player body by dt seconds. Fixed-timestep friendly. */
 export function stepPlayer(world: BlockReader, b: Body, input: MoveInput, dt: number): void {
@@ -271,10 +303,18 @@ export function stepPlayer(world: BlockReader, b: Body, input: MoveInput, dt: nu
   let accel = input.accel ?? (b.onGround ? 14 : 3.5);
 
   if (input.fly) {
-    targetX *= 2.2;
-    targetZ *= 2.2;
+    let boost = input.flyBoost ?? 2.2;
+    // Indoors (a roof close over the head) a flier slows to little more than a walk, and the lower the roof the slower: it can turn in a room and
+    // find the door.
+    if (input.flyAssist) {
+      const gap = roofGap(world, b);
+      if (gap < 4) boost = 1 + (boost - 1) * (0.2 + 0.8 * Math.max(0, Math.min(1, (gap - 0.3) / 3)));
+    }
+    targetX *= boost;
+    targetZ *= boost;
     accel = 8;
-    const targetY = (input.jump ? FLY : 0) + (input.flyDown ? -FLY : 0);
+    const rise = input.flyRise ?? FLY;
+    const targetY = (input.jump ? rise : 0) + (input.flyDown ? -rise : 0);
     b.vy += (targetY - b.vy) * Math.min(1, 10 * dt);
   } else if (b.onLadder && !b.inWater) {
     // Hold forward (or jump) to climb, sneak to hang on, otherwise slide down slowly.
@@ -328,8 +368,9 @@ export function stepPlayer(world: BlockReader, b: Body, input: MoveInput, dt: nu
   const wasOnGround = b.onGround;
   b.onGround = false;
   const guard = input.sneak && wasOnGround && !input.fly;
-  moveAxis(world, b, 'x', b.vx * dt, guard, wasOnGround, input.stepHeight);
-  moveAxis(world, b, 'z', b.vz * dt, guard, wasOnGround, input.stepHeight);
+  const assist = !!input.flyAssist && input.fly;
+  moveAxis(world, b, 'x', b.vx * dt, guard, wasOnGround, input.stepHeight, assist);
+  moveAxis(world, b, 'z', b.vz * dt, guard, wasOnGround, input.stepHeight, assist);
   moveAxis(world, b, 'y', b.vy * dt, false);
   if (input.solids && input.solids.length > 0) pushOut(world, b, input.solids);
 }

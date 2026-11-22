@@ -10,6 +10,7 @@ import { cleanCamera, parseSessionMessage, type ClassView, type Command, type Se
 import { isClassId, type ClassId } from './classes';
 import type { Fx } from './abilityEffects';
 import type { BossView } from './boss';
+import type { RiftView } from './rift';
 import type { DungeonView } from './dungeonView';
 import type { GearRoll } from './gear';
 import { isSocialAction, type ChatChannel, type SocialAction, type SocialView } from './social';
@@ -152,6 +153,13 @@ export interface SelfView {
   offhand: ItemView | null;
   /** The mount slot: the horn of the mount the mount key summons. */
   mountSlot: ItemView | null;
+  /** The outfit slot: the glowing set the hero wears. */
+  outfitSlot: ItemView | null;
+  companionSlot: ItemView | null;
+  /** The wing slot: the wings the hero wears. */
+  wingSlot: ItemView | null;
+  /** The jewelry worn: ring, ring, necklace (null for an empty slot). */
+  accessories: (ItemView | null)[];
   blocking: boolean;
   /** How far into a meal you are (0..1), left out while not eating. */
   eat?: number;
@@ -175,6 +183,8 @@ export interface SelfView {
   boss?: BossView;
   /** How far this player is in the dungeon they are in (its tracker; left out outside a dungeon). */
   dungeon?: DungeonView;
+  /** The rift that is open near this player (its tracker; left out when none is within sight). */
+  rift?: RiftView;
 }
 
 export interface MenuView {
@@ -185,8 +195,8 @@ export interface MenuView {
   furnace: { burn: number; cook: number } | null;
   /** A villager's trade list, while the trade screen is open. */
   trade?: { profession: Profession; level: number; xp: number; offers: Offer[]; selected: number } | null;
-  /** The enchanting table: bookshelves around it and the three offers (cost and a hint of one enchantment). */
-  enchant?: { shelves: number; offers: { cost: number; clue: [number, number] | null }[] } | null;
+  /** The Runic Altar: the shelves of books around it (the lore a high rank asks for). The glyphs it offers follow from the piece in it. */
+  enchant?: { shelves: number } | null;
   /** The anvil: what the job costs in levels and whether it is more than an anvil will do. */
   anvil?: { cost: number; tooExpensive: boolean; name: string | null } | null;
   /** The grindstone: the most experience taking the result would give. */
@@ -220,6 +230,10 @@ export interface PlayerView {
   onGround: boolean;
   /** Item in hand (0 = empty). */
   held: number;
+  /** The glow of the held item, if it carries glyphs: 1 + the place of its strongest element (see `glowCode`); left out: none. */
+  hg?: number;
+  /** The glow of the off-hand item, the same way. */
+  og?: number;
   /** Worn armor item ids: helmet, chestplate, leggings, boots (0 = none). */
   armor: number[];
   /** Off-hand item id (0 = empty) and whether the shield is raised. */
@@ -231,6 +245,8 @@ export interface PlayerView {
   dd?: 1;
   /** Seconds since the arm swung (a blow, a block placed or being mined), sent only while the swing is on screen. */
   sw?: number;
+  /** How much faster than usual that swing runs (the attack speed of the weapon in the hand; left out at 1). */
+  sr?: number;
   /** A Ground Slam: 1 crouching, 2 in the air, 3 down on the shield after the blow (left out otherwise). */
   sl?: number;
   /** Seconds since a Shield Bash was thrown, sent only while the figure is still drawn in it (left out otherwise). */
@@ -248,6 +264,11 @@ export interface PlayerView {
   gt?: string;
   /** The mount they ride (1 + its place in MOUNTS), left out when on foot. */
   mt?: number;
+  /** The companion that follows them (1 + its place in COMPANIONS), left out when they have none. */
+  pt?: number;
+  /** The wings they wear (1 + their place in WINGS), left out when they have none, and whether they are flying on them (left out otherwise). */
+  wg?: number;
+  fl?: 1;
 }
 
 export interface MobView {
@@ -279,6 +300,11 @@ export interface MobView {
   love?: 1;
   /** An armor stand: helmet, chestplate, leggings, boots and the item in its hand. 0 is empty. Left out for every other mob. */
   gear?: number[];
+  /** Its health and its most, sent only while it is hurt (or a strong one of a dungeon, whose most is its own): left out, it is at full health. */
+  hp?: number;
+  mx?: number;
+  /** A strong one of a dungeon. Sent only when true. */
+  el?: 1;
 }
 
 export interface ArrowView {

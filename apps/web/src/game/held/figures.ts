@@ -4,6 +4,7 @@ import { mageProp } from '../mageGear';
 import { FIGURE_AIM } from './aim';
 import type { HeldViews } from './kinds';
 import type { ItemModels } from './models';
+import { stripAura } from '../enchantFx';
 
 /**
  * Items as they are seen outside the first-person hand: in the hand of a blocky figure, on its shield arm, and lying on the ground.
@@ -42,6 +43,7 @@ export class ItemFigures {
     // (a bow hangs relaxed and a crossbow is cocked, whatever the first-person one is doing just now)
     view.forFigure?.();
     const inner = view.object.clone();
+    stripAura(inner); // (the hand may be glowing just now: the figure is lit by its own wearer's piece)
     inner.position.set(0, 0, 0);
     inner.rotation.set(0, 0, 0);
     inner.scale.setScalar(1);
@@ -85,6 +87,7 @@ export class ItemFigures {
   figureShield(id: number): THREE.Object3D | null {
     if (!id) return null;
     const inner = this.views.get(id).object.clone();
+    stripAura(inner);
     inner.position.set(0, 0, 0);
     inner.rotation.set(0, 0, 0);
     inner.scale.setScalar(0.78);

@@ -1,0 +1,149 @@
+/* The economy numbers on the token page. Plain classes under .tkeco. */
+.tkeco {
+  margin-top: 40px;
+  text-align: left;
+}
+.tkeco h3 {
+  margin: 0 0 6px;
+  font-weight: 400;
+  font-size: 22px;
+}
+.tkeco h3 em {
+  font-style: normal;
+  color: #a96bff;
+}
+.tkeco h4 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #a48f6a;
+  font-weight: 400;
+}
+.tkeco .tkeco-lead {
+  margin: 0 0 18px;
+  max-width: 760px;
+  font-size: 13px;
+  line-height: 1.7;
+  opacity: 0.8;
+}
+.tkeco-cards {
+  list-style: none;
+  margin: 0 0 22px;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+.tkeco-cards li {
+  display: grid;
+  gap: 3px;
+  padding: 12px 14px;
+  background: rgba(0, 0, 0, 0.32);
+  border: 1px solid rgba(169, 107, 255, 0.35);
+  border-radius: 6px;
+}
+.tkeco-cards small {
+  font-size: 11px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: #a48f6a;
+}
+.tkeco-cards b {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 24px;
+  font-weight: 400;
+  color: #d9b8ff;
+}
+.tkeco-cards span {
+  font-size: 12px;
+  opacity: 0.7;
+}
+.tkeco-chart {
+  margin-bottom: 22px;
+  padding: 14px 14px 10px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(246, 207, 114, 0.18);
+  border-radius: 6px;
+}
+.tkeco-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 120px;
+}
+.tkeco-day {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 2px;
+}
+.tkeco-day i,
+.tkeco-key i {
+  display: block;
+  flex: 1 1 0;
+  max-width: 14px;
+  min-height: 2px;
+  border-radius: 2px 2px 0 0;
+}
+.tkeco-key i {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  min-height: 0;
+  margin: 0 4px 0 10px;
+  border-radius: 2px;
+  vertical-align: middle;
+}
+.tkeco i.earned {
+  background: #a96bff;
+}
+.tkeco i.spent {
+  background: #f6cf72;
+}
+.tkeco-axis {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+  font-size: 11px;
+  opacity: 0.75;
+}
+.tkeco .tkeco-quiet {
+  margin: 10px 0 0;
+  font-size: 12px;
+  font-style: italic;
+  opacity: 0.7;
+}
+.tkeco-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 22px;
+}
+.tkeco dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 14px;
+  font-size: 14px;
+}
+.tkeco .tkeco-row {
+  display: contents;
+}
+.tkeco dt {
+  opacity: 0.8;
+}
+.tkeco dd {
+  margin: 0;
+  text-align: right;
+  color: #d9b8ff;
+}
+.tkeco dd small {
+  opacity: 0.7;
+  color: inherit;
+}

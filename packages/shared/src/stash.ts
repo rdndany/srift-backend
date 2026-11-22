@@ -15,6 +15,15 @@ export const STASHKEEPER = 'stashkeeper';
 /** How many slots a stash has (six rows of nine). */
 export const STASH_SLOTS = 54;
 
+/** How many slots one bought stash tab adds (three rows of nine), and the most tabs a wallet can ever have. */
+export const STASH_TAB_SLOTS = 27;
+export const STASH_MAX_TABS = 4;
+/** The most slots any stash can have: what a message may name and what a saved stash may hold. */
+export const STASH_MAX_SLOTS = STASH_SLOTS + STASH_TAB_SLOTS * STASH_MAX_TABS;
+
+/** How many slots a stash with `tabs` bought tabs has. */
+export const stashSlotsFor = (tabs: number): number => STASH_SLOTS + STASH_TAB_SLOTS * Math.max(0, Math.min(STASH_MAX_TABS, Math.floor(tabs) || 0));
+
 /** What the stash window shows: the slots, in order (null is empty). */
 export interface StashView {
   slots: (ItemStack | null)[];
@@ -31,10 +40,16 @@ export function stashBlocker(stack: ItemStack | null): string | null {
 }
 
 /** A saved stash read as the window shows it, without a vault (what the lobby shows of a wallet whose characters are all away). */
-export function stashViewOf(raw: unknown): StashView {
-  const c = new Container(STASH_SLOTS);
+export function stashViewOf(raw: unknown, tabs = 0): StashView {
+  const c = new Container(savedSize(raw, stashSlotsFor(tabs)));
   c.loadJSON(raw);
   return { slots: c.slots.map((s) => (s ? cloneStack(s) : null)) };
+}
+
+/** How many slots a saved stash needs: what the owner has room for, and never fewer than what was written down (nothing saved is dropped). */
+function savedSize(raw: unknown, want: number): number {
+  const saved = Array.isArray(raw) ? Math.min(raw.length, STASH_MAX_SLOTS) : 0;
+  return Math.max(STASH_SLOTS, want, saved);
 }
 
 /** Every stash the realm knows, by owner (a wallet address). */
@@ -42,6 +57,18 @@ export class StashVault {
   private readonly stashes = new Map<string, Container>();
   /** Owners whose stash changed since it was last written down. */
   readonly dirty = new Set<string>();
+  /** How many stash tabs an owner has bought (a server with a token sets this; the default is none). */
+  tabsOf: (owner: string) => number = () => 0;
+
+  private want(owner: string): number {
+    let tabs = 0;
+    try {
+      tabs = this.tabsOf(owner);
+    } catch {
+      /* a stash that cannot be sized is the plain one */
+    }
+    return stashSlotsFor(tabs);
+  }
 
   has(owner: string): boolean {
     return this.stashes.has(owner);
@@ -50,7 +77,7 @@ export class StashVault {
   /** Read an owner's stash from what was saved (once: a stash that is already here is the newer one). */
   load(owner: string, raw: unknown): void {
     if (this.stashes.has(owner)) return;
-    const c = new Container(STASH_SLOTS);
+    const c = new Container(savedSize(raw, this.want(owner)));
     c.loadJSON(raw);
     this.stashes.set(owner, c);
   }
@@ -59,8 +86,14 @@ export class StashVault {
   of(owner: string): Container {
     let c = this.stashes.get(owner);
     if (!c) {
-      c = new Container(STASH_SLOTS);
+      c = new Container(this.want(owner));
       this.stashes.set(owner, c);
+    } else if (c.size < this.want(owner)) {
+      // A tab was bought while this stash was open in the realm: grow it, keeping what is in it. (A stash never shrinks.)
+      const bigger = new Container(this.want(owner));
+      c.slots.forEach((s, i) => bigger.set(i, s));
+      this.stashes.set(owner, bigger);
+      c = bigger;
     }
     return c;
   }
@@ -89,7 +122,8 @@ export class StashVault {
 
   /** The stack in a stash slot, or null. */
   peek(owner: string, slot: number): ItemStack | null {
-    return slot >= 0 && slot < STASH_SLOTS ? this.of(owner).get(slot) : null;
+    const c = this.of(owner);
+    return slot >= 0 && slot < c.size ? c.get(slot) : null;
   }
 
   /** Remove `count` (at most what is there) from a stash slot: what a withdrawal took away once it was handed over. */

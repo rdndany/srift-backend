@@ -1,6 +1,8 @@
+import { MOB_TIER_INFO, mobTier } from './mobTier';
 import { CLASSES, CLASS_IDS, CLASS_LEVELS, isClassId, type ClassId, type StatModifier } from './classes';
+import { ENCHANTS, glyphStat } from './enchant';
 import type { ItemStack } from './inventory';
-import { I, armorId, getItem, toolId } from './items';
+import { I, accessoryOfItem, armorId, getItem, toolId } from './items';
 import type { MobKind } from './mobs';
 
 /**
@@ -312,7 +314,7 @@ export function pickRarity(weights: readonly [number, number, number], rand: () 
 /** What a monster of this kind leaves when it dies: null most of the time, else a piece for a random class or for anyone. */
 export function gearDrop(kind: MobKind, rand: () => number): ItemStack | null {
   const d = GEAR_DROPS[kind];
-  if (!d || rand() >= d.chance) return null;
+  if (!d || rand() >= d.chance * MOB_TIER_INFO[mobTier(kind)].loot) return null;
   const level = d.level[0] + Math.floor(rand() * (d.level[1] - d.level[0] + 1));
   const pick = Math.floor(rand() * (CLASS_IDS.length + 1));
   return randomGear(level, pickRarity(d.rarity, rand), pick < CLASS_IDS.length ? CLASS_IDS[pick] : undefined, rand);
@@ -343,6 +345,53 @@ export function gearModifiers(stacks: readonly (ItemStack | null)[], who: Wearer
     for (const [stat, v] of allStats(st.id, st.gear)) out.push(STAT_INFO[stat].mod(v));
   }
   return out;
+}
+
+/** The stat modifiers of the rings and the necklace a character wears (see accessories.ts): fixed stats, so no level or class is asked for. */
+export function accessoryModifiers(stacks: readonly (ItemStack | null)[], who: Wearer | null): StatModifier[] {
+  const out: StatModifier[] = [];
+  if (!who) return out;
+  for (const st of stacks) {
+    const def = st ? accessoryOfItem(st.id) : null;
+    if (def) for (const [stat, v] of def.stats) out.push(STAT_INFO[stat].mod(v));
+  }
+  return out;
+}
+
+/**
+ * The stat modifiers of the glyphs a character wears and holds: the glyphs of a stat (Vigor, Might, Fury...) add to the class stats like the
+ * bonus stats of the gear itself, and so do for every ability. A Glyph Tome adds nothing, and nor does a piece that needs a higher level
+ * than the wearer has (a plain piece, or a ring, always counts).
+ */
+export function glyphModifiers(stacks: readonly (ItemStack | null)[], who: Wearer | null): StatModifier[] {
+  const out: StatModifier[] = [];
+  if (!who) return out;
+  for (const st of stacks) {
+    if (!st?.ench || getItem(st.id).storesEnchants || !gearUsable(st, who)) continue;
+    for (const [id, rank] of st.ench) {
+      const g = glyphStat(id, rank);
+      if (g) out.push(STAT_INFO[g[0]].mod(g[1]));
+    }
+  }
+  return out;
+}
+
+/** A short text that changes when the glyphs of a stat on the stacks change (see `gearKey`). */
+export function glyphKey(stacks: readonly (ItemStack | null)[]): string {
+  let key = '';
+  for (const st of stacks) {
+    if (!st?.ench || getItem(st.id).storesEnchants) continue;
+    for (const [id, rank] of st.ench) if (ENCHANTS.some((d) => d.id === id && d.stat)) key += `${id}.${rank},`;
+    key += ';';
+  }
+  return key;
+}
+
+/** What a glyph does at a rank, as the tooltip and the altar say it: a glyph of a stat in the line of that stat (`resource` names the class's pool). */
+export function glyphLine(id: number, rank: number, resource = 'Resource'): string {
+  const g = glyphStat(id, rank);
+  if (g) return statLine(g[0], g[1], resource);
+  return ENCHANTS.find((d) => d.id === id)?.effect(rank) ?? '';
 }
 
 /** A short text that changes when what the wearer gets from their gear changes (to know when to recompute). */

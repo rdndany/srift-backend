@@ -1,0 +1,166 @@
+/* ================================================================================================
+   The Inventory tab: a paper doll. Armor and the off hand down the left, the necklace, the rings,
+   the wings and the companion down the right, the character on a lit stage between them with the
+   mount and the outfit under it, and the numbers that matter most in a strip along the bottom.
+   The Attributes tab holds the rest of the numbers and the stat points.
+   ================================================================================================ */
+#menu-screen .wow .inv-top.doll {
+  --doll-slot: 52px; /* (a slot is 48px and a 2px border on each side) */
+  display: grid;
+  grid-template-columns: var(--doll-slot) minmax(0, 1fr) var(--doll-slot);
+  grid-template-areas:
+    'left mid right'
+    'stats stats stats';
+  align-items: start;
+  column-gap: 14px;
+  row-gap: 8px;
+  padding: 10px 14px 10px;
+  margin: 2px 0 0;
+}
+.doll-col {
+  grid-area: left;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.doll-col + .doll-mid + .doll-col {
+  grid-area: right;
+}
+.doll-mid {
+  grid-area: mid;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.quick-stats {
+  grid-area: stats;
+}
+
+/* A slot that holds something is outlined in gold (the empty ones show the ghost of what goes there). */
+.doll-slot {
+  position: relative;
+  line-height: 0;
+}
+.doll-slot:has(.slot .item-view, .slot canvas, .slot img:not(.ghost)) {
+  filter: drop-shadow(0 0 5px rgba(240, 188, 76, 0.4));
+}
+
+/* The stage the character stands on: a spotlight from above in the colour of the class, a gold floor ring and a vignette. */
+.doll-stage {
+  position: relative;
+  height: 224px;
+  overflow: hidden;
+  box-sizing: border-box;
+  background:
+    radial-gradient(ellipse 40% 6% at 50% 89%, rgba(255, 228, 154, 0.55), rgba(255, 228, 154, 0.12) 60%, transparent 74%),
+    radial-gradient(ellipse 58% 36% at 50% 92%, color-mix(in srgb, var(--cls, #f0bc4c) 38%, transparent), transparent 72%),
+    radial-gradient(ellipse 80% 62% at 50% 24%, color-mix(in srgb, var(--cls, #f0bc4c) 26%, #2c2418) 0%, #1b150e 58%, #0a0704 100%);
+  border: 3px solid;
+  border-color: var(--w-bronze-hi) var(--w-bronze-lo) var(--w-bronze-lo) var(--w-bronze-hi);
+  box-shadow: inset 0 0 0 2px var(--w-edge), inset 0 0 34px rgba(0, 0, 0, 0.85);
+}
+/* Rivets in the corners of the stage. */
+.doll-stage::before,
+.doll-stage::after {
+  content: '';
+  position: absolute;
+  top: 5px;
+  width: 6px;
+  height: 6px;
+  background: var(--w-gold, #f0bc4c);
+  box-shadow: inset -1px -1px 0 rgba(0, 0, 0, 0.45);
+  z-index: 2;
+  pointer-events: none;
+}
+.doll-stage::before {
+  left: 5px;
+}
+.doll-stage::after {
+  right: 5px;
+}
+.doll-stage .char-preview {
+  position: absolute;
+  inset: 0;
+}
+
+/* The class on the upper left of the stage and the level on the upper right, small, so that the figure's feet and head stay clear. */
+#menu-screen .wow .doll-stage .char-class,
+#menu-screen .wow .doll-stage .char-plate {
+  left: 10px;
+  right: auto;
+  top: 8px;
+  bottom: auto;
+  padding: 0;
+  background: none;
+  font-size: 13px;
+}
+#menu-screen .wow .doll-stage .char-plate {
+  left: auto;
+  right: 10px;
+  color: var(--w-dim, #a48f6a);
+}
+
+/* The mount and the outfit, side by side under the stage. */
+.doll-extra {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+}
+
+/* The strip of numbers along the bottom. */
+.quick-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+.quick-stat {
+  white-space: nowrap;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 6px;
+  padding: 5px 4px 4px;
+  background: rgba(0, 0, 0, 0.38);
+  border: 1px solid rgba(208, 162, 76, 0.22);
+  border-bottom: 2px solid var(--qs, #d0a24c);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.5);
+}
+.quick-stat b {
+  font-size: 15px;
+  color: var(--qs, #ffe49a);
+  text-shadow: 1px 1px 0 #000;
+}
+.quick-stat span {
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #d8c7a4;
+}
+
+/* ---- the Attributes tab: the numbers on the left, the stat points on the right ---- */
+.attr-page {
+  flex: 1;
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  min-height: 0;
+}
+#menu-screen .wow .attr-page .char-stats {
+  flex: 1;
+  min-width: 0;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 2px solid;
+  border-color: #000 #3d2c12 #3d2c12 #000;
+  box-shadow: inset 3px 3px 0 rgba(0, 0, 0, 0.45);
+}
+#menu-screen .wow .attr-page .char-stats .cls-stats {
+  gap: 14px;
+}
+#menu-screen .wow .attr-page .char-stats .cls-stat {
+  font-size: 14px;
+}
+#menu-screen .wow .attr-page .attr-points {
+  width: 250px;
+}

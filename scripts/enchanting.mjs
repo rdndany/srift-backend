@@ -1,6 +1,6 @@
-// Enchanting E2E: bookshelves around an enchanting table are counted, the table screen shows three offers
-// for the item in its slot, choosing one spends lapis and levels and enchants the item (which then shimmers
-// and lists its enchantments), an enchanted tool does what it says (Silk Touch), and an anvil mends a tool
+// Enchanting E2E: bookshelves around a Runic Altar are counted, the altar lists the glyphs the piece on it takes,
+// inscribing one spends lapis and Auren and fills a socket (the item then shimmers and its tooltip lists the glyph),
+// a glyph can be raised or erased, a glyph tool does what it says (Gentle Hand), and an anvil mends a tool
 // with its material. Saves `enchanting-*.png`.
 // Usage: node scripts/enchanting.mjs [url] [outDir]   (the game server needs CHEATS=1, as scripts/e2e.mjs sets)
 import { mkdirSync } from 'node:fs';
@@ -11,7 +11,6 @@ const outDir = process.argv[3] ?? 'screenshots';
 mkdirSync(outDir, { recursive: true });
 
 const ITEM_SLOT = 36;
-const LAPIS_SLOT = 37;
 const RESULT_SLOT = 38;
 const BOOKSHELF = 255;
 const TABLE = 254;
@@ -104,55 +103,79 @@ await sc(([x, y, z]) => {
 }, [bx + 1.5, Y + 1.01, bz + 0.5]);
 await shot('table', 1500);
 
-// Items: a sword, lapis and enough experience for the top offer.
+// Items: a sword, lapis and Auren for the glyphs.
 await sc(([a, b]) => {
   window.__solrift.give(a, 1);
   window.__solrift.give(b, 20);
-  window.__solrift.addXp(1500);
+  window.__solrift.addCoins(1000);
+  window.__solrift.addXp(1500); // levels for the anvil, further down
 }, [SWORD, LAPIS]);
-const level0 = (await sc(() => window.__solrift.xp())).level;
-check(level0 >= 30, `thirty levels of experience (${level0})`);
+const coins0 = await sc(() => window.__solrift.coins());
+check(coins0 >= 1000, `Auren in the purse (${coins0})`);
 
-check(await sc(([x, y, z]) => window.__solrift.useBlock(x, y, z), [bx, Y + 1, bz]), 'using the table does something');
-check(await until(async () => (await sc(() => window.__solrift.screen())) === 'enchant'), 'the enchanting screen opens');
-await page.waitForSelector('.ench-offer', { timeout: 5000 });
-check((await page.locator('.ench-offer').count()) === 3, 'with three offers');
-check((await page.locator('[data-testid="ench-shelves"]').innerText()).includes('15'), 'and the shelf count');
-check((await page.locator('.ench-offer.none').count()) === 3, 'none of them is on offer with nothing in the slot');
-check((await page.locator('[data-testid="ench-warning"]').innerText()).includes('item'), 'an empty table says to put an item in');
-check((await page.locator('[data-testid="ench-level"]').innerText()).includes('level'), 'the screen shows your level');
+check(await sc(([x, y, z]) => window.__solrift.useBlock(x, y, z), [bx, Y + 1, bz]), 'using the altar does something');
+check(await until(async () => (await sc(() => window.__solrift.screen())) === 'enchant'), 'the Runic Altar screen opens');
+await page.waitForSelector('[data-testid="altar"]', { timeout: 5000 });
+check((await page.locator('[data-testid="ench-shelves"]').innerText()).includes('15'), 'with the lore of fifteen shelves');
+check((await page.locator('[data-testid="ench-warning"]').innerText()).toLowerCase().includes('lay a piece'), 'an empty altar says to lay a piece on it');
+check((await page.locator('.glyph-row').count()) === 0, 'and offers no glyph');
 await shot('empty');
 
-// Put the sword and the lapis in.
+// Lay the sword on the altar.
 await slot(await slotOf(SWORD)).click();
 await slot(ITEM_SLOT).click();
-await slot(await slotOf(LAPIS)).click({ modifiers: ['Shift'] });
 await sleep(400);
 let scr = await sc(() => window.__solrift.enchantScreen());
-check(!!scr.item, 'the sword is in the table slot');
-check(scr.lapis === 20, `and the lapis in its slot (${scr.lapis})`);
-check(scr.offers.some((o) => o.cost > 0), `the table offers ${JSON.stringify(scr.offers.map((o) => o.cost))}`);
-check(scr.offers[2].cost >= 20 && scr.offers[2].cost <= 30, `the top offer is dear with fifteen shelves (${scr.offers[2].cost})`);
-check((await page.locator('.ench-offer.ok').count()) === scr.offers.filter((o) => o.cost > 0).length, 'every real offer can be afforded');
-const clueText = (await page.locator('.ench-offer .clue').nth(2).getAttribute('data-clue')) || '';
-check(clueText.includes('...?') && (await page.locator('.ench-offer .clue svg').count()) > 0, `the clue hints at one enchantment in the alien script ("${clueText}")`);
-check((await page.locator('[data-testid="ench-warning"]').count()) === 0, 'with an item, lapis and levels there is no warning');
+check(!!scr.item, 'the sword is on the altar');
+check(scr.lapis === 20, `and the lapis in the bags is counted (${scr.lapis})`);
+check(scr.options.length >= 5 && scr.options.some((o) => o.state === 'ok'), `the altar lists the glyphs the sword takes (${scr.options.map((o) => o.name).join(', ')})`);
+check(scr.options.every((o) => o.id !== 20), 'none of them is a treasure (Renewal)');
+check((await page.locator('.glyph-row').count()) === scr.options.length, 'the screen shows each of them');
+check((await page.locator('[data-testid="altar-sockets"] .sock').count()) === 1, 'a plain sword has one socket');
+check((await page.locator('[data-testid="glyph-detail"]').count()) === 1, 'and a glyph is described beside the list');
+check((await page.locator('[data-testid="ench-warning"]').count()) === 0, 'there is no warning');
 await shot('offers');
 
-// Choose the top offer.
-await page.locator('.ench-offer[data-offer="2"]').click();
-await until(async () => ((await sc(() => window.__solrift.enchantScreen()))?.lapis ?? 0) === 17);
+// Inscribe the first glyph (Keen Edge): it costs lapis and Auren, and fills the socket.
+const first = scr.options[0];
+// An inscription can fail (the chance is on the button): try again until it takes, and count what the failures cost.
+const inscribeUntil = async (done) => {
+  let tries = 0;
+  while (tries < 15 && !(await done())) {
+    await page.locator('[data-testid="inscribe"]').click();
+    await sleep(350);
+    tries++;
+  }
+  return tries;
+};
+check((await page.locator('[data-testid="glyph-chance"]').count()) === 1, 'the chance of the glyph is shown');
+const tries1 = await inscribeUntil(async () => ((await sc(() => window.__solrift.enchantScreen()))?.item?.ench?.length ?? 0) === 1);
 scr = await sc(() => window.__solrift.enchantScreen());
-check(scr.lapis === 17, `three lapis were spent (${scr.lapis} left)`);
-const level1 = (await sc(() => window.__solrift.xp())).level;
-check(level0 - level1 === 3, `and three levels (${level0} -> ${level1})`);
-check((await page.locator('.ench-offer.none').count()) === 3, 'an enchanted item gets no more offers');
+check(scr.item.ench?.[0]?.[0] === first.id, `the sword now carries ${first.name}`);
+// (a failure costs all the lapis and half the Auren: the last, good try costs the full price)
+check(20 - scr.lapis >= first.price.lapis, `at least ${first.price.lapis} lapis were spent (${scr.lapis} left after ${tries1 + 1} tries)`);
+const coins1 = await sc(() => window.__solrift.coins());
+check(coins0 - coins1 >= first.price.auren, `and at least ${first.price.auren} Auren (${coins0} -> ${coins1})`);
+check((await page.locator('[data-testid="altar-sockets"] .sock.full').count()) === 1, 'the socket is filled');
+check((await page.locator('[data-testid="erase"]').count()) === 1, 'the glyph can be erased');
 check((await slot(ITEM_SLOT).locator('.glint').count()) === 1, 'the item shimmers');
+check((await page.locator('.glyph-row[data-state="sockets"]').count()) === scr.options.length - 1, 'no other glyph fits: the sockets are full');
 await slot(ITEM_SLOT).hover();
 await sleep(300);
 const tip = await page.locator('.tooltip').innerText();
-check(tip.split('\n').length >= 2 && /iron sword/i.test(tip), `its tooltip lists the enchantments (${JSON.stringify(tip)})`);
+check(/Glyph sockets: 1 \/ 1/.test(tip) && /iron sword/i.test(tip), `its tooltip lists the glyphs and sockets (${JSON.stringify(tip)})`);
 await shot('enchanted');
+
+// Raise it, then erase it for nothing.
+await inscribeUntil(async () => ((await sc(() => window.__solrift.enchantScreen()))?.item?.ench?.[0]?.[1] ?? 0) === 2);
+check(((await sc(() => window.__solrift.enchantScreen()))?.item?.ench?.[0]?.[1] ?? 0) === 2, 'the same glyph can be raised a rank');
+const coins2 = await sc(() => window.__solrift.coins());
+await page.locator('[data-testid="erase"]').click();
+await until(async () => !(await sc(() => window.__solrift.enchantScreen()))?.item?.ench);
+scr = await sc(() => window.__solrift.enchantScreen());
+check(!scr.item.ench, 'erasing takes the glyph off');
+check((await sc(() => window.__solrift.coins())) === coins2, 'and costs nothing');
+await inscribeUntil(async () => ((await sc(() => window.__solrift.enchantScreen()))?.item?.ench?.length ?? 0) === 1);
 
 // Take it back, close the screen, and hold it.
 await slot(ITEM_SLOT).click({ modifiers: ['Shift'] });
@@ -165,7 +188,7 @@ await sc((i) => window.__solrift.select(i), at < 9 ? at : 0);
 const inv = await sc(() => window.__solrift.inventory());
 check(Array.isArray(inv[at]?.[3]) && inv[at][3].length >= 1, `with its enchantments (${JSON.stringify(inv[at])})`);
 
-// Silk Touch: stone comes out as stone, not cobblestone.
+// Gentle Hand (Silk Touch): stone comes out as stone, not cobblestone.
 await sc(([p]) => window.__solrift.giveEnchanted(p, [[12, 1]]), [PICK]);
 const pickAt = await slotOf(PICK);
 await sc((i) => window.__solrift.select(i), pickAt < 9 ? pickAt : 0);
@@ -176,7 +199,7 @@ await sc(() => {
   window.__solrift.tickDrops(2);
   window.__solrift.gatherDrops();
 });
-check((await sc((i) => window.__solrift.countOf(i), STONE)) >= 1, 'Silk Touch lifts stone whole');
+check((await sc((i) => window.__solrift.countOf(i), STONE)) >= 1, 'Gentle Hand lifts stone whole');
 check((await sc((i) => window.__solrift.countOf(i), COBBLE)) === 0, 'and leaves no cobblestone');
 
 // The anvil mends a tool with its material.

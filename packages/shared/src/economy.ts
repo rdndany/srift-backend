@@ -3,8 +3,11 @@ import { bagPrice, bagStock } from './bags';
 import { gearValue, rollGear, type GearRoll, type Rarity } from './gear';
 import { mulberry32 } from './noise';
 import type { ItemStack } from './inventory';
-import { I, armorId, bagSlotsOf, mountItemId, skillBookAbility, toolId } from './items';
+import { I, armorId, bagSlotsOf, companionItemId, mountItemId, necklaceId, ringId, skillBookAbility, toolId, wingItemId } from './items';
 import { MOUNTS } from './mounts';
+import { COMPANIONS } from './companions';
+import { WINGS } from './wings';
+import { ACCESSORY_MATERIALS, type AccessoryMaterial } from './accessories';
 import type { ClassId } from './classes';
 import type { MobKind } from './mobs';
 import { skillBookPrice, skillBookStock } from './skillbooks';
@@ -82,6 +85,12 @@ type ArmorSet = 'leather' | 'gold' | 'iron' | 'diamond';
 const armorSet = (material: ArmorSet, prices: [number, number, number, number]): ShopItem[] => prices.map((price, slot) => ({ id: armorId(slot, material), count: 1, price }));
 const tool = (kind: ToolKind, material: ToolMaterial, price: number): ShopItem => ({ id: toolId(kind, material), count: 1, price });
 const ware = (id: number, count: number, price: number): ShopItem => ({ id, count, price });
+/** The rings and the necklaces (see accessories.ts), leather to diamond, at the given prices: the rings first, then the necklaces. */
+const JEWELRY_PRICES: Record<AccessoryMaterial, readonly [number, number]> = { leather: [60, 90], iron: [220, 320], gold: [480, 700], diamond: [900, 1300] };
+const jewelry = (): ShopItem[] => [
+  ...ACCESSORY_MATERIALS.map((m) => ware(ringId(m), 1, JEWELRY_PRICES[m][0])),
+  ...ACCESSORY_MATERIALS.map((m) => ware(necklaceId(m), 1, JEWELRY_PRICES[m][1])),
+];
 /** A piece of gear of a rarity and level, for a class (or anyone), with stats that are always the same ones. It costs eight times what it sells for (the merchants sell all three rarities). */
 const piece = (id: number, rarity: Rarity, level: number, cls?: ClassId): ShopItem => {
   const gear = rollGear(id, level, rarity, cls, mulberry32(id * 131 + level * 7 + rarity))!;
@@ -137,7 +146,7 @@ export const SHOPS: readonly ShopDef[] = [
   },
   {
     npc: 'hilda',
-    line: 'Armor does not make you brave, it makes you alive. Try the leather first, the iron when you have earned it.',
+    line: 'Armor does not make you brave, it makes you alive. Try the leather first, the iron when you have earned it. Rings and necklaces are in the glass case: right-click one to wear it, two rings and a necklace at a time.',
     stock: [
       ...armorSet('leather', [40, 64, 56, 32]),
       ...armorSet('iron', [150, 240, 210, 120]),
@@ -155,6 +164,7 @@ export const SHOPS: readonly ShopDef[] = [
       ...armorPieces('diamond', 1, 14),
       ...armorPieces('diamond', 2, 18),
       ...armorPieces('diamond', 3, 20),
+      ...jewelry(),
       ...bagStock([3, 4]),
     ],
   },
@@ -182,7 +192,7 @@ export const SHOPS: readonly ShopDef[] = [
   },
   {
     npc: 'fenna',
-    line: 'Bows, bolts and everything for the long shot. Keep your quiver full and your distance longer. The Ranger\'s skill books are on the end of the counter: right-click one to learn it. And the horns on the shelf behind me call a Fenrir, a great wolf in armour: put one in the mount slot (top right of the screen), then press H to ride.',
+    line: 'Bows, bolts and everything for the long shot. Keep your quiver full and your distance longer. The Ranger\'s skill books are on the end of the counter: right-click one to learn it. And the horns on the shelf behind me call a Fenrir, a great wolf in armour: put one in the mount slot (top right of the screen), then press H to ride. The wings hanging from the rafters are for those who would rather not ride: wear a pair in the wing slot and double-tap jump to take to the air. And the little ones in the cages by the door are companions: wear one in the companion slot and it follows you about, lending a hand.',
     stock: [
       ware(I.ARROW, 16, 32),
       ware(I.ARROW, 64, 120),
@@ -200,6 +210,10 @@ export const SHOPS: readonly ShopDef[] = [
       ware(I.MINECART, 1, 90),
       // The horns that teach a mount (see mounts.ts): right-click one to put it in the mount slot, then press H to ride.
       ...MOUNTS.map((m) => ware(mountItemId(m.id), 1, m.price)),
+      // The wings (see wings.ts): right-click a pair to put it in the wing slot, then double-tap jump to fly. The first pairs are dear, the second pairs dearer.
+      ...WINGS.map((w) => ware(wingItemId(w.id), 1, w.tier === 1 ? 3000 : 9000)),
+      // The companions (see companions.ts): right-click one to put it in the companion slot, and it follows at your shoulder.
+      ...COMPANIONS.map((c) => ware(companionItemId(c.id), 1, 2500)),
       ...skillBookStock('ranger'),
     ],
   },

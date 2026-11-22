@@ -14,6 +14,7 @@ import { OffJab } from './held/offJab';
 import { MapHold } from './held/mapHold';
 import { ItemModels } from './held/models';
 import type { SwingStyle } from './held/swings';
+import { addAura, auraSamples, stripAura } from './enchantFx';
 import { AXIS_X, AXIS_Y, AXIS_Z, DEG, REST_DEFAULT, type HandFrame, type HeldKit, type HeldView } from './held/view';
 
 /**
@@ -74,7 +75,16 @@ export class HeldItem {
   private palette: Palette | null = null;
   private armorIds: readonly number[] = [];
 
+  /** The colour the held item glows with (it carries glyphs), or null; and the one now on the model. */
+  private glow: string | null = null;
+  private glowOn: { view: HeldView; color: string } | null = null;
+  /** The same for the off-hand item (its own copy of the model), and the one now on it. */
+  private offGlow: string | null = null;
+  private offGlowOn: { obj: THREE.Object3D; color: string } | null = null;
+
   private swingT = 1; // 0..1 while swinging, 1 = idle
+  /** How much faster than usual the swing in progress runs (the attack speed of the weapon). */
+  private swingRate = 1;
   /** The swing of the last item that was in the hand (null: the plain one), and which of its variants comes next. The empty hand keeps the timing of the item before it. */
   private style: SwingStyle | null = null;
   private swingVariant = 0;
@@ -139,6 +149,7 @@ export class HeldItem {
   /** A character for its arm, dressed like the player and lit like the hand. */
   private makeChar(): Character {
     const c = new Character();
+    c.showSetFx(false);
     if (this.palette) c.setLook(this.palette);
     c.setArmor(this.armorIds);
     c.setTint(this.models.tint);
@@ -164,6 +175,44 @@ export class HeldItem {
     for (const ch of this.chars) ch.setTint(this.models.tint);
   }
 
+  /** The glow of the item in the main hand: the colour of its strongest glyph's element, or null for a plain one. */
+  setGlow(color: string | null): void {
+    this.glow = color;
+    this.syncGlow();
+  }
+
+  /** The glow of the item in the off hand (a shield, an orb, a dagger), or null for a plain one. */
+  setOffGlow(color: string | null): void {
+    this.offGlow = color;
+    this.syncOffGlow();
+  }
+
+  /** Put the glow on (or take it off) the off hand's model, when the item or the colour has changed. */
+  private syncOffGlow(): void {
+    const want = this.offObj && this.offGlow && this.offView !== this.map.off ? { obj: this.offObj, color: this.offGlow } : null;
+    const now = this.offGlowOn;
+    if (now && want && now.obj === want.obj && now.color === want.color) return;
+    if (now) stripAura(now.obj);
+    this.offGlowOn = null;
+    if (want) {
+      addAura(want.obj, want.color);
+      this.offGlowOn = want;
+    }
+  }
+
+  /** Put the glow on (or take it off) the model in the hand, when the item or the colour has changed. */
+  private syncGlow(): void {
+    const want = this.view && this.glow && !this.holdsMap() ? { view: this.view, color: this.glow } : null;
+    const now = this.glowOn;
+    if (now && want && now.view === want.view && now.color === want.color) return;
+    if (now) stripAura(now.view.object);
+    this.glowOn = null;
+    if (want) {
+      addAura(want.view.object, want.color);
+      this.glowOn = want;
+    }
+  }
+
   /** Hold the swing at one moment of it (0..1; null lets it play), for looking at a pose. */
   holdSwing(t: number | null, variant = 0): void {
     this.frozenSwing = t;
@@ -187,15 +236,19 @@ export class HeldItem {
   }
 
   /** Start a swing (attack or place). Ignored while one is already in its first half. */
-  swing(): void {
+  swing(rate = 1): void {
     if (this.holdsMap()) return;
     const st = this.style;
     if (st) {
       if (this.swingT > st.again) {
         this.swingT = 0;
+        this.swingRate = rate;
         this.swingVariant++;
       }
-    } else if (this.swingT > 0.5) this.swingT = 0;
+    } else if (this.swingT > 0.5) {
+      this.swingT = 0;
+      this.swingRate = rate;
+    }
   }
 
   /** Is this item the one in the hand right now (not still being swapped in or out)? */
@@ -222,6 +275,7 @@ export class HeldItem {
   swingIfIdle(): boolean {
     if (this.holdsMap() || this.switching || this.swingT < 1) return false;
     this.swingT = 0;
+    this.swingRate = 1;
     return true;
   }
 
@@ -250,7 +304,7 @@ export class HeldItem {
       this.switching = false;
     }
 
-    this.swingT = Math.min(1, this.swingT + dt / (this.style?.dur ?? 0.3));
+    this.swingT = Math.min(1, this.swingT + (dt * this.swingRate) / (this.style?.dur ?? 0.3));
     if (this.frozenSwing !== null) this.swingT = this.frozenSwing;
     const s = this.swingT;
 
@@ -356,6 +410,7 @@ export class HeldItem {
     this.offObj = null;
     this.offView = null;
     this.offId = id;
+    this.syncOffGlow();
     if (!id) return;
     if (getItem(id).use === 'map' && this.map.off) {
       this.offView = this.map.off;
@@ -367,6 +422,7 @@ export class HeldItem {
     this.offView = view;
     // A clone, so the same shield can also be the one in the main hand; geometry and materials are shared.
     this.offObj = view.object.clone();
+    stripAura(this.offObj);
     carryRenderHooks(view.object, this.offObj);
     if (!getItem(id).shield) {
       // Held up in the left hand: smaller than in the right, and mirrored so a blade leans toward the middle.
@@ -376,6 +432,7 @@ export class HeldItem {
       this.offObj.rotation.set(0.05, -0.45, o.lean);
     }
     this.offPivot.add(this.offObj);
+    this.syncOffGlow();
   }
 
   /** Turn the needle of the compass in hand to one of its pictures (0 = straight ahead, clockwise): the hand shows the item as it is. */
@@ -385,6 +442,10 @@ export class HeldItem {
 
   private setItem(id: number): void {
     if (this.view) {
+      if (this.glowOn?.view === this.view) {
+        stripAura(this.view.object);
+        this.glowOn = null;
+      }
       this.holder.remove(this.view.object);
       this.view.leave?.();
     }
@@ -399,6 +460,7 @@ export class HeldItem {
     this.rest.copy(view.rest ?? REST_DEFAULT);
     this.style = view.swing ?? null;
     this.swingT = 1;
+    this.syncGlow();
   }
 
   /** The item as a blocky figure holds it in its right hand (grip at the origin, blade pointing forward). */
@@ -467,6 +529,7 @@ export class HeldItem {
       new THREE.Mesh(this.models.colorBox(1, 1, 1, 0xffffff), this.models.flat()),
       flame,
       page,
+      ...auraSamples(),
     ];
     for (const s of samples) take(s);
     const prev = renderer.getRenderTarget();

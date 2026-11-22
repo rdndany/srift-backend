@@ -176,3 +176,64 @@
     inset 0 0 0 3px #6d5420,
     0 14px 40px rgba(0, 0, 0, 0.7);
 }
+
+/* The frame of a creature: the same plate, with a health bar under the name and the tier's colour on the ring. */
+#target-frame.mob {
+  cursor: default;
+  pointer-events: none;
+}
+#target-frame.mob .tf-plate {
+  gap: 4px;
+  border-color: color-mix(in srgb, var(--cls) 45%, #6d5420);
+}
+#target-frame.mob[data-tier='epic'] .tf-plate {
+  box-shadow:
+    inset 0 0 0 1px rgba(199, 125, 255, 0.28),
+    0 0 14px rgba(199, 125, 255, 0.3),
+    0 5px 14px rgba(0, 0, 0, 0.5);
+}
+#target-frame.mob[data-tier='rare'] .tf-plate {
+  box-shadow:
+    inset 0 0 0 1px rgba(90, 168, 255, 0.25),
+    0 0 12px rgba(90, 168, 255, 0.25),
+    0 5px 14px rgba(0, 0, 0, 0.5);
+}
+#target-frame .tf-hp {
+  position: relative;
+  height: 14px;
+  background: #120b07;
+  border: 1px solid #000;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+#target-frame .tf-hp i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  transition: width 0.18s ease-out;
+  box-shadow: inset 0 -5px 0 rgba(0, 0, 0, 0.25), inset 0 2px 0 rgba(255, 255, 255, 0.22);
+}
+#target-frame .tf-hp span {
+  position: absolute;
+  inset: 0;
+  text-align: center;
+  font-size: 10px;
+  line-height: 14px;
+  color: #fff;
+  text-shadow: 1px 1px #000;
+}
+#target-frame .tf-role.hostile {
+  color: #ff7a6a;
+}
+#target-frame .tf-role.boss {
+  color: #ffb347;
+}
+#target-frame .tf-role.neutral {
+  color: #ffd45a;
+}
+#target-frame .tf-role.passive {
+  color: #8ee08e;
+}
+#target-frame .tf-role.npc,
+#target-frame .tf-role.trader {
+  color: #8cc8ff;
+}

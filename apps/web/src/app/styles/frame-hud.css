@@ -96,36 +96,7 @@
   border-color: #efe3b0;
 }
 
-/* The minimap: a bronze frame, a gold plate for the north mark and one for the coordinates. */
-#minimap .minimap-north {
-  top: -5px;
-  padding: 0 6px;
-  color: var(--w-gold-hi);
-  background: linear-gradient(#3a2d1a, #1c150c);
-  border: 2px solid var(--w-edge);
-  border-radius: 0;
-  box-shadow: inset 1px 1px 0 0 var(--w-bronze-hi), inset -1px -1px 0 0 var(--w-bronze-lo);
-}
-#minimap .minimap-place {
-  margin-top: 8px;
-  padding: 1px 10px;
-  color: var(--w-gold-hi);
-  background: linear-gradient(#3a2d1a, #1c150c);
-  border: 2px solid var(--w-edge);
-  border-radius: 0;
-  box-shadow: inset 1px 1px 0 0 var(--w-bronze-hi), inset -1px -1px 0 0 var(--w-bronze-lo);
-}
-#minimap .minimap-coords {
-  margin-top: 4px;
-  padding: 1px 8px;
-  color: var(--w-text);
-  background: var(--w-panel);
-  border: 2px solid var(--w-edge);
-  border-radius: 0;
-  box-shadow: inset 1px 1px 0 0 var(--w-bronze), inset -1px -1px 0 0 var(--w-bronze-lo);
-}
-
-/* The quests, under the minimap: only each quest's title and what it asks for, as lettering on the screen. */
+/* The quests, top right: only each quest's title and what it asks for, as lettering on the screen. */
 #quest-tracker {
   width: 204px;
   gap: 10px;

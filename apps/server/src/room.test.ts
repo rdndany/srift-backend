@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   B,
   BAG_MENU_SLOTS,
+  ENCH,
   INVENTORY_SLOTS,
   I,
   LAPIS,
@@ -12,6 +13,7 @@ import {
   parseNetClientMessage,
   armorId,
   toolId,
+  glowCode,
   totalForLevel,
   type NetInput,
   type NetServerMessage,
@@ -470,6 +472,31 @@ describe('chat and commands', () => {
     expect(room.realm.time).not.toBe(0.75);
   });
 
+  it('opens a rift with /rift, tells the player of it in the snapshot and in an event, and refuses without cheats', () => {
+    const room = makeRoom({ cheats: true, rifts: true });
+    // a yard wide enough for a rift (they open 45 to 80 blocks off)
+    for (let x = CX - 100; x <= CX + 100; x++)
+      for (let z = CZ - 100; z <= CZ + 100; z++) {
+        for (let y = FLOOR + 1; y < FLOOR + 4; y++) room.world.setBlock(x, y, z, B.AIR);
+        room.world.setBlock(x, FLOOR, z, B.STONE);
+      }
+    const a = joinAt(room, 'alex');
+    ticks(room, 3);
+    a.clear();
+    room.receive(a.id!, { t: 'chat', text: '/rift epic' });
+    ticks(room, 2);
+    const view = a.snap.you.rift;
+    expect(view?.grade).toBe('epic');
+    expect(view?.phase).toBe('omen');
+    expect(view?.waves).toBe(5);
+    const events = a.of('events').flatMap((m) => m.events);
+    expect(events.some((e) => e.t === 'rift' && e.what === 'omen')).toBe(true);
+    const plain = makeRoom({ rifts: true });
+    const b = joinAt(plain, 'bob');
+    plain.receive(b.id!, { t: 'chat', text: '/rift' });
+    expect(plain.realm.rifts?.current).toBeNull();
+  });
+
   it('cheat commands work when enabled', () => {
     const room = makeRoom({ cheats: true });
     const a = joinAt(room, 'alex');
@@ -656,7 +683,7 @@ describe('armor', () => {
     room.tick();
     const view = a.snap.inv!.menu!;
     expect(view.kind).toBe('inventory');
-    expect(view.slots.length).toBe(36 + 4 + 1 + 4 + 1 + 1 + BAG_MENU_SLOTS); // armor, the off hand, the mount and the bags
+    expect(view.slots.length).toBe(36 + 4 + 1 + 4 + 1 + 1 + 1 + 1 + 1 + 3 + BAG_MENU_SLOTS); // armor, the off hand, the mount, the outfit, the companion, the wings, the rings and the necklace and the bags
     room.receive(a.id!, { t: 'cmd', c: { t: 'shift', slot: 0 } });
     for (let i = 0; i < 3; i++) room.tick();
     expect(p.armor.get(3)?.id).toBe(armorId(3, 'gold'));
@@ -971,38 +998,89 @@ describe('enchanting', () => {
     return { tx, ty };
   };
 
-  it('shows the offers to the player, enchants on command and sends the enchantments with the item', () => {
-    const room = makeRoom();
+  it('shows the altar to the player, inscribes on command and sends the glyphs with the item', () => {
+    const room = makeRoom({ rand: () => 0 }); // a roll that always takes
     const c = joinAt(room, 'merlin');
     const p = room.player(c.id!)!;
     const { tx, ty } = table(room);
-    p.xp.add(totalForLevel(30));
+    p.addCoins(500);
     p.inventory.set(0, makeStack(toolId('sword', 'iron')));
     p.inventory.set(1, makeStack(LAPIS, 5));
     expect(p.useBlock(tx, ty, CZ)).toBe(true);
     room.receive(c.id!, { t: 'cmd', c: { t: 'shift', slot: 0 } });
-    room.receive(c.id!, { t: 'cmd', c: { t: 'shift', slot: 1 } });
     room.tick();
     const view = c.snap.inv!.menu!;
     expect(view.kind).toBe('enchant');
     expect(view.enchant?.shelves).toBe(15);
-    expect(view.enchant!.offers).toHaveLength(3);
-    expect(view.enchant!.offers[2].cost).toBeGreaterThan(0);
-    // The server keeps what is on offer to itself: only the cost and one hint go out.
-    expect(JSON.stringify(view.enchant)).not.toContain('list');
     expect(view.slots[36]?.e).toBeUndefined();
-    room.receive(c.id!, { t: 'cmd', c: { t: 'enchant', index: 2 } });
+    room.receive(c.id!, { t: 'cmd', c: { t: 'enchant', id: ENCH.SHARPNESS } });
     room.tick();
     const after = c.snap.inv!.menu!;
-    expect(after.slots[36]?.e?.length).toBeGreaterThan(0);
-    expect(after.slots[37]?.count).toBe(2);
-    expect(c.snap.you.level).toBe(27);
+    expect(after.slots[36]?.e).toEqual([[ENCH.SHARPNESS, 1]]);
+    expect(p.coins).toBeLessThan(500);
+    expect(p.inventory.countOf(LAPIS)).toBeLessThan(5);
+    // And erasing takes it off again for nothing.
+    const coins = p.coins;
+    room.receive(c.id!, { t: 'cmd', c: { t: 'enchant', id: ENCH.SHARPNESS, erase: true } });
+    room.tick();
+    expect(c.snap.inv!.menu!.slots[36]?.e).toBeUndefined();
+    expect(p.coins).toBe(coins);
   });
 
-  it('refuses an offer that is not one of three', () => {
-    expect(parseNetClientMessage({ t: 'cmd', c: { t: 'enchant', index: 3 } })).toBeNull();
-    expect(parseNetClientMessage({ t: 'cmd', c: { t: 'enchant', index: -1 } })).toBeNull();
-    expect(parseNetClientMessage({ t: 'cmd', c: { t: 'enchant', index: 1 } })).not.toBeNull();
+  it('refuses a glyph that is not a plain id', () => {
+    expect(parseNetClientMessage({ t: 'cmd', c: { t: 'enchant', id: 0 } })).toBeNull();
+    expect(parseNetClientMessage({ t: 'cmd', c: { t: 'enchant', id: -1 } })).toBeNull();
+    expect(parseNetClientMessage({ t: 'cmd', c: { t: 'enchant', id: 300 } })).toBeNull();
+    expect(parseNetClientMessage({ t: 'cmd', c: { t: 'enchant', id: 1 } })).not.toBeNull();
+  });
+
+  it('shows other players the glow of the glyph piece in your hand, and nothing for a plain one', () => {
+    const room = makeRoom();
+    const a = joinAt(room, 'alex');
+    const b = joinAt(room, 'bob', CX + 3.5, CZ + 0.5);
+    const p = room.player(a.id!)!;
+    p.inventory.set(0, makeStack(toolId('sword', 'iron'), 1, 0, [[7, 3]]));
+    p.inventory.set(1, makeStack(toolId('sword', 'iron')));
+    p.selected = 0;
+    room.tick();
+    const glowing = b.snap.players.find((v) => v.name === 'alex')!;
+    expect(glowing.hg).toBe(glowCode(p.inventory.get(0)));
+    expect(glowing.hg).toBeGreaterThan(0);
+    p.selected = 1;
+    room.tick();
+    expect(b.snap.players.find((v) => v.name === 'alex')!.hg).toBeUndefined();
+  });
+
+  it('shows other players the glow of the glyph item in your off hand', () => {
+    const room = makeRoom();
+    const a = joinAt(room, 'alex');
+    const b = joinAt(room, 'bob', CX + 3.5, CZ + 0.5);
+    const p = room.player(a.id!)!;
+    p.offhand.set(0, makeStack(I.SHIELD, 1, 0, [[7, 3]]));
+    room.tick();
+    expect(b.snap.players.find((v) => v.name === 'alex')!.og).toBe(glowCode(p.offhand.get(0)));
+    p.offhand.set(0, makeStack(I.SHIELD));
+    room.tick();
+    expect(b.snap.players.find((v) => v.name === 'alex')!.og).toBeUndefined();
+  });
+
+  it('sends the health of a hurt creature, and nothing for one at full health', () => {
+    const room = makeRoom();
+    const a = joinAt(room, 'alex');
+    const mob = room.realm.mobs.spawn('zombie', CX + 4.5, 70, CZ + 0.5);
+    room.tick();
+    const seen = () => a.snap.mobs.find((m) => m.id === mob.id);
+    expect(seen()).toBeDefined();
+    expect(seen()!.hp).toBeUndefined();
+    mob.health = mob.maxHealth / 2;
+    room.tick();
+    expect(seen()!.hp).toBe(Math.ceil(mob.maxHealth / 2));
+    expect(seen()!.mx).toBe(Math.round(mob.maxHealth));
+    mob.health = mob.maxHealth;
+    mob.elite = true;
+    room.tick();
+    expect(seen()!.el).toBe(1);
+    expect(seen()!.mx).toBe(Math.round(mob.maxHealth));
   });
 
   it('keeps an enchanted item through a save', () => {
@@ -1027,7 +1105,7 @@ describe('enchanting', () => {
     room.tick();
     expect(a.snap.inv?.menu?.kind).toBe('enchant');
     expect(b.snap.inv?.menu ?? null).toBeNull();
-    room.receive(b.id!, { t: 'cmd', c: { t: 'enchant', index: 0 } });
+    room.receive(b.id!, { t: 'cmd', c: { t: 'enchant', id: 1 } });
     room.tick();
     expect(room.player(b.id!)!.screen).toBe('none');
   });

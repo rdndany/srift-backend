@@ -10,6 +10,11 @@ target/
 .anchor/
 data/
 
+# Solana keypair files (the $SOLRIFT treasury key is a secret: never commit one)
+*keypair*.json
+*-keypair.json
+id.json
+
 .next/
 *.tsbuildinfo
 screenshots/

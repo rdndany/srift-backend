@@ -38,6 +38,10 @@ export function makeUiApi(parts: UiApiParts): UiApi {
     bags: session.bags,
     offhand: session.offhand,
     mountSlot: session.mountSlot,
+    outfitSlot: session.outfitSlot,
+    companionSlot: session.companionSlot,
+    wingSlot: session.wingSlot,
+    accessories: session.accessories,
     icons,
     menu: () => session.menu,
     click: (slot, button) => sendCommand({ t: 'click', slot, button }),
@@ -53,7 +57,7 @@ export function makeUiApi(parts: UiApiParts): UiApi {
     creativeClear: () => sendCommand({ t: 'creativeClear' }),
     creativeGear: (spec) => sendCommand({ t: 'creativeGear', spec }),
     trade: (index) => sendCommand({ t: 'trade', index }),
-    enchant: (index) => sendCommand({ t: 'enchant', index }),
+    enchant: (id, erase) => sendCommand({ t: 'enchant', id, ...(erase ? { erase: true } : {}) }),
     anvilName: (name) => sendCommand({ t: 'anvilName', name }),
     close() {
       sendCommand({ t: 'closeMenu' });

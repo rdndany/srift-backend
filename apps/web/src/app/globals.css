@@ -26,18 +26,19 @@
 @import './styles/forge.css';             /* the forge in the crafting grid and what a jewel does to a piece */
 @import './styles/enchanting.css';        /* enchanting table and anvil, the glint, and the flames while on fire */
 @import './styles/party.css';             /* the party: frame, invitation, window */
-@import './styles/minimap.css';           /* the map in the corner */
 @import './styles/quest-tracker.css';     /* the quests under the map, quest notes, the zone banner */
 @import './styles/quests.css';            /* the quest dialog and the quest log */
 @import './styles/coins.css';             /* the purse and the coin counts */
 @import './styles/frame-window.css';      /* the bronze window of the inventory and the crafting table */
 @import './styles/frame-tabs.css';        /* its tabs, the character's numbers, the hotbar under the window */
 @import './styles/frame-menus.css';       /* furnace, chest, trades, enchanting table, anvil, grindstone in the same window */
-@import './styles/frame-hud.css';         /* the HUD in the same frame: hotbar, bars, character frame, minimap, quests, party */
+@import './styles/frame-hud.css';         /* the HUD in the same frame: hotbar, bars, character frame, quests, party */
 @import './styles/frame-recipe-book.css'; /* the creative palette's tabs, search and list (the same pieces the recipe book once had) */
 @import './styles/crafting-book.css';      /* the Crafting tab: the grid, what a recipe needs, and the recipe book as a column */
 @import './styles/frame-dialogs.css';     /* party, quest log, quest dialog and shop as the same window */
 @import './styles/frame-quest-log.css';   /* the quest log made over: chapters, plates, the detail page */
 @import './styles/frame-quest-wells.css'; /* quest log and party with the studded frame and sunken wells */
+@import './styles/paperdoll.css';         /* the Inventory tab's paper doll (the character and what it wears), the Attributes tab */
 @import './styles/bags.css';              /* the bag bar and the bag windows */
+@import './styles/hud-scale.css';         /* the HUD scaled to the screen: --hud, set by HudScale.tsx */
 @import './styles/landing.css';           /* the presentation page (/welcome, the bare domain) */

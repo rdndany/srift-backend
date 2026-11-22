@@ -58,7 +58,7 @@ export const EXPANSIONS: readonly Expansion[] = [
       { kind: 'feature', name: 'Classes and abilities', blurb: 'Warrior, Mage or Ranger, each with a resource bar and four abilities learned as you level.', playable: true },
       { kind: 'feature', name: 'Gear and off-hand', blurb: 'Armor slots, a shield, orb or dagger in the off hand, bows and crossbows, and a character sheet with your stats.', playable: true },
       { kind: 'feature', name: 'Recipe book', blurb: 'Every recipe you know in one searchable book, with what is missing for each.', playable: true },
-      { kind: 'feature', name: 'Party, minimap and world map', blurb: 'Parties of up to four with health frames, a minimap in the corner and a map you can hold.', playable: true },
+      { kind: 'feature', name: 'Party and world map', blurb: 'Parties of up to four with health frames and a map you can hold.', playable: true },
     ],
   },
   {

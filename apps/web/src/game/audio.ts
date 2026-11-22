@@ -378,14 +378,196 @@ export class GameAudio {
     for (let i = 0; i < 2; i++) setTimeout(() => this.blip(1500 + i * 700 + Math.random() * 200, 0.7, 0.09, 0.4, 'bandpass'), i * 70);
   }
 
-  /** Enchanting: a rising shimmer of bright notes. The anvil rings and clanks instead. */
-  enchant(anvil = false): void {
+  /**
+   * The Runic Altar and the anvil. The anvil rings and clanks. The altar has its own sound, in the family of the jewels (bells
+   * and glitter in a reverb) but a different spell: a rune charging (a low swell that rises and a thin tone that sweeps up), the
+   * strike (a deep thump and a bell on the root with its fifth) and a rising run of notes that is the glyph's element:
+   * ember crackles, tide bubbles, storm cracks, verdant is a soft rain of chimes, shadow is low and cold, radiant is bright and
+   * high, arcane (and anything else) is a mystic whoosh. A higher rank is a longer run and a deeper thump. Erasing a glyph is
+   * the opposite: the notes fall and the air goes out of it.
+   */
+  enchant(anvil = false, fx?: { element?: string; rank?: number; erase?: boolean; fail?: boolean }): void {
     if (anvil) {
       this.blip(1100, 5, 0.3, 0.5, 'bandpass');
       setTimeout(() => this.blip(320, 1.2, 0.2, 0.6, 'lowpass'), 60);
       return;
     }
-    [880, 1109, 1319, 1760].forEach((f, i) => setTimeout(() => this.blip(f, 5, 0.22, 0.28, 'bandpass'), i * 80));
+    if (fx?.fail) return this.fizzle();
+    if (fx?.erase) return this.unbind();
+    this.inscribe(fx?.element ?? 'arcane', Math.max(1, Math.min(5, fx?.rank ?? 1)));
+  }
+
+  /**
+   * A rift: it tears open (a low groan that sinks, with a cold bell), opens (a rush, a thump and glitter), sends a wave (two horn calls),
+   * is sealed (a bright rising run of bells) or collapses (the notes fall). The higher its grade, the higher the pitch of it all.
+   */
+  rift(what: 'omen' | 'open' | 'wave' | 'sealed' | 'collapsed', grade: 'uncommon' | 'rare' | 'epic' = 'uncommon'): void {
+    if (!this.ctx || !this.master) return;
+    const k = grade === 'epic' ? 1.26 : grade === 'rare' ? 1.12 : 1;
+    switch (what) {
+      case 'omen':
+        this.swell(130 * k, 'sawtooth', 0.12, 0.5, 1.6, 0, 55 * k, 0.5, 700);
+        this.swell(65 * k, 'sine', 0.3, 0.3, 1.8, 0, 40, 0.2);
+        this.fmBell(311 * k, 0.12, 2.2, 0.5, 1.41, 3, 0.7);
+        this.fmBell(466 * k, 0.09, 2.4, 0.9, 1.41, 3, 0.7);
+        this.blip(180, 1.5, 1.2, 0.14, 'lowpass', 0.3);
+        break;
+      case 'open':
+        this.blip(300, 0.8, 0.9, 0.3, 'bandpass', 8);
+        this.swell(55 * k, 'sine', 0.4, 0.01, 0.9, 0.05, 28, 0.2);
+        this.swell(220 * k, 'triangle', 0.12, 0.05, 0.9, 0, 440 * k, 0.5, 2200);
+        this.fmBell(523 * k, 0.16, 1.8, 0.1, 2.76, 4, 0.6);
+        this.glitter(1200 * k, 8, 0.05, 0.15, 0.08);
+        break;
+      case 'wave':
+        this.swell(196 * k, 'sawtooth', 0.1, 0.06, 0.45, 0, 0, 0.4, 1400);
+        this.swell(294 * k, 'sawtooth', 0.09, 0.06, 0.6, 0.3, 0, 0.4, 1400);
+        this.swell(49 * k, 'sine', 0.3, 0.01, 0.5, 0.3, 30, 0.15);
+        break;
+      case 'sealed':
+        [523, 659, 784, 1047, 1319].forEach((hz, i) => this.fmBell(hz * k, 0.13 - i * 0.012, 1.6, i * 0.11, 2.76, 3, 0.6));
+        this.swell(131 * k, 'triangle', 0.14, 0.2, 1.2, 0, 262 * k, 0.5, 1800);
+        this.glitter(1800 * k, 10, 0.06, 0.5, 0.08);
+        break;
+      case 'collapsed':
+        this.swell(330 * k, 'triangle', 0.12, 0.02, 1.2, 0, 70, 0.4, 1600);
+        [880, 659, 494, 370].forEach((hz, i) => this.fmBell(hz * k, 0.09, 0.9, 0.05 + i * 0.14, 1.41, 2.5, 0.6));
+        this.blip(160, 1.2, 1.0, 0.16, 'lowpass', 0.3);
+        break;
+    }
+  }
+
+  /** One soft tone (sines and triangles) with a slow attack and an optional glide, a little of it sent through the reverb. */
+  private swell(freq: number, type: OscillatorType, gain: number, attack: number, dur: number, delay = 0, glideTo = 0, wet = 0.5, cutoff = 0): void {
+    if (!this.ctx || !this.master) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime + delay;
+    const out = ctx.createGain();
+    out.gain.setValueAtTime(0.0001, t);
+    out.gain.exponentialRampToValueAtTime(gain, t + attack);
+    out.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    const osc = ctx.createOscillator();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t);
+    if (glideTo) osc.frequency.exponentialRampToValueAtTime(glideTo, t + dur * 0.85);
+    let node: AudioNode = osc;
+    if (cutoff) {
+      const f = ctx.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.setValueAtTime(cutoff * 0.25, t);
+      f.frequency.exponentialRampToValueAtTime(cutoff, t + attack);
+      f.frequency.exponentialRampToValueAtTime(cutoff * 0.4, t + dur);
+      osc.connect(f);
+      node = f;
+    }
+    node.connect(out);
+    out.connect(this.master);
+    const tail = this.tail();
+    if (tail && wet > 0) {
+      const send = ctx.createGain();
+      send.gain.value = wet;
+      out.connect(send).connect(tail);
+    }
+    osc.start(t);
+    osc.stop(t + dur + 0.05);
+  }
+
+  private inscribe(element: string, rank: number): void {
+    // Each element: a root note (Hz) and the steps of its run (semitones), an arcane minor-ish or a bright major one.
+    const sets: Record<string, { root: number; steps: number[]; bell: number }> = {
+      ember: { root: 196, steps: [0, 3, 7, 10, 12], bell: 3.5 },
+      tide: { root: 220, steps: [0, 2, 7, 9, 14], bell: 2.76 },
+      storm: { root: 233, steps: [0, 5, 7, 12, 17], bell: 5.07 },
+      verdant: { root: 262, steps: [0, 4, 7, 9, 14], bell: 2.0 },
+      shadow: { root: 147, steps: [0, 3, 6, 10, 15], bell: 1.41 },
+      radiant: { root: 330, steps: [0, 4, 7, 12, 16], bell: 3.5 },
+      arcane: { root: 247, steps: [0, 3, 7, 12, 15], bell: 3.5 },
+    };
+    const set = sets[element] ?? sets.arcane;
+    const f = (semi: number, oct = 1): number => set.root * oct * Math.pow(2, semi / 12);
+    const charge = 0.42;
+
+    // The rune charging: a low swell and a thin tone sweeping up toward the strike.
+    this.swell(set.root, 'triangle', 0.16, 0.34, 0.62, 0, set.root * 2, 0.5, 1800);
+    this.swell(set.root * 1.5, 'sine', 0.08, 0.34, 0.6, 0, set.root * 3, 0.6);
+    this.swell(set.root * 4, 'sine', 0.035, 0.38, 0.5, 0, set.root * 8, 0.8);
+    this.blip(1500, 1.2, charge, 0.12, 'bandpass', 5);
+
+    // The strike: a thump below, a bell on the root and its fifth.
+    this.swell(set.root / 2, 'sine', 0.34 + rank * 0.03, 0.01, 0.55, charge, set.root / 4, 0.2);
+    this.fmBell(f(0, 4), 0.26, 1.7, charge, set.bell, 4.5, 0.5);
+    this.fmBell(f(7, 4), 0.12, 1.2, charge + 0.015, set.bell, 3, 0.5);
+    this.blip(8500, 0.7, 0.07, 0.12, 'highpass');
+
+    // The run of notes (longer with the rank) that climbs in the element's scale, ringing in the reverb.
+    const n = 2 + rank;
+    for (let i = 0; i < n; i++) {
+      const oct = i >= set.steps.length ? 8 : 4;
+      this.fmBell(f(set.steps[i % set.steps.length], oct), 0.13 - i * 0.012, 1.0 + (n - i) * 0.1, charge + 0.12 + i * 0.075, set.bell, 2.5, 0.7);
+    }
+    this.glitter(f(set.steps[2], 8), 5 + rank * 2, 0.05, charge + 0.2, 0.05, 2);
+
+    // The mark of the element.
+    const at = (ms: number, fn: () => void): void => void setTimeout(fn, ms);
+    switch (element) {
+      case 'ember':
+        for (let i = 0; i < 6; i++) at(charge * 1000 + 60 + i * (50 + Math.random() * 60), () => this.blip(2200 + Math.random() * 3000, 1.6, 0.03 + Math.random() * 0.03, 0.3, 'bandpass'));
+        this.blip(600, 0.5, 0.6, 0.22, 'lowpass', 3);
+        break;
+      case 'tide':
+        for (let i = 0; i < 4; i++) this.swell(520 + i * 170, 'sine', 0.07, 0.01, 0.16, charge + 0.06 + i * 0.07, 1300 + i * 220, 0.5);
+        this.blip(3500, 0.6, 0.7, 0.14, 'highpass', 0.4);
+        break;
+      case 'storm':
+        this.blip(6500, 0.6, 0.22, 0.36, 'highpass', 0.4);
+        this.swell(1400, 'sawtooth', 0.07, 0.005, 0.28, charge, 150, 0.3, 4000);
+        at(charge * 1000 + 180, () => this.blip(90, 1, 0.5, 0.45, 'lowpass', 0.6));
+        break;
+      case 'verdant':
+        for (let i = 0; i < 5; i++) this.swell(f(set.steps[i % 5], 8), 'sine', 0.05, 0.01, 0.7, charge + 0.1 + i * 0.09, 0, 0.7);
+        this.blip(5200, 0.5, 0.8, 0.07, 'highpass', 0.7);
+        break;
+      case 'shadow':
+        this.swell(set.root / 2, 'sine', 0.2, 0.3, 1.4, charge - 0.2, set.root / 3, 0.6, 400);
+        this.fmBell(f(-12, 2), 0.2, 2.2, charge, 1.41, 5, 0.6);
+        break;
+      case 'radiant':
+        this.fmBell(f(12, 4), 0.1, 1.6, charge + 0.05, 3.5, 3, 0.8);
+        this.fmBell(f(19, 4), 0.07, 1.4, charge + 0.12, 3.5, 2.5, 0.8);
+        this.blip(9500, 0.7, 0.4, 0.1, 'highpass');
+        break;
+      default:
+        this.blip(900, 1.5, 0.6, 0.18, 'bandpass', 6);
+        this.swell(f(0, 8), 'sine', 0.05, 0.02, 1.2, charge, f(12, 8), 0.9);
+    }
+  }
+
+  /**
+   * An inscription that failed: the same charge as the real one, then it goes wrong. The swell is a tone and a half step above it
+   * (a sour pair), the strike is a dry crack of noise and a flat clunk instead of a bell, two cracked bells fall a tritone apart and
+   * the air hisses out, with a low thud under it.
+   */
+  private fizzle(): void {
+    const root = 247;
+    this.swell(root, 'triangle', 0.14, 0.26, 0.5, 0, root * 1.9, 0.4, 1600);
+    this.swell(root * 1.059, 'sawtooth', 0.04, 0.26, 0.5, 0, root * 2.0, 0.3, 1200);
+    this.blip(1500, 1.2, 0.3, 0.1, 'bandpass', 5);
+    const t = 0.34;
+    setTimeout(() => this.blip(5200, 0.8, 0.12, 0.42, 'highpass', 0.4), t * 1000);
+    setTimeout(() => this.blip(900, 1.4, 0.2, 0.3, 'bandpass', 0.3), t * 1000 + 20);
+    this.swell(root / 2, 'sine', 0.3, 0.01, 0.4, t, root / 5, 0.15);
+    this.fmBell(698, 0.14, 0.55, t + 0.02, 1.41, 7, 0.4);
+    this.fmBell(494, 0.11, 0.6, t + 0.12, 1.41, 6, 0.4);
+    setTimeout(() => this.blip(3500, 0.6, 0.7, 0.14, 'highpass', 0.25), t * 1000 + 60);
+  }
+
+  /** A glyph taken off: the notes fall, the air goes out of the rune and a dull bell settles. */
+  private unbind(): void {
+    this.swell(660, 'triangle', 0.14, 0.02, 0.7, 0, 130, 0.4, 2400);
+    this.blip(4000, 0.8, 0.6, 0.16, 'bandpass', 0.15);
+    [1319, 988, 740, 587].forEach((hz, i) => this.fmBell(hz, 0.11 - i * 0.015, 0.7, 0.04 + i * 0.09, 2.76, 2.5, 0.6));
+    this.fmBell(220, 0.14, 1.0, 0.4, 1.41, 3, 0.4);
+    this.swell(110, 'sine', 0.18, 0.01, 0.45, 0.42, 55, 0.1);
   }
 
   /** A short reverb tail (a decaying noise impulse) that the jewel sounds are sent through, so they ring in a space. */

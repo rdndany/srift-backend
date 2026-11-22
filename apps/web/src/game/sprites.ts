@@ -1,5 +1,5 @@
 import { ICON_COLORS, OUTFIT_ICONS } from './outfitIcons';
-import { ARMOR_MATERIALS, ARMOR_SLOTS, OUTFIT_CLASSES, BED_RED, COMPASS_FRAMES, DYE_NAMES, DYE_RGB, TILE_PX, TOOL_KINDS, TOOL_MATERIALS, type ArmorMaterial, type ArmorSlot, type OutfitClass, type ToolKind, type ToolMaterial } from '@solrift/shared';
+import { ACCESSORY_MATERIALS, ARMOR_MATERIALS, ARMOR_SLOTS, COMPANIONS, WINGS, OUTFITS, OUTFIT_CLASSES, BED_RED, COMPASS_FRAMES, DYE_NAMES, DYE_RGB, TILE_PX, TOOL_KINDS, TOOL_MATERIALS, type AccessoryMaterial, type ArmorMaterial, type ArmorSlot, type CompanionDef, type WingDef, type OutfitClass, type OutfitDef, type ToolKind, type ToolMaterial } from '@solrift/shared';
 
 /**
  * Procedural item sprites (16x16). Each sprite is rasterised once into an RGBA
@@ -2724,6 +2724,79 @@ function outfitGrid(cls: OutfitClass, slotIndex: number): Cell[] {
   }
   return outline(g);
 }
+
+// ---- the glowing sets of the token shop ------------------------------------------------------------
+
+const cssRgb = (hex: string): RGB => {
+  const n = parseInt(hex.replace('#', '').slice(0, 6), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+};
+
+/**
+ * The picture of a glowing set: a bust in its own colours (the cloth, the second cloth, the trim) with its light at the heart of it, and the
+ * silhouette of its class (plate with spiked shoulders, a robe under a pointed hat, a hooded cloak with feathers). Sets of a higher tier glow more:
+ * they have a ring of sparks about them.
+ */
+function outfitSetGrid(def: OutfitDef): Cell[] {
+  const g = blank();
+  const cloth = cssRgb(def.shirt);
+  const lining = cssRgb(def.pants);
+  const trim = cssRgb(def.trim);
+  const glow = cssRgb(def.glow);
+  /** A block of colour, lit from the top left and shaded at the bottom right. */
+  const fill = (x0: number, y0: number, x1: number, y1: number, c: RGB): void => {
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) dot(g, x, y, shade(c, x === x0 || y === y0 ? 18 : x === x1 || y === y1 ? -26 : hashPx(x, y) < 0.2 ? -8 : 0));
+  };
+  const put = (list: [number, number][], c: RGB): void => list.forEach(([x, y]) => dot(g, x, y, c));
+  const gem = (x: number, y: number): void => {
+    put([[x, y], [x + 1, y], [x, y + 1], [x + 1, y + 1]], glow);
+    dot(g, x, y, shade(glow, 70));
+  };
+
+  if (def.cls === 'warrior') {
+    // Spiked pauldrons, a breastplate with a gem, a belt and faulds.
+    fill(1, 4, 4, 6, trim);
+    fill(11, 4, 14, 6, trim);
+    put([[1, 3], [2, 2], [14, 3], [13, 2]], shade(trim, 30));
+    fill(4, 3, 11, 10, cloth);
+    fill(6, 2, 9, 3, trim);
+    fill(4, 10, 11, 11, trim);
+    fill(4, 12, 7, 14, lining);
+    fill(8, 12, 11, 14, lining);
+    gem(7, 6);
+    put([[5, 5], [10, 5]], shade(cloth, 26));
+  } else if (def.cls === 'mage') {
+    // A pointed hat with a band and a star, over a robe that widens to the hem.
+    fill(7, 0, 8, 1, cloth);
+    fill(6, 2, 9, 3, cloth);
+    fill(5, 4, 10, 5, cloth);
+    fill(3, 5, 12, 5, trim);
+    dot(g, 7, 3, shade(glow, 60));
+    fill(5, 6, 10, 8, cloth);
+    fill(4, 9, 11, 11, cloth);
+    fill(3, 12, 12, 14, lining);
+    fill(3, 14, 12, 14, trim);
+    fill(4, 9, 11, 9, trim);
+    gem(7, 7);
+    put([[6, 6], [9, 6]], trim);
+  } else {
+    // A hood, a cloak with a strap and a quiver, and feathers of light at the shoulders.
+    fill(6, 1, 9, 2, cloth);
+    fill(5, 3, 10, 5, cloth);
+    put([[7, 4], [8, 4]], shade(cloth, -70));
+    fill(4, 6, 11, 9, cloth);
+    fill(3, 10, 12, 13, lining);
+    fill(3, 13, 12, 14, cloth);
+    for (let i = 0; i < 6; i++) dot(g, 5 + i, 6 + i, trim);
+    gem(7, 8);
+    put([[2, 7], [1, 6], [0, 5], [2, 8], [1, 8]], glow);
+    put([[13, 7], [14, 6], [15, 5], [13, 8], [14, 8]], glow);
+  }
+  // The higher the tier, the more it sparkles about the figure.
+  if (def.tier !== 'common') put([[0, 1], [15, 1], [1, 14]], shade(glow, 50));
+  if (def.tier === 'epic') put([[14, 14], [0, 9], [15, 9], [8, 0]], shade(glow, 80));
+  return outline(g);
+}
 // ---- lanterns and chains --------------------------------------------------------------------------------
 
 interface LanternPalette {
@@ -2937,6 +3010,370 @@ function flowerPotGrid(): Cell[] {
   return outline(g);
 }
 
+// ---- the parts of the companions and the companions (see companions.ts) ----------------------------------------------------------
+
+/** An Imp Horn: a short curved horn, dark red at the root and hot at the tip. */
+function impHornGrid(): Cell[] {
+  const g = blank();
+  const path: [number, number][] = [[4, 13], [5, 13], [4, 12], [5, 12], [6, 12], [5, 11], [6, 11], [7, 11], [6, 10], [7, 10], [8, 10], [7, 9], [8, 9], [9, 8], [8, 8], [9, 7], [10, 7], [10, 6], [11, 6], [11, 5], [12, 5], [12, 4], [13, 3]];
+  path.forEach(([x, y], i) => {
+    const t = i / (path.length - 1);
+    const c: RGB = [Math.round(112 + 143 * t), Math.round(22 + 130 * t * t), Math.round(18 + 40 * t)];
+    dot(g, x, y, shade(c, x + y < 14 ? 14 : -10));
+  });
+  // A ridge of light along the back of the horn and the ember at its point.
+  for (const [x, y] of [[5, 11], [6, 10], [7, 9], [8, 8], [9, 7]] as const) dot(g, x, y, [236, 120, 74]);
+  dot(g, 13, 3, [255, 226, 130]);
+  dot(g, 14, 2, [255, 170, 60]);
+  return outline(g);
+}
+
+/** A Cinder Heart: a heart of black stone with a fire in it, cracked, the cracks bright. */
+function cinderHeartGrid(): Cell[] {
+  const g = blank();
+  fillShape(
+    g,
+    (x, y) => {
+      const u = (x - 7.5) / 6.4;
+      const v = -(y - 8.2) / 6.2;
+      return Math.pow(u * u + v * v - 1, 3) - u * u * v * v * v <= 0;
+    },
+    (x, y) => {
+      const r = Math.hypot(x - 7.5, y - 8);
+      const heat = Math.max(0, 1 - r / 6);
+      const d = Math.floor(hashPx(x, y) * 12) - 6;
+      return shade([Math.round(70 + 170 * heat), Math.round(20 + 90 * heat * heat), 24], d + (x + y < 13 ? 10 : -8));
+    },
+  );
+  for (const [x, y] of [[7, 5], [7, 6], [8, 7], [7, 8], [6, 9], [7, 10], [8, 11]] as const) dot(g, x, y, [255, 208, 96]);
+  dot(g, 4, 5, [255, 160, 90]);
+  dot(g, 10, 5, [255, 160, 90]);
+  return outline(g);
+}
+
+/** A Seraph Feather: a long white quill with a vane that glows gold at the edge. */
+function seraphFeatherGrid(): Cell[] {
+  const g = blank();
+  const x0 = 3;
+  const y0 = 13.5;
+  const x1 = 12.5;
+  const y1 = 2.5;
+  const len = Math.hypot(x1 - x0, y1 - y0);
+  const ux = (x1 - x0) / len;
+  const uy = (y1 - y0) / len;
+  fillShape(
+    g,
+    (x, y) => {
+      const t = ((x - x0) * ux + (y - y0) * uy) / len;
+      const d = Math.abs(-(x - x0) * uy + (y - y0) * ux);
+      return t >= 0 && t <= 1 && d <= 3.1 * Math.pow(Math.sin(Math.PI * Math.min(1, t * 1.05 + 0.04)), 0.8) + 0.4;
+    },
+    (x, y) => {
+      const t = ((x - x0) * ux + (y - y0) * uy) / len;
+      const d = Math.abs(-(x - x0) * uy + (y - y0) * ux);
+      if (d < 0.6) return [255, 236, 170]; // the quill
+      const base: RGB = d > 2 ? [255, 224, 140] : [252, 250, 242];
+      return shade(base, Math.floor(hashPx(x, y) * 10) - 5 + (t > 0.7 ? 8 : 0));
+    },
+  );
+  dot(g, 2, 14, [214, 176, 96]);
+  dot(g, 13, 1, [255, 255, 220]);
+  return outline(g);
+}
+
+/** A Halo Ring: a ring of gold seen a little from above, with a glint. */
+function haloRingGrid(): Cell[] {
+  const g = blank();
+  fillShape(
+    g,
+    (x, y) => {
+      const r = Math.hypot((x - 7.5) / 6.4, (y - 8.5) / 3.6);
+      return r <= 1 && r >= 0.55;
+    },
+    (x, y) => {
+      const r = Math.hypot((x - 7.5) / 6.4, (y - 8.5) / 3.6);
+      const base: RGB = r > 0.8 ? [214, 158, 40] : [255, 226, 110];
+      return shade(base, y < 8.5 ? 16 : -14 + Math.floor(hashPx(x, y) * 8));
+    },
+  );
+  dot(g, 4, 7, [255, 255, 220]);
+  dot(g, 5, 6, [255, 255, 220]);
+  dot(g, 11, 4, [255, 255, 255]);
+  dot(g, 11, 3, [255, 246, 190]);
+  dot(g, 10, 4, [255, 246, 190]);
+  dot(g, 12, 4, [255, 246, 190]);
+  return outline(g);
+}
+
+// ---- rings and necklaces (see accessories.ts) ----------------------------------------------------------------------------
+
+/** The colour of the band or the chain of a piece of jewelry, by material (the diamond ones are set in a pale silver). */
+const JEWEL_BASE: Record<AccessoryMaterial, RGB> = {
+  leather: [150, 100, 58],
+  iron: [204, 208, 216],
+  gold: [248, 208, 46],
+  diamond: [226, 230, 240],
+};
+/** The stone set in a ring or hanging from a necklace (none for leather and iron rings). */
+const JEWEL_STONE: Record<AccessoryMaterial, RGB | null> = {
+  leather: null,
+  iron: null,
+  gold: [222, 52, 64],
+  diamond: [120, 240, 250],
+};
+
+/** A ring seen from the front: a round band, with a setting and a stone at the top (the stone is bright, the band shaded top to bottom). */
+function ringGrid(material: AccessoryMaterial): Cell[] {
+  const g = blank();
+  const base = JEWEL_BASE[material];
+  const stone = JEWEL_STONE[material];
+  fillShape(
+    g,
+    (x, y) => {
+      const r = Math.hypot(x - 7.5, y - 9.5);
+      return r <= 5.4 && r >= 3;
+    },
+    (x, y) => {
+      const r = Math.hypot(x - 7.5, y - 9.5);
+      const lit = y < 9.5 ? 22 : -22;
+      return shade(base, lit + (r > 4.4 ? -10 : 8) + Math.floor(hashPx(x, y) * 8));
+    },
+  );
+  if (material === 'leather') {
+    // Stitches along the band.
+    for (const [x, y] of [[3, 8], [4, 12], [7, 14], [11, 13], [12, 8]] as const) dot(g, x, y, shade(base, -62));
+  }
+  // The setting: a small block above the band that holds the stone.
+  for (let x = 6; x <= 9; x++) for (let y = 3; y <= 5; y++) dot(g, x, y, shade(base, y === 3 ? 18 : -8));
+  if (stone) {
+    for (let x = 7; x <= 8; x++) for (let y = 2; y <= 4; y++) dot(g, x, y, shade(stone, y === 2 ? 40 : x === 7 ? 14 : -28));
+    dot(g, 7, 2, [255, 255, 255]);
+  } else {
+    dot(g, 7, 3, shade(base, 40));
+  }
+  return outline(g);
+}
+
+/** A necklace: a chain (or a cord) hanging in a curve from the top corners, and a pendant at the bottom. */
+function necklaceGrid(material: AccessoryMaterial): Cell[] {
+  const g = blank();
+  const stone = JEWEL_STONE[material];
+  const chain: RGB = material === 'diamond' ? JEWEL_BASE.gold : JEWEL_BASE[material];
+  const side: [number, number][] = [[1, 1], [2, 3], [3, 5], [4, 7], [6, 9], [7, 10]];
+  side.forEach(([x, y], i) => {
+    const c = material === 'leather' ? shade(chain, i % 2 === 0 ? 0 : -14) : shade(chain, i % 2 === 0 ? 24 : -24);
+    dot(g, x, y, c);
+    dot(g, 15 - x, y, c);
+    // A second pixel makes the line two thick where it climbs steeply.
+    if (i < side.length - 1) {
+      dot(g, x + 1, y, shade(c, -10));
+      dot(g, 14 - x, y, shade(c, -10));
+    }
+  });
+  // The pendant.
+  if (material === 'diamond' && stone) {
+    fillShape(g, (x, y) => Math.abs(x - 7.5) + Math.abs(y - 12) <= 3.4, (x, y) => shade(stone, y < 12 ? 24 : -26 + (x < 7.5 ? 10 : 0)));
+    dot(g, 6, 11, [255, 255, 255]);
+    dot(g, 7, 10, [210, 252, 255]);
+  } else {
+    const base = JEWEL_BASE[material];
+    fillShape(g, (x, y) => Math.hypot(x - 7.5, y - 12.3) <= 2.9, (x, y) => shade(base, (y < 12.3 ? 20 : -22) + Math.floor(hashPx(x, y) * 8)));
+    if (stone) {
+      dot(g, 7, 12, stone);
+      dot(g, 8, 12, shade(stone, -30));
+      dot(g, 7, 11, shade(stone, 50));
+    } else {
+      dot(g, 7, 11, shade(base, 44));
+    }
+  }
+  return outline(g);
+}
+
+/** The Cinder Imp: a round red head with two horns, yellow eyes and a grin of fangs, over a flame. */
+function cinderImpGrid(def: CompanionDef): Cell[] {
+  const g = blank();
+  const body = cssRgb(def.body);
+  const glow = cssRgb(def.glow);
+  const trim = cssRgb(def.trim);
+  // Little wings behind the head.
+  for (const [x, y] of [[1, 5], [2, 4], [2, 5], [3, 6], [1, 6], [14, 5], [13, 4], [13, 5], [12, 6], [14, 6]] as const) dot(g, x, y, shade(body, -40));
+  // The head.
+  fillShape(
+    g,
+    (x, y) => Math.hypot((x - 7.5) / 5.2, (y - 8.8) / 4.8) <= 1,
+    (x, y) => shade(body, (x + y < 15 ? 22 : -20) + Math.floor(hashPx(x, y) * 10) - 5),
+  );
+  // Horns.
+  for (const [x, y] of [[3, 4], [4, 3], [4, 4], [3, 2], [2, 1], [12, 4], [11, 3], [11, 4], [12, 2], [13, 1]] as const) dot(g, x, y, shade(trim, x < 8 ? 10 : -10));
+  dot(g, 2, 1, glow);
+  dot(g, 13, 1, glow);
+  // Eyes, a nose and a grin.
+  for (const [x, y] of [[5, 7], [6, 7], [9, 7], [10, 7]] as const) dot(g, x, y, [255, 232, 120]);
+  dot(g, 6, 7, [40, 10, 6]);
+  dot(g, 9, 7, [40, 10, 6]);
+  for (const x of [5, 6, 7, 8, 9, 10]) dot(g, x, 11, [38, 8, 8]);
+  dot(g, 5, 10, [38, 8, 8]);
+  dot(g, 10, 10, [38, 8, 8]);
+  dot(g, 6, 12, [255, 248, 230]);
+  dot(g, 9, 12, [255, 248, 230]);
+  // The flame it floats on.
+  for (const [x, y] of [[7, 14], [8, 14], [7, 15], [8, 13]] as const) dot(g, x, y, glow);
+  dot(g, 7, 15, [255, 214, 100]);
+  return outline(g);
+}
+
+/** The Dawn Seraph: a pale round head under a ring of light, two feathered wings and a calm face. */
+function dawnSeraphGrid(def: CompanionDef): Cell[] {
+  const g = blank();
+  const body = cssRgb(def.body);
+  const trim = cssRgb(def.trim);
+  const glow = cssRgb(def.glow);
+  // Wings, with the feathers showing along their lower edge.
+  for (const sx of [-1, 1]) {
+    for (let i = 0; i < 4; i++) {
+      for (let j = 0; j < 5 - i; j++) {
+        const x = sx < 0 ? 3 - i - 0 : 12 + i;
+        dot(g, x, 5 + j + i, shade(body, j === 4 - i ? -34 : -6 + i * 4));
+      }
+    }
+  }
+  // The head.
+  fillShape(
+    g,
+    (x, y) => Math.hypot((x - 7.5) / 4.6, (y - 9) / 4.6) <= 1,
+    (x, y) => shade(body, (x + y < 16 ? 12 : -14) + Math.floor(hashPx(x, y) * 8) - 4),
+  );
+  // The halo.
+  for (const x of [5, 6, 7, 8, 9, 10]) dot(g, x, 2, trim);
+  dot(g, 4, 3, trim);
+  dot(g, 11, 3, trim);
+  for (const x of [5, 6, 7, 8, 9, 10]) dot(g, x, 3, shade(trim, -50));
+  dot(g, 7, 1, glow);
+  dot(g, 8, 1, glow);
+  // Eyes (shut, content) and a small smile.
+  for (const [x, y] of [[5, 9], [6, 9], [9, 9], [10, 9]] as const) dot(g, x, y, [96, 74, 40]);
+  dot(g, 6, 12, [214, 150, 120]);
+  dot(g, 7, 12, [214, 150, 120]);
+  dot(g, 8, 12, [214, 150, 120]);
+  dot(g, 4, 11, [250, 190, 170]);
+  dot(g, 11, 11, [250, 190, 170]);
+  return outline(g);
+}
+
+
+// ---- the frame and the feather of the wings, and the wings (see wings.ts) ----------------------------------------------------------
+
+/** A tapering quill from (x0, y0) to (x1, y1), at most `w` wide at its fullest: `color` gives each pixel, `d` is how far it is from the shaft (0 on it). */
+function quill(g: Cell[], x0: number, y0: number, x1: number, y1: number, w: number, color: (t: number, d: number, x: number, y: number) => RGB): void {
+  const len = Math.hypot(x1 - x0, y1 - y0);
+  const ux = (x1 - x0) / len;
+  const uy = (y1 - y0) / len;
+  fillShape(
+    g,
+    (x, y) => {
+      const t = ((x - x0) * ux + (y - y0) * uy) / len;
+      const d = Math.abs(-(x - x0) * uy + (y - y0) * ux);
+      return t >= 0 && t <= 1 && d <= w * Math.pow(Math.sin(Math.PI * Math.min(1, t * 0.9 + 0.1)), 0.7) + 0.35;
+    },
+    (x, y) => {
+      const t = ((x - x0) * ux + (y - y0) * uy) / len;
+      const d = Math.abs(-(x - x0) * uy + (y - y0) * ux);
+      return color(t, d, x, y);
+    },
+  );
+}
+
+/** A Wing Frame: two bars of iron on a spine of bone, the arch the wings are stretched on. */
+function wingFrameGrid(): Cell[] {
+  const g = blank();
+  const iron: RGB = [196, 202, 214];
+  const bone: RGB = [236, 228, 204];
+  // The spine, and a bar from its top out to each side, bending down at the end.
+  for (let y = 4; y <= 13; y++) for (const x of [7, 8]) dot(g, x, y, shade(bone, x === 7 ? 10 : -14));
+  for (const sx of [-1, 1]) {
+    const pts: [number, number][] = [[6, 5], [5, 4], [4, 3], [3, 3], [2, 3], [1, 4], [1, 5], [1, 6], [1, 7]];
+    pts.forEach(([x, y], i) => dot(g, sx < 0 ? x : 15 - x, y, shade(iron, i % 2 ? -12 : 8)));
+    for (const [x, y] of [[6, 8], [5, 8], [4, 9], [3, 10], [2, 10]] as const) dot(g, sx < 0 ? x : 15 - x, y, shade(iron, -22));
+  }
+  dot(g, 7, 3, [255, 255, 255]);
+  dot(g, 8, 3, bone);
+  return outline(g);
+}
+
+/** A Storm Feather: a long quill the blue of a sky before rain, with the white of a lightning at its heart. */
+function stormFeatherGrid(): Cell[] {
+  const g = blank();
+  quill(g, 3, 13.5, 12.5, 2.5, 3.2, (t, d, x, y) => {
+    if (d < 0.6) return [236, 246, 255];
+    const base: RGB = d > 2 ? [70, 120, 230] : [150, 208, 250];
+    return shade(base, Math.floor(hashPx(x, y) * 10) - 5 + (t > 0.7 ? 10 : 0));
+  });
+  for (const [x, y] of [[8, 8], [7, 9], [8, 10], [7, 11]] as const) dot(g, x, y, [255, 240, 140]);
+  dot(g, 2, 14, [150, 150, 170]);
+  dot(g, 13, 1, [255, 255, 255]);
+  return outline(g);
+}
+
+/** A pair of wings, spread, in the colours of the wings: a bat's skin on bone, long feathers, or blades of glass. Wings of the second kind have more of everything and a light on them. */
+function wingsGrid(def: WingDef): Cell[] {
+  const g = blank();
+  const body = cssRgb(def.body);
+  const trim = cssRgb(def.trim);
+  const glow = cssRgb(def.glow);
+  const t2 = def.tier === 2;
+  const both = (x: number, y: number, c: RGB): void => {
+    dot(g, x, y, c);
+    dot(g, 15 - x, y, shade(c, -10));
+  };
+  if (def.shape === 'bat') {
+    // Membrane hung from an arm of bone that rises to the wrist, scalloped along the lower edge between the fingers.
+    const fingers = t2 ? [1, 3, 5] : [2, 4];
+    for (let x = 0; x <= 6; x++) {
+      const top = Math.round(2 + x * 0.65);
+      const bottom = [9, 12, 9, 13, 10, 13, 12][x] + (t2 ? 1 : 0);
+      for (let y = top; y <= Math.min(14, bottom); y++) both(x, y, shade(body, (y - top) * -2 + (x < 3 ? 8 : -4) + Math.floor(hashPx(x, y) * 8) - 4));
+    }
+    for (let x = 0; x <= 6; x++) both(x, Math.round(2 + x * 0.65), shade(trim, 40));
+    for (const fx of fingers) for (let y = Math.round(2 + fx * 0.65); y <= [9, 12, 9, 13, 10, 13, 12][fx] + (t2 ? 1 : 0); y++) both(fx, y, shade(trim, 24));
+    both(0, 1, shade(trim, 60));
+    if (t2) {
+      both(0, 0, glow);
+      both(2, 14, glow);
+    }
+    for (const x of [6, 7]) for (let y = 7; y <= 13; y++) dot(g, x === 6 ? 6 : 9, y, shade(trim, 30));
+  } else if (def.shape === 'feather') {
+    // Quills fanned out from the shoulder: the longest at the top, shorter below, edged in the colour of the trim.
+    const set: [number, number][] = t2 ? [[0.3, 1.2], [0.4, 4.2], [0.6, 7.2], [1.2, 10], [2.6, 12.2], [4.4, 13.2]] : [[0.5, 2.5], [0.6, 6], [1.2, 9.5], [3, 12.2]];
+    for (const [tx, ty] of set) {
+      for (const sx of [0, 1]) {
+        const x0 = sx ? 9.2 : 6.3;
+        const x1 = sx ? 15 - tx : tx;
+        quill(g, x0, 11.2, x1, ty, 1.7, (tt, d, x, y) => {
+          if (d < 0.5) return shade(trim, 30);
+          return shade(d > 1.3 ? trim : body, Math.floor(hashPx(x, y) * 10) - 5 + (tt > 0.75 ? (t2 ? 14 : 6) : 0));
+        });
+      }
+    }
+    if (t2) for (const [x, y] of [[1, 1], [14, 1], [4, 14], [11, 14]] as const) dot(g, x, y, glow);
+  } else {
+    // Blades of glass fanned from the shoulder, veined down the middle.
+    const set: [number, number][] = t2 ? [[0.5, 1.5], [0, 6], [0.8, 11], [3.5, 13.5]] : [[0.8, 2], [0.2, 8.5], [2.6, 13.2]];
+    for (const [tx, ty] of set) {
+      for (const sx of [0, 1]) {
+        const x0 = sx ? 9 : 6.5;
+        const x1 = sx ? 15 - tx : tx;
+        quill(g, x0, 10.8, x1, ty, 2.1, (tt, d, x, y) => {
+          if (d < 0.55) return shade(glow, tt > 0.6 ? 0 : -30);
+          return shade(d > 1.5 ? trim : body, Math.floor(hashPx(x, y) * 10) - 5 + (tt > 0.7 ? 10 : 0));
+        });
+      }
+    }
+  }
+  // The shoulders, where the two meet.
+  for (const y of [10, 11, 12]) for (const x of [7, 8]) dot(g, x, y, shade(trim, x === 7 ? 30 : 10));
+  return outline(g);
+}
+
 const BUILDERS: Record<string, () => Cell[]> = {
   lantern: () => lanternSideGrid(false, false),
   lantern_hang: () => lanternSideGrid(false, true),
@@ -3076,6 +3513,10 @@ const BUILDERS: Record<string, () => Cell[]> = {
   warden_scroll: wardenScrollGrid,
   hollow_bone: hollowBoneGrid,
   hollow_sigil: hollowSigilGrid,
+  imp_horn: impHornGrid,
+  cinder_heart: cinderHeartGrid,
+  seraph_feather: seraphFeatherGrid,
+  halo_ring: haloRingGrid,
   coal: coalGrid,
   raw_iron: () => rawOreGrid([222, 170, 140]),
   raw_gold: () => rawOreGrid([250, 214, 56]),
@@ -3160,6 +3601,15 @@ BUILDERS.armor_stand = armorStandGrid;
 for (const m of TOOL_MATERIALS) for (const k of TOOL_KINDS) BUILDERS[`${m}_${k}`] = () => toolGrid(k, m);
 for (const m of ARMOR_MATERIALS) for (const s of ARMOR_SLOTS) BUILDERS[`${m}_${s}`] = () => armorGrid(s, m);
 for (const c of OUTFIT_CLASSES) ARMOR_SLOTS.forEach((s, i) => (BUILDERS[`outfit_${c}_${s}`] = () => outfitGrid(c, i)));
+for (const o of OUTFITS) BUILDERS[`outfit_set_${o.id}`] = () => outfitSetGrid(o);
+BUILDERS.wing_frame = wingFrameGrid;
+BUILDERS.storm_feather = stormFeatherGrid;
+for (const w of WINGS) BUILDERS[`wings_${w.id}`] = () => wingsGrid(w);
+for (const m of ACCESSORY_MATERIALS) {
+  BUILDERS[`${m}_ring`] = () => ringGrid(m);
+  BUILDERS[`${m}_necklace`] = () => necklaceGrid(m);
+}
+for (const c of COMPANIONS) BUILDERS[`companion_${c.id}`] = () => (c.id === 'cinder-imp' ? cinderImpGrid(c) : dawnSeraphGrid(c));
 
 /** Returns a 16x16 RGBA getter for a sprite name, or null if the name is not an item sprite. */
 export function spritePainter(name: string): ((x: number, y: number) => SpritePixel) | null {

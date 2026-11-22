@@ -13,6 +13,8 @@ export interface AccountInfo {
   wallet: string;
   /** The look (`lookCode`) of the character in play, or null when the wallet has not made one yet. */
   look: number | null;
+  /** The outfit (an id from `OUTFITS`) the character in play wears, or null. */
+  outfit: string | null;
   /** The class of the character in play (null: none yet, or one from before classes). */
   class: ClassId | null;
   /** All of the wallet's characters, oldest first. */
@@ -44,6 +46,8 @@ interface AuthState {
   selectCharacter(id: string): Promise<AccountInfo>;
   /** Delete the character in play and all its progress (server and this device); confirm is its name. Another character, if any, takes its place. */
   deleteCharacter(confirm: string): Promise<AccountInfo>;
+  /** Take the account the server just described (for example after a hero slot was bought, which changes `maxCharacters`). */
+  applyAccount(account: AccountInfo): void;
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -131,6 +135,10 @@ export const useAuth = create<AuthState>()((set, get) => {
       enter(res.account);
       return res.account;
     },
+    applyAccount(account) {
+      enter(account);
+    },
+
     async logout() {
       set({ busy: true, error: '' });
       try {

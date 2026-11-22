@@ -1,4 +1,4 @@
-/* ---- enchanting ---- */
+/* ---- glyphs: the shimmer on an inscribed piece (tinted by its strongest element), and the Runic Altar ---- */
 .glint {
   position: absolute;
   inset: 0;
@@ -6,9 +6,73 @@
   mask-size: 100% 100%;
   -webkit-mask-size: 100% 100%;
   image-rendering: pixelated;
-  background: linear-gradient(115deg, transparent 25%, rgba(190, 120, 255, 0.85) 45%, rgba(120, 90, 255, 0.5) 55%, transparent 75%) 0 0 / 300% 100%;
+  background: linear-gradient(115deg, transparent 22%, color-mix(in srgb, var(--gl, #be78ff) 55%, #fff) 44%, var(--gl, #be78ff) 52%, transparent 74%) 0 0 / 300% 100%;
   mix-blend-mode: screen;
-  animation: glint-sweep 2.4s linear infinite;
+  animation: glint-sweep 1.9s linear infinite;
+}
+/* The piece itself: it breathes light in its element's colour, and a pulse of the same colour rests behind it. */
+.ench-icon {
+  animation: ench-breathe 2.6s ease-in-out infinite;
+}
+@keyframes ench-breathe {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 1px var(--gl, #be78ff)) brightness(1);
+  }
+  50% {
+    filter: drop-shadow(0 0 4px var(--gl, #be78ff)) drop-shadow(0 0 7px color-mix(in srgb, var(--gl, #be78ff) 60%, transparent)) brightness(1.18);
+  }
+}
+.ench-aura {
+  position: absolute;
+  inset: -2px;
+  pointer-events: none;
+  border-radius: 6px;
+  background: radial-gradient(circle at 50% 55%, color-mix(in srgb, var(--gl, #be78ff) 55%, transparent) 0%, color-mix(in srgb, var(--gl, #be78ff) 18%, transparent) 55%, transparent 80%);
+  mix-blend-mode: screen;
+  animation: ench-aura 2.6s ease-in-out infinite;
+}
+@keyframes ench-aura {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.95;
+  }
+}
+/* Little four-pointed sparks that rise off the piece and fade. */
+.ench-sparks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+.ench-sparks i {
+  position: absolute;
+  bottom: 18%;
+  width: 5px;
+  height: 5px;
+  opacity: 0;
+  background:
+    linear-gradient(var(--gl, #fff), var(--gl, #fff)) center / 100% 1px no-repeat,
+    linear-gradient(var(--gl, #fff), var(--gl, #fff)) center / 1px 100% no-repeat;
+  filter: drop-shadow(0 0 2px var(--gl, #fff)) brightness(1.6);
+  animation: ench-spark 2.1s ease-out infinite;
+}
+@keyframes ench-spark {
+  0% {
+    opacity: 0;
+    transform: translateY(0) scale(0.4);
+  }
+  25% {
+    opacity: 1;
+    transform: translateY(-8px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-26px) scale(0.5);
+  }
 }
 @keyframes glint-sweep {
   from {
@@ -17,82 +81,6 @@
   to {
     background-position: -150% 0;
   }
-}
-.ench-row {
-  display: flex;
-  gap: 18px;
-  align-items: flex-start;
-  margin-bottom: 8px;
-}
-.ench-slots {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-}
-.ench-offers {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 300px;
-}
-.ench-offer {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  height: 52px;
-  padding: 0 10px;
-  background: #2c2640;
-  border: 2px solid #14101e;
-  border-right-color: #4a4268;
-  border-bottom-color: #4a4268;
-  color: #8f87b0;
-  font: inherit;
-  cursor: default;
-}
-.ench-offer .clue {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-align: left;
-  font-size: 14px;
-}
-.ench-offer .need {
-  color: #5a8cff;
-  font-weight: bold;
-}
-.ench-offer .cost {
-  min-width: 28px;
-  text-align: right;
-  font-size: 20px;
-  font-weight: bold;
-  color: #d25a5a;
-  text-shadow: 1px 1px #000;
-}
-.ench-offer.ok {
-  cursor: pointer;
-  color: #f2e8ff;
-  background: #4a3a78;
-}
-.ench-offer.ok:hover {
-  background: #6a52a8;
-}
-.ench-offer.ok .cost {
-  color: #7dff7d;
-}
-.ench-warning {
-  margin-top: 4px;
-  font-size: 13px;
-  color: #ff6a6a;
-  text-align: left;
-  text-shadow: 1px 1px #000;
-}
-.ench-level {
-  color: #7dff7d;
-}
-.ench-offer.none {
-  opacity: 0.5;
 }
 .anvil-name {
   display: block;
@@ -111,20 +99,6 @@
 }
 .anvil-name:disabled {
   opacity: 0.5;
-}
-.galactic {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-}
-.galactic-gap {
-  display: inline-block;
-}
-.ench-offer .clue {
-  color: #cfc4f0;
-}
-.ench-offer.ok .clue {
-  color: #f2e8ff;
 }
 .anvil-cost.bad {
   color: #ff6a6a;
@@ -159,10 +133,551 @@
 /* Notes under a screen wrap inside the panel's width (set by the inventory grid) instead of stretching it. */
 #menu-screen .anvil-cost,
 #menu-screen [data-testid="grind-note"],
-#menu-screen .ench-warning {
+#menu-screen .ench-warning,
+#menu-screen .altar-empty {
+  height: var(--altar-body, 276px);
+  justify-content: center;
   width: 0;
   min-width: 100%;
   white-space: normal;
   box-sizing: border-box;
 }
 
+
+/* ---- the Runic Altar ---- */
+.altar {
+  --glow: #c8b6ff;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  margin-bottom: 8px;
+  text-align: left;
+}
+.altar-top {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+.altar-stage {
+  position: relative;
+  flex: none;
+  width: 150px;
+  height: 150px;
+}
+.altar-runes {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.altar-runes .r-line {
+  fill: none;
+  stroke: color-mix(in srgb, var(--glow) 75%, #fff 10%);
+  stroke-width: 1.4;
+  opacity: 0.75;
+}
+.altar-runes .r-line.thin {
+  stroke-width: 0.8;
+  opacity: 0.5;
+}
+.altar-runes .r-tick {
+  stroke: color-mix(in srgb, var(--glow) 80%, #fff 10%);
+  stroke-width: 1.4;
+  opacity: 0.8;
+}
+.altar-runes circle.off {
+  opacity: 0.25;
+}
+.altar-runes .ring-a,
+.altar-runes .ring-b {
+  transform-origin: 100px 100px;
+  animation: altar-spin 60s linear infinite;
+}
+.altar-runes .ring-b {
+  animation-duration: 38s;
+  animation-direction: reverse;
+}
+@keyframes altar-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.altar-slot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  padding: 4px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(14, 10, 26, 0.9) 55%, transparent 100%);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--glow) 60%, transparent);
+}
+.altar-slot .slot-grid {
+  margin: 0;
+}
+.altar-flash {
+  position: absolute;
+  inset: 8px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(circle, color-mix(in srgb, var(--fx) 80%, #fff) 0%, var(--fx) 30%, transparent 70%);
+  mix-blend-mode: screen;
+  opacity: 0;
+  animation: altar-flash 0.9s ease-out;
+}
+.altar-flash.erase {
+  --fx: #8c8c9c;
+  animation-duration: 0.5s;
+}
+@keyframes altar-flash {
+  0% {
+    opacity: 0.95;
+    transform: scale(0.5);
+  }
+  60% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.25);
+  }
+}
+.altar-side {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.am-label {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #a99dcb;
+  margin-bottom: 3px;
+}
+.altar-meter {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  column-gap: 8px;
+}
+.altar-meter .am-label {
+  grid-column: 1 / -1;
+}
+.altar-meter .pips {
+  display: flex;
+  gap: 2px;
+}
+.altar-meter .pips i {
+  flex: 1;
+  height: 9px;
+  background: #241d38;
+  border: 1px solid #0d0a16;
+  transform: skewX(-18deg);
+}
+.altar-meter .pips i.on {
+  background: linear-gradient(#ffe9a8, #d49a2c);
+  box-shadow: 0 0 5px rgba(255, 210, 110, 0.7);
+}
+.altar-meter b {
+  color: #ffe58a;
+  font-size: 14px;
+  min-width: 18px;
+  text-align: right;
+  text-shadow: 1px 1px #000;
+}
+.sock-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.sock-row em {
+  color: #6f6690;
+  font-size: 12px;
+}
+.sock {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background: #1a1428;
+  border: 2px solid #3e3560;
+  border-radius: 50%;
+  cursor: default;
+  box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.8);
+}
+.sock.full {
+  cursor: pointer;
+  border-color: #8f7fd0;
+  background: #2a2146;
+}
+.sock.sel {
+  border-color: #ffe58a;
+  box-shadow: 0 0 8px rgba(255, 229, 138, 0.7);
+}
+.altar-purse {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+.altar-purse span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.altar-purse b {
+  color: #e8e0ff;
+  font-size: 15px;
+  text-shadow: 1px 1px #000;
+}
+.altar-purse b.short,
+.cost-chip.short {
+  color: #ff7a7a;
+}
+.altar-purse img,
+.cost-chip img {
+  image-rendering: pixelated;
+}
+.altar-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  background: #1c1630;
+  border: 2px dashed #4a3f72;
+  color: #b9afdc;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.altar-empty b {
+  color: #ffe58a;
+  font-size: 15px;
+}
+.altar-body {
+  height: var(--altar-body, 276px);
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+.glyph-list {
+  flex: 1 1 52%;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-right: 3px;
+  scrollbar-width: thin;
+  scrollbar-color: #5b4e86 #1a1626;
+}
+.glyph-row {
+  --el: #c8b6ff;
+  display: grid;
+  grid-template-columns: 30px 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 2px 8px 2px 4px;
+  background: #241d38;
+  border: 2px solid #120e1e;
+  border-left: 3px solid color-mix(in srgb, var(--el) 70%, #000);
+  color: #e8e0ff;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.glyph-row:hover {
+  background: #31284d;
+}
+.glyph-row.sel {
+  background: #3b2f62;
+  border-color: color-mix(in srgb, var(--el) 80%, #000);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--el) 40%, transparent);
+}
+.glyph-row:not(.ok):not(.has) {
+  color: #8f87b0;
+}
+.glyph-row.has .g-name {
+  color: #fff;
+}
+.glyph-row.has::after {
+  content: '';
+}
+.g-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.g-tier {
+  margin-left: 6px;
+  font-style: normal;
+  font-size: 8px;
+  letter-spacing: 1px;
+  color: color-mix(in srgb, var(--el) 80%, #fff);
+  vertical-align: 2px;
+}
+.g-rank {
+  color: color-mix(in srgb, var(--el) 70%, #fff);
+  font-size: 12px;
+  font-weight: bold;
+  white-space: nowrap;
+}
+.g-state {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #c98a8a;
+  min-width: 0;
+}
+.glyph-row.lapis .g-state,
+.glyph-row.auren .g-state {
+  color: #d9b45a;
+}
+.glyph-detail {
+  --el: #c8b6ff;
+  flex: 1 1 48%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 9px 10px;
+  background: linear-gradient(#211a38, #181328);
+  border: 2px solid #120e1e;
+  border-top: 3px solid color-mix(in srgb, var(--el) 75%, #000);
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #5b4e86 #1a1626;
+}
+.gd-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.gd-name {
+  font-size: 16px;
+  font-weight: bold;
+  color: #fff;
+  text-shadow: 1px 1px #000;
+}
+.gd-sub {
+  font-size: 11px;
+  color: #a99dcb;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.gd-el {
+  color: var(--el);
+  font-weight: bold;
+}
+.rank-pips {
+  display: inline-flex;
+  gap: 3px;
+  margin-left: 4px;
+}
+.rank-pips i {
+  width: 9px;
+  height: 9px;
+  background: #241d38;
+  border: 1px solid #5b4e86;
+  transform: rotate(45deg) scale(0.85);
+}
+.rank-pips i.on {
+  background: var(--el);
+  border-color: var(--el);
+  box-shadow: 0 0 5px var(--el);
+}
+.rank-pips i.next {
+  border-color: var(--el);
+  animation: pip-pulse 1.2s ease-in-out infinite;
+}
+@keyframes pip-pulse {
+  50% {
+    background: color-mix(in srgb, var(--el) 40%, transparent);
+  }
+}
+.gd-text {
+  font-size: 12px;
+  line-height: 1.4;
+  color: #cfc4f0;
+}
+.gd-text .now {
+  color: #8f87b0;
+  margin-bottom: 3px;
+}
+.gd-text .next {
+  color: #8dff9a;
+}
+.gd-cost {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.cost-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  background: #120e1e;
+  border: 1px solid #4a3f72;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: bold;
+  color: #e8e0ff;
+}
+.cost-chip.lore {
+  color: #ffe58a;
+}
+.cost-chip.lore.short {
+  color: #ff7a7a;
+}
+.gd-why {
+  font-size: 12px;
+  color: #ff9a8a;
+  line-height: 1.35;
+}
+.gd-actions {
+  margin-top: auto;
+  display: flex;
+  gap: 6px;
+}
+.gd-actions button {
+  font: inherit;
+  font-size: 13px;
+  font-weight: bold;
+  padding: 7px 10px;
+  cursor: pointer;
+  border: 2px solid #120e1e;
+  color: #fff;
+  text-shadow: 1px 1px #000;
+}
+.gd-actions .inscribe {
+  flex: 1;
+  background: linear-gradient(color-mix(in srgb, var(--el) 55%, #3b2f62), color-mix(in srgb, var(--el) 25%, #241d38));
+  border-color: color-mix(in srgb, var(--el) 70%, #000);
+}
+.gd-actions .inscribe:hover:not(:disabled) {
+  filter: brightness(1.25);
+}
+.gd-actions .inscribe:disabled {
+  cursor: default;
+  background: #2a2540;
+  border-color: #120e1e;
+  color: #7d7599;
+}
+.gd-actions .erase {
+  background: #3a2430;
+  border-color: #5a2f40;
+}
+.gd-actions .erase:hover {
+  background: #5a2f40;
+}
+/* The sigils: the ring and the lines in the glyph's element colour. */
+.sigil .sg-ring {
+  fill: none;
+  stroke: var(--sg);
+  stroke-width: 1.4;
+}
+.sigil .sg-ring.thin {
+  stroke-width: 0.5;
+  opacity: 0.6;
+}
+.sigil .sg-line {
+  stroke: var(--sg);
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  fill: none;
+}
+.sigil .sg-dot {
+  fill: var(--sg);
+}
+.sigil {
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--sg) 70%, transparent));
+}
+.sigil.dim {
+  opacity: 0.45;
+  filter: none;
+}
+
+/* The chance of a glyph to take, and what a failure does. */
+.cost-chip.chance.hi {
+  color: #8dff9a;
+  border-color: #3f7a4a;
+}
+.cost-chip.chance.mid {
+  color: #ffe58a;
+  border-color: #8a7330;
+}
+.cost-chip.chance.lo {
+  color: #ff9a7a;
+  border-color: #8a4a30;
+}
+.gd-risk {
+  font-size: 11px;
+  color: #a99dcb;
+  line-height: 1.35;
+}
+.altar-flash.fail {
+  mix-blend-mode: normal;
+  background: radial-gradient(circle, rgba(255, 140, 110, 0.9) 0%, rgba(200, 40, 30, 0.55) 35%, transparent 70%);
+  animation: altar-fail 0.7s ease-out;
+}
+@keyframes altar-fail {
+  0% {
+    opacity: 0.95;
+    transform: scale(1.1);
+  }
+  20% {
+    transform: scale(0.9) translateX(-3px);
+  }
+  40% {
+    transform: scale(1) translateX(3px);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+.altar-fizzle {
+  position: absolute;
+  left: 50%;
+  bottom: 6px;
+  transform: translateX(-50%);
+  padding: 2px 10px;
+  background: rgba(40, 8, 8, 0.85);
+  border: 1px solid #8a3a30;
+  color: #ff8a70;
+  font-size: 13px;
+  font-weight: bold;
+  text-shadow: 1px 1px #000;
+  pointer-events: none;
+  white-space: nowrap;
+  opacity: 0;
+  animation: altar-fizzle 1.6s ease-out;
+}
+@keyframes altar-fizzle {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 6px);
+  }
+  15% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  75% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -6px);
+  }
+}

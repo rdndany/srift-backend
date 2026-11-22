@@ -39,7 +39,9 @@ import {
   pottedOf,
 } from './blocks';
 import { ARMOR_SLOTS, armorWear, reduceDamage } from './armor';
-import { ENCH, MAX_SHELVES, efficiencyBonus, levelOf, protectionFactor, protectionPoints, sharpnessBonus, wearAfterUnbreaking, type ProtectionKind } from './enchant';
+import { COMPANIONS, companionBonusText } from './companions';
+import { WING_EXHAUSTION_PER_BLOCK, WING_MIN_HUNGER, WING_TAKEOFF, wingBonusText, wingByNumber, WINGS, type WingDef } from './wings';
+import { ENCH, MAX_SHELVES, efficiencyBonus, levelOf, protectionFactor, protectionPoints, sharpnessBonus, siphonShare, wearAfterUnbreaking, type ProtectionKind } from './enchant';
 import { BLOCK_XP, Experience } from './experience';
 import type { BlockEntities } from './blockEntities';
 import type { DropWorld } from './dropEntities';
@@ -49,8 +51,8 @@ import type { WorldAccess } from './headlessWorld';
 import { BAG_SLOTS, bagInventory, strandedSlots } from './bags';
 import { organizeInventory } from './organize';
 import { formatEmberTime, EMBER_CAST, EMBER_COOLDOWN, EMBER_MOVE_LIMIT } from './emberstone';import { MOUNTS, MOUNT_BITE, MOUNT_BLOCK_TEXT, MOUNT_HOWL, MOUNT_CAST, MOUNT_MOVE_LIMIT, MOUNT_STEP_HEIGHT, MOUNTED_EYE, RIDE_CHECK, RIDE_GRACE, mountBlocker, mountDef, rideEnclosed, mountSpeedText, type MountId, type MountView } from './mounts';
-import { Container, HOTBAR_SLOTS, PLAYER_SLOTS, cloneStack, makeStack, type ItemStack } from './inventory';
-import { I, PEARL_TRIP_DAMAGE, bagSlotsOf, bedItemColor, blockDrops, breakTime, canHarvest, dyeColor, getItem, harvestHint, holdsInOffhand, isUndroppable, mountOfItem, outfitItems, silkKeeps, skillBookAbility, usedOnBlock, type ItemDef, type ItemUse, type WeaponDef } from './items';
+import { Container, HOTBAR_SLOTS, PLAYER_SLOTS, canMerge, cloneStack, makeStack, maxStackOf, type ItemStack } from './inventory';
+import { I, PEARL_TRIP_DAMAGE, accessoryOfItem, bagSlotsOf, bedItemColor, companionOfItem, wingOfItem, blockDrops, breakTime, canHarvest, dyeColor, getItem, harvestHint, holdsInOffhand, isUndroppable, mountOfItem, outfitItems, outfitSetFits, outfitSetOfItem, silkKeeps, skillBookAbility, usedOnBlock, type ItemDef, type ItemUse, type WeaponDef } from './items';
 import { AnvilMenu, ChestMenu, CraftingMenu, EnchantMenu, CreativeMenu, FurnaceMenu, GrindstoneMenu, TradeMenu, type Menu } from './menu';
 import { tooltipName } from './tooltip';
 import { ARMOR_STAND_POSES, ARROW_GRAVITY, WOOL_REGROW, arrowSpeed, rayAabb, type Mob, type MobEffect, type MobEffects, type MobKind, type MobManager } from './mobs';
@@ -78,19 +80,22 @@ import { campfireFood } from './campfire';
 import { COOK_SECONDS } from './smelting';
 import { EXHAUSTION, Vitals } from './survival';
 import type { BossView } from './boss';
+import type { RiftView } from './rift';
 import type { DungeonView } from './dungeonView';
 import type { ClassView, Command, InputFrame, SessionEvent, SessionScreen } from './sessionProtocol';
 import { MAX_COINS, stackSellPrice, shopOf } from './economy';
-import { AUCTIONEER, DEFAULT_AUCTION_QUERY, cleanQuery, depositFor, sellBlocker, type AuctionQuery } from './auction';
+import { AUCTIONEER, DEFAULT_AUCTION_QUERY, cleanQuery, depositFor, sellBlocker, type AuctionQuery, type TokenDesk } from './auction';
 import { STASHKEEPER, stashBlocker } from './stash';
 import { AchievementBook, ACH_TIERS, type AchStat, type AchievementDef } from './achievements';
+import { BountyBook, dayOf, type BountyDef } from './bounties';
 import { FIRST_QUEST, NPCS, QuestLog, npcById, questById, rewardCoins, rewardItems, type QuestEvent, type QuestProgress } from './quests';
 import { ABILITY_BY_ID, ClassState, abilitiesOf, abilityAt, type AbilityDef, type AbilityId, type CastBlock } from './abilities';
 import type { EffectOwner, Fx } from './abilityEffects';
 import { creativeGear } from './creative';
-import { canRollGear, cloneGear, gearKey, gearModifiers } from './gear';
+import { accessoryModifiers, canRollGear, cloneGear, gearKey, gearModifiers, glyphKey, glyphModifiers } from './gear';
+import { ACCESSORY_SLOT_COUNT, NECKLACE_SLOT, accessorySlotsOf } from './accessories';
 import { jewelKind, useJewel } from './jewels';
-import { CLASSES, offhandModifier, rollDamage, type ClassId, type DamageKind } from './classes';
+import { CLASSES, offhandModifier, rollDamage, swingRate, type ClassId, type DamageKind } from './classes';
 import { POINTS_PER_LEVEL, type AttrKey } from './statPoints';
 import { TUNING, castCost } from './tuning';
 
@@ -175,14 +180,21 @@ export function rushMove(move: MoveInput, yaw: number, speed: number, hop = fals
   move.accel = 90;
 }
 
-export function buildMove(f: InputFrame, flying: boolean, canSprint: boolean, noclip = false, speedMul = 1): MoveInput {
+/**
+ * `wing`: the wings worn (they make the wearer quicker on foot), and `wingFlight`: the wearer flies on them (not the flight of creative mode):
+ * the flight is then at the speed of the wings, without sprinting, and it climbs and sinks at their pace.
+ */
+export function buildMove(f: InputFrame, flying: boolean, canSprint: boolean, noclip = false, speedMul = 1, wing: WingDef | null = null, wingFlight = false): MoveInput {
+  const quick = wing ? speedMul * wing.walk : speedMul;
+  const winged = !!wing && wingFlight && flying;
   return {
     ...(noclip ? { noclip: true } : {}),
-    ...(speedMul !== 1 ? { speedMul } : {}),
+    ...(quick !== 1 ? { speedMul: quick } : {}),
+    ...(winged ? { flyBoost: wing!.fly, flyRise: wing!.rise, flyAssist: true } : {}),
     forward: f.forward,
     strafe: f.strafe,
     jump: f.jump,
-    sprint: f.sprint && f.forward > 0 && canSprint,
+    sprint: f.sprint && f.forward > 0 && canSprint && !winged,
     sneak: f.sneak && !flying,
     fly: flying,
     flyDown: flying && f.sneak,
@@ -264,8 +276,6 @@ export class Player implements EffectOwner {
   menu: Menu | null = null;
   /** The villager whose trade screen is open. */
   tradingWith: Mob | null = null;
-  /** Seeds the enchanting table's offers; it moves on after every enchantment (0 = not drawn yet). */
-  enchantSeed = 0;
   screen: SessionScreen = 'none';
   flying = false;
   /** True once the terrain around the player exists and the simulation runs. */
@@ -316,6 +326,10 @@ export class Player implements EffectOwner {
   readonly quests: QuestLog | null;
   /** The deeds counted and the achievements won (see achievements.ts). */
   readonly ach = new AchievementBook();
+  /** Today's daily bounties and how far this character is with them (see bounties.ts). */
+  readonly bounty = new BountyBook();
+  /** The counts have changed (or the client has not been told them yet): they go out at the next whole second. */
+  private bountyDirty = true;
   private achSeconds = 0;
   private achLevelTimer = 0;
   /** The quest giver (an id of `NPCS`) being talked to, while the dialog is open. */
@@ -371,6 +385,16 @@ export class Player implements EffectOwner {
   emberCooldown = 0;
   /** The mount slot: the horn of the mount the mount key summons (shown top right of the screen, and beside the off hand in the inventory). */
   readonly mountSlot = new Container(1);
+  /** The outfit slot: the glowing set the hero wears (it shows to everyone, and nothing else changes). */
+  readonly outfitSlot = new Container(1);
+  /** The companion that follows the hero (one item, see companions.ts). */
+  readonly companionSlot = new Container(1);
+  /** How long the feet have been on the ground in a flight on wings (the flight ends after a moment of it). */
+  private wingGroundT = 0;
+  /** The wings the hero wears (one item, see wings.ts). */
+  readonly wingSlot = new Container(1);
+  /** The jewelry the hero wears: two rings (slots 0 and 1) and a necklace (slot 2), see accessories.ts. */
+  readonly accessories = new Container(ACCESSORY_SLOT_COUNT);
   /** The mount being ridden. */
   mountId: MountId | null = null;
   /** How long (seconds) the rider has been enclosed without a break, and the seconds to the next look (see `rideEnclosed`). */
@@ -545,8 +569,24 @@ export class Player implements EffectOwner {
   // ---- events --------------------------------------------------------------
 
   emit(e: SessionEvent): void {
+    if (e.t === 'swing') {
+      // A weapon in the hand swings as fast as its attack speed: others see it from `swingRate`, and so does the client for its own arm.
+      this.swingAge = 0;
+      this.swingRate = this.holdsWeapon() ? swingRate(this.cls?.stats.attackSpeed ?? 1) : 1;
+      if (this.swingRate !== 1 && !e.off) e = { ...e, rate: this.swingRate };
+    }
     this.events.push(e);
-    if (e.t === 'swing') this.swingAge = 0;
+  }
+
+  /** How much faster than usual the last swing runs (1 for the usual one; mining and placing are always 1). */
+  swingRate = 1;
+
+  /** A blade, a class weapon or a bow in the hand: what attack speed speeds up. */
+  private holdsWeapon(): boolean {
+    const h = this.held;
+    if (!h) return false;
+    const it = getItem(h.id);
+    return !!it.weapon || it.tool?.kind === 'sword' || it.use === 'bow' || it.use === 'crossbow';
   }
 
   /** Seconds since the arm last swung (a blow, a placed block, a block being mined): other players see it from this. */
@@ -585,7 +625,7 @@ export class Player implements EffectOwner {
           // Right-clicking a skill book in the bags reads it (it never goes onto the cursor).
           if (c.button === 1 && !this.menu.cursor) {
             const slot = this.menu.slots[c.slot];
-            if (slot && slot.container === this.inventory && slot.kind === 'normal' && (this.learnFromBook(slot.index) || this.equipHorn(slot.index))) return;
+            if (slot && slot.container === this.inventory && slot.kind === 'normal' && (this.learnFromBook(slot.index) || this.equipHorn(slot.index) || this.equipOutfit(slot.index) || this.equipCompanion(slot.index) || this.equipWings(slot.index) || this.equipAccessory(slot.index))) return;
           }
           // A jewel on the cursor, clicked on a piece of equipment, is used on it (instead of swapping places with it).
           if (c.button === 0 && this.useJewelOnSlot(c.slot)) {
@@ -646,7 +686,7 @@ export class Player implements EffectOwner {
         }
         return;
       case 'enchant':
-        if (this.menu instanceof EnchantMenu && this.menu.enchant(c.index)) this.emit({ t: 'inv' });
+        if (this.menu instanceof EnchantMenu && (c.erase ? this.menu.erase(c.id) : this.menu.inscribe(c.id))) this.emit({ t: 'inv' });
         return;
       case 'respawn':
         this.respawnFromDeath();
@@ -719,6 +759,7 @@ export class Player implements EffectOwner {
         return;
       case 'fly':
         if (this.mode === 'creative') this.flying = !this.flying;
+        else if (this.wingNumber > 0) this.toggleWingFlight();
         return;
       case 'swap':
         this.swapHands();
@@ -727,7 +768,7 @@ export class Player implements EffectOwner {
         this.respawn();
         return;
       case 'inventory':
-        this.openMenu(this.mode === 'creative' ? new CreativeMenu(this.inventory) : new CraftingMenu(this.inventory, 2, this.armor, this.offhand, this.mountSlot));
+        this.openMenu(this.mode === 'creative' ? new CreativeMenu(this.inventory) : new CraftingMenu(this.inventory, 2, this.armor, this.offhand, this.mountSlot, this.outfitSlot, () => this.cls?.classId ?? null, this.companionSlot, this.wingSlot, this.accessories));
         return;
       case 'ability':
         this.useAbility(c.slot);
@@ -841,7 +882,7 @@ export class Player implements EffectOwner {
 
   /** Open one of the standard screens without a block (tests, hotkeys). */
   openScreen(kind: 'inventory' | 'crafting' | 'furnace' | 'chest' | 'creative'): void {
-    if (kind === 'inventory') this.openMenu(new CraftingMenu(this.inventory, 2, this.armor, this.offhand, this.mountSlot));
+    if (kind === 'inventory') this.openMenu(new CraftingMenu(this.inventory, 2, this.armor, this.offhand, this.mountSlot, this.outfitSlot, () => this.cls?.classId ?? null, this.companionSlot, this.wingSlot, this.accessories));
     else if (kind === 'crafting') this.openMenu(new CraftingMenu(this.inventory, 3));
     else if (kind === 'furnace') this.openMenu(new FurnaceMenu(this.inventory, this.blockEntities.furnace(0, 0, 0), (n) => this.spawnXpAtFeet(n)));
     else if (kind === 'chest') this.openMenu(new ChestMenu(this.inventory, this.blockEntities.chest(0, 0, 0)));
@@ -926,27 +967,15 @@ export class Player implements EffectOwner {
     return Math.min(MAX_SHELVES, n);
   }
 
-  /** A fresh number for the table to roll its offers from. */
-  private newEnchantSeed(): number {
-    return 1 + Math.floor(this.rand() * 0x7ffffffe);
-  }
-
   private openEnchantTable(hit: RayHit): void {
-    if (!this.enchantSeed) this.enchantSeed = this.newEnchantSeed();
     this.openMenu(
       new EnchantMenu(this.inventory, {
         shelves: this.countShelves(hit.x, hit.y, hit.z),
-        seed: () => this.enchantSeed,
-        level: () => this.xp.level,
         creative: () => this.mode === 'creative',
-        spend: (n) => {
-          this.xp.spend(n);
-          this.emit({ t: 'xp' });
-        },
-        done: () => {
-          this.enchantSeed = this.newEnchantSeed();
-          this.emit({ t: 'enchant' });
-        },
+        coins: () => this.coins,
+        spend: (n) => void this.spendCoins(n),
+        rand: () => this.rand(),
+        done: (w) => this.emit({ t: 'enchant', glyph: w.glyph, rank: w.rank, ...(w.erase ? { erase: true } : {}), ...(w.fail ? { fail: true } : {}) }),
       }),
     );
   }
@@ -1708,7 +1737,7 @@ export class Player implements EffectOwner {
       }
     } else this.stabs = 0;
     const base = blade ? (blade.kind === 'melee' ? blade.damage : 1) : tool ? tool.damage : 1;
-    const roll = rollDamage(this.cls?.stats ?? null, 'melee', (base + sharpnessBonus(levelOf(hs, ENCH.SHARPNESS))) * (combo ? 1.5 : 1) * (this.weakTime > 0 ? WEAK_DAMAGE : 1), this.rand);
+    const roll = rollDamage(this.cls?.stats ?? null, 'melee', (base + sharpnessBonus(levelOf(hs, ENCH.SHARPNESS))) * (combo ? 1.5 : 1) * (this.weakTime > 0 ? WEAK_DAMAGE : 1) * this.companionMight * this.wingMight, this.rand);
     const dealt = roll.amount;
     this.mobs.damage(mob, dealt, d.x, d.z, this.realm.mobEvents, true, true, true, {
       knock: 1 + levelOf(hs, ENCH.KNOCKBACK),
@@ -1716,6 +1745,9 @@ export class Player implements EffectOwner {
       looting: levelOf(hs, ENCH.LOOTING),
     });
     this.showHit(mob, dealt, roll.crit, { blade: dagger, combo });
+    // Siphon: a share of what the blow did comes back as health.
+    const siphon = siphonShare(levelOf(hs, ENCH.SIPHON));
+    if (siphon > 0 && !this.vitals.dead) this.vitals.health = Math.min(this.vitals.maxHealth, this.vitals.health + Math.round(dealt * siphon * 10) / 10);
     this.attackCooldown = (blade?.kind === 'melee' ? blade.cooldown : 0.5) / (this.cls ? this.cls.stats.attackSpeed : 1);
     this.emit(stab ? { t: 'swing', off: true } : { t: 'swing' });
     if (tool || weapon?.kind === 'melee') this.damageHeld(1);
@@ -1792,6 +1824,30 @@ export class Player implements EffectOwner {
       this.hudProgress = 0;
       return;
     }
+    // ---- glowing set: right-click to put it in the outfit slot ----
+    if (rightPressed && item?.use === 'outfit') {
+      this.equipOutfit(this.selected);
+      this.hudProgress = 0;
+      return;
+    }
+    // ---- companion: right-click to put it in the companion slot ----
+    if (rightPressed && item?.use === 'companion') {
+      this.equipCompanion(this.selected);
+      this.hudProgress = 0;
+      return;
+    }
+    // ---- wings: right-click to put them in the wing slot ----
+    if (rightPressed && item?.use === 'wings') {
+      this.equipWings(this.selected);
+      this.hudProgress = 0;
+      return;
+    }
+    // ---- rings and necklaces: right-click to wear one ----
+    if (rightPressed && item?.use === 'accessory') {
+      this.equipAccessory(this.selected);
+      this.hudProgress = 0;
+      return;
+    }
     // ---- mount horn: right-click to put it in the mount slot ----
     if (rightPressed && item?.use === 'horn') {
       this.equipHorn(this.selected);
@@ -1824,7 +1880,10 @@ export class Player implements EffectOwner {
           this.breakProgress += dt / Math.max(0.05, time);
           this.hitTimer -= dt;
           // Mining swings the arm again and again (the others see it, though no swing event is sent).
-          if (this.swingAge >= 0.3) this.swingAge = 0;
+          if (this.swingAge >= 0.3) {
+            this.swingAge = 0;
+            this.swingRate = 1;
+          }
           if (this.hitTimer <= 0 && this.breakProgress < 1) {
             this.hitTimer = 0.24;
             this.realm.emitNear(target.x, target.y, target.z, { t: 'sound', sound: def.sound, action: 'hit', vol: 1 });
@@ -2196,7 +2255,7 @@ export class Player implements EffectOwner {
         // A crossbow bolt hits as hard as the weapon says (9 is a full bow); the class's ranged multiplier and crits come on top.
         const weapon = bow ? getItem(bow.id).weapon : null;
         const shot = weapon ? (arrow.damage * weapon.damage) / 9 : arrow.damage;
-        const roll = rollDamage(this.cls?.stats ?? null, 'ranged', shot * (this.weakTime > 0 ? WEAK_DAMAGE : 1), this.rand);
+        const roll = rollDamage(this.cls?.stats ?? null, 'ranged', shot * (this.weakTime > 0 ? WEAK_DAMAGE : 1) * this.companionMight * this.wingMight, this.rand);
         arrow.damage = roll.amount;
         // Where it ends, the archer is told: a number and a mark over what it hit (a headshot counts as a critical hit), or the arrow stands in the wall.
         arrow.onHit = (a, mob, dealt, head) => {
@@ -2269,12 +2328,14 @@ export class Player implements EffectOwner {
     if (!cls) return;
     const worn: (ItemStack | null)[] = [this.held, this.offhand.get(0)];
     for (let i = 0; i < this.armor.size; i++) worn.push(this.armor.get(i));
+    const jewelry: (ItemStack | null)[] = [];
+    for (let i = 0; i < this.accessories.size; i++) jewelry.push(this.accessories.get(i));
     const who = { id: cls.classId, level: cls.level };
-    const key = gearKey(worn, who);
+    const key = `${gearKey(worn, who)}#${jewelry.map((j) => j?.id ?? 0).join(',')}#${glyphKey(worn)}#${glyphKey(jewelry)}`;
     if (key === this.gearBonusKey) return;
     this.gearBonusKey = key;
     const full = cls.resource >= cls.stats.maxResource - 1e-6;
-    cls.setGearModifiers(gearModifiers(worn, who));
+    cls.setGearModifiers([...gearModifiers(worn, who), ...accessoryModifiers(jewelry, who), ...glyphModifiers(worn, who), ...glyphModifiers(jewelry, who)]);
     if (full) cls.resource = cls.stats.maxResource; // a pool that was full stays full when it gets deeper
     this.applyClassVitals(false);
   }
@@ -2499,6 +2560,169 @@ export class Player implements EffectOwner {
     return true;
   }
 
+  // ---- outfits (see outfits.ts) -----------------------------------------------------------------------------------
+
+  /** The id of the glowing set in the outfit slot (null: none, or not a set of this hero's class). */
+  get wornOutfit(): string | null {
+    const s = this.outfitSlot.get(0);
+    const def = s ? outfitSetOfItem(s.id) : null;
+    return def && outfitSetFits(s!.id, this.cls?.classId ?? null) ? def.id : null;
+  }
+
+  /**
+   * Put a glowing set of the bags (`index` is its slot) in the outfit slot; a set already there goes back to where this one was. Returns whether it
+   * was a set at all (so the click that used it does not also pick it up). A set of another class stays where it is.
+   */
+  equipOutfit(index: number): boolean {
+    const stack = this.inventory.get(index);
+    const def = stack ? outfitSetOfItem(stack.id) : null;
+    if (!stack || !def) return false;
+    if (this.vitals.dead || this.spectating || this.sleeping) return true;
+    if (!outfitSetFits(stack.id, this.cls?.classId ?? null)) {
+      this.emit({ t: 'toast', text: `${def.name} is a set for the ${CLASSES[def.cls].name}: your hero cannot wear it` });
+      return true;
+    }
+    const worn = this.outfitSlot.get(0);
+    this.outfitSlot.set(0, cloneStack({ ...stack, count: 1 }));
+    this.inventory.set(index, worn);
+    this.emit({ t: 'toast', text: `You are wearing ${def.name}` });
+    this.emit({ t: 'inv' });
+    return true;
+  }
+
+  // ---- companions (see companions.ts) -----------------------------------------------------------------------------
+
+  /** The companion in the companion slot, 1 + its place in COMPANIONS (0: none). It is what the other players are told, and the figure that follows. */
+  get companionNumber(): number {
+    const s = this.companionSlot.get(0);
+    const def = s ? companionOfItem(s.id) : null;
+    return def ? COMPANIONS.indexOf(def) + 1 : 0;
+  }
+
+  /** What the companion gives: a share more damage dealt (1.1) and a share of the damage taken that does not land (0.9). */
+  private get companionMight(): number {
+    const def = COMPANIONS[this.companionNumber - 1];
+    return 1 + (def?.might ?? 0);
+  }
+  private get companionWard(): number {
+    const def = COMPANIONS[this.companionNumber - 1];
+    return 1 - (def?.ward ?? 0);
+  }
+
+  /** Put a companion of the bags (`index` is its slot) in the companion slot; one already there goes back to where this one was. Returns whether it was a companion at all. */
+  equipCompanion(index: number): boolean {
+    const stack = this.inventory.get(index);
+    const def = stack ? companionOfItem(stack.id) : null;
+    if (!stack || !def) return false;
+    if (this.vitals.dead || this.spectating || this.sleeping) return true;
+    const worn = this.companionSlot.get(0);
+    this.companionSlot.set(0, cloneStack({ ...stack, count: 1 }));
+    this.inventory.set(index, worn);
+    this.emit({ t: 'toast', text: `${def.name} follows you now (${companionBonusText(def)})` });
+    this.emit({ t: 'inv' });
+    return true;
+  }
+
+  // ---- wings (see wings.ts) ---------------------------------------------------------------------------------------
+
+  /** The wings in the wing slot, 1 + their place in WINGS (0: none). It is what the other players are told, and what is drawn on the back. */
+  get wingNumber(): number {
+    const s = this.wingSlot.get(0);
+    const def = s ? wingOfItem(s.id) : null;
+    return def ? WINGS.indexOf(def) + 1 : 0;
+  }
+
+  /** The wings worn (null: none). */
+  get wingDef(): WingDef | null {
+    return wingByNumber(this.wingNumber);
+  }
+
+  /** Flying on wings (the flight of survival mode: creative mode flies as it always did). */
+  get wingFlying(): boolean {
+    return this.flying && this.mode === 'survival' && !this.spectating && this.wingNumber > 0;
+  }
+
+  /** What the wings give: a share more damage dealt and a share of the damage taken that does not land. */
+  private get wingMight(): number {
+    return 1 + (this.wingDef?.might ?? 0);
+  }
+  private get wingWard(): number {
+    return 1 - (this.wingDef?.ward ?? 0);
+  }
+
+  /** Put a pair of wings of the bags (`index` is its slot) in the wing slot; a pair already there goes back to where this one was. Returns whether it was a pair of wings at all. */
+  equipWings(index: number): boolean {
+    const stack = this.inventory.get(index);
+    const def = stack ? wingOfItem(stack.id) : null;
+    if (!stack || !def) return false;
+    if (this.vitals.dead || this.spectating || this.sleeping) return true;
+    const worn = this.wingSlot.get(0);
+    this.wingSlot.set(0, cloneStack({ ...stack, count: 1 }));
+    this.inventory.set(index, worn);
+    this.emit({ t: 'toast', text: `${def.name} on your back (${wingBonusText(def)}): double-tap jump to fly` });
+    this.emit({ t: 'inv' });
+    return true;
+  }
+
+  // ---- rings and necklaces (see accessories.ts) -------------------------------------------------------------------
+
+  /**
+   * Wear a ring or a necklace of the bags (`index` is its slot). A ring goes in a free ring slot; with both full it takes the place of the
+   * first one, which goes back to where this one was. A necklace takes the place of the one worn. Returns whether it was jewelry at all.
+   */
+  equipAccessory(index: number): boolean {
+    const stack = this.inventory.get(index);
+    const def = stack ? accessoryOfItem(stack.id) : null;
+    if (!stack || !def) return false;
+    if (this.vitals.dead || this.spectating || this.sleeping) return true;
+    const places = accessorySlotsOf(def.kind);
+    const at = places.find((i) => !this.accessories.get(i)) ?? places[0];
+    const worn = this.accessories.get(at);
+    this.accessories.set(at, cloneStack({ ...stack, count: 1 }));
+    this.inventory.set(index, worn);
+    this.emit({ t: 'toast', text: `${def.name.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase())} on` });
+    this.emit({ t: 'inv' });
+    return true;
+  }
+
+  /** Only a ring in a ring slot, and a necklace in the necklace slot, one of each (a hostile or old save): anything else is dropped. */
+  private sanitizeAccessories(): void {
+    for (let i = 0; i < ACCESSORY_SLOT_COUNT; i++) {
+      const s = this.accessories.get(i);
+      if (!s) continue;
+      const def = accessoryOfItem(s.id);
+      if (!def || !accessorySlotsOf(def.kind).includes(i)) this.accessories.set(i, null);
+      else s.count = 1;
+    }
+  }
+
+  /** The double tap of the jump key with wings on: take off (a push off the ground), or fold the wings and come down. */
+  private toggleWingFlight(): void {
+    if (this.flying) {
+      this.flying = false;
+      return;
+    }
+    const b = this.body;
+    if (this.vitals.dead || this.riding || this.sleeping) return;
+    if (this.mountId) {
+      this.emit({ t: 'toast', text: "You can't fly while mounted." });
+      return;
+    }
+    if (b.inWater || b.onLadder || this.rootTime > 0) return;
+    if (this.vitals.hunger <= WING_MIN_HUNGER) {
+      this.emit({ t: 'toast', text: 'You are too hungry to fly.' });
+      return;
+    }
+    this.flying = true;
+    this.wingGroundT = 0;
+    // A push off the ground, unless there is a roof in the way (a room, a doorway: the head would knock on it); the wings then lift gently.
+    if (b.onGround) {
+      const room = !collides(this.world, b.x, b.y + 1.2, b.z, b.width, b.height);
+      b.vy = room ? WING_TAKEOFF : 2;
+      b.onGround = false;
+    }
+  }
+
   /**
    * The mount key. Mounted: get off. Summoning: cancel. Otherwise begin to summon the mount of the horn in the mount slot: a
    * cast that needs the player to stand still (see tickMount), and is refused indoors, in water and in the air.
@@ -2700,7 +2924,7 @@ export class Player implements EffectOwner {
    */
   strike(mob: Mob, base: number, kind: DamageKind, from: { x: number; z: number }, knock = 1, lift = 0): void {
     if (mob.dead || mob.def.invulnerable) return;
-    const roll = rollDamage(this.cls?.stats ?? null, kind, base * (this.weakTime > 0 ? WEAK_DAMAGE : 1), this.rand);
+    const roll = rollDamage(this.cls?.stats ?? null, kind, base * (this.weakTime > 0 ? WEAK_DAMAGE : 1) * this.companionMight * this.wingMight, this.rand);
     this.mobs.damage(mob, roll.amount, mob.body.x - from.x, mob.body.z - from.z, this.realm.mobEvents, true, knock > 0, true, { knock, lift });
     this.showHit(mob, roll.amount, roll.crit);
   }
@@ -3138,6 +3362,11 @@ export class Player implements EffectOwner {
     return this.realm.bossViewFor(this);
   }
 
+  /** The rift that is open near this player (its wave, the monsters left, the time), for the tracker; null when none. */
+  riftView(): RiftView | null {
+    return this.realm.riftViewFor(this);
+  }
+
   /** What a class player's interface shows (null without a class). */
   classView(): ClassView | null {
     const cls = this.cls;
@@ -3200,7 +3429,7 @@ export class Player implements EffectOwner {
   /** Everything the main hand does with the use button, shield, horn, vehicle and spell included. What is left over goes to the off hand. */
   private mainHandOwnsUse(item: ItemDef | null): boolean {
     if (!item) return false;
-    return this.mainHandBusy(item) || item.shield || item.use === 'horn' || item.use === 'vehicle' || item.weapon?.kind === 'spell';
+    return this.mainHandBusy(item) || item.shield || item.use === 'horn' || item.use === 'outfit' || item.use === 'companion' || item.use === 'wings' || item.use === 'vehicle' || item.weapon?.kind === 'spell';
   }
 
   /** A stack of blocks in the off hand that a click can set down. */
@@ -3255,7 +3484,7 @@ export class Player implements EffectOwner {
     const parry = this.blockTime < SHIELD_RAISE + PARRY_WINDOW;
     let broke = false;
     if (amount >= 3 && !parry) {
-      s.damage += 1 + Math.floor(amount);
+      s.damage += wearAfterUnbreaking(1 + Math.floor(amount), levelOf(s, ENCH.UNBREAKING), false, this.rand);
       if (s.damage >= getItem(s.id).durability) {
         if (this.shieldInOffhand) this.offhand.set(0, null);
         else this.inventory.set(this.selected, null);
@@ -3285,6 +3514,30 @@ export class Player implements EffectOwner {
     this.lowerShield();
     this.emit({ t: 'equip' });
     this.emit({ t: 'inv' });
+  }
+
+  /** Only a pair of wings, and one pair, may be in the wing slot (a hostile or old save): anything else is dropped. */
+  private sanitizeWingSlot(): void {
+    const s = this.wingSlot.get(0);
+    if (!s) return;
+    if (wingOfItem(s.id) === null) this.wingSlot.set(0, null);
+    else s.count = 1;
+  }
+
+  /** Only a companion, and one of it, may be in the companion slot (a hostile or old save): anything else is dropped. */
+  private sanitizeCompanionSlot(): void {
+    const s = this.companionSlot.get(0);
+    if (!s) return;
+    if (companionOfItem(s.id) === null) this.companionSlot.set(0, null);
+    else s.count = 1;
+  }
+
+  /** Only a glowing set of the hero's class, and one of it, may be in the outfit slot (a hostile or old save): anything else is dropped. */
+  private sanitizeOutfitSlot(): void {
+    const s = this.outfitSlot.get(0);
+    if (!s) return;
+    if (outfitSetOfItem(s.id) === null) this.outfitSlot.set(0, null);
+    else s.count = 1;
   }
 
   /** Only a mount horn, and one of it, may be in the mount slot (a hostile or old save). */
@@ -3347,7 +3600,7 @@ export class Player implements EffectOwner {
 
   /** Damage after the worn armor has taken its share. Only survival players are protected from anything. */
   private afterArmor(damage: number): number {
-    return reduceDamage(damage, this.defense, this.toughness);
+    return reduceDamage(damage, this.defense, this.toughness) * this.companionWard * this.wingWard;
   }
 
   /** Every worn piece takes wear from a hit; a piece that wears out breaks. */
@@ -3442,6 +3695,23 @@ export class Player implements EffectOwner {
   achAdd(stat: AchStat, n = 1): void {
     if (this.spectating) return;
     this.achWon(this.ach.add(stat, n));
+    this.bountyDone(this.bounty.add(dayOf(this.realm.clock()), stat, n));
+    this.bountyDirty = true;
+  }
+
+  /** Daily bounties were finished: tell the player and the server (which pays them), and show the new counts at once. */
+  private bountyDone(list: BountyDef[]): void {
+    if (list.length === 0) return;
+    const day = this.bounty.today;
+    for (const b of list) this.emit({ t: 'bounty', id: b.id, name: b.name, tier: b.tier, day });
+    this.syncBounties();
+  }
+
+  /** Tell the client today's bounties and the counts (it is small). */
+  syncBounties(): void {
+    this.bountyDirty = false;
+    const now = this.realm.clock();
+    this.emit({ t: 'bounties', view: this.bounty.view(dayOf(now), now) });
   }
 
   private achWon(list: AchievementDef[]): void {
@@ -3461,7 +3731,10 @@ export class Player implements EffectOwner {
     this.achAdd('kills');
     if (mob.elite) this.achAdd('elites');
     if (mob.def.boss) this.achAdd('bosses');
-    if (mob.kind === 'hollow_king') this.achAdd('dungeons');
+    if (mob.kind === 'hollow_king') {
+      this.achAdd('dungeons');
+      if (!this.spectating) this.emit({ t: 'clear', id: 'hollow-deep', name: 'the Hollow Deep' });
+    }
   }
 
   /** Level and playing time, once a second. */
@@ -3476,6 +3749,8 @@ export class Player implements EffectOwner {
     this.achLevelTimer += dt;
     if (this.achLevelTimer < 1) return;
     this.achLevelTimer = 0;
+    // (the counts of the day go out once a second at the most, and at once when the day turns)
+    if (this.bountyDirty || this.bounty.today !== dayOf(this.realm.clock())) this.syncBounties();
     this.achWon(this.ach.reach('level', this.cls ? this.cls.level : this.xp.level));
   }
 
@@ -3834,12 +4109,25 @@ export class Player implements EffectOwner {
     this.mountSlot.set(0, null);
     this.mountSlot.loadJSON(p.mountSlot);
     this.sanitizeMountSlot();
-    this.enchantSeed = p.es && Number.isInteger(p.es) && p.es > 0 ? p.es : 0;
+    this.outfitSlot.set(0, null);
+    this.outfitSlot.loadJSON(p.outfitSlot);
+    this.sanitizeOutfitSlot();
+    this.companionSlot.set(0, null);
+    this.companionSlot.loadJSON(p.companionSlot);
+    this.sanitizeCompanionSlot();
+    this.wingSlot.set(0, null);
+    this.wingSlot.loadJSON(p.wingSlot);
+    this.sanitizeWingSlot();
+    for (let i = 0; i < ACCESSORY_SLOT_COUNT; i++) this.accessories.set(i, null);
+    this.accessories.loadJSON(p.accessories);
+    this.sanitizeAccessories();
     this.selected = Math.max(0, Math.min(HOTBAR_SLOTS - 1, p.selected));
     this.peakY = this.body.y;
     this.lastHealth = this.vitals.health;
     this.ach.loadJSON(p.ach);
     this.syncAch();
+    this.bounty.loadJSON(p.bounty);
+    this.bountyDirty = true;
     if (this.quests) {
       this.quests.loadJSON(p.quests);
       // A character saved before the cave start who has already got on with the quests has long since left it: the quests
@@ -3902,14 +4190,18 @@ export class Player implements EffectOwner {
       mobs: plain(this.mobs.toJSON(this.body.x, this.body.z, 28)),
       xp: this.xp.toJSON(),
       ...(this.coins > 0 ? { coins: this.coins } : {}),
-      ...(this.enchantSeed ? { es: this.enchantSeed } : {}),
       armor: plain(this.armor.toJSON()),
       offhand: plain(this.offhand.toJSON()),
       ...(this.spawnPoint ? { spawn: { ...this.spawnPoint } } : {}),
       ...(this.emberCooldown > 0 ? { hs: Math.ceil(this.emberCooldown) } : {}),
       ...(this.mountSlot.get(0) ? { mountSlot: plain(this.mountSlot.toJSON()) } : {}),
+      ...(this.outfitSlot.get(0) ? { outfitSlot: plain(this.outfitSlot.toJSON()) } : {}),
+      ...(this.companionSlot.get(0) ? { companionSlot: plain(this.companionSlot.toJSON()) } : {}),
+      ...(this.wingSlot.get(0) ? { wingSlot: plain(this.wingSlot.toJSON()) } : {}),
+      ...(this.accessories.isEmpty() ? {} : { accessories: plain(this.accessories.toJSON()) }),
       ...(this.quests && !this.quests.empty ? { quests: plain(this.quests.toJSON()) } : {}),
       ...(Object.keys(this.ach.toJSON()).length > 0 ? { ach: plain(this.ach.toJSON()) } : {}),
+      ...(!this.bounty.empty ? { bounty: plain(this.bounty.toJSON()) } : {}),
       ...(this.cls ? { cls: this.cls.toJSON() } : {}),
       ...(this.outfitted ? { of: true } : {}),
       ...(this.hardcore ? { hardcore: true, ...(this.gameOver ? { gameOver: true } : {}), ...(this.spectating ? { spectating: true } : {}) } : {}),
@@ -4142,7 +4434,8 @@ export class Player implements EffectOwner {
     const pz = b.z;
     // A mount runs at its own speed: no sprinting on it (and so no hunger), and no sneaking.
     const canSprint = (this.mode === 'creative' || this.vitals.hunger > 6) && !this.blocking && !this.mountId;
-    const move = buildMove(f, this.flying, canSprint, this.spectating, this.speedMul * (this.slowTime > 0 && this.rootTime <= 0 ? this.slowMul : 1));
+    const wings = this.wingDef;
+    const move = buildMove(f, this.flying, canSprint, this.spectating, this.speedMul * (this.slowTime > 0 && this.rootTime <= 0 ? this.slowMul : 1), wings, this.wingFlying);
     // Rooted: no walking, no jumping (the roots hold the feet).
     if (this.rootTime > 0 && !this.flying) rooted(move);
     if (this.mountId) {
@@ -4177,7 +4470,8 @@ export class Player implements EffectOwner {
             this.realm.emitNear(b.x, b.y, b.z, { t: 'sound', sound: 'dirt', action: 'land', vol: 1 });
           }
         } else {
-          this.vitals.land(this.peakY - b.y, this.vitalsCtx(), protectionFactor(this.armorProtection('fall')));
+          // (Wings take the fall: the wearer lands light.)
+          this.vitals.land(wings ? 0 : this.peakY - b.y, this.vitalsCtx(), protectionFactor(this.armorProtection('fall')));
         }
       }
       this.peakY = b.y;
@@ -4193,13 +4487,27 @@ export class Player implements EffectOwner {
     // ---- exhaustion ----
     if (move.jump && wasOnGround && !b.onGround && b.vy > 0) {
       this.vitals.addExhaustion(move.sprint ? EXHAUSTION.sprintJump : EXHAUSTION.jump);
-      if (!this.flying && !b.inWater && !b.onLadder && !this.mountId) this.realm.emitNear(b.x, b.y, b.z, { t: 'sound', sound: this.soundUnderfoot(), action: 'jump', vol: move.sprint ? 1 : 0.8 });
+      if (!this.flying && !b.inWater && !b.onLadder && !this.mountId && this.wingNumber === 0) this.realm.emitNear(b.x, b.y, b.z, { t: 'sound', sound: this.soundUnderfoot(), action: 'jump', vol: move.sprint ? 1 : 0.8 });
     }
     if (move.sprint && b.onGround) this.vitals.addExhaustion(EXHAUSTION.sprintPerBlock * Math.hypot(b.x - px, b.z - pz));
+    if (this.wingFlying) {
+      // On the wings: the flight burns hunger as it goes, and ends on the ground (with jump not held), in the water, or on an empty belly.
+      this.vitals.addExhaustion(WING_EXHAUSTION_PER_BLOCK * Math.hypot(b.x - px, b.z - pz));
+      if (b.inWater || this.vitals.dead) this.flying = false;
+      else if (this.vitals.hunger <= WING_MIN_HUNGER) {
+        this.flying = false;
+        this.emit({ t: 'toast', text: 'You are too hungry to keep flying.' });
+      } else if (b.onGround && !f.jump) {
+        // Down on the ground: the flight ends when the wearer sinks to it (sneaking) or has stood on it a moment, not at every touch of a slope.
+        this.wingGroundT += STEP;
+        if (f.sneak || this.wingGroundT > 0.4) this.flying = false;
+      } else this.wingGroundT = 0;
+    }
     this.vitals.tick(STEP, this.vitalsCtx());
 
     // (A mount's paws make their own sound, in time with its stride: the client plays them.)
-    if (b.onGround && !this.flying && !move.sneak && !this.mountId) {
+    // (A figure with wings floats above the ground: its feet make no sound.)
+    if (b.onGround && !this.flying && !move.sneak && !this.mountId && this.wingNumber === 0) {
       this.stepAcc += Math.hypot(b.x - px, b.z - pz);
       const stride = move.sprint ? 2.5 : 1.9;
       if (this.stepAcc >= stride) {
@@ -4212,7 +4520,7 @@ export class Player implements EffectOwner {
   /** Run the physics steps that `dt` of real time buys, plus the fell-out-of-the-world check. */
   advance(f: InputFrame): void {
     if (this.spectating) this.flying = true;
-    else if (this.mode === 'survival') this.flying = false;
+    else if (this.mode === 'survival' && this.wingNumber === 0) this.flying = false;
     this.acc += f.dt;
     while (this.acc >= STEP) {
       this.markView();
@@ -4226,7 +4534,7 @@ export class Player implements EffectOwner {
   /** Exactly one physics step (the server runs clients' inputs this way). */
   advanceOne(f: InputFrame): void {
     if (this.spectating) this.flying = true;
-    else if (this.mode === 'survival') this.flying = false;
+    else if (this.mode === 'survival' && this.wingNumber === 0) this.flying = false;
     this.markView();
     this.simulateStep(f);
     this.viewBlend = 1;
@@ -4471,7 +4779,16 @@ export class Player implements EffectOwner {
   /** Show the window of the Auctioneer what the house holds now (for the search made last). */
   private sendAuctions(): void {
     this.realm.auctions.update();
-    this.emit({ t: 'auction', view: this.realm.auctions.view(this.auctionQuery, this.account) });
+    const view = this.realm.auctions.view(this.auctionQuery, this.account);
+    const desk = this.tokenDesk();
+    if (desk && this.wallet) view.tokens = { balance: desk.balance(this.wallet) };
+    this.emit({ t: 'auction', view });
+  }
+
+  /** The desk that lets this player trade in $SOLRIFT, or null when they may not (no token, a guest, creative, admin, a cheats server). */
+  private tokenDesk(): TokenDesk | null {
+    const desk = this.realm.tokenDesk;
+    return desk && this.wallet && this.mode !== 'creative' && desk.allowed(this) ? desk : null;
   }
 
   /**
@@ -4513,7 +4830,12 @@ export class Player implements EffectOwner {
           say(`You cannot afford the deposit of ${deposit} Auren.`);
           break;
         }
-        const res = house.post({ seller: this.account, sellerName: this.name, item: offered, bid: c.bid, buyout: c.buyout, hours: c.hours, deposit });
+        const token = c.token === true;
+        if (token && !this.tokenDesk()) {
+          say('You cannot trade in $SOLRIFT here.');
+          break;
+        }
+        const res = house.post({ seller: this.account, sellerName: this.name, item: offered, bid: c.bid, buyout: c.buyout, hours: c.hours, deposit, token, sellerWallet: token ? this.wallet : null });
         if (!res.ok) {
           say(res.error);
           break;
@@ -4528,12 +4850,16 @@ export class Player implements EffectOwner {
       }
       case 'bid':
       case 'buyout': {
-        const res = c.a === 'bid' ? house.bid(c.id, this.account, this.name, c.amount, this.coins) : house.buyout(c.id, this.account, this.name, this.coins);
+        const desk = this.tokenDesk();
+        const funds = { wallet: desk ? this.wallet : null, tokens: desk && this.wallet ? desk.balance(this.wallet) : 0 };
+        const res = c.a === 'bid' ? house.bid(c.id, this.account, this.name, c.amount, this.coins, funds) : house.buyout(c.id, this.account, this.name, this.coins, funds);
         if (!res.ok) {
           say(res.error);
           break;
         }
-        this.spendCoins(res.pay);
+        // (an auction in $SOLRIFT is paid from the ledger by the house's moves, not from the purse)
+        if (res.token) desk?.flush();
+        else this.spendCoins(res.pay);
         this.auctionTouched = true;
         this.emit({ t: 'shop', what: 'buy' });
         say(res.bought ? 'Bought! The item is waiting in your mail.' : 'Bid placed.');
@@ -4634,6 +4960,79 @@ export class Player implements EffectOwner {
     }
     this.sendStash();
   }
+  // ---- the website's Camp ------------------------------------------------------------------------------------------
+  // A hero that is not in the game can still be looked after from the website (see camp.ts and the server's desk.ts): the server
+  // loads the saved hero into a Player that has no body in the world, asks one of these, and writes the result back. They return
+  // null when it was done, or the reason it was not.
+
+  /** Stand at a counter (the Auctioneer, the Stashkeeper) without walking there: the counters' commands then work. `null` steps away. */
+  atCounter(npc: string | null): void {
+    this.dialogNpc = npc;
+    this.screen = npc ? 'dialog' : 'none';
+  }
+
+  /** Put on what lies in a slot of the bags: a piece of armor, a horn, a glowing set, a companion, wings, or something for the off hand. What was worn goes back to that slot. */
+  deskEquip(index: number): string | null {
+    const stack = this.inventory.isUsable(index) ? this.inventory.get(index) : null;
+    if (!stack) return 'There is nothing there.';
+    if (this.vitals.dead) return 'Your hero is dead: revive it in the game first.';
+    const armor = getItem(stack.id).armor;
+    if (armor) {
+      const worn = this.armor.get(armor.slotIndex);
+      if (worn && stack.count > 1 && !this.inventory.canFit(worn)) return 'Your bags are full.';
+      this.armor.set(armor.slotIndex, cloneStack({ ...stack, count: 1 }));
+      this.inventory.set(index, stack.count > 1 ? { ...stack, count: stack.count - 1 } : null);
+      if (worn) this.inventory.collect(worn);
+      return null;
+    }
+    this.drainEvents();
+    const done = this.equipHorn(index) || this.equipOutfit(index) || this.equipCompanion(index) || this.equipWings(index) || this.equipAccessory(index);
+    if (done) {
+      const toast = this.drainEvents().flatMap((e) => (e.t === 'toast' ? [e.text] : [])).pop();
+      return this.inventory.get(index) === stack ? (toast ?? 'It cannot be worn now.') : null;
+    }
+    if (holdsInOffhand(stack.id)) {
+      const worn = this.offhand.get(0);
+      this.offhand.set(0, cloneStack(stack));
+      this.inventory.set(index, worn);
+      return null;
+    }
+    return 'That cannot be worn.';
+  }
+
+  /** Take off what is worn in a place and put it in the bags. */
+  deskUnequip(where: string): string | null {
+    const armorAt = ARMOR_SLOTS.indexOf(where as (typeof ARMOR_SLOTS)[number]);
+    const box = armorAt >= 0 ? this.armor : where === 'offhand' ? this.offhand : where === 'mount' ? this.mountSlot : where === 'outfit' ? this.outfitSlot : where === 'companion' ? this.companionSlot : where === 'wings' ? this.wingSlot : where === 'ring1' || where === 'ring2' || where === 'necklace' ? this.accessories : null;
+    if (!box) return 'There is nothing like that to take off.';
+    const at = armorAt >= 0 ? armorAt : where === 'ring2' ? 1 : where === 'necklace' ? NECKLACE_SLOT : 0;
+    const worn = box.get(at);
+    if (!worn) return 'Nothing is worn there.';
+    if (!this.inventory.canFit(worn)) return 'Your bags are full.';
+    this.inventory.collect(cloneStack(worn));
+    box.set(at, null);
+    return null;
+  }
+
+  /** Move a stack of the bags onto another slot: it merges when they match, and swaps places otherwise. */
+  deskSwap(a: number, b: number): string | null {
+    if (a === b) return null;
+    if (!this.inventory.isUsable(a) || !this.inventory.isUsable(b)) return 'That slot is not there.';
+    const from = this.inventory.get(a);
+    const to = this.inventory.get(b);
+    if (!from) return 'There is nothing there.';
+    if (to && canMerge(to, from) && to.count < maxStackOf(to)) {
+      const n = Math.min(maxStackOf(to) - to.count, from.count);
+      to.count += n;
+      from.count -= n;
+      this.inventory.set(a, from.count > 0 ? from : null);
+      return null;
+    }
+    this.inventory.set(a, to);
+    this.inventory.set(b, from);
+    return null;
+  }
+
   // ---- test and debug helpers ---------------------------------------------
   // These bypass the protocol on purpose. They are the "dev back door" behind `window.__solrift`
   // and the unit tests, and are never reachable from a client message.

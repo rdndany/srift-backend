@@ -10,7 +10,7 @@ const TIPS = [
   'Hold the left mouse button to mine. Right click places a block.',
   'Double-tap W to sprint. Shift sneaks along edges.',
   'Torches keep the monsters away. Place them before dark.',
-  'Press J to hide or show the minimap.',
+  'Hold a map and right-click to unfold it and see where you are.',
   'Press Esc at any time to pause and see the controls.',
   'Sleep in a bed to skip the night.',
   'Press T to chat when you are in the online realm.',

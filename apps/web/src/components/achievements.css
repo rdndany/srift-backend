@@ -135,3 +135,28 @@
   color: var(--tc);
   text-shadow: 1px 1px 0 #000;
 }
+
+/* The daily bounties tab: three rows tinted like the bronze, silver and gold achievements. */
+#quest-log .ach-row.bounty-easy {
+  --tc: #b87333;
+}
+#quest-log .ach-row.bounty-medium {
+  --tc: #c3ccd6;
+}
+#quest-log .ach-row.bounty-hard {
+  --tc: #f1c24f;
+}
+#quest-log .ach-total em {
+  float: right;
+  font-style: normal;
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--w-dim, #b8a98a);
+}
+#quest-log .bounty-note {
+  margin: 10px 4px 2px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--w-dim, #b8a98a);
+}

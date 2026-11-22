@@ -1,0 +1,66 @@
+/* ================================================================================================
+   The HUD on a smaller screen. It is drawn in pixels for about 1280 x 720; HudScale.tsx puts how much of that the screen shows in
+   `--hud` (1 on a screen that size or bigger, down to 0.55) and the room the HUD has, in its own pixels, in `--hud-w` and `--hud-h`.
+   Each part of the HUD is zoomed by it, so the corners keep to their corners and nothing reaches over its neighbour. The windows of the
+   inventory screen are scaled one by one to fit (see useWindowFit); they are not here.
+   Inside a zoomed box a `vw` is not the same on every browser, so what wanted to be a share of the screen asks `--hud-w` / `--hud-h`.
+   ================================================================================================ */
+:root {
+  --hud: 1;
+  --hud-w: 100vw;
+  --hud-h: 100vh;
+}
+
+#player-frame,
+#quest-tracker,
+#quest-notes,
+#zone-banner,
+#recipe-toast,
+#pickup-feed,
+#party-frame,
+#boss-frame,
+#boss-banner,
+#hud-bottom,
+#menu-hotbar,
+#bag-hud,
+#chat,
+#item-name,
+#spectator-banner {
+  zoom: var(--hud);
+}
+
+/* The status effects are placed by the page at the pixel under the frame, so their box is not zoomed, only what is in it. */
+.pf-buffs .pf-buff {
+  zoom: var(--hud);
+}
+.pf-buffs {
+  gap: calc(3px * var(--hud));
+}
+
+/* A share of the screen, in the HUD's own pixels. */
+#chat {
+  width: min(520px, calc(var(--hud-w) * 0.6));
+}
+#boss-banner {
+  max-width: calc(var(--hud-w) * 0.8);
+}
+#item-name {
+  max-width: min(calc(var(--hud-w) * 0.9), 640px);
+}
+/* The bags use the room the inventory window leaves them (useWindowFit measures it). */
+#bag-hud {
+  max-width: var(--bag-room, 240px);
+}
+
+/* The quest log and the party window keep the room for the hotbar under them whatever the height of the screen is (their frame is zoomed with the HUD). */
+.log-card,
+.party-card {
+  zoom: var(--hud);
+  width: min(556px, calc(var(--hud-w) * 0.94));
+  height: min(627px, calc(var(--hud-h) - 124px / var(--hud)));
+}
+
+/* The room under a window of the inventory screen (its tabs hang from it, the hotbar is under them) is the HUD's too. */
+#menu-screen:has(.panel.wow) {
+  padding-bottom: calc(112px * var(--hud));
+}

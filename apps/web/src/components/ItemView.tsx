@@ -1,6 +1,7 @@
 'use client';
 
-import { I, getItem, type ItemStack, type TipLine } from '@solrift/shared';
+import { ELEMENTS, I, dominantElement, getItem, type ItemStack, type TipLine } from '@solrift/shared';
+import type { CSSProperties } from 'react';
 import { useUi } from '../ui/store';
 
 export const isEnchanted = (stack: ItemStack | null): boolean => !!stack && (!!stack.ench || getItem(stack.id).storesEnchants);
@@ -13,12 +14,22 @@ export function ItemView({ stack }: { stack: ItemStack | null }) {
   if (!stack || !api) return null;
   const item = getItem(stack.id);
   const left = item.durability > 0 ? 1 - stack.damage / item.durability : 1;
+  const el = isEnchanted(stack) ? (dominantElement(stack) ?? 'arcane') : null;
+  const glow = el ? ({ '--gl': ELEMENTS[el].color } as CSSProperties) : undefined;
   const src = stack.id === I.COMPASS ? api.icons.compassUrl(needle) : api.icons.url(stack.id);
   return (
     <>
+      {glow && <span className="ench-aura" data-ench-aura style={glow} />}
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img className={stack.gear?.r === 3 ? "item-icon epic-icon" : "item-icon"} src={src} alt={item.name} draggable={false} />
-      {isEnchanted(stack) && <div className="glint" data-glint style={{ maskImage: `url(${src})`, WebkitMaskImage: `url(${src})` }} />}
+      <img className={`${stack.gear?.r === 3 ? 'item-icon epic-icon' : 'item-icon'}${glow ? ' ench-icon' : ''}`} style={glow} src={src} alt={item.name} draggable={false} />
+      {glow && <div className="glint" data-glint style={{ maskImage: `url(${src})`, WebkitMaskImage: `url(${src})`, ...glow }} />}
+      {glow && (
+        <span className="ench-sparks" aria-hidden="true" style={glow}>
+          <i style={{ left: `${20 + (stack.id * 7) % 20}%`, animationDelay: '0s' }} />
+          <i style={{ left: `${55 + (stack.id * 11) % 25}%`, animationDelay: '-0.9s' }} />
+          <i style={{ left: `${35 + (stack.id * 3) % 30}%`, animationDelay: '-1.7s' }} />
+        </span>
+      )}
       {stack.gear && stack.gear.r > 0 && <div className={`rarity-ring r${stack.gear.r}`} data-testid="rarity-ring" />}
       {!!stack.gear?.u && (
         <span className={stack.gear.u >= 10 ? 'plus-badge hi max' : stack.gear.u >= 7 ? 'plus-badge hi' : 'plus-badge'} data-testid="plus-badge">

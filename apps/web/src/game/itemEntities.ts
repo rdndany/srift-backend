@@ -1,8 +1,9 @@
 import * as THREE from 'three';
-import { makeStack, parseGear, tooltipLines, type ClassId, type ItemStack, type TipColor, type TipLine } from '@solrift/shared';
+import { ELEMENTS, dominantElement, makeStack, parseGear, tooltipLines, type ClassId, type ItemStack, type TipColor, type TipLine } from '@solrift/shared';
 import type { DropLike } from './clientSession';
 import type { ItemIcons } from './icons';
 import type { EntityLight } from './entityLight';
+import { addAura } from './enchantFx';
 
 /** The colours of a tooltip line (the same as the hover tooltips in the menus). */
 const TIP_COLOR: Record<TipColor, string> = {
@@ -41,6 +42,8 @@ interface Piece {
   obj: THREE.Object3D;
   mats: THREE.MeshBasicMaterial[];
   lift: number;
+  /** The soft light round a drop that carries glyphs (it breathes with `sync`). */
+  halo?: THREE.Sprite;
 }
 
 interface Tag {
@@ -102,6 +105,40 @@ export class ItemEntities {
 
   /** The body of a new drop: the item's solid model (with materials of its own, to be lit by itself), or its flat picture when there is none. */
   private make(d: DropLike): Piece {
+    const piece = this.body(d);
+    const el = d.stack.ench && d.stack.ench.length > 0 ? dominantElement(this.stackOf(d)) : null;
+    if (el) {
+      const color = ELEMENTS[el].color;
+      addAura(piece.obj, color);
+      const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.haloTexture(), color, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
+      halo.scale.setScalar(1.1);
+      halo.renderOrder = 10;
+      piece.obj.add(halo);
+      piece.halo = halo;
+    }
+    return piece;
+  }
+
+  /** One soft round light, shared by every halo (tinted by each). */
+  private haloTex: THREE.CanvasTexture | null = null;
+  private haloTexture(): THREE.CanvasTexture {
+    if (!this.haloTex) {
+      const c = document.createElement('canvas');
+      c.width = c.height = 64;
+      const g = c.getContext('2d')!;
+      const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+      grad.addColorStop(0, 'rgba(255,255,255,0.9)');
+      grad.addColorStop(0.35, 'rgba(255,255,255,0.35)');
+      grad.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = grad;
+      g.fillRect(0, 0, 64, 64);
+      this.haloTex = new THREE.CanvasTexture(c);
+      this.haloTex.colorSpace = THREE.SRGBColorSpace;
+    }
+    return this.haloTex;
+  }
+
+  private body(d: DropLike): Piece {
     const model = this.models?.(d.stack.id) ?? null;
     if (!model) {
       const mesh = new THREE.Mesh(this.geo, this.base(d.stack.id).clone());
@@ -191,6 +228,11 @@ export class ItemEntities {
       }
       piece.obj.position.set(d.x, d.y + piece.lift + Math.sin(d.age * 2.4 + d.phase) * 0.05, d.z);
       piece.obj.rotation.y = d.age * 1.6 + d.phase;
+      if (piece.halo) {
+        const breath = 0.5 + 0.5 * Math.sin(d.age * 3 + d.phase);
+        piece.halo.scale.setScalar(0.9 + breath * 0.35);
+        (piece.halo.material as THREE.SpriteMaterial).opacity = 0.55 + breath * 0.4;
+      }
       if (this.env) {
         this.env.at(d.x, d.y, d.z, this.tmp);
         this.tmp.setRGB(Math.min(1, Math.max(0.25, this.tmp.r)), Math.min(1, Math.max(0.25, this.tmp.g)), Math.min(1, Math.max(0.25, this.tmp.b)));
@@ -203,6 +245,7 @@ export class ItemEntities {
         if (live.has(id)) continue;
         this.group.remove(piece.obj);
         for (const m of piece.mats) m.dispose();
+        piece.halo?.material.dispose();
         this.meshes.delete(id);
       }
     }
@@ -274,8 +317,10 @@ export class ItemEntities {
     for (const piece of this.meshes.values()) {
       this.group.remove(piece.obj);
       for (const m of piece.mats) m.dispose();
+      piece.halo?.material.dispose();
     }
     this.meshes.clear();
+    this.haloTex?.dispose();
     for (const tag of this.tags.values()) {
       this.group.remove(tag.sprite);
       tag.sprite.material.dispose();

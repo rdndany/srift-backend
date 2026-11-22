@@ -74,3 +74,18 @@ describe('newCharacterSheet', () => {
     }
   });
 });
+describe('achievements on the sheet', () => {
+  it('shows what a saved character has won and counted, and nothing for a new one', () => {
+    const save = { ...mage().savePlayer(), ach: { s: { kills: 120, level: 6 }, d: ['lvl-5', 'kill-25'] } };
+    const sheet = sheetOfSave(save, 'mage');
+    expect(sheet.ach.stats.kills).toBe(120);
+    // (the counts earn what the list says, so "kill-100" is won too, as it is in the game)
+    expect(sheet.ach.done).toEqual(expect.arrayContaining(['lvl-5', 'kill-25', 'kill-100']));
+    expect(sheet.ach.done).not.toContain('kill-500');
+    expect(JSON.parse(JSON.stringify(sheet))).toEqual(sheet);
+
+    expect(newCharacterSheet('mage').ach.done).toEqual([]);
+    const rubbish = sheetOfSave({ ...mage().savePlayer(), ach: { s: { kills: 'many' }, d: [5, 'nope'] } as never }, 'mage');
+    expect(rubbish.ach.done).toEqual([]);
+  });
+});
