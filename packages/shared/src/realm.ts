@@ -29,6 +29,7 @@ import { canStayAt } from './plants';
 import { isRail, railRemoved } from './rails';
 import { VEHICLE_ITEM, VehicleWorld, type Vehicle, type VehicleKind } from './vehicles';
 import { FluidSim, isFluid } from './fluids';
+import { InvasionDirector, whereIs, type InvasionHost, type InvasionView } from './invasion';
 import { RIFT_GRADE_DEFS, RiftDirector, compass, type RiftGrade, type RiftHost, type RiftPlayer, type RiftView } from './rift';
 import { randomEnchantedBook } from './enchant';
 import { FireSim } from './fire';
@@ -125,6 +126,10 @@ export interface RealmOptions {
   villagers?: boolean;
   /** Rifts: now and then a tear opens near the players and waves of monsters come out of it (see rift.ts). Off by default; the game and the server turn it on. */
   rifts?: boolean;
+  /** The Gilded Tide: an invasion every half hour by the wall clock (see invasion.ts). Off by default; the game and the server turn it on. */
+  invasions?: boolean;
+  /** The wall clock the invasions keep (milliseconds since 1970; default `Date.now`). Tests inject their own. */
+  clock?: () => number;
   /** Random source for everything the simulation does by chance. Inject a seeded one in tests. */
   rand?: () => number;
   /**
@@ -208,6 +213,8 @@ export class Realm {
   villagers: boolean;
   /** The rifts of this world (null: none). */
   readonly rifts: RiftDirector | null;
+  /** The Gilded Tide of this world (null: none). */
+  readonly invasions: InvasionDirector | null;
   /** False on a shared server: beds are respawn points only and nobody can skip the night. */
   readonly allowSleep: boolean;
 
@@ -260,6 +267,7 @@ export class Realm {
     this.naturalSpawning = opts.naturalSpawning ?? true;
     this.villagers = opts.villagers ?? this.naturalSpawning;
     this.rifts = opts.rifts ? new RiftDirector(this.riftHost(), opts.seed) : null;
+    this.invasions = opts.invasions ? new InvasionDirector(this.invasionHost(opts.clock ?? Date.now), opts.seed) : null;
     this.allowSleep = opts.sleeping ?? true;
     this.auctionStock = opts.auctionStock ?? true;
     this.stockState = (opts.seed ^ 0x5eed1e55) >>> 0;
@@ -584,6 +592,7 @@ export class Realm {
       if (living.length > 0) this.updateVillagers(dt, living);
     }
     this.rifts?.update(dt);
+    this.invasions?.update(dt);
     if (this.stations.length > 0) this.updateNpcs(dt, view);
     if (this.dummySpots.length > 0) this.updateDummies(dt, view);
   }
@@ -1147,6 +1156,7 @@ export class Realm {
         if (i >= 0) this.mobs.mobs.splice(i, 1);
       },
       puff: (x, y, z) => this.emitNear(x, y, z, { t: 'burst', id: B.OBSIDIAN, x, y, z, count: 8 }),
+      chests: (x, y, z, grade) => this.placeRiftChests(x, y, z, grade),
       announce: (what, grade, text, x, z) => {
         for (const p of this.players) {
           if (p.spectating || this.copyAt(p) >= 0) continue;
@@ -1170,6 +1180,83 @@ export class Realm {
         p.giveOrDrop(piece);
         if (rand() < def.tome) p.giveOrDrop(randomEnchantedBook(rand));
         p.emit({ t: 'toast', text: rank === 1 && helpers > 1 ? `${RIFT_GRADE_DEFS[grade].name}: you fought the best! +${def.xp} xp, +${def.coins} coins and a piece of gear` : `${RIFT_GRADE_DEFS[grade].name}: +${def.xp} xp, +${def.coins} coins and a piece of gear` });
+      },
+    };
+  }
+
+  /**
+   * A sealed rift leaves two chests of treasure by its place, one each side of the middle facing it, filled from the grade's loot table.
+   * Where the ground is too rough for a chest the stacks that would have been in it are dropped at the middle instead.
+   */
+  private placeRiftChests(x: number, y: number, z: number, grade: RiftGrade): void {
+    const table = LOOT_TABLES[RIFT_GRADE_DEFS[grade].chest];
+    const cx = Math.floor(x);
+    const cz = Math.floor(z);
+    // Offsets from the middle to try, best first, and the way the chest on each faces (BED_DIRS: +x, -x, +z, -z): toward the middle.
+    const tries: readonly [number, number, number][] = [[-2, 0, 0], [2, 0, 1], [0, -2, 2], [0, 2, 3], [-3, 1, 0], [3, -1, 1], [-3, -2, 0], [3, 2, 1], [-1, 3, 3], [1, -3, 2]];
+    const spots: { x: number; y: number; z: number; dir: number }[] = [];
+    for (const [dx, dz, dir] of tries) {
+      if (spots.length >= 2) break;
+      const bx = cx + dx;
+      const bz = cz + dz;
+      const g = this.world.surfaceY(bx, bz);
+      if (g < 0 || Math.abs(g + 1 - Math.floor(y)) > 3) continue;
+      const floor = BLOCKS[this.world.getBlock(bx, g, bz)];
+      if (!floor.solid || floor.liquid || this.world.getBlock(bx, g + 1, bz) !== B.AIR) continue;
+      if (spots.some((s) => s.x === bx && s.z === bz)) continue;
+      spots.push({ x: bx, y: g + 1, z: bz, dir });
+    }
+    for (let i = 0; i < 2; i++) {
+      const slots = rollChest(table, this.rand);
+      const spot = spots[i];
+      if (!spot) {
+        for (const s of slots) if (s) this.drops.spawn(s, x, y + 0.5, z, (this.rand() - 0.5) * 2, 4, (this.rand() - 0.5) * 2, 0.5);
+        continue;
+      }
+      this.world.setBlock(spot.x, spot.y, spot.z, chestId(spot.dir, 0));
+      this.blockChanged(spot.x, spot.y, spot.z);
+      const chest = this.blockEntities.chest(spot.x, spot.y, spot.z);
+      slots.forEach((s, k) => chest.set(k, s));
+      this.emitNear(spot.x + 0.5, spot.y + 0.5, spot.z + 0.5, { t: 'burst', id: B.GOLD_ORE, x: spot.x, y: spot.y, z: spot.z, count: 14 });
+    }
+  }
+
+  /** What a player's interface shows of the Gilded Tide (null when none is on, or the player is in a dungeon). */
+  invasionViewFor(p: Player): InvasionView | null {
+    if (!this.invasions?.current || p.spectating || this.copyAt(p) >= 0) return null;
+    return this.invasions.view();
+  }
+
+  /** Begin the Gilded Tide right now near the players (a cheat, a test). Returns false when one is on already, or there is no one about or no ground for it. */
+  startInvasion(): boolean {
+    return !!this.invasions && this.invasions.open(this.riftPlayers());
+  }
+
+  private invasionHost(clock: () => number): InvasionHost {
+    return {
+      now: clock,
+      players: () => this.riftPlayers(),
+      groundAt: (x, z) => this.world.surfaceY(Math.floor(x), Math.floor(z)),
+      standable: (x, y, z) => {
+        const bx = Math.floor(x);
+        const bz = Math.floor(z);
+        const floor = this.world.getBlock(bx, y - 1, bz);
+        return BLOCKS[floor].solid && !BLOCKS[floor].liquid && this.world.getBlock(bx, y, bz) === B.AIR && this.world.getBlock(bx, y + 1, bz) === B.AIR && !isFluid(this.world.getBlock(bx, y, bz));
+      },
+      allowed: (x, z) => !this.generator.safeFromMonsters(x, z, SAFE_BUFFER) && this.generator.instanceAt(x, z) < 0,
+      spawn: (kind, x, y, z) => this.mobs.spawn(kind, x, y, z),
+      present: (mob) => this.mobs.mobs.includes(mob),
+      remove: (mob) => {
+        const i = this.mobs.mobs.indexOf(mob);
+        if (i >= 0) this.mobs.mobs.splice(i, 1);
+      },
+      puff: (x, y, z) => this.emitNear(x, y, z, { t: 'burst', id: B.GOLD_ORE, x, y, z, count: 10 }),
+      announce: (what, text, x, z) => {
+        for (const p of this.players) {
+          if (p.spectating || this.copyAt(p) >= 0) continue;
+          const where = x !== undefined && z !== undefined ? ` (${whereIs(p.body.x, p.body.z, x, z)})` : '';
+          p.emit({ t: 'invasion', what, text: text + where });
+        }
       },
     };
   }

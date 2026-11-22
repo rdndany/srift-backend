@@ -494,6 +494,39 @@ function skillBookGrid(cover: RGB, emblem: keyof typeof BOOK_EMBLEMS): Cell[] {
   return outline(g);
 }
 
+/**
+ * The Codex of Aurelion: a thick crimson book bound all round in gold, with a gold sun on the cover (rays round a bright core)
+ * and a stud in each corner, so it is never taken for a skill book.
+ */
+function codexGrid(): Cell[] {
+  const g = blank();
+  const cover: RGB = [122, 22, 44];
+  const gold: RGB = [248, 206, 74];
+  fillShape(
+    g,
+    (x, y) => x >= 2 && x <= 13 && y >= 1 && y <= 14,
+    (x, y) => {
+      if (x === 2) return shade(gold, -40);
+      if (x === 13) return [238, 226, 190];
+      if (y === 1) return shade(gold, 6);
+      if (y === 14) return shade(gold, -46);
+      if (x === 3) return shade(gold, -14);
+      if (x === 12) return shade(gold, -30);
+      return shade(cover, hashPx(x, y) * 14 - 5 + (x + y < 12 ? 10 : 0));
+    },
+  );
+  // The sun: a core, four long rays and four short ones.
+  const cx = 7;
+  const cy = 7;
+  for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]] as const) g[(cy + dy) * N + cx + dx] = [255, 244, 170];
+  for (const [dx, dy] of [[-1, 0], [-1, 1], [2, 0], [2, 1], [0, -1], [1, -1], [0, 2], [1, 2]] as const) g[(cy + dy) * N + cx + dx] = gold;
+  for (const [dx, dy] of [[0, -2], [1, -2], [0, 3], [1, 3], [-2, 0], [-2, 1], [3, 0], [3, 1]] as const) g[(cy + dy) * N + cx + dx] = shade(gold, -22);
+  for (const [dx, dy] of [[-2, -2], [3, -2], [-2, 3], [3, 3]] as const) g[(cy + dy) * N + cx + dx] = shade(gold, -34);
+  // The corner studs.
+  for (const [x, y] of [[4, 2], [11, 2], [4, 13], [11, 13]] as const) g[y * N + x] = [255, 238, 150];
+  return outline(g);
+}
+
 /** The cloth of each bag, smallest first: plain burlap, leather, then blue, green, purple and a dark violet for the rarest. */
 const BAG_COLORS: readonly RGB[] = [
   [164, 134, 96],
@@ -3538,6 +3571,7 @@ const BUILDERS: Record<string, () => Cell[]> = {
   bag_5: () => bagGrid(5),
   bag_6: () => bagGrid(6),
   emberstone: emberstoneGrid,
+  codex_of_aurelion: codexGrid,
   horn_fenrir: () => hornGrid([172, 66, 38], [236, 222, 186], [214, 96, 255]),
   horn_fenrir_black: () => hornGrid([48, 46, 58], [214, 204, 190], [255, 70, 50]),
   horn_fenrir_blue: () => hornGrid([44, 100, 204], [196, 232, 255], [96, 236, 255]),

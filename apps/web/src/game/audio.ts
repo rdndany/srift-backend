@@ -437,6 +437,46 @@ export class GameAudio {
     }
   }
 
+  /**
+   * The Gilded Tide: a warning (a rising brass call over a low drum), the tide breaking (a rush, a heavy thump and a gold glitter),
+   * Aurelion rising (a deep roar and a long sinking horn), his fall (a bright run of bells and a glitter) or the tide fading (the notes fall).
+   */
+  invasion(what: 'omen' | 'open' | 'boss' | 'slain' | 'faded'): void {
+    if (!this.ctx || !this.master) return;
+    switch (what) {
+      case 'omen':
+        this.swell(220, 'sawtooth', 0.1, 0.15, 0.7, 0, 330, 0.5, 1500);
+        this.swell(330, 'sawtooth', 0.09, 0.15, 0.9, 0.5, 440, 0.5, 1500);
+        this.swell(110, 'sine', 0.3, 0.02, 1.0, 0.5, 60, 0.2);
+        this.fmBell(784, 0.1, 1.6, 0.9, 2.76, 3, 0.6);
+        break;
+      case 'open':
+        this.blip(260, 0.9, 1.0, 0.3, 'bandpass', 8);
+        this.swell(50, 'sine', 0.45, 0.01, 1.2, 0.05, 26, 0.2);
+        this.swell(165, 'sawtooth', 0.12, 0.08, 1.1, 0, 330, 0.5, 2000);
+        this.swell(247, 'sawtooth', 0.1, 0.08, 1.1, 0.25, 495, 0.5, 2000);
+        this.fmBell(1047, 0.12, 1.8, 0.3, 2.76, 4, 0.6);
+        this.glitter(1500, 12, 0.06, 0.2, 0.08);
+        break;
+      case 'boss':
+        this.swell(58, 'sawtooth', 0.22, 0.05, 2.0, 0, 34, 0.4, 500);
+        this.swell(46, 'sine', 0.45, 0.02, 2.2, 0.05, 27, 0.2);
+        this.swell(196, 'sawtooth', 0.1, 0.3, 1.6, 0.4, 98, 0.5, 1200);
+        this.blip(140, 1.6, 1.4, 0.25, 'lowpass', 0.3);
+        this.fmBell(392, 0.09, 2.2, 1.0, 1.41, 3, 0.7);
+        break;
+      case 'slain':
+        [523, 659, 784, 1047, 1319, 1568].forEach((hz, i) => this.fmBell(hz, 0.13 - i * 0.01, 1.6, i * 0.1, 2.76, 3, 0.6));
+        this.swell(131, 'triangle', 0.14, 0.2, 1.4, 0, 262, 0.5, 1800);
+        this.glitter(2000, 14, 0.06, 0.5, 0.08);
+        break;
+      case 'faded':
+        this.swell(330, 'triangle', 0.12, 0.02, 1.2, 0, 80, 0.4, 1600);
+        [880, 659, 494, 370].forEach((hz, i) => this.fmBell(hz, 0.09, 0.9, 0.05 + i * 0.14, 1.41, 2.5, 0.6));
+        break;
+    }
+  }
+
   /** One soft tone (sines and triangles) with a slow attack and an optional glide, a little of it sent through the reverb. */
   private swell(freq: number, type: OscillatorType, gain: number, attack: number, dur: number, delay = 0, glideTo = 0, wet = 0.5, cutoff = 0): void {
     if (!this.ctx || !this.master) return;

@@ -176,6 +176,8 @@ export type SessionEvent =
   | { t: 'boss'; text: string; kind: 'yell' | 'warn' }
   /** A rift: it is tearing open (`omen`), opens, sends the next wave, is sealed or collapses. Shown across the screen, with its own sound; `grade` colours it. */
   | { t: 'rift'; what: 'omen' | 'open' | 'wave' | 'sealed' | 'collapsed'; grade: 'uncommon' | 'rare' | 'epic'; text: string }
+  /** The Gilded Tide, the invasion every half hour: a warning (`omen`), it begins (`open`), Aurelion rises (`boss`), he falls (`slain`) or it fades away. Shown across the screen in gold, with its own sound. */
+  | { t: 'invasion'; what: 'omen' | 'open' | 'boss' | 'slain' | 'faded'; text: string }
   /**
    * The sound of a boss fight, for everybody in the copy (the client works the loudness out from where it stands). `wake`: he rises; `cast`: `spell` begins to wind up (`seconds` long); `release`: it lands (at x,y,z);
    * `phase`: the next phase (`phase`) begins; `down`: he has fallen; `step`: a stride; `swing`: a melee blow.

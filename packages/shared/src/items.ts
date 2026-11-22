@@ -140,6 +140,8 @@ export const I = {
   JEWEL_BLOOM: 433,
   /** Hold it and its needle (a sprite with `COMPASS_FRAMES` pictures) swings to point north. */
   COMPASS: 434,
+  /** The only thing the monsters of the Gilded Tide leave (see invasion.ts). Right-click it and it opens into one piece of epic gear. */
+  AURELION_CODEX: 435,
   /** The mount horns (440 + the mount's place in `MOUNTS`): right-click one to put it in the mount slot, and summon it with the mount key. */
   MOUNT_BASE: 440,
   /** The clothes of the classes (460 + class * 4 + slot, see `outfitId`): worn in the armor slots, and taken off like armor. */
@@ -480,6 +482,7 @@ export type ItemUse =
   | 'bow' // held to draw, let go to shoot
   | 'crossbow' // held to wind, shoots when it is wound all the way
   | 'skill_book' // teaches its ability
+  | 'codex' // opens into a piece of epic gear and is used up
   | 'horn' // goes in the mount slot
   | 'outfit' // goes in the outfit slot
   | 'companion' // goes in the companion slot
@@ -772,6 +775,7 @@ add({ id: I.HOLLOW_SIGIL, name: 'hollow_sigil', tile: tileIndex('hollow_sigil'),
 add({ id: I.JEWEL_DAWN, name: 'jewel_of_dawn', tile: tileIndex('jewel_dawn'), maxStack: 64, kind: 'Jewel' });
 add({ id: I.JEWEL_RIFT, name: 'jewel_of_the_rift', tile: tileIndex('jewel_rift'), maxStack: 64, kind: 'Jewel' });
 add({ id: I.JEWEL_BLOOM, name: 'jewel_of_bloom', tile: tileIndex('jewel_bloom'), maxStack: 64, kind: 'Jewel' });
+add({ id: I.AURELION_CODEX, name: 'aurelion_codex', tile: tileIndex('codex_of_aurelion'), maxStack: 64, use: 'codex', kind: 'Special' });
 // Class weapons. Melee ones swing like a sword, the crossbow shoots arrows, wands, staves and books cast with the class resource.
 add({ id: I.GREATSWORD, name: 'greatsword', tile: tileIndex('greatsword'), maxStack: 1, durability: 500, weapon: { kind: 'melee', damage: 8, cooldown: 0.85, cost: 0 } });
 add({ id: I.DAGGER, name: 'dagger', tile: tileIndex('dagger'), maxStack: 1, durability: 200, offhand: true, weapon: { kind: 'melee', damage: 3, cooldown: 0.3, cost: 0 } });

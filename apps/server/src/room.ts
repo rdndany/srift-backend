@@ -135,6 +135,10 @@ export interface RoomOptions {
   naturalSpawning?: boolean;
   /** Rifts (timed co-op world events): on whenever natural spawning is, unless said. */
   rifts?: boolean;
+  /** The Gilded Tide (an invasion every half hour on the wall clock): off unless said. */
+  invasions?: boolean;
+  /** The wall clock the Gilded Tide keeps (default: the real one). A test sets its own. */
+  clock?: () => number;
   /** Allow cheat commands in chat (/time, /weather, /gamemode, /tp). Off on shared servers. */
   cheats?: boolean;
   /** Who may switch on admin mode with `/admin on` (see `admin.ts`). Nobody, when absent. */
@@ -355,7 +359,7 @@ export class GameRoom {
     this.tickHz = opts.tickHz ?? 20;
     const generator = makeGenerator(this.seed, this.kind);
     this.world = new HeadlessWorld(generator);
-    this.realm = new Realm({ seed: this.seed, world: this.world, generator, naturalSpawning: opts.naturalSpawning ?? true, rifts: opts.rifts ?? opts.naturalSpawning ?? true, rand: opts.rand, sleeping: false, auctionStock: false });
+    this.realm = new Realm({ seed: this.seed, world: this.world, generator, naturalSpawning: opts.naturalSpawning ?? true, rifts: opts.rifts ?? opts.naturalSpawning ?? true, invasions: opts.invasions ?? false, clock: opts.clock, rand: opts.rand, sleeping: false, auctionStock: false });
     if (opts.now) this.realm.clock = opts.now;
     if (opts.store) this.loadWorld(opts.store);
     if (opts.store) this.realm.auctions.load(opts.store.getJson(this.auctionKey));
@@ -1283,7 +1287,7 @@ export class GameRoom {
     if (CHAT_COMMANDS.has(cmd) && this.muted(m)) return this.tell(m, 'You are muted.');
     switch (cmd) {
       case 'help':
-        this.tell(m, `Commands: /help /who /home /w /r /me /friend /ignore /inspect /trade /guild /g /party /p${this.cheatsFor(m) ? ' /time /weather /gamemode /tp /xp /coins /rift' : ''}${m.adminOn ? ' (admin: /admin help)' : m.admin ? ' /admin' : ''}`);
+        this.tell(m, `Commands: /help /who /home /w /r /me /friend /ignore /inspect /trade /guild /g /party /p${this.cheatsFor(m) ? ' /time /weather /gamemode /tp /xp /coins /rift /invasion' : ''}${m.adminOn ? ' (admin: /admin help)' : m.admin ? ' /admin' : ''}`);
         return;
       case 'who':
         this.tell(m, `Online (${this.members.size}): ${[...this.members.values()].map((x) => x.name).join(', ')}`);
@@ -1368,6 +1372,7 @@ export class GameRoom {
       case 'xp':
       case 'coins':
       case 'rift':
+      case 'invasion':
         if (!this.cheatsFor(m)) {
           this.tell(m, 'Cheats are off on this server');
           this.strike(m, STRIKES.forbidden, 'cheat command without cheats');
@@ -1610,6 +1615,8 @@ export class GameRoom {
       const grade = g === 'uncommon' || g === 'rare' || g === 'epic' ? g : undefined;
       if (args[0] && !grade) return this.tell(m, 'Usage: /rift [uncommon|rare|epic]');
       this.tell(m, this.realm.startRift(grade) ? 'A rift is tearing open nearby' : this.realm.rifts?.current ? 'A rift is already open' : 'No place for a rift here');
+    } else if (name === 'invasion') {
+      this.tell(m, this.realm.startInvasion() ? 'The Gilded Tide breaks over the land' : this.realm.invasions?.current ? 'The Gilded Tide is on already' : !this.realm.invasions ? 'Invasions are off on this server' : 'No place for the Gilded Tide here');
     } else if (name === 'tp') {
       const [x, y, z] = args.map(Number);
       if (![x, y, z].every((v) => Number.isFinite(v) && Math.abs(v) < 30_000_000)) return this.tell(m, 'Usage: /tp x y z');

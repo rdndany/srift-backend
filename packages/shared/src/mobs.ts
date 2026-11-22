@@ -68,6 +68,12 @@ export type MobKind =
   | 'ashen_knight'
   | 'hollow_priest'
   | 'shade'
+  /** The monsters of the Gilded Tide (see `GILDED_KINDS` and invasion.ts): they come in an invasion every half hour and leave nothing but the Codex of Aurelion. */
+  | 'gilt_imp'
+  | 'gilt_hound'
+  | 'gilt_drake'
+  | 'gilt_colossus'
+  | 'aurelion'
   /** A quest giver of the Adventure mode: it stands where it was put, cannot be hurt, and its variant says which person it is (see `NPCS`). */
   | 'npc'
   /** A training dummy: stands where it was put, takes any hit without dying, and mends itself. Never saved. */
@@ -82,6 +88,15 @@ export type MobKind =
 export const HOLLOW_DEEP_KINDS = ['moss_lurker', 'spore_puff', 'ember_wraith', 'ashen_knight', 'hollow_priest', 'shade'] as const;
 export type HollowDeepKind = (typeof HOLLOW_DEEP_KINDS)[number];
 export const isHollowDeepKind = (kind: string): kind is HollowDeepKind => (HOLLOW_DEEP_KINDS as readonly string[]).includes(kind);
+
+/**
+ * The five monsters of the Gilded Tide, the invasion that sweeps the world every half hour (see invasion.ts): imps, hounds, drakes and
+ * colossi in a golden tide, led by the Hoard King Aurelion. They are never born by the spawner or kept in a save; the invasion director
+ * puts them in the world. Each leaves nothing but the Codex of Aurelion (`MobManager.kill` skips coins, bags, jewels and gear for them).
+ */
+export const GILDED_KINDS = ['gilt_imp', 'gilt_hound', 'gilt_drake', 'gilt_colossus', 'aurelion'] as const;
+export type GildedKind = (typeof GILDED_KINDS)[number];
+export const isGildedKind = (kind: string): kind is GildedKind => (GILDED_KINDS as readonly string[]).includes(kind);
 
 /** What a monster's blow can leave on a player besides the damage (see `Player.afflict`). */
 export type MobEffect = 'poison' | 'root' | 'slow' | 'weak' | 'burn';
@@ -639,6 +654,93 @@ export const MOBS: Record<MobKind, MobDef> = {
       return out;
     },
     xp: () => 10,
+  },
+  // ---- the Gilded Tide (plain units; they hunt from far off, and leave only the Codex of Aurelion) ----
+  gilt_imp: {
+    kind: 'gilt_imp',
+    name: 'gilt imp',
+    width: 0.55,
+    height: 1.15,
+    health: 22,
+    speed: 2.2,
+    runSpeed: 5,
+    hostile: true,
+    burnsInDaylight: false,
+    detect: 64,
+    melee: { damage: 2, cooldown: 0.9, reach: 1.1 },
+    behaves: 'zombie',
+    jumpSpeed: 9,
+    drops: (r) => (r() < 0.2 ? [{ id: I.AURELION_CODEX, count: 1 }] : []),
+    xp: () => 6,
+  },
+  gilt_hound: {
+    kind: 'gilt_hound',
+    name: 'gilt hound',
+    width: 0.8,
+    height: 0.95,
+    health: 32,
+    speed: 2.6,
+    runSpeed: 6.4,
+    hostile: true,
+    burnsInDaylight: false,
+    detect: 64,
+    melee: { damage: 2.5, cooldown: 1.1, reach: 1.3 },
+    behaves: 'zombie',
+    jumpSpeed: 9,
+    drops: (r) => (r() < 0.28 ? [{ id: I.AURELION_CODEX, count: 1 }] : []),
+    xp: () => 8,
+  },
+  gilt_drake: {
+    kind: 'gilt_drake',
+    name: 'gilt drake',
+    width: 0.95,
+    height: 1.9,
+    health: 72,
+    speed: 1.6,
+    runSpeed: 3.6,
+    hostile: true,
+    burnsInDaylight: false,
+    detect: 64,
+    melee: { damage: 3.5, cooldown: 1.5, reach: 1.9 },
+    behaves: 'zombie',
+    jumpSpeed: 8.5,
+    drops: (r) => (r() < 0.5 ? [{ id: I.AURELION_CODEX, count: 1 }] : []),
+    xp: () => 20,
+  },
+  gilt_colossus: {
+    kind: 'gilt_colossus',
+    name: 'gilt colossus',
+    width: 1.7,
+    height: 3.9,
+    health: 190,
+    speed: 1.2,
+    runSpeed: 2.5,
+    hostile: true,
+    burnsInDaylight: false,
+    detect: 64,
+    melee: { damage: 5.5, cooldown: 2, reach: 2.9 },
+    behaves: 'zombie',
+    jumpSpeed: 8,
+    drops: (r) => [{ id: I.AURELION_CODEX, count: 1 + (r() < 0.5 ? 1 : 0) }],
+    xp: () => 60,
+  },
+  aurelion: {
+    kind: 'aurelion',
+    name: 'King Aurelion',
+    width: 2.6,
+    height: 6.2,
+    health: 650,
+    speed: 1.8,
+    runSpeed: 3.3,
+    hostile: true,
+    burnsInDaylight: false,
+    detect: 96,
+    melee: { damage: 7, cooldown: 2, reach: 3.7 },
+    behaves: 'zombie',
+    boss: true,
+    jumpSpeed: 9,
+    drops: (r) => [{ id: I.AURELION_CODEX, count: between(r, 6, 9) }],
+    xp: () => 250,
   },
   stray: {
     kind: 'stray',
@@ -1517,7 +1619,7 @@ export class MobManager {
     const out: MobSave[] = [];
     for (const m of this.mobs) {
       // Villagers are kept by the realm, with their trades, in the world's state.
-      if (m.dead || out.length >= limit || m.kind === 'villager' || m.kind === 'npc' || m.kind === 'dummy' || m.rift !== 0 || isHollowDeepKind(m.kind)) continue;
+      if (m.dead || out.length >= limit || m.kind === 'villager' || m.kind === 'npc' || m.kind === 'dummy' || m.rift !== 0 || isHollowDeepKind(m.kind) || isGildedKind(m.kind)) continue;
       if (Math.hypot(m.body.x - cx, m.body.z - cz) > radius) continue;
       out.push({
         kind: m.kind,
@@ -1541,7 +1643,7 @@ export class MobManager {
     if (!Array.isArray(list)) return 0;
     let n = 0;
     for (const e of list as Partial<MobSave>[]) {
-      if (!e || !(e.kind! in MOBS) || e.kind === 'villager' || e.kind === 'npc' || e.kind === 'dummy' || isHollowDeepKind(e.kind!) || ![e.x, e.y, e.z].every((v) => Number.isFinite(v))) continue;
+      if (!e || !(e.kind! in MOBS) || e.kind === 'villager' || e.kind === 'npc' || e.kind === 'dummy' || isHollowDeepKind(e.kind!) || isGildedKind(e.kind!) || ![e.x, e.y, e.z].every((v) => Number.isFinite(v))) continue;
       const size = SLIME_SIZES.includes(e.size as 1 | 2 | 4) ? e.size : 1;
       const m = this.spawn(e.kind as MobKind, e.x!, e.y!, e.z!, {
         size,
@@ -1694,9 +1796,12 @@ export class MobManager {
         // (a rare or epic kind is worth a little more than its base: see `MOB_TIER_INFO`; a boss has its own worth)
         const worth = mob.def.xp(this.rand, mob.traits) * (mob.def.boss ? 1 : MOB_TIER_INFO[mobTier(mob.kind)].xp);
         events.xp?.(Math.round(worth), mob.body.x, mob.body.y + 0.3, mob.body.z);
-        const coins = coinsForKill(mob.kind, mob.size, this.rand);
-        if (coins > 0) events.coins?.(coins, mob.body.x, mob.body.y + 0.3, mob.body.z);
-        events.loot?.(mob, mob.body.x, mob.body.y + 0.3, mob.body.z);
+        // The Gilded Tide leaves the Codex of Aurelion and nothing else: no coins, bags, jewels, skill books or gear.
+        if (!isGildedKind(mob.kind)) {
+          const coins = coinsForKill(mob.kind, mob.size, this.rand);
+          if (coins > 0) events.coins?.(coins, mob.body.x, mob.body.y + 0.3, mob.body.z);
+          events.loot?.(mob, mob.body.x, mob.body.y + 0.3, mob.body.z);
+        }
       }
     }
     // A slime bursts into two to four smaller ones.

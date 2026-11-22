@@ -82,6 +82,7 @@ export * from './bags';
 export * from './abilityEffects';
 export * from './boss';
 export * from './rift';
+export * from './invasion';
 export * from './dungeonView';
 export * from './organize';
 export * from './emberstone';

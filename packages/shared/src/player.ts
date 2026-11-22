@@ -92,7 +92,7 @@ import { FIRST_QUEST, NPCS, QuestLog, npcById, questById, rewardCoins, rewardIte
 import { ABILITY_BY_ID, ClassState, abilitiesOf, abilityAt, type AbilityDef, type AbilityId, type CastBlock } from './abilities';
 import type { EffectOwner, Fx } from './abilityEffects';
 import { creativeGear } from './creative';
-import { accessoryModifiers, canRollGear, cloneGear, gearKey, gearModifiers, glyphKey, glyphModifiers } from './gear';
+import { accessoryModifiers, canRollGear, cloneGear, gearKey, gearModifiers, glyphKey, glyphModifiers, pickRarity, randomGear } from './gear';
 import { ACCESSORY_SLOT_COUNT, NECKLACE_SLOT, accessorySlotsOf } from './accessories';
 import { jewelKind, useJewel } from './jewels';
 import { CLASSES, offhandModifier, rollDamage, swingRate, type ClassId, type DamageKind } from './classes';
@@ -143,7 +143,7 @@ export const SLEEP_EYE = 0.2;
 
 /** Starting hotbar for creative mode. */
 /** Uses of the item in the main hand that keep the use button for themselves: a shield in the off hand is not raised by it. */
-const TAKES_THE_BUTTON: ReadonlySet<ItemUse> = new Set<ItemUse>(['xp_bottle', 'pearl', 'emberstone', 'skill_book', 'bucket', 'armor_stand', 'fishing_rod']);
+const TAKES_THE_BUTTON: ReadonlySet<ItemUse> = new Set<ItemUse>(['xp_bottle', 'pearl', 'emberstone', 'skill_book', 'codex', 'bucket', 'armor_stand', 'fishing_rod']);
 
 export const CREATIVE_HOTBAR = [B.GRASS, B.DIRT, B.STONE, B.COBBLE, B.PLANKS, B.LOG, B.GLASS, B.SAND, B.GLOWSTONE];
 
@@ -625,7 +625,7 @@ export class Player implements EffectOwner {
           // Right-clicking a skill book in the bags reads it (it never goes onto the cursor).
           if (c.button === 1 && !this.menu.cursor) {
             const slot = this.menu.slots[c.slot];
-            if (slot && slot.container === this.inventory && slot.kind === 'normal' && (this.learnFromBook(slot.index) || this.equipHorn(slot.index) || this.equipOutfit(slot.index) || this.equipCompanion(slot.index) || this.equipWings(slot.index) || this.equipAccessory(slot.index))) return;
+            if (slot && slot.container === this.inventory && slot.kind === 'normal' && (this.learnFromBook(slot.index) || this.openCodex(slot.index) || this.equipHorn(slot.index) || this.equipOutfit(slot.index) || this.equipCompanion(slot.index) || this.equipWings(slot.index) || this.equipAccessory(slot.index))) return;
           }
           // A jewel on the cursor, clicked on a piece of equipment, is used on it (instead of swapping places with it).
           if (c.button === 0 && this.useJewelOnSlot(c.slot)) {
@@ -1824,6 +1824,12 @@ export class Player implements EffectOwner {
       this.hudProgress = 0;
       return;
     }
+    // ---- codex: right-click to open it ----
+    if (rightPressed && item?.use === 'codex') {
+      this.openCodex(this.selected);
+      this.hudProgress = 0;
+      return;
+    }
     // ---- glowing set: right-click to put it in the outfit slot ----
     if (rightPressed && item?.use === 'outfit') {
       this.equipOutfit(this.selected);
@@ -2519,6 +2525,25 @@ export class Player implements EffectOwner {
               : `Only a ${own} can learn ${def.name}`,
       });
     }
+    this.emit({ t: 'inv' });
+    return true;
+  }
+
+  /**
+   * Open a Codex of Aurelion in the bags (`index` is its slot): it is used up and gives one piece of Epic gear, for the
+   * character's class, near their level. Returns whether the slot held a codex (so the click that opened it does not pick it up).
+   */
+  openCodex(index: number): boolean {
+    const stack = this.inventory.get(index);
+    if (!stack || stack.id !== I.AURELION_CODEX) return false;
+    if (this.vitals.dead || this.spectating || this.sleeping) return true;
+    const piece = randomGear(this.mountLevel + Math.floor(this.rand() * 3) - 1, pickRarity([0, 0, 1], () => this.rand()), this.cls?.classId, () => this.rand());
+    if (this.mode === 'survival') {
+      stack.count -= 1;
+      if (stack.count <= 0) this.inventory.set(index, null);
+    }
+    this.giveOrDrop(piece);
+    this.emit({ t: 'toast', text: 'The Codex of Aurelion opens: a piece of epic gear' });
     this.emit({ t: 'inv' });
     return true;
   }

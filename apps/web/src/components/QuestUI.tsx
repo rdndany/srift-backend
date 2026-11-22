@@ -185,7 +185,7 @@ function RiftBlock() {
           </div>
         </>
       )}
-      {rift.phase === 'sealed' && <div className="tracker-line done">Sealed! Rewards given</div>}
+      {rift.phase === 'sealed' && <div className="tracker-line done">Sealed! Rewards given: two chests by the rift</div>}
       {rift.phase === 'collapsed' && <div className="tracker-line">It collapsed...</div>}
       {(rift.phase === 'omen' || rift.phase === 'fighting') && (
         <div className={`tracker-line${near ? ' done' : ''}`}>{near ? 'You are at the rift' : `${rift.dist} blocks ${rift.dir}`}</div>

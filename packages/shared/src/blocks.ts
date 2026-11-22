@@ -403,6 +403,7 @@ export const ITEM_TILES = [
   'jewel_dawn',
   'jewel_rift',
   'jewel_bloom',
+  'codex_of_aurelion',
   'compass',
   ...Array.from({ length: COMPASS_FRAMES - 1 }, (_, i) => `compass_${i + 1}`),
   'horn_fenrir',

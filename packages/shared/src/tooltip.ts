@@ -245,6 +245,10 @@ export function tooltipLines(stack: ItemStack | null, viewerClass?: ClassId | nu
     lines.push({ text: `Cooldown: ${formatEmberTime(EMBER_COOLDOWN)}`, color: 'dim' });
     lines.push({ text: 'Hold the right mouse button to use it', color: 'good' });
   }
+  if (stack.id === I.AURELION_CODEX) {
+    lines.push({ text: 'Right-click to open it: one piece of Epic gear for your class', color: 'good' });
+    lines.push({ text: 'Left only by the monsters of the Gilded Tide, which come every 30 minutes', color: 'dim' });
+  }
   if (stack.id === I.HOLLOW_SIGIL) {
     lines.push({ text: 'Opens the Hollow Cellar, once', color: 'good' });
     lines.push({ text: 'A new dungeon uses it up; coming back to one that is still open does not', color: 'dim' });

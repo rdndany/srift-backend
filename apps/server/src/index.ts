@@ -36,6 +36,8 @@ const server = createGameServer({
     admins: { wallets: parseIdList(process.env.ADMIN_WALLETS), accounts: parseIdList(process.env.ADMIN_ACCOUNTS) },
     onAdmin: (e) => console.warn(`[solrift] ADMIN ${e.name} (${e.account ?? 'no account'}): ${e.action}${e.detail ? ` ${e.detail}` : ''}`),
     naturalSpawning: process.env.NO_MOBS !== '1',
+    // The Gilded Tide: an invasion every half hour (on the hour and at half past).
+    invasions: process.env.NO_MOBS !== '1' && process.env.NO_INVASIONS !== '1',
     maxPlayers: process.env.MAX_PLAYERS ? Number(process.env.MAX_PLAYERS) : undefined,
     onViolation: (v) => console.warn(`[solrift] ${v.kicked ? 'KICK' : 'strike'} ${v.name}: ${v.reason} (score ${v.score.toFixed(1)})`),
     mode: process.env.GAME_MODE === 'creative' ? 'creative' : 'survival',

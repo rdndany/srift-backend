@@ -9,6 +9,7 @@ import { StaffBoltView } from './staffFx';
 import { WandBoltView } from './wandFx';
 import { BOSS_SKINS, hollowKingRig } from './mobBoss';
 import { DEEP_RIGS, DEEP_SKINS, isDeepKind, poseDeep } from './mobDeep';
+import { GILDED_RIGS, GILDED_SKINS } from './mobGilded';
 import { batRig, creeperRig, endermanRig, HOSTILE_SKINS, slimeRig, spiderRig, undeadRig } from './mobHostile';
 import { eyes, hash, jit, mix, mul, plain, rect, withFeatures, type Brick, type Feature, type Painter, type Part, type RGB } from './mobPaint';
 import { paintTile } from './atlas';
@@ -59,7 +60,7 @@ DYE_RGB.forEach((c, i) => {
   const lo: [number, number, number] = [c[0] * 0.93, c[1] * 0.93, c[2] * 0.93];
   EXTRA_SKINS[`sheep_wool_${i}`] = (x, y) => jit(hash(x >> 1, y >> 1, 21) > 0.5 ? [c[0], c[1], c[2]] : lo, 6, x, y, 21);
 });
-Object.assign(SKINS, EXTRA_SKINS, HOSTILE_SKINS, BOSS_SKINS, DEEP_SKINS);
+Object.assign(SKINS, EXTRA_SKINS, HOSTILE_SKINS, BOSS_SKINS, DEEP_SKINS, GILDED_SKINS);
 
 // Skeletons (and the stray, which is the same in ice): bone shaded from its lit top-left corner to its shadowed edge, yellowed
 // in patches and cracked here and there; a skull with hollow sockets and a glint in them; a bow of wood, a leather quiver.
@@ -621,6 +622,7 @@ const RIGS: Record<MobKind, Part[]> = {
   creeper: creeperRig(),
   hollow_king: hollowKingRig(),
   ...DEEP_RIGS,
+  ...GILDED_RIGS,
   pig: [
     { size: [0.5, 0.5, 0.5], at: [0, 0.68, -0.6], skin: 'pig_body', front: 'pig_face', isHead: true },
     { size: [0.62, 0.5, 0.95], at: [0, 0.6, 0.05], skin: 'pig_body' },

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { B, GameSession, HeadlessWorld, MOBS, Mob, WorldGenerator, mulberry32, type InputFrame } from './index';
+import { B, Container, GameSession, HeadlessWorld, LOOT_TABLES, MOBS, Mob, WorldGenerator, isChest, mulberry32, type InputFrame } from './index';
 import { RIFT_ABANDON, RIFT_AFTER, RIFT_FIRST, RIFT_GRADES, RIFT_GRADE_DEFS, RIFT_OMEN, RIFT_PAUSE, RIFT_PRESENCE, RIFT_SIGHT, RiftDirector, compass, type RiftEventKind, type RiftGrade, type RiftHost, type RiftPlayer } from './rift';
 
 interface Said {
@@ -13,6 +13,7 @@ function fake(players: RiftPlayer[]) {
   const paid: { player: RiftPlayer; rank: number; helpers: number }[] = [];
   const mobs: Mob[] = [];
   const removed: Mob[] = [];
+  const chests: { x: number; y: number; z: number; grade: RiftGrade }[] = [];
   const host: RiftHost = {
     players: () => players,
     groundAt: () => 64,
@@ -24,10 +25,11 @@ function fake(players: RiftPlayer[]) {
       return m;
     },
     remove: (m) => removed.push(m),
+    chests: (x, y, z, grade) => chests.push({ x, y, z, grade }),
     announce: (what, _grade, text) => said.push({ what, text }),
     reward: (player, _grade, rank, helpers) => paid.push({ player, rank, helpers }),
   };
-  return { host, said, paid, mobs, removed };
+  return { host, said, paid, mobs, removed, chests };
 }
 
 const at = (x: number, z: number): RiftPlayer => ({ ref: {}, x, y: 65, z });
@@ -55,6 +57,7 @@ describe('the rift tables', () => {
       expect(def.waves.length).toBeGreaterThan(waves);
       expect(def.reward.xp).toBeGreaterThan(xp);
       expect(def.waves[def.waves.length - 1].some((s) => s.elite)).toBe(true);
+      expect(LOOT_TABLES[def.chest], `${g} chest`).toBeDefined();
       waves = def.waves.length;
       xp = def.reward.xp;
     }
@@ -183,6 +186,9 @@ describe('the rift director', () => {
     expect(f.paid[0].player).toBe(a);
     expect(f.paid[0].rank).toBe(1);
     expect(f.paid[0].helpers).toBe(f.paid.length);
+    // the two chests are asked for once, at the place of the rift, and the words say so
+    expect(f.chests).toEqual([{ x: r.x, y: r.y, z: r.z, grade: 'uncommon' }]);
+    expect(f.said.at(-1)?.text).toContain('Two chests');
   });
 
   it('does not pay someone who only walked by', () => {
@@ -223,6 +229,7 @@ describe('the rift director', () => {
     expect(r.phase).toBe('collapsed');
     expect(f.removed.length).toBe(f.mobs.length);
     expect(f.paid).toHaveLength(0);
+    expect(f.chests).toHaveLength(0); // a rift that collapsed leaves no treasure
     expect(f.said.at(-1)?.what).toBe('collapsed');
     run(d, RIFT_AFTER + 1);
     expect(d.current).toBeNull();
@@ -344,6 +351,16 @@ describe('rifts in the realm', () => {
     expect(s.xp.total - xp0).toBeGreaterThanOrEqual(RIFT_GRADE_DEFS.uncommon.reward.xp);
     expect(s.coins - coins0).toBeGreaterThanOrEqual(RIFT_GRADE_DEFS.uncommon.reward.coins);
     expect(s.riftView()!.phase).toBe('sealed');
+
+    // two chests stand by the middle of the rift, each with treasure in it
+    const v = s.riftView()!;
+    const found: Container[] = [];
+    for (let x = Math.floor(v.x) - 5; x <= Math.floor(v.x) + 5; x++)
+      for (let z = Math.floor(v.z) - 5; z <= Math.floor(v.z) + 5; z++)
+        for (let y = FLOOR; y <= FLOOR + 3; y++) if (isChest(s.world.getBlock(x, y, z))) found.push(s.realm.blockEntities.chest(x, y, z));
+    expect(found).toHaveLength(2);
+    for (const c of found) expect(c.slots.some((st) => st !== null)).toBe(true);
+    expect(events.some((e) => e.t === 'rift' && e.what === 'sealed' && e.text.includes('Two chests'))).toBe(true);
   });
 
   it('does not open a rift on a player in creative mode', () => {

@@ -1,3 +1,4 @@
+import type { LootTableName } from './loot';
 import type { Mob, MobKind } from './mobs';
 
 /**
@@ -40,6 +41,8 @@ export interface RiftGradeDef {
     /** The chance of a Glyph Tome as well. */
     tome: number;
   };
+  /** The loot table (see loot.ts) the two chests that appear when it is sealed are filled from. */
+  chest: LootTableName;
 }
 
 export const RIFT_GRADE_DEFS: Record<RiftGrade, RiftGradeDef> = {
@@ -54,6 +57,7 @@ export const RIFT_GRADE_DEFS: Record<RiftGrade, RiftGradeDef> = {
       [{ kind: 'husk', count: 3 }, { kind: 'zombie', count: 1, elite: 4 }],
     ],
     reward: { xp: 120, coins: 60, gearLevel: [2, 6], gearRarity: [75, 22, 3], tome: 0.15 },
+    chest: 'cache',
   },
   rare: {
     name: 'Unstable Rift',
@@ -67,6 +71,7 @@ export const RIFT_GRADE_DEFS: Record<RiftGrade, RiftGradeDef> = {
       [{ kind: 'shade', count: 2 }, { kind: 'moss_lurker', count: 1, elite: 4 }],
     ],
     reward: { xp: 320, coins: 160, gearLevel: [5, 10], gearRarity: [45, 42, 13], tome: 0.35 },
+    chest: 'temple',
   },
   epic: {
     name: 'Raging Rift',
@@ -81,6 +86,7 @@ export const RIFT_GRADE_DEFS: Record<RiftGrade, RiftGradeDef> = {
       [{ kind: 'shade', count: 2 }, { kind: 'ashen_knight', count: 1, elite: 5 }, { kind: 'hollow_priest', count: 1, elite: 3 }],
     ],
     reward: { xp: 800, coins: 400, gearLevel: [8, 14], gearRarity: [10, 50, 40], tome: 0.6 },
+    chest: 'relic',
   },
 };
 
@@ -127,6 +133,8 @@ export interface RiftHost {
   reward(player: RiftPlayer, grade: RiftGrade, rank: number, helpers: number): void;
   /** A puff where a monster of a collapsing rift was taken away. */
   puff?(x: number, y: number, z: number): void;
+  /** Set down two chests of treasure by the place of a rift that was sealed (the loot table is its grade's `chest`). */
+  chests?(x: number, y: number, z: number, grade: RiftGrade): void;
 }
 
 export type RiftEventKind = 'omen' | 'open' | 'wave' | 'sealed' | 'collapsed';
@@ -348,7 +356,8 @@ export class RiftDirector {
   private seal(r: Rift, players: readonly RiftPlayer[]): void {
     r.phase = 'sealed';
     r.t = 0;
-    this.host.announce('sealed', r.grade, `${RIFT_GRADE_DEFS[r.grade].name} sealed!`, r.x, r.z);
+    this.host.announce('sealed', r.grade, `${RIFT_GRADE_DEFS[r.grade].name} sealed! Two chests of treasure appear.`, r.x, r.z);
+    this.host.chests?.(r.x, r.y, r.z, r.grade);
     // Whoever fought (a kill, or time at the rift) and is still near is paid, the best of them first.
     const helpers = players
       .filter((p) => Math.hypot(p.x - r.x, p.z - r.z) <= RIFT_RADIUS * 2 && ((r.score.get(p.ref) ?? 0) > 0 || (r.present.get(p.ref) ?? 0) >= RIFT_PRESENCE))

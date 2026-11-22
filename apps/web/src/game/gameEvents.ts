@@ -76,6 +76,11 @@ export function makeEventHandler(parts: EventParts): (events: SessionEvent[]) =>
           showBossLine(e.text, 'warn', RIFT_GRADE_DEFS[e.grade].color);
           audio.rift(e.what, e.grade);
           break;
+        case 'invasion':
+          // Across the screen in gold, like a raid warning, with a sound of its own.
+          showBossLine(e.text, 'warn', '#ffd24a');
+          audio.invasion(e.what);
+          break;
         case 'bossFx': {
           // The sound of the fight: how loud and how dull it is follows how far the king is (a roar or his fall is heard in all of the copy).
           // It has no place when it comes without one: the room, then.
