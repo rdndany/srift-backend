@@ -72,6 +72,8 @@ export interface FluidHost {
   hiss(x: number, y: number, z: number): void;
   /** Cells fluid may never enter (a protected village, say). */
   isProtected?(x: number, y: number, z: number): boolean;
+  /** Is a flow from the first cell into the second not allowed (it would run into land that is not the source's own)? */
+  crossBlocked?(fx: number, fy: number, fz: number, tx: number, ty: number, tz: number): boolean;
 }
 
 const HORIZONTAL: [number, number][] = [
@@ -178,7 +180,7 @@ export class FluidSim {
     }
 
     // Fall first; only fluid that has landed (or is held up by fluid) spreads sideways.
-    if (this.canFlowInto(x, y - 1, z, kind, FALL)) {
+    if (this.canFlowInto(x, y - 1, z, kind, FALL, x, y, z)) {
       this.flowInto(x, y - 1, z, kind, FALL);
       return;
     }
@@ -188,7 +190,7 @@ export class FluidSim {
     const next = level === FALL ? 1 : level + 1;
     if (next > MAX_FLOW[kind]) return;
     for (const [dx, dz] of HORIZONTAL) {
-      if (this.canFlowInto(x + dx, y, z + dz, kind, next)) this.flowInto(x + dx, y, z + dz, kind, next);
+      if (this.canFlowInto(x + dx, y, z + dz, kind, next, x, y, z)) this.flowInto(x + dx, y, z + dz, kind, next);
     }
   }
 
@@ -225,8 +227,9 @@ export class FluidSim {
   }
 
   /** Can fluid of `kind` arriving at `level` take this cell over? */
-  private canFlowInto(x: number, y: number, z: number, kind: number, level: number): boolean {
+  private canFlowInto(x: number, y: number, z: number, kind: number, level: number, sx: number, sy: number, sz: number): boolean {
     if (this.host.isProtected?.(x, y, z)) return false;
+    if (this.host.crossBlocked?.(sx, sy, sz, x, y, z)) return false;
     const id = this.host.getBlock(x, y, z);
     if (washable(id)) return true;
     const k = FLUID_KIND[id];

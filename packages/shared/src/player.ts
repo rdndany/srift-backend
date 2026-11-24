@@ -18,6 +18,7 @@ import {
   leverInfo,
   buttonInfo,
   isSwitchable,
+  signInfo,
   campfireId,
   campfireInfo,
   chestId,
@@ -51,7 +52,7 @@ import type { WorldAccess } from './headlessWorld';
 import { BAG_SLOTS, bagInventory, strandedSlots } from './bags';
 import { organizeInventory } from './organize';
 import { formatEmberTime, EMBER_CAST, EMBER_COOLDOWN, EMBER_MOVE_LIMIT } from './emberstone';import { MOUNTS, MOUNT_BITE, MOUNT_BLOCK_TEXT, MOUNT_HOWL, MOUNT_CAST, MOUNT_MOVE_LIMIT, MOUNT_STEP_HEIGHT, MOUNTED_EYE, RIDE_CHECK, RIDE_GRACE, mountBlocker, mountDef, rideEnclosed, mountSpeedText, type MountId, type MountView } from './mounts';
-import { Container, HOTBAR_SLOTS, PLAYER_SLOTS, canMerge, cloneStack, makeStack, maxStackOf, type ItemStack } from './inventory';
+import { Container, HOTBAR_SLOTS, canMerge, cloneStack, makeStack, maxStackOf, type ItemStack } from './inventory';
 import { I, PEARL_TRIP_DAMAGE, accessoryOfItem, bagSlotsOf, bedItemColor, companionOfItem, wingOfItem, blockDrops, breakTime, canHarvest, dyeColor, getItem, harvestHint, holdsInOffhand, isUndroppable, mountOfItem, outfitItems, outfitSetFits, outfitSetOfItem, silkKeeps, skillBookAbility, usedOnBlock, type ItemDef, type ItemUse, type WeaponDef } from './items';
 import { AnvilMenu, ChestMenu, CraftingMenu, EnchantMenu, CreativeMenu, FurnaceMenu, GrindstoneMenu, TradeMenu, type Menu } from './menu';
 import { tooltipName } from './tooltip';
@@ -73,6 +74,10 @@ import { type Rider, type Vehicle, type VehicleKind } from './vehicles';
 import { raycast, type RayHit } from './raycast';
 import { aimThroughCrosshair, lookVector, sanitizeCamera } from './crosshair';
 import type { Realm } from './realm';
+import { GuardedWorld } from './landGuard';
+import { parseLandCommand, publicLandConfig, type LandCommand } from './landProtocol';
+import type { LandClaim } from './landClaims';
+import { MESSAGES as LAND_MESSAGES, type Econ } from './landService';
 import type { PlayerSave, SaveMode } from './save';
 import type { Weather, WeatherKind } from './weather';
 import type { WorldGenerator } from './worldgen';
@@ -85,15 +90,17 @@ import type { DungeonView } from './dungeonView';
 import type { ClassView, Command, InputFrame, SessionEvent, SessionScreen } from './sessionProtocol';
 import { MAX_COINS, stackSellPrice, shopOf } from './economy';
 import { AUCTIONEER, DEFAULT_AUCTION_QUERY, cleanQuery, depositFor, sellBlocker, type AuctionQuery, type TokenDesk } from './auction';
-import { STASHKEEPER, stashBlocker } from './stash';
+import { isStashkeeper, stashBlocker } from './stash';
 import { AchievementBook, ACH_TIERS, type AchStat, type AchievementDef } from './achievements';
 import { BountyBook, dayOf, type BountyDef } from './bounties';
+import { rollQuestDrops } from './questDrops';
 import { FIRST_QUEST, NPCS, QuestLog, npcById, questById, rewardCoins, rewardItems, type QuestEvent, type QuestProgress } from './quests';
-import { ABILITY_BY_ID, ClassState, abilitiesOf, abilityAt, type AbilityDef, type AbilityId, type CastBlock } from './abilities';
+import { ABILITY_BY_ID, ClassState, abilitiesOf, abilityAt, type AbilityDef, type CastBlock } from './abilities';
 import type { EffectOwner, Fx } from './abilityEffects';
 import { creativeGear } from './creative';
-import { accessoryModifiers, canRollGear, cloneGear, gearKey, gearModifiers, glyphKey, glyphModifiers, pickRarity, randomGear } from './gear';
+import { accessoryModifiers, cloneGear, gearKey, gearModifiers, glyphKey, glyphModifiers, pickRarity, randomGear } from './gear';
 import { ACCESSORY_SLOT_COUNT, NECKLACE_SLOT, accessorySlotsOf } from './accessories';
+import { HK } from './hollowKingData';
 import { jewelKind, useJewel } from './jewels';
 import { CLASSES, offhandModifier, rollDamage, swingRate, type ClassId, type DamageKind } from './classes';
 import { POINTS_PER_LEVEL, type AttrKey } from './statPoints';
@@ -102,6 +109,8 @@ import { TUNING, castCost } from './tuning';
 /** Blocks per second under which a player counts as standing still (the speed dies away within a fifth of a second of letting go of the keys). */
 const STILL_SPEED = 0.3;
 export const REACH = 5;
+/** How far from a sign (blocks, from the eye to its middle) its writing may be changed: a little more than the reach, for the lag between the click and the words. */
+const SIGN_REACH = REACH + 3;
 /** How far a blow reaches, and how far beside a mob's body or head it still lands: what the screen showed a moment ago is not exactly where the mob is now (it walks, and the picture is a tick or two behind). */
 const MELEE_REACH = 4;
 /** A dagger's combo: this many stabs, each within this many seconds of the last, and the last hits half as hard again. */
@@ -338,6 +347,8 @@ export class Player implements EffectOwner {
   coins = 0;
   /** The named place the player is in (an id of `ZONES`), and a timer for looking it up. */
   private zoneId: string | null = null;
+  /** Kills without a quest drop, by quest (the drops that are certain after a number of misses; see questDrops.ts). */
+  private readonly questMisses = new Map<string, number>();
   private questTimer = 0;
 
   private events: SessionEvent[] = [];
@@ -447,8 +458,16 @@ export class Player implements EffectOwner {
 
   // ---- shared state, by shortcut ---------------------------------------------
 
+  /** The world as this player's hands see it: where the realm has land, every write is asked of the land first (see landGuard.ts). */
+  private guarded: GuardedWorld | null = null;
   get world(): WorldAccess {
-    return this.realm.world;
+    if (!this.realm.land) return this.realm.world;
+    return (this.guarded ??= new GuardedWorld(
+      this.realm.world,
+      () => this.realm.land,
+      () => this.account,
+      (_x, _y, _z, why, owner) => this.landNotice(why, owner),
+    ));
   }
   get generator(): WorldGenerator {
     return this.realm.generator;
@@ -731,6 +750,12 @@ export class Player implements EffectOwner {
       case 'stash':
         this.stashCommand(c);
         return;
+      case 'land':
+        this.landCommand(c);
+        return;
+      case 'sign':
+        this.signCommand(c);
+        return;
       case 'party': {
         const reply = this.realm.parties.run(this, c.a, c.name);
         if (reply) this.emit({ t: 'toast', text: reply });
@@ -850,6 +875,18 @@ export class Player implements EffectOwner {
   }
 
   private openForBlock(hit: RayHit): void {
+    const claims = this.realm.land;
+    if (claims) {
+      const d = claims.checkUse(this.account, hit.x, hit.y, hit.z, hit.id);
+      if (!d.ok) {
+        this.landNotice(d.why ?? 'claim', d.owner);
+        return;
+      }
+    }
+    if (signInfo(hit.id)) {
+      this.editSign(hit.x, hit.y, hit.z);
+      return;
+    }
     if (isBed(hit.id)) {
       this.useBed(hit);
       return;
@@ -878,6 +915,25 @@ export class Player implements EffectOwner {
     else if (hit.id === B.ENCHANTING_TABLE) this.openEnchantTable(hit);
     else if (isAnvil(hit.id)) this.openAnvil(hit);
     else if (hit.id === B.GRINDSTONE) this.openGrindstone();
+  }
+
+  /**
+   * Right-click a sign (or put one up): its editor opens, with what is written on it, for anybody who may build there. Others read it and that is all.
+   */
+  private editSign(x: number, y: number, z: number): boolean {
+    if (this.spectating || this.vitals.dead || !signInfo(this.world.getBlock(x, y, z))) return false;
+    if (this.placeLocked(x, y, z, true, 'place')) return false;
+    this.emit({ t: 'signEdit', x, y, z, lines: this.blockEntities.signAt(x, y, z) });
+    return true;
+  }
+
+  /** The words typed into a sign's editor: kept (after cleaning) only for a sign within reach that the player may build on. */
+  private signCommand(c: Extract<Command, { t: 'sign' }>): void {
+    if (this.spectating || this.vitals.dead || !signInfo(this.world.getBlock(c.x, c.y, c.z))) return;
+    const e = this.eye();
+    if (Math.hypot(e.x - (c.x + 0.5), e.y - (c.y + 0.5), e.z - (c.z + 0.5)) > SIGN_REACH) return;
+    if (this.placeLocked(c.x, c.y, c.z, true, 'place')) return;
+    this.blockEntities.setSign(c.x, c.y, c.z, c.lines);
   }
 
   /** Open one of the standard screens without a block (tests, hotkeys). */
@@ -1077,6 +1133,9 @@ export class Player implements EffectOwner {
 
   /** Seconds until the next "you can't change this" notice (so that holding the button does not flood the chat). */
   private lockedNotice = 0;
+  /** Seconds until the wilderness hint may be said again, and how many times it has been said this visit. */
+  private wildHint = 0;
+  private wildHints = 0;
   /** The chest whose lid is open for this player, so closing the window can shut it. */
   private chestAt: { x: number; y: number; z: number } | null = null;
 
@@ -1116,17 +1175,229 @@ export class Player implements EffectOwner {
    * Creative players (operators, online) may; so may everybody mine a monster spawner, which is what the quests ask for.
    */
   private breakLocked(id: number, x: number, y: number, z: number, say: boolean): boolean {
-    if (id === B.SPAWNER) return false;
-    return this.placeLocked(x, y, z, say);
+    if (id === B.SPAWNER) return this.placeLocked(x, y, z, say, 'break', 0, true);
+    return this.placeLocked(x, y, z, say, 'break');
   }
 
-  private placeLocked(x: number, y: number, z: number, say: boolean): boolean {
-    if (this.mode === 'creative' || !this.realm.isProtected(x, y, z)) return false;
-    if (say && this.lockedNotice <= 0) {
-      this.lockedNotice = 2;
-      this.emit({ t: 'toast', text: 'This place is protected: you cannot change it' });
+  /**
+   * Is the block at (x, y, z) off limits to this player: a protected place (see above), or land that somebody has claimed? `land` is
+   * what the player would do to the block for the land's rules (null: it is only being looked at, say the block a thing is set against).
+   * The land is also asked at the write itself (`GuardedWorld`), so this is the early, polite no: the item is not used up and they are told why.
+   */
+  private placeLocked(x: number, y: number, z: number, say: boolean, land: 'place' | 'break' | null = 'place', placing = 0, landOnly = false): boolean {
+    if (!landOnly && this.mode !== 'creative' && this.realm.isProtected(x, y, z)) {
+      if (say && this.lockedNotice <= 0) {
+        this.lockedNotice = 2;
+        this.emit({ t: 'toast', text: 'This place is protected: you cannot change it' });
+      }
+      return true;
     }
+    const claims = this.realm.land;
+    if (!claims || !land) return false;
+    const d = claims.checkBuild(this.account, x, y, z, land, placing);
+    if (d.ok) {
+      // Building in the open: said once in a while, never more than a few times in a visit (the land's rule, not a nag).
+      if (say && land === 'place' && this.wildHint <= 0 && this.wildHints < 3 && claims.inspect(x, y, z).claim === null) {
+        this.wildHint = 600;
+        this.wildHints++;
+        this.emit({ t: 'toast', text: LAND_MESSAGES.wilderness });
+      }
+      return false;
+    }
+    if (say) this.landNotice(d.why ?? 'claim', d.owner);
     return true;
+  }
+
+  // ---- land claims ---------------------------------------------------------------------------------------------
+
+  private landCool = 0;
+  private landSyncIn = 0;
+  private landCfgSent = false;
+  /** The claims this player has been told about, and the version of each (what `landTick` compares). */
+  private readonly landSeen = new Map<string, string>();
+  /** Where the server's own territory was last worked out for this player, and which of it they were told about. */
+  private landZonesAt: [number, number] | null = null;
+  private landZonesSig = '';
+  private landZonesIn = 0;
+
+  /** What a purchase needs of this player: the Auren, taken from and given back to this one purse, and the save to store with it. */
+  private landEcon(): Econ {
+    return {
+      balance: () => this.coins,
+      charge: (n) => this.spendCoins(n),
+      refund: (n) => {
+        this.coins = Math.min(this.coins + Math.max(0, Math.floor(n)), MAX_COINS);
+      },
+      save: () => this.realm.landSave?.(this) ?? null,
+    };
+  }
+
+  /** The Land Surveyor: is there one in a bag? (A purchase needs it; the one who has none cannot buy.) */
+  private carriesSurveyor(): boolean {
+    return this.inventory.countOf(I.LAND_SURVEYOR) > 0;
+  }
+
+  /** Hand the claims round the player to their client, as they change (once a second; a claim is sent when it is new or has a new version). */
+  private landTick(dt: number): void {
+    const land = this.realm.land;
+    if (!land || this.spectating) return;
+    this.landCool = Math.max(0, this.landCool - dt);
+    this.landSyncIn -= dt;
+    if (this.landSyncIn > 0) return;
+    this.landSyncIn = 1;
+    if (!this.landCfgSent) {
+      this.landCfgSent = true;
+      this.emit({ t: 'land', e: { k: 'cfg', cfg: publicLandConfig(land.cfg) } });
+    }
+    // The towns, vaults and landmarks round here: looked up again after a walk of a couple of dozen blocks, and every few seconds (an administrator may reserve ground).
+    this.landZonesIn -= 1;
+    if (!this.landZonesAt || this.landZonesIn <= 0 || Math.hypot(this.body.x - this.landZonesAt[0], this.body.z - this.landZonesAt[1]) >= 24) {
+      this.landZonesIn = 5;
+      this.landZonesAt = [this.body.x, this.body.z];
+      const zones = land.protectedNear(this.body.x, this.body.z, 220);
+      const sig = zones.map((z) => z.id).join('|');
+      if (sig !== this.landZonesSig) {
+        this.landZonesSig = sig;
+        this.emit({ t: 'land', e: { k: 'zones', zones } });
+      }
+    }
+    const near = land.claimsNear(this.account, this.body.x, this.body.z, 128);
+    const add = [];
+    const keep = new Set<string>();
+    for (const v of near) {
+      keep.add(v.id);
+      const sig = `${v.rev}:${v.kind}:${v.role}:${v.status}`;
+      if (this.landSeen.get(v.id) !== sig) {
+        this.landSeen.set(v.id, sig);
+        add.push(v);
+      }
+    }
+    const remove: string[] = [];
+    for (const id of [...this.landSeen.keys()]) {
+      if (keep.has(id)) continue;
+      this.landSeen.delete(id);
+      remove.push(id);
+    }
+    if (add.length > 0 || remove.length > 0) this.emit({ t: 'land', e: { k: 'sync', add, remove } });
+  }
+
+  /** A change to one of the claims (the owner renamed it, a grant was made): everybody who has it in view is sent it again at their next tick. */
+  landForget(id: string): void {
+    this.landSeen.delete(id);
+    this.landSyncIn = 0;
+  }
+
+  private landCommand(c: Extract<Command, { t: 'land' }>): void {
+    const land = this.realm.land;
+    if (!land) return;
+    const cmd: LandCommand | null = parseLandCommand(c);
+    if (!cmd) return;
+    const account = this.account;
+    // Pricing a shape is the one thing a client asks for as it moves a corner: it may ask often, not without limit.
+    if (cmd.a === 'preview') {
+      if (this.landCool > 0.7) return;
+      this.landCool += 0.1;
+    } else if (this.landCool > 2.5) {
+      this.emit({ t: 'toast', text: 'Slow down a moment.' });
+      return;
+    } else {
+      this.landCool += 0.25;
+    }
+    const reply = (what: string, result: import('./landService').LandResult): void => {
+      this.emit({ t: 'land', e: { k: 'result', what, result } });
+      if (result.claim) this.landForget(result.claim.id);
+      this.realm.land?.touchOwner(account ?? '');
+    };
+    const where = { x: this.body.x, z: this.body.z };
+    switch (cmd.a) {
+      case 'preview':
+        this.emit({ t: 'land', e: { k: 'preview', preview: land.preview(account, cmd.v, this.landEcon(), { asGuild: cmd.guild, expand: cmd.expand, carries: this.carriesSurveyor() }) } });
+        return;
+      case 'buy': {
+        const r = land.purchase({ account, ownerName: this.name, name: cmd.name, vertices: cmd.v, idem: cmd.idem, asGuild: cmd.guild, carries: this.carriesSurveyor(), reach: where }, this.landEcon());
+        reply('buy', r);
+        if (r.ok && !r.replay) {
+          this.emit({ t: 'toast', text: r.text });
+          this.emit({ t: 'land', e: { k: 'mine', claims: land.claimsOf(account ?? '').map((x) => land.viewOf(x, land.actorOf(account))) } });
+        }
+        return;
+      }
+      case 'expand':
+        reply('expand', land.expand({ account, id: cmd.id, vertices: cmd.v, idem: cmd.idem, carries: this.carriesSurveyor(), reach: where }, this.landEcon()));
+        return;
+      case 'hello':
+        // Say it all again at the next tick: the rules, and every claim round here (nothing is "already seen").
+        this.landCfgSent = false;
+        this.landSeen.clear();
+        this.landZonesAt = null;
+        this.landZonesSig = '';
+        this.landSyncIn = 0;
+        return;
+      case 'list':
+        this.emit({ t: 'land', e: { k: 'mine', claims: land.claimsOf(account ?? '').map((x: LandClaim) => land.viewOf(x, land.actorOf(account))) } });
+        return;
+      case 'detail':
+        this.emit({ t: 'land', e: { k: 'detail', detail: land.detail(account, cmd.id) } });
+        return;
+      case 'rename':
+        reply('rename', land.rename(account, cmd.id, cmd.name));
+        return;
+      case 'grant': {
+        if (cmd.kind === 'guild') {
+          const gid = land.actorOf(account).guildId;
+          if (!gid) return reply('grant', { ok: false, code: 'guild', text: 'You are not in a guild.' });
+          reply('grant', land.grant(account, cmd.id, { kind: 'guild', id: gid, name: land.guildLabel(gid), role: cmd.role }));
+          return;
+        }
+        const who = cmd.who.toLowerCase();
+        const target = this.realm.players.find((p) => p.name.toLowerCase() === who && p.account && p.account !== account);
+        if (!target || !target.account) return reply('grant', { ok: false, code: 'unknown', text: `${cmd.who} is not here. They must be in the world to be invited.` });
+        reply('grant', land.grant(account, cmd.id, { kind: 'player', id: target.account, name: target.name, role: cmd.role }));
+        target.landForget(cmd.id);
+        return;
+      }
+      case 'revoke': {
+        const r = land.revokeGrant(account, cmd.id, cmd.kind, cmd.who);
+        reply('revoke', r);
+        for (const p of this.realm.players) p.landForget(cmd.id);
+        return;
+      }
+      case 'public':
+        reply('public', land.setPublic(account, cmd.id, cmd.perms, cmd.guildRole));
+        for (const p of this.realm.players) p.landForget(cmd.id);
+        return;
+      case 'release':
+        reply('release', land.release(account, cmd.id));
+        return;
+      case 'unrelease':
+        reply('unrelease', land.cancelRelease(account, cmd.id));
+        return;
+      case 'recover': {
+        let stacks = 0;
+        for (const r of land.recoveryOf(account ?? '')) {
+          const items = r.items as { id: number; count: number }[] | null;
+          if (Array.isArray(items)) {
+            for (const s of items) {
+              if (s && typeof s.id === 'number' && typeof s.count === 'number' && s.count > 0) {
+                this.giveOrDrop(s as ItemStack);
+                stacks++;
+              }
+            }
+          }
+          land.takeRecovery(r.id);
+        }
+        if (stacks > 0) this.emit({ t: 'inv' });
+        this.emit({ t: 'land', e: { k: 'recovered', stacks } });
+        return;
+      }
+    }
+  }
+
+  /** Tell the player the land is somebody's (not more than every couple of seconds). */
+  private landNotice(why: 'claim' | 'band', owner?: string): void {
+    if (this.lockedNotice > 0) return;
+    this.lockedNotice = 2;
+    this.emit({ t: 'toast', text: why === 'band' ? LAND_MESSAGES.band : owner ? `${LAND_MESSAGES.protectedProperty} (${owner})` : LAND_MESSAGES.protectedProperty });
   }
 
   /**
@@ -1184,7 +1455,7 @@ export class Player implements EffectOwner {
     if (!held || !item) return false;
     const world = this.world;
     // Nothing is built, tilled or lit in a protected place (bone meal only helps what already grows there).
-    if (item.use !== 'bone_meal' && (this.placeLocked(t.x, t.y, t.z, true) || this.placeLocked(t.x + t.nx, t.y + t.ny, t.z + t.nz, true))) return false;
+    if (item.use !== 'bone_meal' && (this.placeLocked(t.x, t.y, t.z, true, null) || this.placeLocked(t.x + t.nx, t.y + t.ny, t.z + t.nz, true))) return false;
 
     if (item.tool?.kind === 'axe' && this.stripBlock(t)) return true;
     if (item.tool?.kind === 'hoe') {
@@ -1210,6 +1481,11 @@ export class Player implements EffectOwner {
     if (isRail(spot.id)) railPlaced(world, spot.x, spot.y, spot.z);
     this.realm.checkFall(spot.x, spot.y, spot.z);
     this.realm.blockChanged(spot.x, spot.y, spot.z);
+    // A sign put up is written on at once, as in the original (and keeps none of what an old one there had).
+    if (signInfo(spot.id)) {
+      this.blockEntities.forgetSign(spot.x, spot.y, spot.z);
+      this.editSign(spot.x, spot.y, spot.z);
+    }
     this.puff(spot.x, spot.y, spot.z, spot.id, true);
     this.realm.emitNear(spot.x, spot.y, spot.z, { t: 'sound', sound: BLOCKS[spot.id].sound, action: 'place', vol: 1 });
     this.emit({ t: 'swing' });
@@ -1230,7 +1506,7 @@ export class Player implements EffectOwner {
     const held = this.held;
     const item = held ? getItem(held.id) : null;
     if (!item || item.block == null) return null;
-    if (this.placeLocked(t.x, t.y, t.z, false) || this.placeLocked(t.x + t.nx, t.y + t.ny, t.z + t.nz, false)) return null;
+    if (this.placeLocked(t.x, t.y, t.z, false, null) || this.placeLocked(t.x + t.nx, t.y + t.ny, t.z + t.nz, false, 'place', item.block)) return null;
     const world = this.world;
     // Plants and grass are replaced in place rather than built against.
     const inPlace = BLOCKS[t.id].replaceable;
@@ -1537,7 +1813,8 @@ export class Player implements EffectOwner {
     const hit = raycast(this.world, eye.x, eye.y, eye.z, d.x, d.y, d.z, REACH, true);
     if (!hit) return false;
     const survival = this.mode === 'survival';
-    if (this.placeLocked(hit.x, hit.y, hit.z, true) || this.placeLocked(hit.x + hit.nx, hit.y + hit.ny, hit.z + hit.nz, true)) return false;
+    const pickUp = held.id === I.BUCKET;
+    if (this.placeLocked(hit.x, hit.y, hit.z, true, pickUp ? 'break' : null) || this.placeLocked(hit.x + hit.nx, hit.y + hit.ny, hit.z + hit.nz, true, pickUp ? null : 'place', held.id === I.LAVA_BUCKET ? B.LAVA : B.WATER)) return false;
 
     if (held.id === I.BUCKET) {
       if (!isFluidSource(hit.id)) return false;
@@ -1777,6 +2054,7 @@ export class Player implements EffectOwner {
     this.stabAge = Math.min(9, this.stabAge + dt);
     this.castCooldown -= dt;
     this.lockedNotice -= dt;
+    this.wildHint -= dt;
     if (this.emberCooldown > 0) this.emberCooldown = Math.max(0, this.emberCooldown - dt);
     if (!f.right) this.emberHeld = false;
 
@@ -1796,7 +2074,7 @@ export class Player implements EffectOwner {
     }
 
     // A map in the hand is only for reading: it does not attack, mine, place or use anything (but it still speaks to a villager or a quest giver).
-    if (this.held && getItem(this.held.id).use === 'map') {
+    if (this.held && (getItem(this.held.id).use === 'map' || getItem(this.held.id).use === 'land_surveyor')) {
       const talk = rightPressed;
       f = { ...f, left: false, right: false };
       rightPressed = false;
@@ -3370,11 +3648,13 @@ export class Player implements EffectOwner {
     // Each weapon has its own look: a wand's bolt is spell 3 and bursts as 'wand_hit', a staff's is spell 4 and 'staff_hit'; the spellbook's is spell 2 and 'bolt'.
     const wand = itemId === I.WAND;
     const staff = itemId === I.STAFF;
-    this.mobs.castBolt(eye.x + d.x * 0.6, eye.y + d.y * 0.6 - 0.1, eye.z + d.z * 0.6, d.x, d.y, d.z, weapon.speed ?? 18, wand ? 3 : staff ? 4 : 2, (hx, hy, hz, target) => {
-      this.boltBurst(hx, hy, hz, target, weapon.damage, weapon.kind, radius, 0, wand ? 'wand_hit' : staff ? 'staff_hit' : 'bolt');
+    // The Hollow King's staff throws fireballs: they burn what they hit.
+    const fire = itemId === HK.STAFF;
+    this.mobs.castBolt(eye.x + d.x * 0.6, eye.y + d.y * 0.6 - 0.1, eye.z + d.z * 0.6, d.x, d.y, d.z, weapon.speed ?? 18, fire ? 1 : wand ? 3 : staff ? 4 : 2, (hx, hy, hz, target) => {
+      this.boltBurst(hx, hy, hz, target, weapon.damage, weapon.kind, radius, fire ? 5 : 0, fire ? 'fireball_burst' : wand ? 'wand_hit' : staff ? 'staff_hit' : 'bolt', fire ? 1 : 0.6);
     });
     // Its own sound for each (a wand zaps, a staff booms, a spellbook hums), heard by the players near.
-    this.realm.emitNear(eye.x, eye.y, eye.z, { t: 'spell', weapon: itemId === I.STAFF ? 'staff' : itemId === I.SPELLBOOK ? 'spellbook' : 'wand', vol: 0.8 });
+    this.realm.emitNear(eye.x, eye.y, eye.z, { t: 'spell', weapon: itemId === I.STAFF || itemId === HK.STAFF ? 'staff' : itemId === I.SPELLBOOK ? 'spellbook' : 'wand', vol: 0.8 });
     this.emit({ t: 'swing' });
   }
 
@@ -4575,6 +4855,7 @@ export class Player implements EffectOwner {
 
   /** After the shared world updated: damage feedback, death, furnace screen refresh. */
   postRealm(dt: number): void {
+    this.landTick(dt);
     if (this.vitals.health < this.lastHealth) {
       this.emit({ t: 'hurt' });
       this.wake(); // being hurt wakes you at once
@@ -4641,6 +4922,22 @@ export class Player implements EffectOwner {
     this.noteQuests(log.record(e));
   }
 
+  /** A monster this player has a share in has died: what an active quest makes it carry goes straight into the bags (see questDrops.ts). */
+  questKill(mob: MobKind, rand: () => number): void {
+    const log = this.quests;
+    if (!log || this.spectating) return;
+    const count = (id: number): number => this.inventory.countOf(id);
+    const need = (quest: string, item: number): number => {
+      const q = questById(quest);
+      return (q?.objectives ?? []).reduce((n, o) => (o.kind === 'collect' && o.items.includes(item) ? n + o.count : n), 0);
+    };
+    for (const id of rollQuestDrops(mob, this.zoneId, (quest) => log.status(quest) === 'active', count, need, this.questMisses, rand)) {
+      this.collectOrDrop(makeStack(id, 1));
+      this.emit({ t: 'quest', what: 'step', text: `Found: ${getItem(id).name.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}` });
+      this.emit({ t: 'inv' });
+    }
+  }
+
   private noteQuests(list: QuestProgress[]): void {
     if (list.length === 0) return;
     for (const p of list) {
@@ -4660,6 +4957,11 @@ export class Player implements EffectOwner {
   /** The things that are not a single action: where the player stands, what they carry, and who they are talking to. */
   private updateQuests(dt: number): void {
     const log = this.quests!;
+    const classId = this.cls?.classId ?? null;
+    if (log.classId !== classId) {
+      log.classId = classId;
+      this.syncQuests();
+    }
     if (this.dialogNpc) {
       const npc = npcById(this.dialogNpc);
       // A dungeon's person stands in every copy: the one to measure to is the one in the copy being stood in.
@@ -4693,7 +4995,7 @@ export class Player implements EffectOwner {
     this.realm.mobEvents.sound('say', mob);
     this.emit({ t: 'dialog', npc: npc.id });
     if (npc.id === AUCTIONEER) this.sendAuctions();
-    if (npc.id === STASHKEEPER) this.sendStash();
+    if (npc.stash) this.sendStash();
     this.emit({ t: 'swing' });
     return true;
   }
@@ -4939,7 +5241,7 @@ export class Player implements EffectOwner {
    * moved stays where it was, so an item is never in two places.
    */
   private stashCommand(c: Extract<Command, { t: 'stash' }>): void {
-    if (this.spectating || this.screen !== 'dialog' || this.dialogNpc !== STASHKEEPER) return;
+    if (this.spectating || this.screen !== 'dialog' || !isStashkeeper(this.dialogNpc)) return;
     const say = (text: string): void => this.emit({ t: 'toast', text });
     const wallet = this.wallet;
     if (!wallet) {

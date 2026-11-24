@@ -25,6 +25,10 @@ export const goCamp = (): void => location.assign(siteUrl(CAMP_PATH));
 export const TOKEN_PATH = '/token';
 export const goToken = (): void => location.assign(siteUrl(TOKEN_PATH));
 
+/** The Shop (what $SOLRIFT buys: hero slots, stash tabs, keys, outfits) is a page of the website too. */
+export const SHOP_PATH = '/shop';
+export const goShop = (): void => location.assign(siteUrl(SHOP_PATH));
+
 /** The front page at a part of it, from anywhere (from the game's host the part goes in the address). */
 export function frontUrl(id?: string): string {
   const base = siteUrl('/');

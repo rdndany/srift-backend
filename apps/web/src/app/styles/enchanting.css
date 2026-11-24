@@ -23,6 +23,10 @@
     filter: drop-shadow(0 0 4px var(--gl, #be78ff)) drop-shadow(0 0 7px color-mix(in srgb, var(--gl, #be78ff) 60%, transparent)) brightness(1.18);
   }
 }
+/* The relics of the Hollow King: their own colours are what makes them, so the glow lies lighter over them. */
+.ench-aura.ench-soft {
+  background: radial-gradient(circle at 50% 55%, color-mix(in srgb, var(--gl, #be78ff) 24%, transparent) 0%, color-mix(in srgb, var(--gl, #be78ff) 8%, transparent) 55%, transparent 80%);
+}
 .ench-aura {
   position: absolute;
   inset: -2px;

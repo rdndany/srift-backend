@@ -1,8 +1,9 @@
 import { Container, cloneStack, type ItemStack } from './inventory';
 import { isUndroppable } from './items';
+import { npcById } from './quests';
 
 /**
- * The Stash of Dawnwatch: a chest in the town that belongs to a wallet, not to one character. Whatever one of its characters puts
+ * The Stash: a chest in every village and town that belongs to a wallet, not to one character. Whatever one of its characters puts
  * in can be taken out by any other character of the same wallet (a mage leaves a wand, the warrior picks it up). It is never
  * shared with other players: it is found by the wallet alone, and only a signed-in character can open it.
  *
@@ -11,6 +12,9 @@ import { isUndroppable } from './items';
 
 /** The id of the Stashkeeper (an NPC, see `NPCS`): his window is the stash. */
 export const STASHKEEPER = 'stashkeeper';
+
+/** Whether this NPC keeps a stash: Bram in Dawnwatch, and the stashkeeper of every village and town (they all open the same wallet stash). */
+export const isStashkeeper = (id: string | null): boolean => id !== null && npcById(id)?.stash === true;
 
 /** How many slots a stash has (six rows of nine). */
 export const STASH_SLOTS = 54;

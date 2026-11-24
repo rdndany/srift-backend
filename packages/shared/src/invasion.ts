@@ -4,9 +4,10 @@ import { compass } from './rift';
 
 /**
  * The Gilded Tide: every half hour (on the hour and at half past, by the wall clock, the same for every world and every player)
- * a golden invasion sweeps over the land. Gilt imps, hounds, drakes and colossi spawn round every group of players and hunt them from far
- * off; two minutes in, their master, Aurelion the Hoard King, rises as well. They leave nothing but the Codex of Aurelion (see
- * `MobManager.kill`), and a codex opens into one piece of Epic gear (see `Player.openCodex`).
+ * golden creatures (gilt imps, hounds, drakes and the rare colossus) appear all over the land, not round the players: one here, one there,
+ * each on its own stretch of ground, none of them in a pack and none of them near anybody. They are shy: they never attack, and a hit
+ * sends them running. Finding them is the game. They leave nothing but the Codex of Aurelion (see `MobManager.kill`), and a codex opens
+ * into one piece of Epic gear (see `Player.openCodex`).
  *
  * The rules live here and know nothing of the realm: `InvasionDirector` is driven by a host (the realm; a test makes its own) that finds
  * the ground, makes the monsters, tells the time and carries the words to the players. Like the rifts, it rolls its own dice.
@@ -16,55 +17,54 @@ import { compass } from './rift';
 export const INVASION_PERIOD = 30 * 60 * 1000;
 /** The warnings before it, in seconds before it begins (the first when the clock passes it, so a world that starts late still warns once). */
 export const INVASION_WARNINGS: readonly number[] = [300, 60];
-/** Seconds after it begins that Aurelion rises. */
-export const INVASION_BOSS_AT = 120;
 /** Seconds it lasts at most; after that what is left fades away. */
 export const INVASION_SECONDS = 15 * 60;
-/** Seconds the stragglers stay once Aurelion has fallen. */
-export const INVASION_AFTER = 30;
 /** With nobody in the world for this long it ends quietly. */
 export const INVASION_ABANDON = 60;
-/** How far apart two players can be and still be one group (a tide is sent to each group). */
-export const INVASION_GROUP = 80;
-/** The most gilded monsters alive at once (the swarm is cut back to this). */
-export const INVASION_CAP = 72;
+/** The most golden creatures alive at once. */
+export const INVASION_CAP = 48;
+/** The fewest it hides in a world, however small the explored land is. */
+export const INVASION_MIN = 6;
+/** One creature for this many chunks of land, and one more for every player (the land is the same land for everybody, and big lands hide more). */
+export const INVASION_CHUNKS_PER_MOB = 16;
+export const INVASION_PER_PLAYER = 1;
+/** No creature is put closer than this to a player (blocks): finding them is the point. */
+export const INVASION_KEEP_AWAY = 64;
+/** No two creatures are put closer than this to each other (blocks): they are never a pack. */
+export const INVASION_SPACING = 48;
 
-/** What one group of players meets: the swarm, for a lone player. More players in the group make it bigger (see `scaleFor`). */
-export const INVASION_SWARM: readonly { kind: MobKind; count: number }[] = [
-  { kind: 'gilt_imp', count: 8 },
-  { kind: 'gilt_hound', count: 5 },
-  { kind: 'gilt_drake', count: 3 },
-  { kind: 'gilt_colossus', count: 1 },
+/** What kinds hide in the land, and how many of each for every 17 (the colossus is the rare one: there is one, at least, whenever there are enough). */
+export const INVASION_MIX: readonly { kind: MobKind; weight: number }[] = [
+  { kind: 'gilt_imp', weight: 8 },
+  { kind: 'gilt_hound', weight: 5 },
+  { kind: 'gilt_drake', weight: 3 },
+  { kind: 'gilt_colossus', weight: 1 },
 ];
-/** What comes with Aurelion. */
-export const INVASION_ESCORT: readonly { kind: MobKind; count: number }[] = [
-  { kind: 'gilt_colossus', count: 1 },
-  { kind: 'gilt_drake', count: 2 },
-];
 
-export const scaleFor = (players: number): number => Math.min(2.5, 1 + 0.35 * Math.max(0, players - 1));
-
-export type InvasionEventKind = 'omen' | 'open' | 'boss' | 'slain' | 'faded';
+export type InvasionEventKind = 'omen' | 'open' | 'slain' | 'faded';
 
 /** What a player's interface can show of the invasion. */
 export interface InvasionView {
-  /** Fighting, or the stragglers' last half minute once Aurelion is down. */
-  phase: 'fighting' | 'ending';
-  /** Gilded monsters still alive (the boss counts). */
+  /** Golden creatures still alive. */
   left: number;
-  /** Seconds before Aurelion rises (0 once he has). */
-  bossIn: number;
-  boss: 'coming' | 'alive' | 'slain';
   /** Seconds before it fades if it is not beaten. */
   seconds: number;
+}
+
+/** A chunk of the land (its coordinates, not blocks). */
+export interface InvasionChunk {
+  cx: number;
+  cz: number;
 }
 
 /** What the director needs of the world around it. */
 export interface InvasionHost {
   /** The wall clock (milliseconds since 1970). */
   now(): number;
-  /** The players the tide can come for: alive, not creative, not spectating, not inside a dungeon. */
+  /** The players the tide can come for: alive, not spectating, not inside a dungeon (creative is fine: the Tide is a hunt, not a fight). */
   players(): RiftPlayer[];
+  /** The chunks of the land that exist (the explored world). May be empty: the director then looks in a ring round the players, far enough off. */
+  chunks(): readonly InvasionChunk[];
   /** The y of the ground at a column (the top of its highest solid block), or -1 when the column is not there yet. */
   groundAt(x: number, z: number): number;
   /** Is there room for a monster to stand with its feet at y (two cells of air over a solid, dry floor)? */
@@ -84,20 +84,47 @@ export interface InvasionHost {
 }
 
 interface Invasion {
-  phase: 'fighting' | 'ending';
-  /** Seconds since it began; and in the ending, seconds since Aurelion fell. */
+  /** Seconds since it began. */
   t: number;
   mobs: Mob[];
-  boss: Mob | null;
-  bossSpawned: boolean;
   /** Seconds with nobody in the world. */
   lonely: number;
   /** Seconds since the monsters were last counted. */
   count: number;
 }
 
+interface Place {
+  x: number;
+  y: number;
+  z: number;
+}
+
 /** When the next slot is: the next multiple of the period after `now`. */
 export const nextInvasionAt = (now: number): number => (Math.floor(now / INVASION_PERIOD) + 1) * INVASION_PERIOD;
+
+/** How many creatures the land hides, for this much explored land (in chunks; 0 when it is not known) and this many players. */
+export function invasionCount(chunks: number, players: number): number {
+  return Math.max(INVASION_MIN, Math.min(INVASION_CAP, Math.round(chunks / INVASION_CHUNKS_PER_MOB) + players * INVASION_PER_PLAYER));
+}
+
+/** The kinds for `n` creatures, in the proportions of `INVASION_MIX`, with a colossus whenever there are enough to spare one. */
+export function invasionKinds(n: number): MobKind[] {
+  const total = INVASION_MIX.reduce((s, m) => s + m.weight, 0);
+  const counts = INVASION_MIX.map((m) => Math.floor((n * m.weight) / total));
+  const last = INVASION_MIX.length - 1;
+  if (n >= INVASION_MIN && counts[last] === 0) counts[last] = 1;
+  // What the rounding left over goes to the most common kinds first.
+  let rest = n - counts.reduce((s, c) => s + c, 0);
+  for (let i = 0; rest > 0; i = (i + 1) % last) {
+    counts[i]++;
+    rest--;
+  }
+  const out: MobKind[] = [];
+  INVASION_MIX.forEach((m, i) => {
+    for (let k = 0; k < counts[i]; k++) out.push(m.kind);
+  });
+  return out.slice(0, n);
+}
 
 export class InvasionDirector {
   current: Invasion | null = null;
@@ -143,9 +170,13 @@ export class InvasionDirector {
         if (players.length === 0) return;
         const passed = INVASION_WARNINGS.filter((w) => left <= w).length;
         if (passed > this.warned) {
+          const first = this.warned === 0;
           this.warned = passed;
           const when = left > 90 ? `${Math.round(left / 60)} minutes` : `${Math.max(1, Math.round(left / 10) * 10)} seconds`;
-          this.host.announce('omen', `The Gilded Tide is coming in ${when}! Gold glints on the horizon...`);
+          this.host.announce(
+            'omen',
+            first ? `The Gilded Tide is coming in ${when}! Golden creatures will hide all over the land...` : `The Gilded Tide is coming in ${when}!`,
+          );
         }
         return;
       }
@@ -163,110 +194,80 @@ export class InvasionDirector {
     if (inv.count >= 1) {
       inv.count = 0;
       inv.mobs = inv.mobs.filter((m) => !m.dead && this.host.present(m));
+      // Every one found: it is over.
+      if (inv.mobs.length === 0) return this.end(inv, 'slain');
     }
-
-    if (inv.phase === 'ending') {
-      if (inv.t >= INVASION_AFTER || inv.mobs.length === 0) this.end(inv, 'slain');
-      return;
-    }
-
-    if (!inv.bossSpawned && inv.t >= INVASION_BOSS_AT) this.risen(inv, players);
-    if (inv.boss && inv.boss.dead) {
-      // Aurelion is down: the tide recedes (the stragglers have a moment to be hunted).
-      inv.phase = 'ending';
-      inv.t = 0;
-      this.host.announce('slain', 'Aurelion, the Hoard King, has fallen! The Gilded Tide is breaking up. Open your codices!');
-      return;
-    }
-    if (inv.bossSpawned && inv.boss && !this.host.present(inv.boss)) return this.end(inv, 'faded');
     if (inv.t >= INVASION_SECONDS) this.end(inv, 'faded');
   }
 
   /** Begin it now (a cheat, a test, the clock). Returns false when there is nobody about or no ground for any of it. */
   open(players: readonly RiftPlayer[]): boolean {
     if (this.current || players.length === 0) return false;
-    const inv: Invasion = { phase: 'fighting', t: 0, mobs: [], boss: null, bossSpawned: false, lonely: 0, count: 0 };
-    for (const group of this.groups(players)) {
-      const site = this.site(group);
-      if (!site) continue;
-      const scale = scaleFor(group.length);
-      for (const s of INVASION_SWARM) {
-        const n = Math.ceil(s.count * scale);
-        for (let i = 0; i < n && inv.mobs.length < INVASION_CAP; i++) inv.mobs.push(this.make(s.kind, site));
-      }
+    const places = this.places(players);
+    if (places.length === 0) return false;
+    const kinds = invasionKinds(places.length);
+    // The rare ones are not always in the same part of the land.
+    for (let i = kinds.length - 1; i > 0; i--) {
+      const j = Math.floor(this.rand() * (i + 1));
+      [kinds[i], kinds[j]] = [kinds[j], kinds[i]];
     }
-    if (inv.mobs.length === 0) return false;
+    const inv: Invasion = { t: 0, mobs: [], lonely: 0, count: 0 };
+    places.forEach((at, i) => {
+      const m = this.host.spawn(kinds[i], at.x, at.y, at.z);
+      // Kept by the tide (never despawned by distance, however far from everybody).
+      m.bound = true;
+      inv.mobs.push(m);
+    });
     this.current = inv;
     this.warned = INVASION_WARNINGS.length;
-    this.host.announce('open', 'The Gilded Tide has broken over the land! Gilt imps, hounds, drakes and colossi are hunting you. Aurelion follows...');
+    this.host.announce('open', 'The Gilded Tide has broken over the land! Golden creatures are hiding all over the world, shy and far from you. Find them all...');
     return true;
   }
 
-  /** Players in clusters: each is put with the first group that has somebody within `INVASION_GROUP` of them. */
-  private groups(players: readonly RiftPlayer[]): RiftPlayer[][] {
-    const groups: RiftPlayer[][] = [];
-    for (const p of players) {
-      const g = groups.find((members) => members.some((q) => Math.hypot(q.x - p.x, q.z - p.z) <= INVASION_GROUP));
-      if (g) g.push(p);
-      else groups.push([p]);
+  /**
+   * Where the creatures go: a place on the ground in as many different chunks of the land as there are creatures, none near a player, none near
+   * another. The chunks are the ones the world has (the explored land, all of it). When the world does not say, a ring round each player is used.
+   */
+  private places(players: readonly RiftPlayer[]): Place[] {
+    let chunks = this.host.chunks().slice();
+    const known = chunks.length;
+    if (known < 4) {
+      const seen = new Set<number>();
+      chunks = [];
+      for (const p of players) {
+        for (let i = 0; i < 80; i++) {
+          const a = this.rand() * Math.PI * 2;
+          const d = this.between(INVASION_KEEP_AWAY + 12, 150);
+          const cx = Math.floor((p.x + Math.cos(a) * d) / 16);
+          const cz = Math.floor((p.z + Math.sin(a) * d) / 16);
+          const key = cx * 65536 + cz;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          chunks.push({ cx, cz });
+        }
+      }
     }
-    return groups;
-  }
-
-  /** A place on the ground 38 to 58 blocks from the middle of a group of players (null when none is found). */
-  private site(group: readonly RiftPlayer[]): { x: number; y: number; z: number } | null {
-    const cx = group.reduce((s, p) => s + p.x, 0) / group.length;
-    const cz = group.reduce((s, p) => s + p.z, 0) / group.length;
-    for (let attempt = 0; attempt < 16; attempt++) {
-      const a = this.rand() * Math.PI * 2;
-      const d = this.between(38, 58);
-      const x = Math.floor(cx + Math.cos(a) * d) + 0.5;
-      const z = Math.floor(cz + Math.sin(a) * d) + 0.5;
-      if (!this.host.allowed(x, z)) continue;
-      const y = this.host.groundAt(x, z);
-      if (y < 0 || !this.host.standable(x, y + 1, z)) continue;
-      return { x, y: y + 1, z };
+    for (let i = chunks.length - 1; i > 0; i--) {
+      const j = Math.floor(this.rand() * (i + 1));
+      [chunks[i], chunks[j]] = [chunks[j], chunks[i]];
     }
-    return null;
-  }
-
-  /** A place on the ground round a site (the site itself when none is found). */
-  private spot(site: { x: number; y: number; z: number }): { x: number; y: number; z: number } {
-    for (let i = 0; i < 10; i++) {
-      const a = this.rand() * Math.PI * 2;
-      const d = this.between(2, 9);
-      const x = Math.floor(site.x + Math.cos(a) * d) + 0.5;
-      const z = Math.floor(site.z + Math.sin(a) * d) + 0.5;
-      const g = this.host.groundAt(x, z);
-      if (g < 0 || Math.abs(g + 1 - site.y) > 6 || !this.host.standable(x, g + 1, z)) continue;
-      return { x, y: g + 1, z };
+    const want = invasionCount(known < 4 ? 0 : known, players.length);
+    const out: Place[] = [];
+    for (const c of chunks) {
+      if (out.length >= want) break;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const x = c.cx * 16 + 1 + Math.floor(this.rand() * 14) + 0.5;
+        const z = c.cz * 16 + 1 + Math.floor(this.rand() * 14) + 0.5;
+        if (players.some((p) => Math.hypot(p.x - x, p.z - z) < INVASION_KEEP_AWAY)) continue;
+        if (out.some((o) => Math.hypot(o.x - x, o.z - z) < INVASION_SPACING)) continue;
+        if (!this.host.allowed(x, z)) continue;
+        const y = this.host.groundAt(x, z);
+        if (y < 0 || !this.host.standable(x, y + 1, z)) continue;
+        out.push({ x, y: y + 1, z });
+        break;
+      }
     }
-    return site;
-  }
-
-  private make(kind: MobKind, site: { x: number; y: number; z: number }): Mob {
-    const at = this.spot(site);
-    const m = this.host.spawn(kind, at.x, at.y, at.z);
-    // Kept by the tide (never despawned by distance); they hunt on their own, from far off.
-    m.bound = true;
-    return m;
-  }
-
-  /** Aurelion rises, with his escort, near the biggest group. */
-  private risen(inv: Invasion, players: readonly RiftPlayer[]): void {
-    const groups = this.groups(players).sort((a, b) => b.length - a.length);
-    for (const group of groups) {
-      const site = this.site(group);
-      if (!site) continue;
-      inv.boss = this.make('aurelion', site);
-      inv.mobs.push(inv.boss);
-      for (const s of INVASION_ESCORT) for (let i = 0; i < s.count && inv.mobs.length < INVASION_CAP + 4; i++) inv.mobs.push(this.make(s.kind, site));
-      inv.bossSpawned = true;
-      this.host.announce('boss', 'Aurelion, the Hoard King, has risen!', site.x, site.z);
-      return;
-    }
-    // (no ground this time: try again in a moment)
-    inv.t -= 5;
+    return out;
   }
 
   private end(inv: Invasion, how: 'slain' | 'faded' | null): void {
@@ -276,6 +277,7 @@ export class InvasionDirector {
       this.host.remove(m);
     }
     inv.mobs = [];
+    if (how === 'slain') this.host.announce('slain', 'Every golden creature has been found! The Gilded Tide is over. Open your codices!');
     if (how === 'faded') this.host.announce('faded', 'The Gilded Tide fades away...');
     this.current = null;
     this.schedule();
@@ -286,10 +288,7 @@ export class InvasionDirector {
     const inv = this.current;
     if (!inv) return null;
     return {
-      phase: inv.phase,
       left: inv.mobs.filter((m) => !m.dead).length,
-      bossIn: inv.bossSpawned || inv.phase === 'ending' ? 0 : Math.max(0, Math.ceil(INVASION_BOSS_AT - inv.t)),
-      boss: inv.phase === 'ending' ? 'slain' : inv.bossSpawned ? 'alive' : 'coming',
       seconds: Math.max(0, Math.ceil(INVASION_SECONDS - inv.t)),
     };
   }

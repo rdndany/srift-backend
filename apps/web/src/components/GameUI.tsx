@@ -18,6 +18,8 @@ import { BossBanner, BossFrame } from './BossFrame';
 import { AirBubbles } from './Vitals';
 import { TokenSync } from './TokenPurse';
 import { HudScale } from './HudScale';
+import { LandUI } from './LandUI';
+import { SignEditor } from './SignEditor';
 
 function DeathScreen() {
   const screen = useUi((s) => s.screen);
@@ -121,6 +123,8 @@ export function GameUI() {
       <CodexUI />
       <PlayerUI />
       <TradeUI />
+      <LandUI />
+      <SignEditor />
     </>
   );
 }

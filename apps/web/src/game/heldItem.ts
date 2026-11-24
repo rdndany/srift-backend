@@ -13,6 +13,7 @@ import { HeldViews } from './held/kinds';
 import { OffJab } from './held/offJab';
 import { MapHold } from './held/mapHold';
 import { ItemModels } from './held/models';
+import { SurveyorSignals } from './held/surveyor';
 import type { SwingStyle } from './held/swings';
 import { addAura, auraSamples, stripAura } from './enchantFx';
 import { AXIS_X, AXIS_Y, AXIS_Z, DEG, REST_DEFAULT, type HandFrame, type HeldKit, type HeldView } from './held/view';
@@ -57,6 +58,8 @@ export class HeldItem {
   private readonly casting = new Casting();
   private readonly stoneHeat = new StoneHeat();
   private readonly map: MapHold;
+  /** What the land tells the Land Surveyor in the hand: whether a shape is being marked, how it looks, and the moments to play (see held/surveyor.ts). */
+  readonly surveyor = new SurveyorSignals();
 
   /** The main hand: its pivot (the grip), the holder the item sits in, the view of the item (null: the empty hand) and its id. */
   private pivot = new THREE.Group();
@@ -108,7 +111,7 @@ export class HeldItem {
 
   constructor(atlasCanvas: HTMLCanvasElement, atlasTexture: THREE.Texture) {
     this.models = new ItemModels(atlasCanvas, atlasTexture);
-    const kit: HeldKit = { models: this.models, scene: this.scene, makeChar: () => this.makeChar() };
+    const kit: HeldKit = { models: this.models, scene: this.scene, makeChar: () => this.makeChar(), surveyor: this.surveyor };
     this.views = new HeldViews(kit);
     this.figures = new ItemFigures(this.models, this.views);
     this.map = new MapHold(kit, (ch) => {
@@ -521,6 +524,7 @@ export class HeldItem {
     take(this.offObj ?? undefined);
     take(this.map.main?.object);
     take(this.map.off?.object);
+    take(this.views.get(I.LAND_SURVEYOR).object);
     const flame = this.models.torchFlame();
     const page = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.2), this.models.track(new THREE.MeshBasicMaterial({ map: this.models.atlasTexture })));
     const samples: THREE.Object3D[] = [

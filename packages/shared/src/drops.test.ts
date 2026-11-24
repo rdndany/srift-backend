@@ -33,6 +33,8 @@ import {
   outfitItems,
 } from './index';
 import { OUTFITS } from './outfitData';
+import { HOLLOW_KING_IDS } from './hollowKingData';
+import { QUEST_ITEMS } from './questDrops';
 import { COMPANIONS } from './companions';
 import { WINGS } from './wings';
 import { settleOrbs } from './xpOrbs.testutil';
@@ -156,8 +158,8 @@ describe('every item can be obtained', () => {
     // the filled buckets are made by using an empty bucket on a liquid, not crafted; an enchanted book comes
     // from the enchanting table, chest loot and the anvil (see enchant.test.ts); a bottle o' enchanting from
     // dungeon chests and the cleric; a skill book from the kills of a player of its class, quests and the merchants of
-    // Dawnwatch (see skillBooks.test.ts); the biggest bag from monsters and quests (see bags.test.ts); the jewels from monsters, chests and the arcanist (see jewels.test.ts); the mount horns from the ranger quartermaster (see mounts.test.ts); the clothes of the classes are put on every new character of the class (see outfit.test.ts); the two halves of the Hollow Sigil from Tobin's shelves and the chests of the dungeons (see dungeonQuests.test.ts).
-    const wholeOnlyInCreative = new Set<number>([...OUTFIT_CLASSES.flatMap((c) => outfitItems(c)), ...SKILL_BOOKS.map((_, i) => I.SKILL_BOOK_BASE + i), ...OUTFITS.map((_, i) => I.OUTFIT_SET_BASE + i), ...MOUNTS.map((m) => mountItemId(m.id)), ...COMPANIONS.map((c) => companionItemId(c.id)), ...WINGS.map((w) => wingItemId(w.id)), bagId(5), I.EMBERSTONE, I.COMPASS, I.WARDEN_SCROLL, I.HOLLOW_BONE, I.HOLLOW_SIGIL, I.JEWEL_DAWN, I.JEWEL_RIFT, I.JEWEL_BLOOM, B.GRASS, B.LEAVES, B.BIRCH_LEAVES, B.SPRUCE_LEAVES, B.COBWEB, B.ICE, B.PACKED_ICE, B.DEEPSLATE, B.MYCELIUM, B.ACACIA_LEAVES, B.JUNGLE_LEAVES, B.DARK_OAK_LEAVES, B.CHERRY_LEAVES, ...groveLeaves(), B.FERN, B.COAL_ORE, B.LAPIS_ORE, B.IRON_ORE, B.GOLD_ORE, B.DIAMOND_ORE, B.EMERALD_ORE, B.REDSTONE_ORE, I.WATER_BUCKET, I.LAVA_BUCKET, I.ENCHANTED_BOOK, I.EXPERIENCE_BOTTLE]);
+    // Dawnwatch (see skillBooks.test.ts); the biggest bag from monsters and quests (see bags.test.ts); the jewels from monsters, chests and the arcanist (see jewels.test.ts); the mount horns from the ranger quartermaster (see mounts.test.ts); the clothes of the classes are put on every new character of the class (see outfit.test.ts); the Land Surveyor from Tobin's hook (see landService.test.ts); the two halves of the Hollow Sigil from Tobin's shelves and the chests of the dungeons (see dungeonQuests.test.ts); the relics of the Hollow King from the king himself (see hollowKing.test.ts).
+    const wholeOnlyInCreative = new Set<number>([...OUTFIT_CLASSES.flatMap((c) => outfitItems(c)), ...SKILL_BOOKS.map((_, i) => I.SKILL_BOOK_BASE + i), ...OUTFITS.map((_, i) => I.OUTFIT_SET_BASE + i), ...MOUNTS.map((m) => mountItemId(m.id)), ...COMPANIONS.map((c) => companionItemId(c.id)), ...WINGS.map((w) => wingItemId(w.id)), bagId(5), I.EMBERSTONE, I.COMPASS, I.LAND_SURVEYOR, ...QUEST_ITEMS, I.WARDEN_SCROLL, I.HOLLOW_BONE, I.HOLLOW_SIGIL, ...HOLLOW_KING_IDS, I.JEWEL_DAWN, I.JEWEL_RIFT, I.JEWEL_BLOOM, B.GRASS, B.LEAVES, B.BIRCH_LEAVES, B.SPRUCE_LEAVES, B.COBWEB, B.ICE, B.PACKED_ICE, B.DEEPSLATE, B.MYCELIUM, B.ACACIA_LEAVES, B.JUNGLE_LEAVES, B.DARK_OAK_LEAVES, B.CHERRY_LEAVES, ...groveLeaves(), B.FERN, B.COAL_ORE, B.LAPIS_ORE, B.IRON_ORE, B.GOLD_ORE, B.DIAMOND_ORE, B.EMERALD_ORE, B.REDSTONE_ORE, I.WATER_BUCKET, I.LAVA_BUCKET, I.ENCHANTED_BOOK, I.EXPERIENCE_BOTTLE]);
     const missing = [...ITEMS.values()].filter((i) => !have.has(i.id) && !wholeOnlyInCreative.has(i.id)).map((i) => `${i.name} (${i.id})`);
     expect(missing).toEqual([]);
   });

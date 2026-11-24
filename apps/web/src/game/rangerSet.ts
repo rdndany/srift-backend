@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { OutfitDef } from '@solrift/shared';
-import { DEG, SetBuilder, hex, jitter, lerp, lit, noise, paint16, rgbs, scale, trimTexture, type OrbiterSpec, type RGB, type SetCtx, type SetRig, type SparkKind, type V3 } from './setKit';
+import { DEG, SetBuilder, hex, jitter, lerp, lit, noise, paint16, rgbs, scale, trimTexture, type OrbiterSpec, type SetCtx, type SetRig, type SparkKind, type V3 } from './setKit';
 
 /**
  * The Ranger's sets: stitched leathers with a bandolier and a belt of pouches, a hood, a cap, a headdress of antlers or feathers, a mantle of fur or
@@ -59,7 +59,7 @@ const STYLES: Record<string, Style> = {
     sparks: 'rise', count: 20, halo: 0.22, height: 0.65, extent: 0.5,
   },
   wildheart: {
-    head: 'antlers', headSize: 1, mantle: 'fur', cloak: 'none', quiver: true,
+    head: 'antlers', headSize: 1, mantle: 'fur', cloak: 'none', quiver: false,
     wings: [{ kind: 'feather', blades: 3, len: 0.95, curl: 0.2, spread: [34, 86], width: 0.17 }],
     sparks: 'fireflies', count: 24, halo: 0.3, height: 0.95, extent: 0.85,
   },
@@ -161,6 +161,17 @@ function wingTexture(def: OutfitDef, kind: WingKind): THREE.CanvasTexture {
 
 // ---- the set ----------------------------------------------------------------------------------------------------------------
 
+/** What the skin needs to know of a set: whether its head is in a hood (painted, and over the hair). */
+export function rangerLook(id: string): { hood: boolean } {
+  return { hood: (STYLES[id] ?? STYLES.greenwarden).head === 'hood' };
+}
+
+/**
+ * The leathers are painted on the body (see `outfitSkin.ts`): the jerkin with its lacing and its bandolier, the belt, the bracers, the trousers and the
+ * boots are the colours of the skin. What is built of blocks is only what stands clear of it: the pouches, the sheath and the pieces of the tassets that
+ * hang on the legs (so they move with the stride), the fur on the shoulders, the cloak and the quiver (kept within the width of the body, so an arm never
+ * swings through them), the head's gear, and the wings.
+ */
 export function dressRangerSet(ctx: SetCtx, def: OutfitDef): SetRig {
   const st = STYLES[def.id] ?? STYLES.greenwarden;
   const b = new SetBuilder(ctx, def);
@@ -175,155 +186,133 @@ export function dressRangerSet(ctx: SetCtx, def: OutfitDef): SetRig {
   const hs = st.headSize;
   const feather = lit(`wing:feather:${def.id}`, () => wingTexture(def, 'feather'));
 
-  // ---- the jerkin, laced down the front; a bandolier across it, studded; a belt with pouches and a sheathed knife; tassets of leather.
-  put(t, leather, [0.55, 0.66, 0.31], [0, 1.17, 0]);
-  put(t, dark, [0.02, 0.44, 0.012], [0, 1.28, -0.163]);
-  for (let i = 0; i < 5; i++) put(t, trim, [0.12, 0.016, 0.014], [0, 1.46 - i * 0.09, -0.165]);
-  put(t, dark, [0.09, 0.84, 0.34], [0, 1.18, 0], [0, 0, 0.62]);
-  for (let k = -2; k <= 2; k++) put(t, trim, [0.06, 0.06, 0.02], [-0.099 * k, 1.18 + 0.138 * k, -0.172], [0, 0, 0.62]);
-  put(t, trim, [0.58, 0.09, 0.33], [0, 0.88, 0]);
-  put(t, trim, [0.13, 0.12, 0.04], [0, 0.88, -0.18]);
-  put(t, gem, [0.06, 0.06, 0.05], [0, 0.88, -0.2]);
-  for (const s of [-1, 1]) put(t, dark, [0.12, 0.15, 0.1], [s * 0.31, 0.82, -0.07]);
-  put(t, dark, [0.07, 0.3, 0.07], [-0.3, 0.7, 0.12], [0.1, 0, 0.08]); // the sheath
-  put(t, trim, [0.075, 0.04, 0.075], [-0.3, 0.86, 0.12], [0.1, 0, 0.08]);
-  put(t, leather, [0.34, 0.24, 0.04], [0, 0.71, -0.17], [-0.05, 0, 0]);
-  put(t, trim, [0.34, 0.025, 0.05], [0, 0.585, -0.178], [-0.05, 0, 0]);
-  put(t, leather, [0.34, 0.26, 0.04], [0, 0.7, 0.17], [0.06, 0, 0]);
-
-  // ---- arms: a sleeve, a bracer strapped on in three places with a lit edge, a fingerless glove.
-  for (const arm of [ctx.armL, ctx.armR]) {
-    put(arm, leather, [0.29, 0.34, 0.29], [0, -0.17, 0]);
-    put(arm, trim, [0.3, 0.025, 0.3], [0, -0.35, 0]);
-    put(arm, dark, [0.3, 0.28, 0.3], [0, -0.51, 0]);
-    for (const y of [-0.42, -0.51, -0.6]) put(arm, trim, [0.31, 0.02, 0.31], [0, y, 0]);
-    put(arm, edge, [0.31, 0.012, 0.31], [0, -0.655, 0]);
-    put(arm, dark, [0.27, 0.09, 0.27], [0, -0.7, 0]);
+  // ---- the belt's buckle and gem where the painted one is; at the hips, on the legs, pouches and tassets of leather that move with the stride, and a
+  // sheathed knife on the left leg's back. The wrists have a lit edge.
+  put(t, trim, [0.13, 0.11, 0.02], [0, 0.906, -0.135]);
+  put(t, gem, [0.06, 0.06, 0.03], [0, 0.906, -0.16]);
+  for (const [leg, s] of [[ctx.legL, -1], [ctx.legR, 1]] as const) {
+    put(leg, leather, [0.245, 0.2, 0.036], [0, -0.1, -0.143]);
+    put(leg, trim, [0.245, 0.022, 0.04], [0, -0.21, -0.145]);
+    put(leg, leather, [0.245, 0.22, 0.036], [0, -0.11, 0.143]);
+    put(leg, dark, [0.06, 0.14, 0.1], [s * 0.155, -0.1, -0.04]);
+    put(leg, trim, [0.065, 0.025, 0.105], [s * 0.155, -0.035, -0.04]);
+    // The cuff of fur turned down over the boot (one hair higher on the right leg: the two cuffs touch, and a face in the same place would fight).
+    put(leg, fur, [0.27, 0.07, 0.27], [0, -0.53 - (s === 1 ? 0.004 : 0), 0]);
+    put(leg, edge, [0.262, 0.014, 0.262], [0, -0.66, 0]);
   }
+  put(ctx.legL, dark, [0.06, 0.32, 0.05], [0, -0.2, 0.17], [0.12, 0, 0]);
+  put(ctx.legL, trim, [0.065, 0.04, 0.055], [0, -0.04, 0.165], [0.12, 0, 0]);
+  for (const arm of [ctx.armL, ctx.armR]) put(arm, edge, [0.262, 0.014, 0.262], [0, -0.594, 0]);
 
-  // ---- legs: a wrap on the thigh, a knee guard, a tall boot with a turned-down cuff of fur and a band of light.
-  for (const leg of [ctx.legL, ctx.legR]) {
-    put(leg, leather, [0.29, 0.3, 0.29], [0, -0.16, 0]);
-    put(leg, trim, [0.3, 0.025, 0.3], [0, -0.32, 0]);
-    put(leg, dark, [0.3, 0.1, 0.34], [0, -0.38, -0.02]);
-    put(leg, dark, [0.3, 0.3, 0.3], [0, -0.58, 0]);
-    put(leg, fur, [0.35, 0.09, 0.35], [0, -0.45, 0]);
-    put(leg, edge, [0.31, 0.014, 0.31], [0, -0.68, 0]);
-    put(leg, dark, [0.3, 0.07, 0.38], [0, -0.715, -0.04]);
-    put(leg, trim, [0.3, 0.025, 0.39], [0, -0.745, -0.04]);
-  }
-
-  // ---- the mantle.
+  // ---- the mantle: a collar about the neck and a cap on each shoulder, and what hangs from them.
+  const shoulders = (mat: THREE.Material): void => {
+    put(t, mat, [0.56, 0.1, 0.32], [0, 1.46, 0]);
+    for (const [arm, s] of [[ctx.armL, -1], [ctx.armR, 1]] as const) put(arm, mat, [0.34, 0.09, 0.34], [s * 0.05, 0.045, 0]);
+  };
   if (st.mantle === 'fur') {
-    put(t, fur, [0.86, 0.14, 0.47], [0, 1.5, 0]);
-    for (let i = -3; i <= 3; i++) {
-      put(t, fur, [0.12, 0.13, 0.1], [i * 0.12, 1.42, -0.24], [0, 0, i * 0.06]);
-      put(t, fur, [0.12, 0.13, 0.1], [i * 0.12, 1.42, 0.24], [0, 0, i * 0.06]);
+    shoulders(fur);
+    for (let i = -1; i <= 1; i++) {
+      put(t, fur, [0.12, 0.13, 0.06], [i * 0.12, 1.4, -0.19], [0, 0, i * 0.06]);
+      put(t, fur, [0.12, 0.13, 0.06], [i * 0.12, 1.4, 0.19], [0, 0, i * 0.06]);
     }
-    for (const s of [-1, 1]) {
-      put(t, fur, [0.12, 0.13, 0.4], [s * 0.45, 1.44, 0]);
-      put(t, trim, [0.1, 0.1, 0.02], [s * 0.1, 1.5, -0.245]); // a bone toggle each side
-    }
+    put(t, trim, [0.04, 0.1, 0.02], [0, 1.42, -0.2]); // a bone toggle
   } else if (st.mantle === 'feathers' || st.mantle === 'leaves') {
     const mat = st.mantle === 'feathers' ? feather : lit(`wing:leaf:${def.id}`, () => wingTexture(def, 'leaf'));
-    put(t, leather, [0.78, 0.1, 0.44], [0, 1.5, 0]);
-    put(t, trim, [0.8, 0.025, 0.46], [0, 1.555, 0]);
-    // Two rows of feathers or leaves hang over the shoulders and the chest, the lower row longer.
+    shoulders(leather);
+    put(t, trim, [0.58, 0.022, 0.34], [0, 1.52, 0]);
+    // Two rows of feathers or leaves hang over the chest, the lower row longer, no wider than the body.
     for (let row = 0; row < 2; row++) {
-      for (let k = -3; k <= 3; k++) {
-        const x = k * (0.115 + row * 0.01);
+      for (let k = -2; k <= 2; k++) {
+        const x = k * (0.1 + row * 0.01);
         const side = k < 0 ? -1 : 1;
         const down = Math.PI - k * 0.07 + (row ? 0.05 * side : 0);
-        chain(t, mat, row ? edge : null, [x, 1.5 - row * 0.05, -0.2], [0.18, 0, down], 3, 0.3 + row * 0.1, 0.14, 0.05, 0.04, [0, 0, 0], side, st.mantle === 'leaves' ? (i, n) => 0.1 + 0.12 * Math.sin(((i + 0.6) / (n + 0.2)) * Math.PI) : undefined);
+        chain(t, mat, row ? edge : null, [x, 1.42 - row * 0.05, -0.17 - row * 0.015 - (k & 1) * 0.006], [0.18, 0, down], 3, 0.3 + row * 0.1, 0.14, 0.05, 0.04, [0, 0, 0], side, st.mantle === 'leaves' ? (i, n) => 0.1 + 0.12 * Math.sin(((i + 0.6) / (n + 0.2)) * Math.PI) : undefined);
       }
     }
   } else if (st.mantle === 'scarf') {
     // A scarf wound twice about the neck, with a tail that blows back.
-    put(t, cloak, [0.58, 0.14, 0.4], [0, 1.52, 0]);
-    put(t, trim, [0.59, 0.025, 0.41], [0, 1.585, 0]);
-    put(t, cloak, [0.6, 0.12, 0.42], [0, 1.4, 0]);
-    b.hang(t, [0.2, 1.4, 0.2], 4, 0.2, (g) => {
+    put(t, cloak, [0.54, 0.14, 0.3], [0, 1.52, 0]);
+    put(t, trim, [0.55, 0.022, 0.31], [0, 1.595, 0]);
+    put(t, cloak, [0.54, 0.1, 0.3], [0, 1.4, 0]);
+    b.hang(t, [0.18, 1.4, 0.17], 4, 0.2, (g) => {
       put(g, cloak, [0.14, 0.2, 0.03], [0, -0.1, 0]);
       put(g, trim, [0.15, 0.025, 0.035], [0, -0.2, 0]);
     }, 1.2, 0.12);
   }
 
-  // ---- the cloak: from the shoulders, in hinged pieces that stream behind the hero.
+  // ---- the cloak: from the shoulders, in hinged pieces that stream behind the hero, no wider than the body.
   if (st.cloak === 'short' || st.cloak === 'long') {
     const n = st.cloak === 'long' ? 4 : 2;
-    b.hang(t, [0, 1.47, 0.245], n, 0.32, (g, i) => {
-      const w = 0.58 + i * 0.07;
+    b.hang(t, [0, 1.47, 0.17], n, 0.32, (g, i) => {
+      const w = 0.46 + i * 0.015;
       put(g, cloak, [w, 0.33, 0.04], [0, -0.16, 0]);
       if (i === n - 1) {
         put(g, trim, [w + 0.01, 0.03, 0.05], [0, -0.33, 0]);
         // A ragged hem: teeth of cloth along the bottom.
-        for (let k = 0; k < 5; k++) put(g, cloak, [0.1, 0.1 + (k % 2) * 0.06, 0.035], [(k - 2) * 0.13, -0.37 - (k % 2) * 0.03, 0]);
+        for (let k = 0; k < 5; k++) put(g, cloak, [0.09, 0.1 + (k % 2) * 0.06, 0.035], [(k - 2) * 0.11, -0.37 - (k % 2) * 0.03, 0]);
       }
     }, 0.75, 0.07);
   } else if (st.cloak === 'ribbons') {
     // Ribbons of moonlight, five of them, long, that stream like smoke.
     for (let k = 0; k < 5; k++) {
-      b.hang(t, [(k - 2) * 0.12, 1.44, 0.25], 5, 0.27, (g) => {
-        put(g, edge, [0.09, 0.28, 0.02], [0, -0.14, 0]);
-        put(g, core, [0.018, 0.28, 0.024], [0, -0.14, 0]);
+      b.hang(t, [(k - 2) * 0.1, 1.44, 0.17], 5, 0.27, (g) => {
+        put(g, edge, [0.08, 0.28, 0.02], [0, -0.14, 0]);
+        put(g, core, [0.018, 0.28, 0.032], [0, -0.142, 0]);
       }, 1.1, 0.11, k * 0.9);
     }
   }
 
   // ---- the quiver, slung across the back, and arrows with fletching and lit heads.
   if (st.quiver) {
-    put(t, dark, [0.15, 0.52, 0.15], [0.12, 1.22, 0.29], [0, 0, 0.3]);
-    put(t, trim, [0.17, 0.03, 0.17], [0.012, 1.485, 0.29], [0, 0, 0.3]);
-    put(t, trim, [0.17, 0.03, 0.17], [0.19, 0.99, 0.29], [0, 0, 0.3]);
+    put(t, dark, [0.15, 0.52, 0.12], [0.1, 1.2, 0.2], [0, 0, 0.3]);
+    put(t, trim, [0.17, 0.03, 0.14], [0.012, 1.465, 0.2], [0, 0, 0.3]);
+    put(t, trim, [0.17, 0.03, 0.14], [0.185, 0.97, 0.2], [0, 0, 0.3]);
     for (let i = 0; i < 4; i++) {
-      const off = (i - 1.5) * 0.04;
-      put(t, trim, [0.018, 0.3, 0.018], [0.0 + off + 0.04, 1.62, 0.29 + (i % 2) * 0.03], [0, 0, 0.3]);
-      put(t, gem, [0.05, 0.08, 0.012], [-0.012 + off + 0.04, 1.5, 0.29 + (i % 2) * 0.03], [0, 0, 0.3]);
+      const off = (i - 1.5) * 0.035;
+      put(t, trim, [0.018, 0.3, 0.018], [0.0 + off + 0.04, 1.6, 0.2 + (i % 2) * 0.025], [0, 0, 0.3]);
+      put(t, gem, [0.05, 0.08, 0.012], [-0.012 + off + 0.04, 1.49, 0.2 + (i % 2) * 0.025], [0, 0, 0.3]);
     }
-    put(t, dark, [0.06, 0.04, 0.34], [0, 1.44, 0.15], [0, 0, 0.62]); // the strap over the shoulder
   }
 
-  // ---- what the head wears.
+  // ---- what the head wears. (The top of the head is at 0.5 and the blocks that stand on it keep off that height: a face of a block exactly there fights the head's.)
   const plume = (n: number, base: V3): void => {
     for (let i = 0; i < n; i++) {
       const f = n === 1 ? 0.5 : i / (n - 1);
-      chain(head, feather, edge, [base[0] + (f - 0.5) * 0.06, base[1], base[2]], [-0.9 - f * 0.25, 0, -0.35 + f * 0.5], 5, 0.62 - Math.abs(f - 0.5) * 0.2, 0.14, 0.02, 0.03, [-0.1, 0, 0.02], 1, (i2, n2) => 0.04 + 0.12 * Math.sin(((i2 + 0.6) / (n2 + 0.2)) * Math.PI));
+      chain(head, feather, edge, [base[0] + (f - 0.5) * 0.06, base[1], base[2] + i * 0.005], [-0.9 - f * 0.25, 0, -0.35 + f * 0.5], 5, 0.62 - Math.abs(f - 0.5) * 0.2, 0.14, 0.02, 0.03, [-0.1, 0, 0.02], 1, (i2, n2) => 0.04 + 0.12 * Math.sin(((i2 + 0.6) / (n2 + 0.2)) * Math.PI));
     }
   };
   const hood = (): void => {
-    put(head, leather, [0.62, 0.14, 0.64], [0, 0.42, 0.01]);
-    for (const s of [-1, 1]) {
-      put(head, leather, [0.06, 0.58, 0.5], [s * 0.31, 0.1, 0.06]);
-      put(head, trim, [0.02, 0.52, 0.025], [s * 0.3, 0.1, -0.19]);
-    }
-    put(head, leather, [0.62, 0.6, 0.06], [0, 0.1, 0.32]);
-    put(head, dark, [0.62, 0.07, 0.06], [0, 0.33, -0.3]);
-    put(head, gem, [0.05, 0.05, 0.04], [0, 0.34, -0.335]);
-    chain(head, leather, null, [0, 0.46, 0.12], [-0.55, 0, 0], 4, 0.46, 0.32, 0.05, 0.32, [-0.12, 0, 0], 1, undefined, true);
+    // The hood is painted on the head; its thickness is a lining on the sides and the back, a slab on top, a band at the brow, and the point behind.
+    for (const s of [-1, 1]) put(head, leather, [0.03, 0.46, 0.5], [s * 0.265, 0.25, 0.04]);
+    put(head, leather, [0.5, 0.46, 0.03], [0, 0.25, 0.265]);
+    put(head, leather, [0.56, 0.03, 0.58], [0, 0.515, 0.015]);
+    put(head, dark, [0.56, 0.05, 0.02], [0, 0.345, -0.26]);
+    put(head, gem, [0.05, 0.05, 0.02], [0, 0.345, -0.278]);
+    chain(head, leather, null, [0, 0.52, 0.12], [-0.55, 0, 0], 4, 0.46, 0.32, 0.05, 0.32, [-0.12, 0, 0], 1, undefined, true);
   };
   const band = (y = 0.33): void => {
-    put(head, dark, [0.6, 0.09, 0.6], [0, y, 0]);
-    put(head, trim, [0.61, 0.02, 0.61], [0, y + 0.05, 0]);
-    put(head, gem, [0.07, 0.07, 0.04], [0, y, -0.31]);
+    put(head, dark, [0.58, 0.09, 0.58], [0, y, 0]);
+    put(head, trim, [0.59, 0.02, 0.59], [0, y + 0.05, 0]);
+    put(head, gem, [0.07, 0.07, 0.03], [0, y, -0.3]);
   };
   if (st.head === 'hood') {
     hood();
-    if (st.plume) plume(st.plume, [0.2, 0.45, 0.2]);
+    if (st.plume) plume(st.plume, [0.2, 0.52, 0.2]);
   } else if (st.head === 'cap') {
-    put(head, leather, [0.6, 0.14, 0.6], [0, 0.4, 0]);
-    put(head, dark, [0.6, 0.04, 0.3], [0, 0.34, -0.42], [0.18, 0, 0]); // the peak
+    put(head, leather, [0.58, 0.14, 0.58], [0, 0.45, 0]);
+    put(head, dark, [0.6, 0.04, 0.3], [0, 0.38, -0.42], [0.18, 0, 0]); // the peak
     band(0.33);
-    put(head, leather, [0.6, 0.3, 0.05], [0, 0.18, 0.29]);
-    if (st.plume) plume(st.plume, [0.24, 0.42, 0.06]);
+    put(head, leather, [0.58, 0.3, 0.05], [0, 0.18, 0.275]);
+    if (st.plume) plume(st.plume, [0.24, 0.45, 0.06]);
     if (st.beak) {
       // A hawk's beak: hooked, over the nose, with a lit eye each side.
-      chain(head, trim, core, [0, 0.3, -0.31], [-0.7, 0, 0], 3, 0.22, 0.12, 0.02, 0.1, [0.55, 0, 0]);
+      chain(head, trim, core, [0, 0.3, -0.3], [-0.7, 0, 0], 3, 0.22, 0.12, 0.02, 0.1, [0.55, 0, 0]);
       for (const s of [-1, 1]) put(head, core, [0.04, 0.04, 0.02], [s * 0.15, 0.2, -0.3]);
     }
   } else if (st.head === 'antlers') {
-    put(head, fur, [0.62, 0.1, 0.62], [0, 0.34, 0]);
-    put(head, trim, [0.63, 0.02, 0.63], [0, 0.4, 0]);
-    put(head, gem, [0.07, 0.07, 0.04], [0, 0.34, -0.32]);
+    put(head, fur, [0.58, 0.1, 0.58], [0, 0.34, 0]);
+    put(head, trim, [0.59, 0.02, 0.59], [0, 0.4, 0]);
+    put(head, gem, [0.07, 0.07, 0.03], [0, 0.34, -0.3]);
     for (const s of [-1, 1]) {
       chain(head, trim, null, [s * 0.26, 0.4, 0], [-0.15, 0, -s * 24 * DEG], 6, 0.78 * hs, 0.09, 0.035, 0.08, [0.04, 0, s * 8 * DEG]);
       for (const [y, a, len] of [[0.6, 66, 0.3], [0.8, 58, 0.36], [0.42, 80, 0.24]] as const) {
@@ -332,27 +321,27 @@ export function dressRangerSet(ctx: SetCtx, def: OutfitDef): SetRig {
     }
   } else if (st.head === 'crest') {
     // A winged helm: a cap with a fan of long feathers swept back and up, and a pair of fins at the temples.
-    put(head, leather, [0.6, 0.14, 0.6], [0, 0.4, 0]);
+    put(head, leather, [0.58, 0.14, 0.58], [0, 0.42, 0]);
     band(0.3);
     for (const s of [-1, 1]) {
-      chain(head, feather, edge, [s * 0.3, 0.36, 0], [0.2, 0, -s * 80 * DEG], 5, 0.62 * hs, 0.16, 0.03, 0.04, [0, 0, s * 10 * DEG], s, (i, n) => 0.05 + 0.14 * Math.sin(((i + 0.6) / (n + 0.2)) * Math.PI));
-      chain(head, feather, null, [s * 0.3, 0.3, 0.05], [0.4, 0, -s * 105 * DEG], 4, 0.42 * hs, 0.12, 0.03, 0.04, [0, 0, s * 10 * DEG], s);
+      chain(head, feather, edge, [s * 0.29, 0.36, 0], [0.2, 0, -s * 80 * DEG], 5, 0.62 * hs, 0.16, 0.03, 0.04, [0, 0, s * 10 * DEG], s, (i, n) => 0.05 + 0.14 * Math.sin(((i + 0.6) / (n + 0.2)) * Math.PI));
+      chain(head, feather, null, [s * 0.29, 0.3, 0.05], [0.4, 0, -s * 105 * DEG], 4, 0.42 * hs, 0.12, 0.03, 0.04, [0, 0, s * 10 * DEG], s);
     }
-    plume(5, [0, 0.46, 0.12]);
+    plume(5, [0, 0.49, 0.12]);
   } else if (st.head === 'crescent') {
-    put(head, leather, [0.6, 0.14, 0.6], [0, 0.38, 0]);
+    put(head, leather, [0.58, 0.14, 0.58], [0, 0.4, 0]);
     band(0.31);
     // A crescent over the brow, and two long feathers swept back from it.
     for (const s of [-1, 1]) {
-      chain(head, trim, edge, [s * 0.04, 0.42, -0.31], [0, 0, -s * 22 * DEG], 7, 0.6 * hs, 0.11, 0.025, 0.06, [0, 0, s * 13 * DEG], s);
+      chain(head, trim, edge, [s * 0.04, 0.42, -0.3 - (s === 1 ? 0.004 : 0)], [0, 0, -s * 22 * DEG], 7, 0.6 * hs, 0.11, 0.025, 0.06, [0, 0, s * 13 * DEG], s);
     }
-    put(head, core, [0.06, 0.06, 0.03], [0, 0.46, -0.33]);
-    plume(3, [0, 0.45, 0.14]);
+    put(head, core, [0.06, 0.06, 0.03], [0, 0.46, -0.32]);
+    plume(3, [0, 0.47, 0.14]);
   } else if (st.head === 'bloom') {
     // A crown of antlers in bloom: two great beams with many tines, each tine ending in a blossom of light, and a ring of leaves.
-    put(head, fur, [0.62, 0.1, 0.62], [0, 0.34, 0]);
-    put(head, trim, [0.63, 0.025, 0.63], [0, 0.4, 0]);
-    put(head, gem, [0.09, 0.09, 0.05], [0, 0.34, -0.32]);
+    put(head, fur, [0.58, 0.1, 0.58], [0, 0.34, 0]);
+    put(head, trim, [0.59, 0.025, 0.59], [0, 0.4, 0]);
+    put(head, gem, [0.09, 0.09, 0.03], [0, 0.34, -0.3]);
     for (let i = 0; i < 8; i++) {
       const a = (i / 8) * Math.PI * 2;
       if (Math.cos(a) > 0.9) continue;
@@ -369,17 +358,17 @@ export function dressRangerSet(ctx: SetCtx, def: OutfitDef): SetRig {
   }
   if (st.mask) {
     // A mask over the nose and mouth, with a slit of light, and two fins that sweep back along the cheeks.
-    put(head, dark, [0.52, 0.2, 0.06], [0, -0.04, -0.28]);
-    put(head, trim, [0.5, 0.025, 0.065], [0, 0.07, -0.285]);
-    put(head, edge, [0.3, 0.012, 0.07], [0, -0.04, -0.29]);
-    for (const s of [-1, 1]) chain(head, dark, edge, [s * 0.26, -0.02, -0.2], [0, 0.2 * s, -s * 70 * DEG], 3, 0.24, 0.1, 0.03, 0.04, [0, 0, s * 6 * DEG], s);
+    put(head, dark, [0.52, 0.19, 0.04], [0, 0.1, -0.27]);
+    put(head, trim, [0.5, 0.025, 0.045], [0, 0.2, -0.272]);
+    put(head, edge, [0.3, 0.012, 0.05], [0, 0.1, -0.277]);
+    for (const s of [-1, 1]) chain(head, dark, edge, [s * 0.26, 0.08, -0.2], [0, 0.2 * s, -s * 70 * DEG], 3, 0.24, 0.1, 0.03, 0.04, [0, 0, s * 6 * DEG], s);
   }
 
   // ---- the wings: of feathers, of leaves, or of branches; they open and close a little with the clock.
   for (const w of st.wings) {
     const mat = w.kind === 'feather' ? feather : lit(`wing:${w.kind}:${def.id}`, () => wingTexture(def, w.kind));
     b.wings({
-      at: [0.1, 1.4, 0.19],
+      at: [0.1, 1.4, 0.15],
       blades: w.blades,
       len: w.len,
       curl: w.curl,

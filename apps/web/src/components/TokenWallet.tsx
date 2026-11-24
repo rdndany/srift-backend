@@ -1,9 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { CLASSES, CLASS_IDS, wornCode, type ClassId } from '@solrift/shared';
 import { useAuth } from '../auth/store';
-import { CharacterPreview } from './CharacterPreview';
+import { goShop } from './frontNav';
 import { txUrl, useToken, type LedgerRow } from '../token/store';
 import './tokenShop.css';
 
@@ -27,91 +26,6 @@ export function useTokenBalance(): void {
   }, [waiting, loadMe]);
 }
 
-/** The three colours of an outfit as dots: the cloth, the trim and the light it shines with. */
-function Swatch({ o }: { o: { shirt: string; trim: string; glow: string; name: string } }) {
-  return (
-    <span className="tkfit-swatch" aria-hidden="true">
-      <i style={{ background: o.shirt }} />
-      <i style={{ background: o.trim }} />
-      <i style={{ background: o.glow, boxShadow: `0 0 8px ${o.glow}` }} />
-    </span>
-  );
-}
-
-/**
- * Outfits: glowing sets that change how a hero looks and nothing else. They are ITEMS: buying one puts it in your Stash (so there must be a free slot),
- * and a hero wears it by taking it out in the world and putting it in the outfit slot of the inventory screen. A tab for each class, as a hero wears only
- * the sets of its own class (a wallet may still buy any); the stand shows the picked set turning in its own light. Nothing is shown until the token is
- * live, you are signed in, and something is for sale.
- */
-export function TokenOutfits() {
-  const info = useToken((s) => s.info);
-  const me = useToken((s) => s.me);
-  const busy = useToken((s) => s.busy);
-  const error = useToken((s) => s.error);
-  const notice = useToken((s) => s.notice);
-  const buy = useToken((s) => s.buy);
-  const look = useAuth((s) => s.account?.look ?? 0);
-  const heroClass = useAuth((s) => s.account?.class ?? null);
-  const [pick, setPick] = useState<string | null>(null);
-  const [tab, setTab] = useState<ClassId | null>(null);
-  const shownClass: ClassId = tab ?? heroClass ?? CLASS_IDS[0];
-  const list = me?.outfits.filter((o) => o.cls === shownClass);
-  if (!info?.live || !me || !list || list.length === 0) return null;
-  const shown = list.find((o) => o.id === pick) ?? list[0];
-  const full = me.stashFree === 0;
-  return (
-    <div className="tkshop tkfit" data-testid="token-outfits">
-      <h4>Outfits</h4>
-      <p className="tkfit-lede">Sets of armor change how your hero looks and nothing else: no outfit makes anyone stronger, and your real armor still counts, it is only not seen. A set you buy is an item and goes to your Stash (it needs a free slot). In the world, take it out, then right-click it or put it in the outfit slot of your inventory to wear it. A hero wears only the sets of its class, but you can buy the sets of every class, and trade them. Pick one to see it on the stand.</p>
-      <div className="tkfit-tabs" role="tablist" aria-label="Class">
-        {CLASS_IDS.map((c) => (
-          <button key={c} type="button" role="tab" aria-selected={c === shownClass} data-testid={`token-outfit-tab:${c}`} className={c === shownClass ? 'on' : ''} onClick={() => { setTab(c); setPick(null); }}>
-            {CLASSES[c].name}
-            {c === heroClass ? ' (you)' : ''}
-          </button>
-        ))}
-      </div>
-      <div className="tkfit-stage" data-testid="token-outfit-stage" data-outfit={shown.id} style={{ ['--glow' as string]: shown.glow }}>
-        <CharacterPreview armor={[]} turntable grounded lookCode={wornCode(look, shown.id)} />
-        <span className="tkfit-name">{shown.name}</span>
-      </div>
-      <ul>
-        {list.map((o) => {
-          const short = o.price !== null ? Math.max(0, o.price - me.balance) : 0;
-          return (
-            <li key={o.id} data-outfit={o.id} data-tier={o.tier} className={o.id === shown.id ? 'shown' : ''} onClick={() => setPick(o.id)}>
-              <Swatch o={o} />
-              <span className="tkshop-what">
-                <b>
-                  {o.name} <em className={`tkfit-tier ${o.tier}`}>{o.tier}</em>
-                </b>
-                <small>{o.blurb}</small>
-                {o.have > 0 && <small className="tkfit-have">{o.have === 1 ? 'One is in your Stash.' : `${o.have} are in your Stash.`}</small>}
-              </span>
-              <button type="button" disabled={busy || short > 0 || full || o.price === null} data-testid={`token-buy-outfit:${o.id}`} onClick={() => void buy(`outfit:${o.id}`)}>
-                {`Buy for ${o.price?.toLocaleString() ?? ''} $SOLRIFT`}
-              </button>
-              {short > 0 && <small className="tkshop-short">You need {short.toLocaleString()} more.</small>}
-              {short === 0 && full && <small className="tkshop-short">Your Stash is full: make room first.</small>}
-            </li>
-          );
-        })}
-      </ul>
-      {error && (
-        <p className="tkshop-msg warn" role="alert">
-          {error}
-        </p>
-      )}
-      {notice && (
-        <p className="tkshop-msg ok" role="status">
-          {notice}
-        </p>
-      )}
-    </div>
-  );
-}
-
 /**
  * What your $SOLRIFT can be spent on (today: more hero slots for your wallet). `compact` is the one-line form the lobby shows when
  * all the character slots are full. Nothing is shown until the token is live, you are signed in, and something is for sale.
@@ -120,10 +34,8 @@ export function TokenShop({ compact = false }: { compact?: boolean }) {
   const info = useToken((s) => s.info);
   const me = useToken((s) => s.me);
   const busy = useToken((s) => s.busy);
-  const error = useToken((s) => s.error);
-  const notice = useToken((s) => s.notice);
   const buy = useToken((s) => s.buy);
-  // Keys are bought where the plan is told (the token page); the in-game purse sells what is kept for good.
+  // The lobby's offer is the one-line form: what is kept for good (a slot, a tab). Keys and outfits are bought in the Shop (`/shop`).
   const items = compact ? me?.shop.filter((i) => !i.consumable) : me?.shop;
   if (!info?.live || !me || !items || items.length === 0) return null;
   return (
@@ -152,17 +64,13 @@ export function TokenShop({ compact = false }: { compact?: boolean }) {
           );
         })}
       </ul>
-      {error && (
-        <p className="tkshop-msg warn" role="alert">
-          {error}
-        </p>
+      {compact ? (
+        <button type="button" className="tkshop-link" onClick={goShop}>
+          More in the Shop
+        </button>
+      ) : (
+        <p className="tkshop-fine">What you spend stays with the game's treasury and pays for later rewards. Nothing is burned.</p>
       )}
-      {notice && (
-        <p className="tkshop-msg ok" role="status">
-          {notice}
-        </p>
-      )}
-      {!compact && <p className="tkshop-fine">What you spend stays with the game's treasury and pays for later rewards. Nothing is burned.</p>}
     </div>
   );
 }
@@ -172,8 +80,6 @@ export function TokenWallet() {
   const info = useToken((s) => s.info);
   const me = useToken((s) => s.me);
   const busy = useToken((s) => s.busy);
-  const error = useToken((s) => s.error);
-  const notice = useToken((s) => s.notice);
   const withdraw = useToken((s) => s.withdraw);
   const status = useAuth((s) => s.status);
   const [text, setText] = useState('');
@@ -238,19 +144,16 @@ export function TokenWallet() {
         </p>
       )}
       {problem && <p className="tk-wallet-msg warn">{problem}</p>}
-      {error && (
-        <p className="tk-wallet-msg warn" role="alert">
-          {error}
-        </p>
-      )}
-      {notice && (
-        <p className="tk-wallet-msg ok" role="status">
-          {notice}
-        </p>
-      )}
 
-      <TokenShop />
-      <TokenOutfits />
+      <div className="tk-toshop" data-testid="token-to-shop">
+        <span>
+          <b>Spend it in the Shop</b>
+          <small>Hero slots, stash tabs, Hollow Keys and outfits for every class.</small>
+        </span>
+        <button type="button" className="tk-go" onClick={goShop}>
+          Open the Shop
+        </button>
+      </div>
 
       {me.history.length > 0 && (
         <ul className="tk-ledger" aria-label="Your $SOLRIFT history">

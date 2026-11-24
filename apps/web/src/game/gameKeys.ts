@@ -37,6 +37,8 @@ export interface KeyParts {
   windows: ReturnType<typeof makeWindows>;
   sendCommand(c: Command): void;
   openSpellbook(): void;
+  /** The land (see landClient.ts): E closes a shape marked with the Surveyor, B opens the window of the player's lands. */
+  land?: { key(code: string): boolean };
 }
 
 /** Keys that start something (as opposed to held keys, which go in the frame). */
@@ -50,7 +52,7 @@ export class KeyActions {
 
   /** Called once a frame while the player has the mouse and no window is open. */
   handle(): void {
-    const { session, remote, online, input, world, hud, admin, chat, audio, selfView, chase, quality, sendCommand, openSpellbook } = this.parts;
+    const { session, remote, online, input, world, hud, admin, chat, selfView, chase, quality, sendCommand, openSpellbook } = this.parts;
     const { toggleCodex, toggleQuestLog, togglePartyWindow, toggleSocialWindow, openPlayerMenu } = this.parts.windows;
     for (let i = 0; i < 9; i++) if (input.wasPressed(`Digit${i + 1}`)) sendCommand({ t: 'select', slot: i });
     const w = input.consumeWheel();
@@ -92,9 +94,12 @@ export class KeyActions {
     if (input.wasPressed('BracketRight')) setSettings({ renderDistance: Math.min(16, world.renderDistance + 1) });
     if (input.wasPressed('BracketLeft')) setSettings({ renderDistance: Math.max(3, world.renderDistance - 1) });
 
-    if (input.wasPressed('KeyB') && useUi.getState().codex) {
-      toggleCodex(true);
-      return;
+    if (input.wasPressed('KeyB')) {
+      if (this.parts.land?.key('KeyB')) return;
+      if (useUi.getState().codex) {
+        toggleCodex(true);
+        return;
+      }
     }
     if (input.wasPressed('KeyL') && useUi.getState().adventure) {
       toggleQuestLog(true);
@@ -128,6 +133,7 @@ export class KeyActions {
       }
     }
     if (input.wasPressed('KeyE')) {
+      if (this.parts.land?.key('KeyE')) return;
       sendCommand({ t: 'inventory' });
       return;
     }

@@ -3,6 +3,7 @@ import { COMPANIONS } from './companions';
 import { WINGS } from './wings';
 import { ACCESSORY_KINDS, ACCESSORY_MATERIALS } from './accessories';
 import { OUTFITS } from './outfitData';
+import { HK_ITEM_NAMES } from './hollowKingData';
 import { layoutMasonry, MASONRY_SPECS, MASONRY_TILE_RGB, type MasonryRow } from './masonry';
 import { IRON_KIND, JOINERY_TILE_RGB, layoutJoinery, type JoineryLayout } from './joinery';
 import { GROVE_TILE_RGB, layoutGrove, type GroveLayout, type GroveWood } from './grove';
@@ -449,6 +450,28 @@ export const ITEM_TILES = [
   ...WINGS.map((w) => `wings_${w.id}`),
   // the rings and the necklaces (the same materials as the armor, see accessories.ts)
   ...ACCESSORY_KINDS.flatMap((k) => ACCESSORY_MATERIALS.map((m) => `${m}_${k}`)),
+  // the quest items of the Adventure story (see questDrops.ts)
+  'rift_singed_rag',
+  'torn_satchel_scrap',
+  'drowned_reed_charm',
+  'reed_ember',
+  'sun_scorched_tally',
+  'caravan_tally_tag',
+  'sand_ember',
+  'frozen_ward_bell',
+  'frost_ember',
+  'warden_ledger_page',
+  'ashen_medal',
+  'throne_ember',
+  'scorched_fuse',
+  'sealed_coffer',
+  'spore_jar',
+  'bear_claw',
+  'gilded_scale',
+  'land_surveyor',
+  // the relics of the Hollow King (see hollowKingData.ts)
+  ...Object.values(HK_ITEM_NAMES),
+  'cinderbolt_crossbow_frame',
 ] as const;
 
 /** All atlas tiles: block textures first (stable indices), then item sprites. */
@@ -2423,7 +2446,7 @@ export const isAnvil = (id: number): boolean => id === B.ANVIL || id === B.ANVIL
 
 /** Blocks with a right-click interface (GUI) rather than placing a block against them. */
 export function isInteractive(id: number): boolean {
-  return id === B.CRAFTING_TABLE || id === B.FURNACE || isChest(id) || id === B.ENCHANTING_TABLE || isAnvil(id) || id === B.GRINDSTONE || isBed(id) || isSwitchable(id) || leverInfo(id) !== null || buttonInfo(id) !== null;
+  return signInfo(id) !== null || id === B.CRAFTING_TABLE || id === B.FURNACE || isChest(id) || id === B.ENCHANTING_TABLE || isAnvil(id) || id === B.GRINDSTONE || isBed(id) || isSwitchable(id) || leverInfo(id) !== null || buttonInfo(id) !== null;
 }
 
 /** Doors, trapdoors and fence gates open and close when used. */

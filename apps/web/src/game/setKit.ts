@@ -116,7 +116,9 @@ export function canvasTex(key: string, size: number, base: RGB, draw: (g: Canvas
 export function lit(key: string, tex: () => THREE.Texture): THREE.MeshBasicMaterial {
   let m = materials.get(key) as THREE.MeshBasicMaterial | undefined;
   if (!m) {
-    m = new THREE.MeshBasicMaterial({ map: tex(), vertexColors: true });
+    // The metal of the trim sits on the cloth, plate or leather it edges: where their faces share a plane (a band round a hat, a rim on a plate) the trim
+    // is drawn in front, so the two never fight.
+    m = new THREE.MeshBasicMaterial({ map: tex(), vertexColors: true, ...(key.startsWith('trim:') ? { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 } : {}) });
     materials.set(key, m);
   }
   return m;
@@ -130,7 +132,9 @@ export function light(key: string, color: RGB, power: number, soft: boolean, dep
   let m = materials.get(key) as THREE.MeshBasicMaterial | undefined;
   if (!m) {
     const base = new THREE.Color().setRGB((color[0] / 255) * power, (color[1] / 255) * power, (color[2] / 255) * power, THREE.SRGBColorSpace);
-    m = new THREE.MeshBasicMaterial(soft ? { color: base, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false } : { color: base });
+    // Light is drawn in front of whatever it lies on (the seam of light in a plate, the lit edge of a blade): a bias in depth, so it never fights it for the pixel.
+    const front = { polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 };
+    m = new THREE.MeshBasicMaterial(soft ? { color: base, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false, ...front } : { color: base, ...front });
     materials.set(key, m);
     glows.push({ mat: m, base: base.clone(), phase: glows.length * 0.9, depth });
   }
@@ -231,6 +235,9 @@ export interface OrbiterSpec {
   tilt?: number;
 }
 
+/** How far the head blocks of a set sit lower than they are written (see `push`). */
+const HEAD_DROP = -0.15;
+
 export class SetBuilder {
   readonly glowC: RGB;
   readonly hot: RGB;
@@ -260,7 +267,17 @@ export class SetBuilder {
     this.own.push(this.effects);
   }
 
+  /** Blocks laid in a row (a horn, a feather, a fin) have faces in one plane where they meet and overlap, and two blocks of a set may rest on one plane by accident:
+   *  the picture of both is drawn on the same pixels and flickers as the camera moves. So no two blocks that are laid one after the other sit in quite the same
+   *  place: each is moved a hair (a hundredth of a pixel of the skin or so), by a different step on each axis, which puts any two of their coplanar faces apart. */
+  private nudged = 0;
+
   private push(parent: THREE.Object3D, mat: THREE.Material, geo: THREE.BufferGeometry): void {
+    const n = this.nudged++;
+    const step = 0.0011;
+    // The sets are laid out on a head that spans 0..0.5 from its chin; the head box really spans -0.15..0.35 about its pivot.
+    if (parent === this.head) geo.translate(0, HEAD_DROP, 0);
+    geo.translate(((n % 7) - 3) * step, (((n * 3) % 7) - 3) * step, (((n * 5) % 7) - 3) * step);
     const key = `${parent.id}:${mat.uuid}`;
     let b = this.batches.get(key);
     if (!b) this.batches.set(key, (b = { parent, mat, geos: [] }));
@@ -297,7 +314,8 @@ export class SetBuilder {
       };
       const d = taperDepth ? Math.max(0.02, depth * (w / Math.max(w0, 0.001))) : depth;
       place([w, h * 1.02, d], [0, h / 2, 0], mat);
-      if (edgeMat) place([Math.max(0.012, w * 0.22), h * 1.04, d * 1.5], [side * (w / 2 - w * 0.11), h / 2, 0], edgeMat);
+      // (The edge stands a hair out of the side it lights: its outer face in the very plane of the blade's own would fight it.)
+      if (edgeMat) place([Math.max(0.012, w * 0.22), h * 1.04, d * 1.5], [side * (w / 2 - w * 0.11 + 0.003), h / 2, 0], edgeMat);
       m.multiply(step.makeTranslation(0, h, 0)).multiply(turn.makeRotationFromEuler(new THREE.Euler(curl[0], curl[1], curl[2])));
     }
   }

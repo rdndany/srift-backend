@@ -8,7 +8,7 @@ import { COPY, COUNTS, DEEDS, FAMILIES, PLACES, RARITY_LABEL, REALMS, CAVES, bio
 import { SHOTS, shotUrl, type Shot } from './beyondShots';
 import { ClickSparks, Embers, Reveal, Spot, useFrontMotion } from './fx';
 import { lobbyUrl } from '../game/route';
-import { SCROLL_KEY, goMarket, goToken, goCamp } from './frontNav';
+import { SCROLL_KEY, goMarket, goToken, goCamp, goShop } from './frontNav';
 import { ART } from './homeAssets';
 import './home.css';
 import './front.css';
@@ -203,6 +203,7 @@ export function BeyondPage() {
             <button onClick={() => toFront('l-expansions')}>Expansions</button>
             <button className="fp-link-camp" onClick={goCamp}>Camp</button>
             <button className="fp-link-market" onClick={goMarket}>Market</button>
+            <button className="fp-link-shop" onClick={goShop}>Shop</button>
             <button className="fp-link-token" onClick={goToken}>Token</button>
           </nav>
           <div className="fp-account">

@@ -1,5 +1,6 @@
-// A look at the five monsters of the Gilded Tide on the plain square platform: each from the front, the 3/4 and the back, in daylight,
-// and the king in the dark. Saves screenshots/gilded/*.png. Usage: node scripts/gilded-look.mjs [url] [only-this-kind]
+// A look at the golden creatures of the Gilded Tide on the plain square platform: each from the front, the 3/4 and the back, in daylight.
+// (Aurelion is still drawable for cheats, but the Tide no longer brings him.) Saves screenshots/gilded/*.png.
+// Usage: node scripts/gilded-look.mjs [url] [only-this-kind]
 import { mkdirSync } from 'node:fs';
 import { launchBrowser } from './browser.mjs';
 
@@ -34,11 +35,12 @@ const KINDS = [
   ['gilt_imp', 4, 1.4, 0.7],
   ['gilt_hound', 5, 1.6, 0.6],
   ['gilt_drake', 6, 2.2, 1.1],
-  ['gilt_colossus', 11, 3.4, 2],
-  ['aurelion', 20, 5, 3.2],
+  ['gilt_colossus', 12, 3.8, 2.2],
 ];
 let n = 0;
-for (const [kind, dist, h, aim] of KINDS) {
+for (const [kind, dist0, h0, aim0] of KINDS) {
+  const o = process.argv.slice(4).map(Number);
+  const [dist, h, aim] = kind === 'aurelion' && o.length === 3 ? o : [dist0, h0, aim0];
   if (only && kind !== only) continue;
   await sc(([k, y]) => window.__solrift.spawnMob(k, 0.5, y + 1, 0.5, 0), [kind, sy]);
   await sleep(1200);

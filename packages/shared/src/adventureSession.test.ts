@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   ADVENTURE_SEED,
+  UNDERCROFT_ORIGIN,
   B,
   CELLAR_HOUSE,
   CraftingMenu,
@@ -18,7 +19,10 @@ import {
   GameSession,
   HeadlessWorld,
   I,
+  CLEARING,
   NPCS,
+  OUTPOSTS,
+  VAULTS,
   Player,
   QUESTS,
   QuestLog,
@@ -37,6 +41,7 @@ import {
   type QuestLogJSON,
   type SessionEvent,
 } from './index';
+import { doObjectives } from './villageStart.testutil';
 
 const idle = (over: Partial<InputFrame> = {}): InputFrame => ({ t: 'frame', dt: 1 / 20, locked: true, yaw: 0, pitch: 0, forward: 0, strafe: 0, jump: false, sprint: false, sneak: false, left: false, right: false, ...over });
 
@@ -44,7 +49,7 @@ const generator = makeGenerator(ADVENTURE_SEED, 'adventure') as AdventureWorldGe
 
 /**
  * A new character wakes in the Undercroft with nothing (see the tests on that below). Most tests are about the village, so by
- * default they start with the first quest handed in and the player on the Landing; `cave` gives the real start.
+ * default they start with the first quest handed in and the player on the Landing of Dawnwatch; `cave` gives the real start.
  */
 function make(seed = 3, cave = false) {
   const world = new HeadlessWorld(generator);
@@ -53,7 +58,7 @@ function make(seed = 3, cave = false) {
   if (!cave) {
     s.quests!.active.delete(FIRST_QUEST);
     s.quests!.done.add(FIRST_QUEST);
-    const land = generator.spawnFor(0);
+    const land = generator.landingFor(0);
     s.teleport(land.x, land.y, land.z, 0, 0);
     s.drainEvents();
     s.syncQuests();
@@ -75,8 +80,11 @@ const npcMob = (s: GameSession, id: string): Mob => {
 /** Stand in front of a quest giver, and speak to them. */
 function talkTo(s: GameSession, id: string): void {
   const n = NPCS.find((x) => x.id === id)!;
-  s.teleport(n.x, (n.cellar ? generator.undercroftY : generator.hubY) + 1, n.z + 2, 0, 0);
+  s.teleport(n.x, (n.cellar ? generator.undercroftY : n.place ? generator.groundAt(n.place)! : generator.hubY) + 1, n.z + 2, 0, 0);
   run(s, 0.2);
+  // A far village's chunks are loaded a few at a time: wait until its people are there.
+  const v = NPCS.findIndex((x) => x.id === id);
+  for (let i = 0; i < 400 && !s.mobs.mobs.some((m) => m.kind === 'npc' && m.variant === v); i++) s.tick(idle());
   expect(s.talkNpc(npcMob(s, id))).toBe(true);
   expect(s.screen).toBe('dialog');
   expect(s.dialogNpc).toBe(id);
@@ -108,7 +116,7 @@ function takeAndDo(s: GameSession, id: string, doIt: () => void = () => {}): voi
 }
 
 describe('an Adventure player', () => {
-  it('wakes in the Undercroft, the cave under the village, with nothing at all, and the first quest is the healer\'s to give', () => {
+  it('wakes in the Undercroft, the cave under Ashbrook, with nothing at all, and the first quest is the healer\'s to give', () => {
     const s = make(3, true);
     expect(s.body.y).toBeCloseTo(generator.undercroftY + 1, 5);
     expect(generator.zoneAt(s.body.x, s.body.y, s.body.z)).toBe('undercroft');
@@ -126,8 +134,7 @@ describe('an Adventure player', () => {
     // The quest is waiting at the healer; the elder's are locked behind it.
     expect(s.quests!.status(FIRST_QUEST)).toBe('available');
     expect(s.quests!.offeredBy('mirel').map((q) => q.id)).toEqual([FIRST_QUEST]);
-    expect(s.quests!.status('a_blade_for_the_road')).toBe('locked');
-    expect(s.quests!.status('welcome')).toBe('locked');
+    expect(s.quests!.status('ms01')).toBe('locked');
   });
 
   it('wakes different arrivals in different places of the cave, always the same for the same slot', () => {
@@ -141,49 +148,50 @@ describe('an Adventure player', () => {
     expect(spots.size).toBe(12);
   });
 
-  it('puts a creative character in the open, on the Landing', () => {
+  it('puts a creative character in the open, on the green of Ashbrook', () => {
     const world = new HeadlessWorld(generator);
     const s = new GameSession({ seed: ADVENTURE_SEED, world, generator, naturalSpawning: false, rand: mulberry32(4), mode: 'creative' });
     s.finishLoading();
-    expect(generator.zoneAt(s.body.x, s.body.y, s.body.z)).toBe('dawnwatch');
+    expect(generator.zoneAt(s.body.x, s.body.y, s.body.z)).toBe('ashbrook');
     expect(s.quests!.status(FIRST_QUEST)).toBe('done');
   });
 
-  it('climbs out: the first quest is taken from the healer and done at the top of the stair, and Maren pays the map and the compass and offers the sword', () => {
+  it('climbs out: the first quest is taken from the healer and done at the top of the stair, and the reeve pays the Emberstone, the map and a first meal', () => {
     const s = make(3, true);
     talkTo(s, 'mirel');
     s.apply({ t: 'quest', a: 'accept', id: FIRST_QUEST });
     s.closeMenu();
     expect(s.quests!.status(FIRST_QUEST)).toBe('active');
     // Up the stair: the village starts where the steps meet the floor of the cellar house.
-    s.teleport(CELLAR_HOUSE.x0 + 3.5, generator.hubY - 2, 12.5, 0, 0);
+    s.teleport(CELLAR_HOUSE.x0 + 3.5, generator.startY - 2, UNDERCROFT_ORIGIN.z + 12.5, 0, 0);
     run(s, 0.5);
     expect(s.quests!.status(FIRST_QUEST)).toBe('active');
-    s.teleport(CELLAR_HOUSE.x0 + 1.5, generator.hubY + 1, 12.5, 0, 0);
+    s.teleport(CELLAR_HOUSE.x0 + 1.5, generator.startY + 1, UNDERCROFT_ORIGIN.z + 12.5, 0, 0);
     run(s, 1.5);
-    expect(generator.zoneAt(s.body.x, s.body.y, s.body.z)).toBe('dawnwatch');
+    expect(generator.zoneAt(s.body.x, s.body.y, s.body.z)).toBe('ashbrook');
     expect(s.quests!.status(FIRST_QUEST)).toBe('ready');
-    // The elder takes it in. It pays the map and the compass.
-    talkTo(s, 'maren');
+    // The elder takes it in. It pays the Emberstone that was found on the character, the map, and bread and torches.
+    talkTo(s, 'edda');
     s.apply({ t: 'quest', a: 'complete', id: FIRST_QUEST });
+    s.closeMenu();
     expect(s.quests!.status(FIRST_QUEST)).toBe('done');
     expect(s.inventory.countOf(I.MAP)).toBe(1);
-    expect(s.inventory.countOf(I.COMPASS)).toBe(1);
-    expect(s.quests!.offeredBy('maren').map((q) => q.id).sort()).toEqual(['a_blade_for_the_road', 'welcome']);
-    s.apply({ t: 'quest', a: 'accept', id: 'a_blade_for_the_road' });
-    talkTo(s, 'garrick');
-    s.apply({ t: 'quest', a: 'complete', id: 'a_blade_for_the_road' });
-    expect(s.quests!.status('a_blade_for_the_road')).toBe('done');
-    expect(s.inventory.countOf(toolId('sword', 'stone'))).toBe(1);
+    expect(s.inventory.countOf(I.EMBERSTONE)).toBe(1);
+    expect(s.inventory.countOf(I.BREAD)).toBeGreaterThan(0);
+    expect(s.quests!.offeredBy('edda').map((q) => q.id)).toContain('ms01');
+    // And the next quest is hers to give, with the work it asks for done the way the game counts it.
+    takeAndDo(s, 'ms01', () => doObjectives(s, questById('ms01')!));
+    expect(s.quests!.status('ms01')).toBe('done');
+    expect(s.quests!.offeredBy('edda').map((q) => q.id)).toContain('ms02');
   });
 
   it('counts the village if the quest is taken while already standing in it', () => {
     const s = make(3, true);
     // Up on the ground over the cave, in range of the healer's mob (the dialog only checks distance on the map).
     const mirel = NPCS.find((n) => n.id === 'mirel')!;
-    s.teleport(mirel.x, generator.hubY + 1, mirel.z + 2, 0, 0);
+    s.teleport(mirel.x, generator.startY + 1, mirel.z + 2, 0, 0);
     run(s, 1.5);
-    expect(generator.zoneAt(s.body.x, s.body.y, s.body.z)).toBe('dawnwatch');
+    expect(generator.zoneAt(s.body.x, s.body.y, s.body.z)).toBe('ashbrook');
     expect(s.talkNpc(npcMob(s, 'mirel'))).toBe(true);
     s.apply({ t: 'quest', a: 'accept', id: FIRST_QUEST });
     expect(s.quests!.status(FIRST_QUEST)).toBe('ready');
@@ -200,23 +208,23 @@ describe('an Adventure player', () => {
     expect(again.quests!.status(FIRST_QUEST)).toBe('available');
     // An old character that has moved on (with quests behind it, and not this one) has no reason to go back.
     const old = JSON.parse(JSON.stringify(a.savePlayer()));
-    old.quests = { d: ['welcome'], a: [] };
+    old.quests = { d: ['ms00', 'ms01'], a: [] };
     const world2 = new HeadlessWorld(generator);
     const b = new GameSession({ seed: ADVENTURE_SEED, world: world2, generator, naturalSpawning: false, rand: mulberry32(10) });
     b.loadPlayer(parsePlayerSave(old)!);
     b.finishLoading();
     expect(b.quests!.status(FIRST_QUEST)).toBe('done');
-    expect(b.quests!.status('first_timber')).toBe('available');
+    expect(b.quests!.status('ms02')).toBe('available');
   });
 
-  it('starts on the Landing after a death, even though the first start was in the cave', () => {
+  it('starts on the green of Ashbrook after a death, even though the first start was in the cave', () => {
     const s = make(3, true);
     s.vitals.health = 0;
     s.vitals.dead = true;
     s.respawn();
     const land = generator.spawnFor(0);
     expect(Math.hypot(s.body.x - land.x, s.body.z - land.z)).toBeLessThan(40);
-    expect(s.body.y).toBeGreaterThan(generator.hubY);
+    expect(s.body.y).toBeGreaterThan(generator.startY);
   });
 
   it('is in a world that has people in it', () => {
@@ -226,7 +234,7 @@ describe('an Adventure player', () => {
     expect(s.drainEvents().find((e) => e.t === 'quests')).toBeDefined();
     run(s, 1.5);
     const people = s.mobs.mobs.filter((m) => m.kind === 'npc');
-    expect(people.map((m) => m.variant).sort((a, b) => a - b)).toEqual(NPCS.flatMap((n, i) => (n.dungeon ? [] : [i])));
+    expect(people.map((m) => m.variant).sort((a, b) => a - b)).toEqual(NPCS.flatMap((n, i) => (n.dungeon || n.place ? [] : [i])));
     for (const m of people) {
       expect(m.def.invulnerable).toBe(true);
       const n = NPCS[m.variant];
@@ -249,7 +257,7 @@ describe('an Adventure player', () => {
     const s = new GameSession({ seed: 99, world: new HeadlessWorld(generator2), generator: generator2, naturalSpawning: false, rand: mulberry32(1) });
     expect(s.quests).toBeNull();
     expect(s.drainEvents().some((e) => e.t === 'quests')).toBe(false);
-    s.apply({ t: 'quest', a: 'accept', id: 'welcome' });
+    s.apply({ t: 'quest', a: 'accept', id: 'ms00' });
     expect(s.savePlayer().quests).toBeUndefined();
   });
 
@@ -325,52 +333,60 @@ describe('an Adventure player', () => {
   it('takes a quest only from its giver, hands it in only to the one who takes it in, and cannot be cheated', () => {
     const s = make();
     run(s, 1.5);
+    const q = questById('ms02')!; // The reeve gives it, and Brannoc takes it in
+    expect([q.giver, q.turnIn]).toEqual(['edda', 'brannoc']);
+    unlock(s.quests!, q.id);
+    s.syncQuests();
     // Nobody to talk to: nothing happens.
-    s.apply({ t: 'quest', a: 'accept', id: 'welcome' });
-    expect(s.quests!.status('welcome')).toBe('available');
+    s.apply({ t: 'quest', a: 'accept', id: q.id });
+    expect(s.quests!.status(q.id)).toBe('available');
     talkTo(s, 'brannoc');
-    s.apply({ t: 'quest', a: 'accept', id: 'welcome' }); // Maren gives it, not Brannoc
-    expect(s.quests!.status('welcome')).toBe('available');
+    s.apply({ t: 'quest', a: 'accept', id: q.id }); // The reeve gives it, not Brannoc
+    expect(s.quests!.status(q.id)).toBe('available');
     s.closeMenu();
-    talkTo(s, 'maren');
+    talkTo(s, 'edda');
     s.apply({ t: 'quest', a: 'accept', id: 'nonsense' });
-    s.apply({ t: 'quest', a: 'accept', id: 'welcome' });
-    expect(s.quests!.status('welcome')).toBe('ready');
-    s.apply({ t: 'quest', a: 'complete', id: 'welcome' }); // Brannoc takes it in
-    expect(s.quests!.status('welcome')).toBe('ready');
-    expect(s.inventory.countOf(I.BREAD)).toBe(0);
+    s.apply({ t: 'quest', a: 'accept', id: q.id });
+    expect(s.quests!.status(q.id)).toBe('active');
+    s.apply({ t: 'quest', a: 'complete', id: q.id }); // not done yet, and not hers to take in
+    expect(s.quests!.status(q.id)).toBe('active');
+    s.closeMenu();
+    doObjectives(s, q);
+    expect(s.quests!.status(q.id)).toBe('ready');
+    talkTo(s, 'edda');
+    s.apply({ t: 'quest', a: 'complete', id: q.id }); // Brannoc takes it in
+    expect(s.quests!.status(q.id)).toBe('ready');
+    expect(s.inventory.countOf(toolId('sword', 'stone'))).toBe(0);
     s.closeMenu();
     talkTo(s, 'brannoc');
     const xp0 = s.xp.total ?? 0;
-    s.apply({ t: 'quest', a: 'complete', id: 'welcome' });
-    expect(s.quests!.status('welcome')).toBe('done');
-    expect(s.inventory.countOf(I.BREAD)).toBe(3);
-    expect(s.inventory.countOf(I.EMBERSTONE)).toBe(1); // the Emberstone is this quest's gift (the map comes from the first quest)
-    expect(s.inventory.countOf(I.MAP)).toBe(0);
-    expect(s.xp.total ?? 0).toBeGreaterThanOrEqual(xp0);
+    s.apply({ t: 'quest', a: 'complete', id: q.id });
+    expect(s.quests!.status(q.id)).toBe('done');
+    expect(s.inventory.countOf(toolId('sword', 'stone'))).toBe(1);
+    expect(s.xp.total ?? 0).toBeGreaterThan(xp0);
     // And not twice.
-    s.apply({ t: 'quest', a: 'complete', id: 'welcome' });
-    expect(s.inventory.countOf(I.BREAD)).toBe(3);
-    expect(s.inventory.countOf(I.EMBERSTONE)).toBe(1);
+    s.apply({ t: 'quest', a: 'complete', id: q.id });
+    expect(s.inventory.countOf(toolId('sword', 'stone'))).toBe(1);
     const events = s.drainEvents();
     expect(events.filter((e) => e.t === 'quest' && e.what === 'done').length).toBe(1);
     expect(events.some((e) => e.t === 'quests')).toBe(true);
   });
 
-  it('gathers: logs count while they are carried and are handed over with the quest', () => {
+  it('gathers: bones count while they are carried and are handed over with the quest', () => {
     const s = make();
     run(s, 1.5);
-    takeAndDo(s, 'welcome');
-    const id = 'first_timber';
+    const id = 'dw_tobin_1';
     const q = questById(id)!;
-    const need = q.objectives[0].count;
+    unlock(s.quests!, id);
+    s.syncQuests();
     talkTo(s, q.giver);
     s.apply({ t: 'quest', a: 'accept', id });
     s.closeMenu();
-    s.giveItem(B.LOG, need - 1);
+    s.giveItem(I.BONE, 5);
+    s.giveItem(I.STRING, 4);
     run(s, 0.5);
     expect(s.quests!.status(id)).toBe('active');
-    s.giveItem(B.BIRCH_LOG, 1); // any kind of log will do
+    s.giveItem(I.BONE, 1);
     run(s, 0.5);
     expect(s.quests!.status(id)).toBe('ready');
     const events = s.drainEvents();
@@ -378,7 +394,29 @@ describe('an Adventure player', () => {
     talkTo(s, q.turnIn);
     s.apply({ t: 'quest', a: 'complete', id });
     expect(s.quests!.status(id)).toBe('done');
-    expect(s.inventory.countOf(B.LOG) + s.inventory.countOf(B.BIRCH_LOG)).toBe(0);
+    expect(s.inventory.countOf(I.BONE)).toBe(0);
+    expect(s.inventory.countOf(I.STRING)).toBe(0);
+  });
+
+  it('counts walking into each outpost, vault and the clearing', () => {
+    const s = make();
+    run(s, 1.5);
+    const log = s.quests!;
+    const ids = ['ex_3', 'ex_4', 'ex_6'];
+    for (const id of ids) {
+      unlock(log, id);
+      expect(log.accept(id), id).toBe(true);
+    }
+    const spots = [
+      ...OUTPOSTS.map((o) => ({ x: o.x + 0.5, y: generator.groundAt(o.id)! + 1, z: o.z + 0.5 })),
+      ...VAULTS.map((v) => ({ x: v.x + 0.5, y: generator.groundAt(v.id)! - 10, z: v.z + 5.5 })),
+      { x: CLEARING.x + 0.5, y: generator.groundAt('clearing')! + 1, z: CLEARING.z + 0.5 },
+    ];
+    for (const p of spots) {
+      s.teleport(p.x, p.y, p.z, 0, 0);
+      run(s, 0.6);
+    }
+    for (const id of ids) expect(log.status(id), id).toBe('ready');
   });
 
   it('counts what is crafted and smelted out of the screens, and what is mined and placed', () => {
@@ -386,27 +424,27 @@ describe('an Adventure player', () => {
     run(s, 1.5);
     const log = s.quests!;
     // Do the first quests the plain way to open the third.
-    takeAndDo(s, 'welcome');
-    takeAndDo(s, 'first_timber', () => s.giveItem(B.LOG, 5));
-    const bench = questById('workbench')!;
+    const bench = questById('ms01')!;
+    unlock(log, bench.id);
+    s.syncQuests();
     talkTo(s, bench.giver);
-    s.apply({ t: 'quest', a: 'accept', id: 'workbench' });
+    s.apply({ t: 'quest', a: 'accept', id: 'ms01' });
     s.closeMenu();
-    // Crafting table out of the 2x2 grid, via the recipe book.
+    // Sticks out of the 2x2 grid, via the recipe book.
     s.giveItem(B.PLANKS, 8);
     s.apply({ t: 'inventory' });
     const menu = s.menu as CraftingMenu;
     expect(menu).toBeInstanceOf(CraftingMenu);
-    const table = RECIPES.findIndex((r) => r.result.id === B.CRAFTING_TABLE);
+    const table = RECIPES.findIndex((r) => r.result.id === I.STICK);
     s.apply({ t: 'recipe', index: table, all: false });
     s.apply({ t: 'click', slot: menu.resultSlot, button: 0 });
     s.apply({ t: 'closeMenu' });
-    const tableStep = bench.objectives.findIndex((o) => o.kind === 'craft' && o.items.includes(B.CRAFTING_TABLE));
+    const tableStep = bench.objectives.findIndex((o) => o.kind === 'craft' && o.items.includes(I.STICK));
     expect(tableStep).toBeGreaterThanOrEqual(0);
-    expect(log.progressOf('workbench')[tableStep]).toBe(1);
+    expect(log.progressOf('ms01')[tableStep]).toBe(4);
 
     // A furnace: take what it made out of its output slot.
-    const forge = QUESTS.find((q) => q.objectives.some((o) => o.kind === 'smelt'))!;
+    const forge = QUESTS.find((q) => !q.class && q.objectives.some((o) => o.kind === 'smelt' && !!o.items?.includes(I.IRON_INGOT)))!;
     const f = new Furnace();
     f.container.set(2, makeStack(I.IRON_INGOT, 2));
     // Put the quest in the log directly: this part is about the screen, not about the talk.
@@ -481,18 +519,15 @@ describe('an Adventure player', () => {
     s.xp.add(totalForLevel(DUNGEON_MIN_LEVEL));
     run(s, 0.5);
     const log = s.quests!;
-    const dark = questById('into_the_dark')!;
-    const chain = (id: string): void => {
-      const q = questById(id)!;
-      for (const r of q.requires) chain(r);
-      log.done.add(id);
-    };
-    for (const r of dark.requires) chain(r);
-    // Varro gives the quest, and the Hollow Sigil that the portal asks for.
-    talkTo(s, 'varro');
+    const dark = questById('ms33')!;
+    unlock(log, dark.id);
+    s.syncQuests();
+    // Maren gives the quest, and the Hollow Sigil that the portal asks for, and the three Embers.
+    talkTo(s, dark.giver);
     s.apply({ t: 'quest', a: 'accept', id: dark.id });
     s.closeMenu();
     expect(s.inventory.countOf(I.HOLLOW_SIGIL)).toBe(1);
+    expect(s.inventory.countOf(I.REED_EMBER)).toBe(1);
     s.drainEvents();
     run(s, 0.5);
     expect(s.drainEvents().filter((e) => e.t === 'zone' && e.id === 'dawnwatch').length).toBe(0); // the Landing is inside it, and was announced on arrival
@@ -508,26 +543,27 @@ describe('an Adventure player', () => {
     expect(s.drainEvents().some((e) => e.t === 'zone')).toBe(false);
   });
 
-  it('ends "Into the Dark" with Warden Hale inside the cellar and takes the next quest from him, there and then', () => {
+  it('ends "Five Hands" with Warden Hale inside the cellar and takes the next quests from him, there and then', () => {
     const s = make();
     s.xp.add(totalForLevel(DUNGEON_MIN_LEVEL));
     run(s, 0.5);
     const log = s.quests!;
-    unlock(log, 'into_the_dark');
-    // The quest and its key come from Varro in the village...
-    expect(questById('into_the_dark')!.turnIn).toBe('hale');
-    expect(questById('cellar_cleanse')!.giver).toBe('hale');
-    expect(questById('cellar_cleanse')!.turnIn).toBe('hale');
-    talkTo(s, 'varro');
-    s.apply({ t: 'quest', a: 'accept', id: 'into_the_dark' });
+    unlock(log, 'ms33');
+    s.syncQuests();
+    // The quest and its key come from Maren in the village...
+    expect(questById('ms33')!.turnIn).toBe('hale');
+    expect(questById('ms34')!.giver).toBe('hale');
+    expect(questById('ms34')!.turnIn).toBe('hale');
+    talkTo(s, 'maren');
+    s.apply({ t: 'quest', a: 'accept', id: 'ms33' });
     s.closeMenu();
     expect(s.inventory.countOf(I.HOLLOW_SIGIL)).toBe(1);
-    expect(log.offeredBy('varro').map((q) => q.id)).not.toContain('cellar_cleanse');
+    expect(log.offeredBy('maren').map((q) => q.id)).not.toContain('ms34');
     // ...in the cellar, the Warden is at the door, and the portal need not be taken again.
     s.teleport(DUNGEON_X + 0.5, generator.ruinY + 1, DUNGEON_Z + 0.5);
     run(s, 2);
     expect(s.realm.copyAt(s)).toBe(0);
-    expect(log.status('into_the_dark')).toBe('ready');
+    expect(log.status('ms33')).toBe('ready');
     const st = generator.npcStations().find((n) => n.npc.id === 'hale' && generator.instanceAt(n.x, n.z) === 0)!;
     s.teleport(st.x + 2, st.y, st.z, Math.PI / 2, 0);
     run(s, 2);
@@ -535,13 +571,13 @@ describe('an Adventure player', () => {
     expect(hale).toBeDefined();
     expect(s.talkNpc(hale)).toBe(true);
     expect(log.markerFor('hale')).toBe('ready');
-    s.apply({ t: 'quest', a: 'complete', id: 'into_the_dark' });
-    expect(log.status('into_the_dark')).toBe('done');
-    expect(log.offeredBy('hale').map((q) => q.id)).toEqual(['cellar_cleanse']);
-    s.apply({ t: 'quest', a: 'accept', id: 'cellar_cleanse' });
-    expect(log.status('cellar_cleanse')).toBe('active');
+    s.apply({ t: 'quest', a: 'complete', id: 'ms33' });
+    expect(log.status('ms33')).toBe('done');
+    expect(log.offeredBy('hale').map((q) => q.id)).toEqual(expect.arrayContaining(['ms34', 'ms35', 'ms36']));
+    s.apply({ t: 'quest', a: 'accept', id: 'ms34' });
+    expect(log.status('ms34')).toBe('active');
     s.closeMenu();
-    // The cages count towards the quest as they are smashed, and a gate opens when its cages are gone.
+    // The cages are the locks of the cellar's gates: each is noted as it is smashed, and a gate opens when its cages are gone.
     const cages = generator.instanceCages(0);
     const gate = generator.instanceGates(0)[0].boxes[0];
     const toasts = (): string[] => s.drainEvents().flatMap((e) => (e.t === 'toast' ? [e.text] : []));
@@ -551,7 +587,6 @@ describe('an Adventure player', () => {
       s.breakBlock(c.x, c.y, c.z);
       run(s, 1.5);
     }
-    expect(log.progressOf('cellar_cleanse')[0]).toBe(2);
     expect(s.world.getBlock(gate.x0, gate.y0, gate.z0)).toBe(B.AIR);
     expect(toasts().join(' ')).toMatch(/cage shatters \(2 of 3\)[\s\S]*grinds open/);
   });
@@ -559,20 +594,20 @@ describe('an Adventure player', () => {
   it('is saved with its quests and gets them back', () => {
     const s = make();
     run(s, 1.5);
-    takeAndDo(s, 'welcome');
-    talkTo(s, 'brannoc');
-    s.apply({ t: 'quest', a: 'accept', id: 'first_timber' });
+    takeAndDo(s, 'ms01', () => doObjectives(s, questById('ms01')!));
+    talkTo(s, 'edda');
+    s.apply({ t: 'quest', a: 'accept', id: 'ms02' });
     s.closeMenu();
     const save = parsePlayerSave(JSON.parse(JSON.stringify(s.savePlayer())))!;
     expect(save.quests).toBeDefined();
     const t = make(9);
     t.loadPlayer(save);
-    expect([...t.quests!.done]).toEqual([FIRST_QUEST, 'welcome']);
-    expect(t.quests!.status('first_timber')).toMatch(/active/);
+    expect([...t.quests!.done]).toEqual([FIRST_QUEST, 'ms01']);
+    expect(t.quests!.status('ms02')).toMatch(/active/);
     const synced = t.drainEvents().filter((e): e is Extract<SessionEvent, { t: 'quests' }> => e.t === 'quests');
     expect(synced.length).toBeGreaterThan(0);
     const log = synced[synced.length - 1].log as QuestLogJSON;
-    expect(log.d).toEqual([FIRST_QUEST, 'welcome']);
+    expect(log.d).toEqual([FIRST_QUEST, 'ms01']);
   });
 
   it('wins achievements for levels, kills and coins, tells the player, and keeps them in the save', () => {

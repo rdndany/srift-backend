@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { PLEAT, jitter, lerp, noise, rgbs, snap, tileUv, tone, type GearCtx, type GearSlot, type MageRig, type RGB, type V3 } from './mageGear';
+import { jitter, lerp, noise, rgbs, snap, tileUv, type GearCtx, type GearSlot, type MageRig, type RGB, type V3 } from './mageGear';
 
 /**
  * What a Warrior and a Ranger wear, built the way the Mage's robes are (see `mageGear.ts`): blocks at the scale of the skin, painted from small

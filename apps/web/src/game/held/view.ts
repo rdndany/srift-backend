@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { ItemDef } from '@solrift/shared';
 import type { Character } from '../character';
 import type { ItemModels } from './models';
+import type { SurveyorSignals } from './surveyor';
 import type { SwingStyle } from './swings';
 
 /**
@@ -26,6 +27,8 @@ export interface HeldKit {
   readonly scene: THREE.Scene;
   /** A character for its arm, dressed like the player and lit like the hand. */
   makeChar(): Character;
+  /** What the land tells the hand (the Land Surveyor: see surveyor.ts). */
+  readonly surveyor: SurveyorSignals;
 }
 
 /** One frame of the hand, as a view's `pose` sees it. The plain pose (the classic swing arc) is already on `pivot`. */

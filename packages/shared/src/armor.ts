@@ -11,6 +11,8 @@
  * starving or the void. Every piece takes `max(1, floor(damage / 4))` wear when you are hit.
  */
 
+import { HK_DEFENSE, HK_DURABILITY, HK_TOUGHNESS } from './hollowKingData';
+
 export const ARMOR_SLOTS = ['helmet', 'chestplate', 'leggings', 'boots'] as const;
 export type ArmorSlot = (typeof ARMOR_SLOTS)[number];
 
@@ -49,6 +51,8 @@ export interface ArmorDef {
   defense: number;
   toughness: number;
   durability: number;
+  /** Set for the armor of a set with a look of its own (the Hollow King's: burning stone); the material is then only what it falls back to. */
+  set?: 'hollow_king';
 }
 
 export function armorDef(slotIndex: number, material: ArmorMaterial): ArmorDef {
@@ -60,6 +64,11 @@ export function armorDef(slotIndex: number, material: ArmorMaterial): ArmorDef {
     toughness: ARMOR_TOUGHNESS[material],
     durability: MATERIAL_DURABILITY[material] * SLOT_DURABILITY[slotIndex],
   };
+}
+
+/** A piece of the Hollow King's armor: the best there is, and it burns (see hollowKingData.ts). */
+export function hollowKingArmorDef(slotIndex: number): ArmorDef {
+  return { slot: ARMOR_SLOTS[slotIndex], slotIndex, material: 'diamond', defense: HK_DEFENSE[slotIndex], toughness: HK_TOUGHNESS, durability: HK_DURABILITY[slotIndex], set: 'hollow_king' };
 }
 
 /** A piece of a class's clothes: it goes in the same slot as armor, protects nothing and does not wear. */

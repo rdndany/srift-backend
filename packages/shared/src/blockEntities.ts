@@ -1,4 +1,5 @@
-import { B, campfireInfo, isChest } from './blocks';
+import { B, campfireInfo, isChest, signInfo } from './blocks';
+import { cleanSignLines, isBlankSign } from './signText';
 import { Campfire, type CampfireFoodView } from './campfire';
 import { Container, cloneStack, makeStack, type ItemStack } from './inventory';
 import { Furnace } from './smelting';
@@ -12,6 +13,10 @@ export class BlockEntities {
   private pair = new Map<string, string>();
   private furnaces = new Map<string, Furnace>();
   private campfires = new Map<string, Campfire>();
+  /** What is written on the signs (four lines each), by position. A sign with nothing written has no entry. */
+  private signs = new Map<string, string[]>();
+  /** Goes up every time any sign's text changes (a sign written, wiped or broken): a connection that has seen this number has seen every sign. */
+  signRev = 0;
   /**
    * Chests that generated with loot and were already rolled (opened or broken). Remembered so that
    * emptying one, or breaking it and placing another, never makes it fill up again.
@@ -85,6 +90,50 @@ export class BlockEntities {
     return c;
   }
 
+  /** The four lines written on the sign at a block (blank ones when there is nothing written). */
+  signAt(x: number, y: number, z: number): string[] {
+    return this.signs.get(key(x, y, z))?.slice() ?? ['', '', '', ''];
+  }
+
+  /** Write on a sign: the lines are cleaned first (see signText.ts), and a sign left blank keeps nothing. Returns what was kept. */
+  setSign(x: number, y: number, z: number, raw: unknown): string[] {
+    const lines = cleanSignLines(raw) ?? ['', '', '', ''];
+    const k = key(x, y, z);
+    const had = this.signs.get(k);
+    if (isBlankSign(lines)) {
+      if (had) {
+        this.signs.delete(k);
+        this.signRev++;
+      }
+      return lines;
+    }
+    if (!had || had.some((l, i) => l !== lines[i])) {
+      this.signs.set(k, lines);
+      this.signRev++;
+    }
+    return lines;
+  }
+
+  /** The signs with writing on them within  blocks of (x, z). */
+  signsNear(x: number, z: number, r: number): { x: number; y: number; z: number; lines: string[] }[] {
+    const out: { x: number; y: number; z: number; lines: string[] }[] = [];
+    for (const [k, lines] of this.signs) {
+      const [sx, sy, sz] = k.split(',').map(Number);
+      if (Math.abs(sx + 0.5 - x) <= r && Math.abs(sz + 0.5 - z) <= r) out.push({ x: sx, y: sy, z: sz, lines: lines.slice() });
+    }
+    return out;
+  }
+
+  /** Take a sign's writing away (its block is gone). */
+  forgetSign(x: number, y: number, z: number): void {
+    if (this.signs.delete(key(x, y, z))) this.signRev++;
+  }
+
+  /** Every sign with writing on it (to be checked against the world). */
+  signPositions(): [number, number, number][] {
+    return [...this.signs.keys()].map((k) => k.split(',').map(Number) as [number, number, number]);
+  }
+
   /** Campfires that have food on them. Does not create an empty one. */
   foods(): CampfireFoodView[] {
     const out: CampfireFoodView[] = [];
@@ -94,6 +143,14 @@ export class BlockEntities {
       out.push({ x, y, z, slots: c.cooking().map((id) => id ?? 0) });
     }
     return out;
+  }
+
+  /** How many items the chest or furnace at a block holds (nothing is made for one that has never been opened). */
+  itemsAt(id: number, x: number, y: number, z: number): number {
+    const k = key(x, y, z);
+    if (isChest(id)) return this.chests.get(k)?.totalItems() ?? 0;
+    if (id === B.FURNACE) return this.furnaces.get(k)?.container.totalItems() ?? 0;
+    return 0;
   }
 
   /** Called when a block is broken: returns every stack that must be dropped. */
@@ -118,6 +175,10 @@ export class BlockEntities {
       this.furnaces.delete(k);
       return f ? f.container.drain() : [];
     }
+    if (signInfo(id)) {
+      this.forgetSign(x, y, z);
+      return [];
+    }
     if (campfireInfo(id)) {
       const c = this.campfires.get(k);
       this.campfires.delete(k);
@@ -135,6 +196,11 @@ export class BlockEntities {
     for (const m of [this.chests, this.furnaces, this.campfires]) for (const k of [...m.keys()]) if (gone(k)) m.delete(k);
     for (const k of [...this.pair.keys()]) if (gone(k)) this.pair.delete(k);
     for (const k of [...this.rolled]) if (gone(k)) this.rolled.delete(k);
+    for (const k of [...this.signs.keys()]) {
+      if (!gone(k)) continue;
+      this.signs.delete(k);
+      this.signRev++;
+    }
   }
 
   tick(dt: number): void {
@@ -179,15 +245,16 @@ export class BlockEntities {
     for (const [k, f] of this.furnaces) if (!f.container.isEmpty()) furnaces[k] = f.toJSON();
     const campfires: Record<string, unknown> = {};
     for (const [k, c] of this.campfires) if (c.busy) campfires[k] = c.toJSON();
-    const out: { chests: Record<string, unknown>; furnaces: Record<string, unknown>; rolled?: string[]; campfires?: Record<string, unknown>; chestPairs?: Record<string, string> } = { chests, furnaces };
+    const out: { chests: Record<string, unknown>; furnaces: Record<string, unknown>; rolled?: string[]; campfires?: Record<string, unknown>; chestPairs?: Record<string, string>; signs?: Record<string, string[]> } = { chests, furnaces };
     if (Object.keys(chestPairs).length > 0) out.chestPairs = chestPairs;
     if (this.rolled.size > 0) out.rolled = [...this.rolled];
     if (Object.keys(campfires).length > 0) out.campfires = campfires;
+    if (this.signs.size > 0) out.signs = Object.fromEntries(this.signs);
     return out;
   }
 
   loadJSON(data: unknown): void {
-    const d = data as { chests?: Record<string, unknown>; furnaces?: Record<string, unknown>; rolled?: string[]; campfires?: Record<string, unknown>; chestPairs?: Record<string, string> } | null;
+    const d = data as { chests?: Record<string, unknown>; furnaces?: Record<string, unknown>; rolled?: string[]; campfires?: Record<string, unknown>; chestPairs?: Record<string, string>; signs?: Record<string, unknown> } | null;
     if (!d || typeof d !== 'object') return;
     for (const k of Array.isArray(d.rolled) ? d.rolled : []) if (typeof k === 'string') this.rolled.add(k);
     const linked = new Set<string>();
@@ -212,6 +279,11 @@ export class BlockEntities {
       const f = new Furnace();
       f.loadJSON(v as never);
       this.furnaces.set(k, f);
+    }
+    for (const [k, v] of Object.entries(d.signs ?? {})) {
+      if (!/^-?\d+,-?\d+,-?\d+$/.test(k)) continue;
+      const lines = cleanSignLines(v);
+      if (lines && !isBlankSign(lines)) this.signs.set(k, lines);
     }
     for (const [k, v] of Object.entries(d.campfires ?? {})) {
       const c = new Campfire();

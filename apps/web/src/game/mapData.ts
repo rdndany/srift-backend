@@ -144,7 +144,7 @@ export interface MapMarker {
 }
 
 /** What a pin on the map is: a quest to take (`offer`), to hand in (`ready`) or still being done (`waiting`), a party member. */
-export type PinKind = 'offer' | 'ready' | 'waiting' | 'party';
+export type PinKind = 'offer' | 'ready' | 'waiting' | 'party' | 'land';
 
 export interface MapPin {
   kind: PinKind;

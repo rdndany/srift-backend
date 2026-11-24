@@ -139,3 +139,29 @@ describe('body turning', () => {
     expect(Math.abs(wrapAngle(-3 - b))).toBeLessThan(Math.abs(wrapAngle(-3 - 3)));
   });
 });
+
+describe('the way a figure on the wing faces', () => {
+  it('faces the view while it goes ahead or hardly moves', async () => {
+    const { wingedYaw } = await import('./selfView');
+    expect(wingedYaw(0.7, 0, 0, 0)).toBe(0.7);
+    expect(wingedYaw(0.7, 0, 0, 0.5)).toBe(0.7);
+    // (Facing -z at yaw 0: flying ahead is along -z.)
+    expect(wingedYaw(0, 0, -8, 8)).toBeCloseTo(0, 6);
+  });
+
+  it('turns half way into a drift to either side, alike, and less going backward', async () => {
+    const { wingedYaw, motionYaw } = await import('./selfView');
+    const left = wingedYaw(0, -8, 0, 8); // to the left of a view along -z
+    const right = wingedYaw(0, 8, 0, 8);
+    expect(left).toBeGreaterThan(0.5);
+    expect(left).toBeLessThan(1.0);
+    expect(right).toBeCloseTo(-left, 6);
+    const diag = wingedYaw(0, -5.6, -5.6, 8);
+    expect(diag).toBeGreaterThan(0.2);
+    expect(diag).toBeLessThan(left);
+    expect(diag).toBeCloseTo(motionYaw(-5.6, -5.6) * 0.5, 6);
+    // (Right behind it faces the view still, and is eased in on the way there.)
+    expect(Math.abs(wingedYaw(0, 0, 8, 8))).toBeLessThan(0.05);
+    expect(Math.abs(wingedYaw(0, -4, 6, 8))).toBeLessThan(Math.abs(wingedYaw(0, -8, 0, 8)));
+  });
+});

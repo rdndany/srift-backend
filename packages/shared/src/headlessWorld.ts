@@ -20,6 +20,8 @@ export interface WorldAccess extends TreeEditor {
   hasChunk?(cx: number, cz: number): boolean;
   /** Let go of a chunk that is back to its generated state; it is made again from the generator if it is needed. */
   forgetChunk?(cx: number, cz: number): void;
+  /** The chunks that are here now (the Gilded Tide hides its creatures over the land that exists). Worlds that do not say have none to list. */
+  chunkCoords?(): { cx: number; cz: number }[];
   growCrops(dt: number, rand?: () => number, onFire?: (x: number, y: number, z: number) => void): number;
 }
 
@@ -82,6 +84,12 @@ export class HeadlessWorld implements WorldAccess {
 
   forgetChunk(cx: number, cz: number): void {
     this.chunks.delete(chunkKey(cx, cz));
+  }
+
+  chunkCoords(): { cx: number; cz: number }[] {
+    const out: { cx: number; cz: number }[] = [];
+    for (const c of this.chunks.values()) if (this.generator.instanceAt(c.cx * CHUNK_SIZE, c.cz * CHUNK_SIZE) < 0) out.push({ cx: c.cx, cz: c.cz });
+    return out;
   }
 
   /** Chunks that differ from the generator's output, as raw block ids (not the ones of dungeon copies: those are never kept). */

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { I, TILE_PX, tileIndex, type ItemDef } from '@solrift/shared';
+import { HK, I, TILE_PX, tileIndex, type ItemDef } from '@solrift/shared';
 import { SLAB } from './models';
 import { AXIS_X, AXIS_Y, AXIS_Z, DEG, type HandFrame, type HeldBuilder, type HeldKit, type HeldView } from './view';
 
@@ -23,9 +23,14 @@ interface AimDef {
   max: number;
   len: number;
   crossbow: boolean;
+  /** The picture the prod and stock are drawn from (the crossbow of the Hollow King has one of its own with the same shape). */
+  frame?: string;
+  /** It shoots bolts of fire. */
+  fire?: boolean;
 }
 const BOW: AimDef = { a: tl(2.5, 14.5), b: tl(13.5, 2.5), dir: [0.74, -0.67], max: 0.3, len: 0.7, crossbow: false };
 const CROSSBOW: AimDef = { a: tl(6.5, 3.5), b: tl(14.5, 11.5), dir: [-0.707, -0.707], max: 0.22, len: 0.34, crossbow: true };
+const EMBER_CROSSBOW: AimDef = { ...CROSSBOW, frame: 'cinderbolt_crossbow_frame', fire: true };
 
 const S2 = Math.SQRT1_2;
 const basis = (x: THREE.Vector3, y: THREE.Vector3, z: THREE.Vector3): THREE.Quaternion => new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
@@ -81,7 +86,7 @@ class AimView implements HeldView {
     private readonly shot: Shot,
   ) {
     const group = this.object;
-    const sprite = kit.models.sprite(tileIndex(def.crossbow ? 'crossbow_frame' : 'bow_frame'));
+    const sprite = kit.models.sprite(tileIndex(def.frame ?? (def.crossbow ? 'crossbow_frame' : 'bow_frame')));
     group.add(sprite);
     if (def.crossbow) {
       // Held out in front, flat: the stock points away into the view, the prod across it, seen from a little above and behind.
@@ -118,15 +123,15 @@ class AimView implements HeldView {
     const mat = this.kit.models.flat();
     const thick = SLAB * 0.55;
     const L = this.def.len;
-    const shaft = this.def.crossbow ? 0x6b4a2a : 0xc8a06a;
+    const shaft = this.def.fire ? 0xff8a2a : this.def.crossbow ? 0x6b4a2a : 0xc8a06a;
     const part = (len: number, h: number, hex: number, at: number): void => {
       const m = new THREE.Mesh(this.kit.models.colorBox(len, h, h * 1.1, hex, len / 2), mat);
       m.position.x = at;
       into.add(m);
     };
     part(L, thick * 0.55, shaft, 0);
-    part(L * 0.14, thick * 1.5, 0x9aa0ac, L * 0.9); // the head
-    part(L * 0.2, thick * 1.5, this.def.crossbow ? 0xc8463c : 0xe8e8e8, 0); // the fletching
+    part(L * 0.14, thick * 1.5, this.def.fire ? 0xffe27a : 0x9aa0ac, L * 0.9); // the head
+    part(L * 0.2, thick * 1.5, this.def.fire ? 0xff4a1a : this.def.crossbow ? 0xc8463c : 0xe8e8e8, 0); // the fletching
   }
 
   /**
@@ -287,5 +292,6 @@ export function aimBuilders(): Record<number, HeldBuilder> {
   return {
     [I.BOW]: (_item: ItemDef, kit: HeldKit) => new AimView(BOW, kit, shot),
     [I.CROSSBOW]: (_item: ItemDef, kit: HeldKit) => new AimView(CROSSBOW, kit, shot),
+    [HK.CROSSBOW]: (_item: ItemDef, kit: HeldKit) => new AimView(EMBER_CROSSBOW, kit, shot),
   };
 }

@@ -1,5 +1,5 @@
 import './loadEnv';
-import { DEFAULT_SERVER_PORT } from '@solrift/shared';
+import { DEFAULT_LAND_CONFIG, DEFAULT_SERVER_PORT, type LandConfigOverride } from '@solrift/shared';
 import { parseIdList } from './admin';
 import { SqliteRepo } from './db';
 import { DEV_ORIGINS, createGameServer } from './server';
@@ -13,6 +13,31 @@ const WORLD_SEED = Number(process.env.WORLD_SEED ?? 1337);
  * of the core game and by developers). WORLD_KIND=beyond runs the World Beyond, the huge 110-biome planet (WORLD_SEED picks it).
  */
 const WORLD_KIND = process.env.WORLD_KIND === 'overworld' ? 'overworld' : process.env.WORLD_KIND === 'beyond' ? 'beyond' : 'adventure';
+/** LAND_CONFIG is a JSON object of the land rules to change; one that is not valid is said and ignored (the defaults stay). */
+function parseLandConfig(raw: string | undefined): LandConfigOverride | undefined {
+  if (!raw) return undefined;
+  try {
+    const v: unknown = JSON.parse(raw);
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      // Only the known settings, each of the kind it is by default: a typo or a string for a number is said and left out.
+      const keep = (given: object, base: object, where: string): Record<string, unknown> => {
+        const out: Record<string, unknown> = {};
+        for (const [k, val] of Object.entries(given)) {
+          const def = (base as Record<string, unknown>)[k];
+          if (def === undefined || typeof def !== typeof val) console.warn(`[solrift] LAND_CONFIG: ${where}${k} ignored`);
+          else if (k === 'regen' && val && typeof val === 'object') out[k] = keep(val, def as object, 'regen.');
+          else out[k] = val;
+        }
+        return out;
+      };
+      return keep(v, DEFAULT_LAND_CONFIG, '') as LandConfigOverride;
+    }
+  } catch {
+    /* said below */
+  }
+  console.warn('[solrift] LAND_CONFIG is not a JSON object: the default land rules are used');
+  return undefined;
+}
 const DATABASE_PATH = process.env.DATABASE_PATH ?? 'data/solrift.db';
 /** Comma-separated browser origins allowed to sign in, e.g. `https://play.example.com`. */
 const ORIGINS = process.env.AUTH_ORIGINS ? process.env.AUTH_ORIGINS.split(',').map((s) => s.trim()) : DEV_ORIGINS;
@@ -35,6 +60,8 @@ const server = createGameServer({
     // Who may type /admin on: the wallets (and, optionally, single characters by id) the owner lists. Nobody by default.
     admins: { wallets: parseIdList(process.env.ADMIN_WALLETS), accounts: parseIdList(process.env.ADMIN_ACCOUNTS) },
     onAdmin: (e) => console.warn(`[solrift] ADMIN ${e.name} (${e.account ?? 'no account'}): ${e.action}${e.detail ? ` ${e.detail}` : ''}`),
+    // Land claims: LAND_CONFIG='{"pricePerBlock":8,"maxArea":4000,"regen":{"placedHours":24}}' changes prices, limits and timers (see docs/LAND.md).
+    landConfig: parseLandConfig(process.env.LAND_CONFIG),
     naturalSpawning: process.env.NO_MOBS !== '1',
     // The Gilded Tide: an invasion every half hour (on the hour and at half past).
     invasions: process.env.NO_MOBS !== '1' && process.env.NO_INVASIONS !== '1',

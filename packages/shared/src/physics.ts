@@ -35,15 +35,28 @@ export interface Body {
   height?: number;
 }
 
-/** Something solid that bodies cannot walk through (a monster, a person): an upright cylinder, x, y, z at its feet. */
+/** A box of a creature's shape, in the creature's own frame (x right, y up, the front at -z): [centre x, centre y, centre z, size x, size y, size z]. */
+export type SolidBox = readonly [number, number, number, number, number, number];
+
+/**
+ * Something solid that bodies cannot walk through (a monster, a person), x, y, z at its feet: an upright cylinder and, when it has `boxes`,
+ * the thick parts of the shape it is drawn in that stick out of it (its head, a giant's arms, the shield and the sword it holds), turned the way it faces. A body cannot walk into the
+ * arm of a giant, but walks under a raised sword.
+ */
 export interface Solid {
   x: number;
   y: number;
   z: number;
-  /** Radius. */
+  /** Radius of the cylinder (the body, with or without `boxes`). */
   r: number;
   /** Height. */
   h: number;
+  /** The shape, in the creature's frame, and the way it faces (as `Mob.yaw`: the front is (-sin yaw, -cos yaw)) and how big it is next to the boxes (1: as given). */
+  boxes?: readonly SolidBox[];
+  yaw?: number;
+  scale?: number;
+  /** How far from x, z any of the boxes reaches (at their size in the world). */
+  reach?: number;
 }
 
 export interface MoveInput {
@@ -80,6 +93,12 @@ export interface MoveInput {
   flyAssist?: boolean;
   /** Characters in the way: the body is pushed out of each of them (never into a wall), so nobody walks through anybody. */
   solids?: readonly Solid[];
+  /**
+   * The shape of the body itself (a monster's arms and head, see `Solid.boxes`): it is pushed away from a character that comes into any of it, as
+   * a character is pushed out of it. Both give way, so a monster stops an arm's length from you instead of walking on into you and shoving you
+   * along in front of it.
+   */
+  shape?: { boxes: readonly SolidBox[]; yaw: number; scale: number };
 }
 
 export function createBody(x: number, y: number, z: number): Body {
@@ -372,17 +391,133 @@ export function stepPlayer(world: BlockReader, b: Body, input: MoveInput, dt: nu
   moveAxis(world, b, 'x', b.vx * dt, guard, wasOnGround, input.stepHeight, assist);
   moveAxis(world, b, 'z', b.vz * dt, guard, wasOnGround, input.stepHeight, assist);
   moveAxis(world, b, 'y', b.vy * dt, false);
-  if (input.solids && input.solids.length > 0) pushOut(world, b, input.solids);
+  if (input.solids && input.solids.length > 0) pushOut(world, b, input.solids, input.shape);
 }
 
 /**
  * Push a body out of the characters it overlaps: sideways, along the line between the two, and only as far as there is room
  * (a body against a wall is not pushed into it). A body that is above the top of one (a jump over it) is not touched.
  */
-function pushOut(world: BlockReader, b: Body, solids: readonly Solid[]): void {
+/** The most a body gives way to a character in its own shape in one step (blocks). */
+const SHAPE_GIVE = 0.2;
+
+function pushOut(world: BlockReader, b: Body, solids: readonly Solid[], shape?: MoveInput['shape']): void {
   const hw = (b.width ?? PLAYER_WIDTH) / 2;
   const bh = b.height ?? PLAYER_HEIGHT;
+  if (shape) {
+    // The body's own boxes against each character (a circle of its radius): the body gives way.
+    const sc = shape.scale;
+    const c = Math.cos(shape.yaw);
+    const sn = Math.sin(shape.yaw);
+    // (It gives way gradually, not all at once: a monster that finds a character in its arms, or is made beside one, eases off at a walking
+    // pace and is not thrown across the room.)
+    let budget = SHAPE_GIVE;
+    for (const s of solids) {
+      if (s.boxes) continue;
+      for (let pass = 0; pass < 2 && budget > 1e-4; pass++) {
+        let any = false;
+        for (const [cx, cy, cz, sx, sy, sz] of shape.boxes) {
+          if (budget <= 1e-4) break;
+          const y0 = b.y + (cy - sy / 2) * sc;
+          const y1 = b.y + (cy + sy / 2) * sc;
+          if (s.y >= y1 - 0.25 || s.y + s.h <= y0 + 0.1) continue;
+          const rx = s.x - b.x;
+          const rz = s.z - b.z;
+          const lx = rx * c - rz * sn;
+          const lz = rx * sn + rz * c;
+          const mx = cx * sc;
+          const mz = cz * sc;
+          const hx = (sx * sc) / 2;
+          const hz = (sz * sc) / 2;
+          const ex = lx - Math.min(mx + hx, Math.max(mx - hx, lx));
+          const ez = lz - Math.min(mz + hz, Math.max(mz - hz, lz));
+          const d = Math.hypot(ex, ez);
+          if (d >= s.r) continue;
+          let nx: number;
+          let nz: number;
+          let push: number;
+          if (d > 1e-4) {
+            nx = ex / d;
+            nz = ez / d;
+            push = s.r - d + 0.001;
+          } else {
+            const px = hx - Math.abs(lx - mx);
+            const pz = hz - Math.abs(lz - mz);
+            if (px < pz) {
+              nx = lx >= mx ? 1 : -1;
+              nz = 0;
+              push = px + s.r + 0.001;
+            } else {
+              nx = 0;
+              nz = lz >= mz ? 1 : -1;
+              push = pz + s.r + 0.001;
+            }
+          }
+          // (The normal points from the box to the character: the body goes the other way.)
+          push = Math.min(push, budget);
+          if (shove(world, b, -(nx * c + nz * sn), -(-nx * sn + nz * c), push)) {
+            any = true;
+            budget -= push;
+          }
+        }
+        if (!any) break;
+      }
+    }
+  }
   for (const s of solids) {
+    if (s.boxes) {
+      // Its shape: each box is a wall of its own, so a head, an arm or a shield is as solid as the body between them. Twice round, so that
+      // being pushed out of one box into the next (the corner between an arm and the body) is put right as well.
+      const sc = s.scale ?? 1;
+      const c = Math.cos(s.yaw ?? 0);
+      const sn = Math.sin(s.yaw ?? 0);
+      if (Math.hypot(b.x - s.x, b.z - s.z) < hw + Math.max(s.r, s.reach ?? 0)) for (let pass = 0; pass < 2; pass++) {
+        let any = false;
+        for (const [cx, cy, cz, sx, sy, sz] of s.boxes) {
+          const y0 = s.y + (cy - sy / 2) * sc;
+          const y1 = s.y + (cy + sy / 2) * sc;
+          if (b.y >= y1 - 0.25 || b.y + bh <= y0 + 0.1) continue;
+          // The body in the frame of the creature (it faces (-sin yaw, -cos yaw)).
+          const rx = b.x - s.x;
+          const rz = b.z - s.z;
+          const lx = rx * c - rz * sn;
+          const lz = rx * sn + rz * c;
+          const mx = cx * sc;
+          const mz = cz * sc;
+          const hx = (sx * sc) / 2;
+          const hz = (sz * sc) / 2;
+          const ex = lx - Math.min(mx + hx, Math.max(mx - hx, lx));
+          const ez = lz - Math.min(mz + hz, Math.max(mz - hz, lz));
+          const d = Math.hypot(ex, ez);
+          if (d >= hw) continue;
+          let nx: number;
+          let nz: number;
+          let push: number;
+          if (d > 1e-4) {
+            nx = ex / d;
+            nz = ez / d;
+            push = hw - d + 0.001;
+          } else {
+            // The middle of the body is inside the box: out through the nearest side.
+            const px = hx - Math.abs(lx - mx);
+            const pz = hz - Math.abs(lz - mz);
+            if (px < pz) {
+              nx = lx >= mx ? 1 : -1;
+              nz = 0;
+              push = px + hw + 0.001;
+            } else {
+              nx = 0;
+              nz = lz >= mz ? 1 : -1;
+              push = pz + hw + 0.001;
+            }
+          }
+          // Back into the world's frame.
+          if (shove(world, b, nx * c + nz * sn, -nx * sn + nz * c, push)) any = true;
+        }
+        if (!any) break;
+      }
+    }
+    // (The cylinder is the body, with or without the boxes.)
     if (b.y >= s.y + s.h - 0.25 || b.y + bh <= s.y + 0.1) continue;
     const min = hw + s.r;
     let dx = b.x - s.x;
@@ -396,29 +531,31 @@ function pushOut(world: BlockReader, b: Body, solids: readonly Solid[]): void {
       dx /= d;
       dz /= d;
     }
-    const push = min - Math.max(d, 0) + 0.001;
-    const w = b.width;
-    const h = b.height;
-    let moved = false;
-    for (const [mx, mz] of [[dx, dz], [dx, 0], [0, dz]] as const) {
-      if (mx === 0 && mz === 0) continue;
-      const k = push * Math.hypot(mx, mz) > 0 ? push : 0;
-      const nx = b.x + mx * k;
-      const nz = b.z + mz * k;
-      if (!collides(world, nx, b.y, nz, w, h)) {
-        b.x = nx;
-        b.z = nz;
-        moved = true;
-        break;
-      }
-    }
-    // Whoever pushed into it loses the speed they had towards it.
-    const vn = b.vx * dx + b.vz * dz;
-    if (moved && vn < 0) {
-      b.vx -= vn * dx;
-      b.vz -= vn * dz;
+    shove(world, b, dx, dz, min - Math.max(d, 0) + 0.001);
+  }
+}
+
+/** Moves a body `push` blocks along (dx, dz) (a unit direction), or along one of its axes when a wall is in the way; it loses the speed it had towards what pushed. Whether it moved. */
+function shove(world: BlockReader, b: Body, dx: number, dz: number, push: number): boolean {
+  let moved = false;
+  for (const [mx, mz] of [[dx, dz], [dx, 0], [0, dz]] as const) {
+    if (mx === 0 && mz === 0) continue;
+    const nx = b.x + mx * push;
+    const nz = b.z + mz * push;
+    if (!collides(world, nx, b.y, nz, b.width, b.height)) {
+      b.x = nx;
+      b.z = nz;
+      moved = true;
+      break;
     }
   }
+  // Whoever pushed into it loses the speed they had towards it.
+  const vn = b.vx * dx + b.vz * dz;
+  if (moved && vn < 0) {
+    b.vx -= vn * dx;
+    b.vz -= vn * dz;
+  }
+  return moved;
 }
 
 export function isWaterBlock(id: number): boolean {

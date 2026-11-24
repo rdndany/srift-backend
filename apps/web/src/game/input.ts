@@ -14,6 +14,8 @@ export class Input {
   private pressed = new Set<string>();
   /** Right-button presses not yet read by `consumeRightClick`. */
   private rightClicks = 0;
+  /** Left-button presses not yet read by `consumeLeftClick` (the Land Surveyor marks a corner at each one). */
+  private leftClicks = 0;
   /** Middle-button presses (mouse 3) not yet read by `consumeMiddleClick`. */
   private middleClicks = 0;
 
@@ -45,7 +47,10 @@ export class Input {
     on('keyup', (e) => this.keys.delete(e.code));
     on('mousedown', (e) => {
       if (!this.locked) return;
-      if (e.button === 0) this.leftDown = true;
+      if (e.button === 0) {
+        this.leftDown = true;
+        this.leftClicks++;
+      }
       if (e.button === 2) {
         this.rightDown = true;
         this.rightClicks++;
@@ -94,6 +99,13 @@ export class Input {
   consumeRightClick(): boolean {
     const was = this.rightClicks > 0;
     this.rightClicks = 0;
+    return was;
+  }
+
+  /** True once per press of the left mouse button. */
+  consumeLeftClick(): boolean {
+    const was = this.leftClicks > 0;
+    this.leftClicks = 0;
     return was;
   }
 

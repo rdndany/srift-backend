@@ -74,7 +74,7 @@ export function makeWindows(parts: WindowParts) {
   /** Is a window up that needs the mouse (the quest log, party, social, trade, a player's menu, a look at a player)? */
   function mouseWindowOpen(): boolean {
     const s = useUi.getState();
-    return s.codexOpen || s.questLogOpen || s.partyOpen || s.socialOpen || !!s.trade || !!s.playerMenu || !!s.inspect;
+    return s.codexOpen || s.questLogOpen || s.partyOpen || s.socialOpen || !!s.trade || !!s.playerMenu || !!s.inspect || !!s.signEdit || s.land.confirm || s.land.manage;
   }
   /** Back to the game after a window closed, when nothing else needs the mouse. */
   function relockIfFree(): void {
@@ -108,8 +108,30 @@ export function makeWindows(parts: WindowParts) {
     if (relock) relockIfFree();
   }
 
+  /** The writing of a sign: the editor opens over the game with the mouse back. */
+  function openSignEdit(x: number, y: number, z: number, lines: string[]): void {
+    useUi.setState({ signEdit: { x, y, z, lines: [...lines] } });
+    if (document.pointerLockElement) document.exitPointerLock();
+  }
+  /** The editor closes: with lines they are sent for the sign; with null it stays as it was. */
+  function closeSignEdit(lines: string[] | null): void {
+    const e = useUi.getState().signEdit;
+    if (!e) return;
+    useUi.setState({ signEdit: null });
+    if (lines) sendCommand({ t: 'sign', x: e.x, y: e.y, z: e.z, lines });
+    relockIfFree();
+  }
+
   /** A key pressed while one of them is open closes it, or is left alone: true when one is open (the key is then nobody else's). */
   function handleKey(e: KeyboardEvent): boolean {
+    // The board of a sign: Escape leaves it as it was (the editor's own fields take the typing, Enter included).
+    if (useUi.getState().signEdit) {
+      if (e.code === 'Escape') {
+        e.preventDefault();
+        closeSignEdit(null);
+      }
+      return true;
+    }
     // The table of a trade: Escape calls it off.
     if (useUi.getState().trade) {
       if (e.code === 'Escape') {
@@ -172,5 +194,5 @@ export function makeWindows(parts: WindowParts) {
     return false;
   }
 
-  return { toggleCodex, toggleQuestLog, togglePartyWindow, toggleSocialWindow, mouseWindowOpen, relockIfFree, showTrade, openPlayerMenu, closePlayerMenu, handleKey };
+  return { toggleCodex, toggleQuestLog, togglePartyWindow, toggleSocialWindow, mouseWindowOpen, relockIfFree, showTrade, openPlayerMenu, closePlayerMenu, openSignEdit, closeSignEdit, handleKey };
 }

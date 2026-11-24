@@ -15,6 +15,8 @@ import { CASTLE_REGION } from './structures';
 import { dropHovering } from './support';
 import { VILLAGE_EXTENT } from './village';
 import type { Ground } from './surface';
+import type { WorldKind } from './squareWorld';
+import type { RealmMap } from './beyondRealms';
 import { WorldGenerator } from './worldgen';
 import { SIGNATURE } from './beyondBiomes';
 
@@ -31,7 +33,7 @@ const ICED: ReadonlySet<number> = new Set<number>([70, 84]);
  * so caves, ores, ponds, villages and everything that saves, syncs and simulates the world work without change.
  */
 export class BeyondWorldGenerator extends WorldGenerator {
-  override readonly kind = 'beyond' as const;
+  override readonly kind: WorldKind = 'beyond';
   private readonly gnoise: GroundNoise;
   private readonly flora: BeyondFlora;
   private readonly caves: BeyondUnderground;
@@ -47,7 +49,7 @@ export class BeyondWorldGenerator extends WorldGenerator {
       return v !== null && Math.max(Math.abs(v.x - x), Math.abs(v.z - z)) < VILLAGE_EXTENT + 6 + 40;
     };
     this.places = new BeyondStructures({ seed, columnAt: (x, z) => this.columnAt(x, z), nearestVillage: (x, z) => this.nearestVillage(x, z), castlesNear: (x, z, reach) => this.castlesNear(x, z, reach) });
-    this.realmFeatures = new BeyondRealmFeatures({ seed, realms: this.land.realms, heightAt: (x, z) => this.columnAt(x, z).height });
+    this.realmFeatures = new BeyondRealmFeatures({ seed, realms: this.realmHost(), heightAt: (x, z) => this.columnAt(x, z).height });
     this.caves = new BeyondUnderground({ seed, columnAt: (x, z) => this.columnAt(x, z) });
     this.flora = new BeyondFlora({
       seed,
@@ -60,6 +62,11 @@ export class BeyondWorldGenerator extends WorldGenerator {
 
   protected override createTerrain(seed: number): BeyondTerrain {
     return new BeyondTerrain(seed);
+  }
+
+  /** The realm map the realm features ask (a world that slides the land under it slides this too). */
+  protected realmHost(): Pick<RealmMap, 'at' | 'nearby'> {
+    return this.land.realms;
   }
 
   /** The land, with the realm map and the biome gates. */
@@ -96,6 +103,10 @@ export class BeyondWorldGenerator extends WorldGenerator {
       if (v.x + r >= ox && v.x - r < ox + size && v.z + r >= oz && v.z - r < oz + size) out.push({ x: v.x, z: v.z, r });
     }
     return out;
+  }
+
+  override landmarksIn(x0: number, z0: number, x1: number, z1: number): readonly { x: number; z: number; r: number }[] {
+    return this.claims(x0, z0, Math.max(x1 - x0 + 1, z1 - z0 + 1), 0);
   }
 
   /** The top block of a column's ground, worked out the way chunk generation does. */

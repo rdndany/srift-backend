@@ -803,32 +803,7 @@
   opacity: 0.35;
 }
 
-/* ---------- the notice and the tab bar ---------- */
-.camp-notice {
-  position: fixed;
-  left: 50%;
-  bottom: calc(86px + env(safe-area-inset-bottom));
-  z-index: 90;
-  max-width: min(520px, calc(100vw - 24px));
-  padding: 12px 16px;
-  transform: translateX(-50%);
-  font-family: var(--body, system-ui);
-  font-size: 14px;
-  line-height: 1.4;
-  color: #eaffea;
-  background: #0f2a14;
-  box-shadow:
-    inset 0 0 0 1px #3c8a4a,
-    0 10px 30px rgba(0, 0, 0, 0.5);
-  animation: camp-up 0.2s both;
-}
-.camp-notice.bad {
-  color: #ffe3e3;
-  background: #301212;
-  box-shadow:
-    inset 0 0 0 1px #a04444,
-    0 10px 30px rgba(0, 0, 0, 0.5);
-}
+/* ---------- the tab bar ---------- */
 .camp-tabbar {
   position: fixed;
   left: 0;
@@ -898,9 +873,6 @@
     transform: translate(var(--tx, 0), 14px);
   }
 }
-.camp-notice {
-  --tx: -50%;
-}
 
 /* ---------- bigger screens ---------- */
 @media (min-width: 900px) {
@@ -933,9 +905,6 @@
 @media (prefers-reduced-motion: reduce) {
   .camp-sheet,
   .camp-sheet-wrap,
-  .camp-notice {
-    animation: none;
-  }
   #home .fp.camp .camp-bar i {
     transition: none;
   }

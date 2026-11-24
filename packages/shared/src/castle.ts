@@ -105,7 +105,6 @@ const TILES_MAT = matOf('deepslate_tiles');
 const ACACIA = wood('acacia');
 const ACACIA_PLANKS = cubeOf('acacia');
 const ACACIA_MAT = matOf('acacia');
-const ACACIA_LOG = ACACIA.strippedLog;
 const ACACIA_FENCE = ACACIA.fence;
 const SPRUCE_PLANKS = cubeOf('spruce');
 const SPRUCE_MAT = matOf('spruce');

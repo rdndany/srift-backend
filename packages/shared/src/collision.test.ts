@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { B, MobManager, PLAYER_WIDTH, createBody, mulberry32, stepPlayer, BOSS_WINDUP, type MoveInput, type Solid } from './index';
+import { B, MobManager, mobSolid, PLAYER_WIDTH, createBody, mulberry32, stepPlayer, BOSS_WINDUP, type MoveInput, type Solid } from './index';
 
 const floor = { getBlock: (_x: number, y: number, _z: number): number => (y < 1 ? B.STONE : B.AIR) };
 const walk = (over: Partial<MoveInput> = {}): MoveInput => ({ forward: 1, strafe: 0, jump: false, sprint: false, sneak: false, fly: false, flyDown: false, yaw: Math.PI / 2, ...over });
@@ -35,6 +35,60 @@ describe('characters are solid', () => {
     const mob: Solid = { x: 0.9, y: 1, z: 0.5, r: 1, h: 2 };
     for (let i = 0; i < 20; i++) stepPlayer(wall, b, walk({ forward: 0, solids: [mob] }), 1 / 20);
     expect(b.x).toBeLessThanOrEqual(2 - PLAYER_WIDTH / 2 + 1e-3);
+  });
+
+  describe('with the shape of the creature (its arms and head, not just a cylinder)', () => {
+    // An arm held out at head height, 1.4 long, 1.2 blocks from the middle on the creature's left (-x in its frame); its body is a stub in the middle, small enough to be stepped over, so that it is the arm that is under test.
+    const arm = (cy: number): Solid => ({ x: 3.5, y: 1, z: 0.5, r: 0.05, h: 0.2, reach: 3, boxes: [[-1.2, cy, 0, 1.4, 0.4, 0.4]], yaw: 0, scale: 1 });
+    const walkTo = (s: Solid): ReturnType<typeof createBody> => {
+      const b = createBody(0.5, 1, 0.5);
+      for (let i = 0; i < 200; i++) stepPlayer(floor, b, walk({ yaw: -Math.PI / 2, solids: [s] }), 1 / 20);
+      return b;
+    };
+
+    it('does not let a body walk into the arm, which is far outside the cylinder of the body', () => {
+      const b = walkTo(arm(1.2));
+      // The arm begins 1.9 blocks from the middle: the body stops at it (and 0.5 of cylinder would have let it get to 2.7).
+      expect(b.x).toBeLessThan(3.5 - 1.9 + 0.01);
+      expect(b.x).toBeGreaterThan(1.2);
+    });
+
+    it('lets a body walk under a raised arm, and does not stop it for a part above its head', () => {
+      expect(walkTo(arm(3.2)).x).toBeGreaterThan(6);
+    });
+
+    it('turns with the creature: the arm that is on the left of one facing north is on the right of one facing south', () => {
+      const south: Solid = { ...arm(1.2), yaw: Math.PI };
+      // Its arm is on the +x side now (it begins 0.5 past the middle, at x = 4.0), so the body is stopped there, 2.4 blocks later than before.
+      const x = walkTo(south).x;
+      expect(x).toBeGreaterThan(3.5);
+      expect(x).toBeLessThan(4.0 - PLAYER_WIDTH / 2 + 0.01);
+    });
+
+    it('is not pushed into a wall by it', () => {
+      const wall = { getBlock: (x: number, y: number, _z: number): number => (y < 1 || x >= 2 ? B.STONE : B.AIR) };
+      const b = createBody(1.6, 1, 0.5);
+      const s: Solid = { x: 0.9, y: 1, z: 0.5, r: 0.05, h: 0.2, reach: 2, boxes: [[0, 1, 0, 1.2, 2, 1.2]], yaw: 0, scale: 1 };
+      for (let i = 0; i < 20; i++) stepPlayer(wall, b, walk({ forward: 0, solids: [s] }), 1 / 20);
+      expect(b.x).toBeLessThanOrEqual(2 - PLAYER_WIDTH / 2 + 1e-3);
+    });
+  });
+
+  // (Not the bosses that charge across the room, which take whoever is in the way along with them.)
+  // (The gilt colossus is shy and never walks at the player, so a hunting kind is used here.)
+  it.each(['zombie'] as const)("%s does not shove a player along in front of it: it stops at arm's length and the player stays put", (kind) => {
+    // The player is a body of the game's own, pushed out of the arms of whatever stands close, as the server does (see Realm.solidsNear).
+    const mgr = new MobManager(mulberry32(3));
+    const player = createBody(0.5, 1, 0.5);
+    const events: any = { hurtPlayer() {}, sound() {}, explode() {}, shoot() {}, afflict() {}, ignite() {}, fx() {} };
+    const z = mgr.spawn(kind, 8.5, 1, 0.5);
+    for (let i = 0; i < 300; i++) {
+      mgr.update(1 / 20, { world: floor, player: { x: player.x, y: player.y, z: player.z, alive: true, invulnerable: false }, daylight: 0, rand: mulberry32(i + 5) } as any, events);
+      stepPlayer(floor, player, walk({ forward: 0, solids: [mobSolid(kind, z.body.x, z.body.y, z.body.z, z.yaw, z.height / z.def.height, z.width, z.height)] }), 1 / 20);
+    }
+    expect(Math.hypot(player.x - 0.5, player.z - 0.5)).toBeLessThan(0.3);
+    // It is close, though (within a blow of the player), not stopped far off.
+    expect(Math.hypot(z.body.x - player.x, z.body.z - player.z)).toBeLessThan(2);
   });
 
   it('makes a monster stop at the edge of a player instead of standing inside them', () => {

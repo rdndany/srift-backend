@@ -75,6 +75,17 @@ function clothTexture(def: OutfitDef): THREE.CanvasTexture {
   });
 }
 
+/** What the skin needs to know of a set: the metal its plate is painted in. */
+export function warriorLook(id: string): { metal: [RGB, RGB] } {
+  return { metal: (STYLES[id] ?? STYLES.mossback).metal };
+}
+
+/**
+ * The suit is painted on the body (see `outfitSkin.ts`): plate, belt, tabard, greaves are the colours of the skin. What is built of blocks is only what
+ * stands clear of it, and every one of those rests on the body with its back flat against it (a face that looks into the body is never drawn, so it cannot
+ * fight another for the same pixels): the gems and buckle, the lights at the wrists and ankles, the tabard on the thighs, the pauldrons, the crest of the
+ * helm, the wings.
+ */
 export function dressWarrior(ctx: SetCtx, def: OutfitDef): SetRig {
   const st = STYLES[def.id] ?? STYLES.mossback;
   const b = new SetBuilder(ctx, def);
@@ -84,58 +95,45 @@ export function dressWarrior(ctx: SetCtx, def: OutfitDef): SetRig {
   const trim = lit(`trim:${def.id}`, () => trimTexture(def));
   const { put, chain } = { put: b.put.bind(b), chain: b.chain.bind(b) };
 
-  // ---- the breastplate: a front plate with a ridge, a gem in a gold setting and a seam of light each side of it, a back plate, a gorget at the neck.
-  put(t, plate, [0.57, 0.46, 0.06], [0, 1.28, -0.15]);
-  put(t, plate, [0.57, 0.5, 0.06], [0, 1.26, 0.15]);
-  put(t, plate, [0.06, 0.44, 0.3], [-0.285, 1.28, 0]);
-  put(t, plate, [0.06, 0.44, 0.3], [0.285, 1.28, 0]);
-  put(t, plate, [0.5, 0.1, 0.34], [0, 1.52, 0]); // the gorget
-  put(t, trim, [0.52, 0.025, 0.36], [0, 1.575, 0]);
-  put(t, trim, [0.08, 0.4, 0.04], [0, 1.28, -0.19]); // the ridge
-  put(t, trim, [0.16, 0.16, 0.04], [0, 1.34, -0.2]); // the setting of the gem
-  put(t, gem, [0.09, 0.09, 0.05], [0, 1.34, -0.214]);
-  for (const s of [-1, 1]) {
-    put(t, core, [0.022, 0.34, 0.012], [s * 0.15, 1.27, -0.186]); // a seam of light
-    put(t, edge, [0.05, 0.36, 0.016], [s * 0.15, 1.27, -0.185]);
-    put(t, core, [0.022, 0.34, 0.012], [s * 0.2, 1.24, 0.186]);
-    put(t, edge, [0.05, 0.36, 0.016], [s * 0.2, 1.24, 0.185]);
+  // ---- the breast: a gem in a gold setting where the painted stone is, and a gem on the back; the buckle of the belt.
+  put(t, trim, [0.15, 0.15, 0.016], [0, 1.25, -0.133]);
+  put(t, gem, [0.09, 0.09, 0.03], [0, 1.25, -0.156]);
+  put(t, trim, [0.15, 0.1, 0.02], [0, 0.906, -0.135]);
+  put(t, gem, [0.06, 0.06, 0.03], [0, 0.906, -0.16]);
+  put(t, gem, [0.07, 0.07, 0.03], [0, 1.28, 0.14]);
+
+  // ---- the tabard: cloth that hangs from the belt, in front and behind, a piece on each leg so it moves with the leg and never goes into it.
+  for (const leg of [ctx.legL, ctx.legR]) {
+    put(leg, cloth, [0.245, 0.22, 0.036], [0, -0.11, -0.143]);
+    put(leg, trim, [0.245, 0.024, 0.04], [0, -0.232, -0.145]);
+    put(leg, cloth, [0.245, 0.26, 0.036], [0, -0.13, 0.143]);
+    // The knee: a cop with a spike, and the light of the greave.
+    put(leg, plate, [0.23, 0.11, 0.036], [0, -0.285, -0.143]);
+    chain(leg, plate, core, [0, -0.285, -0.16], [-1.45, 0, 0], 2, 0.13, 0.08, 0.02, 0.07, [0.1, 0, 0]);
+    put(leg, edge, [0.262, 0.026, 0.262], [0, -0.531, 0]);
   }
-  put(t, gem, [0.07, 0.07, 0.05], [0, 1.3, 0.19]); // and a gem on the back
 
-  // ---- the belt, a buckle, and the faulds: plates that hang from it, split so the legs move under them.
-  put(t, trim, [0.58, 0.09, 0.33], [0, 0.88, 0]);
-  put(t, trim, [0.15, 0.13, 0.04], [0, 0.88, -0.18]);
-  put(t, gem, [0.07, 0.07, 0.05], [0, 0.88, -0.2]);
-  put(t, plate, [0.34, 0.3, 0.05], [0, 0.69, -0.17], [-0.06, 0, 0]);
-  put(t, cloth, [0.2, 0.28, 0.04], [0, 0.68, -0.205], [-0.06, 0, 0]);
-  put(t, plate, [0.34, 0.34, 0.05], [0, 0.67, 0.17], [0.07, 0, 0]);
-  for (const s of [-1, 1]) put(t, plate, [0.05, 0.26, 0.26], [s * 0.3, 0.72, 0], [0, 0, s * 0.08]);
-
-  // ---- the helm: a cap and a brow, cheek plates and a neck guard, leaving the face open; and its crest.
-  put(head, plate, [0.57, 0.12, 0.57], [0, 0.4, 0]);
-  put(head, plate, [0.57, 0.07, 0.05], [0, 0.29, -0.28]);
-  put(head, trim, [0.12, 0.1, 0.05], [0, 0.34, -0.3]);
-  put(head, gem, [0.06, 0.06, 0.05], [0, 0.34, -0.318]);
-  for (const s of [-1, 1]) put(head, plate, [0.05, 0.28, 0.36], [s * 0.285, 0.14, 0.03]);
-  put(head, plate, [0.57, 0.3, 0.05], [0, 0.14, 0.285]);
+  // ---- the helm: painted on the head; a gem at the brow and a cheek-light, and its crest.
+  put(head, trim, [0.12, 0.07, 0.016], [0, 0.344, -0.258]);
+  put(head, gem, [0.06, 0.06, 0.02], [0, 0.344, -0.274]);
   const hs = st.helmSize;
   if (st.helm === 'horns' || st.helm === 'antlers') {
     for (const s of [-1, 1]) {
-      const root: V3 = [s * 0.3, 0.42, 0];
+      const root: V3 = [s * 0.27, 0.4, 0];
       if (st.helm === 'horns') {
         // A great horn sweeps out, up and then in, and a short one grows from under it.
         chain(head, plate, edge, root, [0, 0, -s * 62 * DEG], 6, 0.62 * hs, 0.13, 0.03, 0.1, [0, 0, s * 17 * DEG], s);
-        chain(head, plate, null, [s * 0.3, 0.33, -0.02], [0.3, 0, -s * 100 * DEG], 3, 0.24 * hs, 0.08, 0.03, 0.08, [0, 0, s * 14 * DEG]);
+        chain(head, plate, null, [s * 0.27, 0.3, -0.02], [0.3, 0, -s * 100 * DEG], 3, 0.24 * hs, 0.08, 0.03, 0.08, [0, 0, s * 14 * DEG]);
       } else {
         // An antler: a beam that rises and bends, and three tines off it.
-        chain(head, plate, null, root, [-0.12, 0, -s * 20 * DEG], 5, 0.6, 0.08, 0.035, 0.08, [0.05, 0, s * 9 * DEG]);
-        chain(head, plate, core, [s * 0.34, 0.6, -0.02], [-0.2, 0, -s * 62 * DEG], 3, 0.26, 0.05, 0.02, 0.06, [0, 0, s * 8 * DEG], s);
-        chain(head, plate, core, [s * 0.4, 0.74, 0.02], [-0.1, 0, -s * 56 * DEG], 3, 0.3, 0.05, 0.02, 0.06, [0, 0, s * 8 * DEG], s);
-        chain(head, plate, core, [s * 0.36, 0.5, 0.0], [0.15, 0, -s * 78 * DEG], 3, 0.2, 0.05, 0.02, 0.06, [0, 0, s * 8 * DEG], s);
+        chain(head, plate, null, root, [-0.12, 0, -s * 20 * DEG], 5, 0.6, 0.08, 0.035, 0.08, [0.05, 0, s * 9 * DEG], s);
+        chain(head, plate, core, [s * 0.32, 0.6, -0.02], [-0.2, 0, -s * 62 * DEG], 3, 0.26, 0.05, 0.02, 0.06, [0, 0, s * 8 * DEG], s);
+        chain(head, plate, core, [s * 0.38, 0.74, 0.02], [-0.1, 0, -s * 56 * DEG], 3, 0.3, 0.05, 0.02, 0.06, [0, 0, s * 8 * DEG], s);
+        chain(head, plate, core, [s * 0.34, 0.5, 0.0], [0.15, 0, -s * 78 * DEG], 3, 0.2, 0.05, 0.02, 0.06, [0, 0, s * 8 * DEG], s);
       }
     }
-    // A crest down the middle, between the horns.
-    if (st.helm === 'horns') for (let i = 0; i < 4; i++) put(head, plate, [0.06, 0.1 + 0.05 * (i === 1 || i === 2 ? 1 : 0), 0.1], [0, 0.5 + 0.02 * i, -0.18 + i * 0.12], [0, 0, 0]);
+    // A crest down the middle, between the horns: a comb of plates that stand on the crown.
+    if (st.helm === 'horns') for (let i = 0; i < 4; i++) put(head, plate, [0.06, 0.1 + 0.05 * (i === 1 || i === 2 ? 1 : 0), 0.1], [0, 0.55 + 0.02 * i, -0.18 + i * 0.12]);
   } else if (st.helm === 'crown') {
     const n = hs > 1.2 ? 7 : 5;
     for (let i = 0; i < n; i++) {
@@ -143,67 +141,51 @@ export function dressWarrior(ctx: SetCtx, def: OutfitDef): SetRig {
       const px = Math.sin(a) * 0.26;
       const pz = Math.cos(a) * 0.26;
       const tall = (0.2 + (i % 2 === 0 ? 0.16 : 0)) * hs;
-      chain(head, trim, core, [px, 0.45, pz], [Math.cos(a) * 0.3, 0, -Math.sin(a) * 0.3], 3, tall, 0.1, 0.02, 0.1, [0, 0, 0], 1);
+      chain(head, trim, core, [px, 0.5, pz], [Math.cos(a) * 0.3, 0, -Math.sin(a) * 0.3], 3, tall, 0.1, 0.02, 0.1, [0, 0, 0], 1);
     }
-    put(head, trim, [0.6, 0.05, 0.6], [0, 0.46, 0]);
-    put(head, gem, [0.07, 0.07, 0.04], [0, 0.46, -0.31]);
+    put(head, trim, [0.58, 0.05, 0.58], [0, 0.505, 0]);
+    put(head, gem, [0.07, 0.07, 0.04], [0, 0.505, -0.3]);
   } else if (st.helm === 'spire') {
-    chain(head, plate, core, [0, 0.46, 0.02], [-0.2, 0, 0], 6, 0.62, 0.2, 0.025, 0.12, [0.07, 0, 0], 1);
-    for (const s of [-1, 1]) chain(head, plate, edge, [s * 0.28, 0.44, 0.1], [0.2, 0, -s * 32 * DEG], 4, 0.34, 0.1, 0.02, 0.06, [0, 0, s * 7 * DEG], s);
+    chain(head, plate, core, [0, 0.5, 0.02], [-0.2, 0, 0], 6, 0.62, 0.2, 0.025, 0.12, [0.07, 0, 0], 1);
+    for (const s of [-1, 1]) chain(head, plate, edge, [s * 0.26, 0.46, 0.1], [0.2, 0, -s * 32 * DEG], 4, 0.34, 0.1, 0.02, 0.06, [0, 0, s * 7 * DEG], s);
   } else if (st.helm === 'fins') {
     // A fin along the top, tall at the front and falling to the back, and a pair of wide ones at the temples.
-    for (let i = 0; i < 6; i++) put(head, plate, [0.05, 0.34 * (1 - i * 0.13), 0.12], [0, 0.46 + 0.17 * (1 - i * 0.13), -0.22 + i * 0.1], [0, 0, 0]);
+    for (let i = 0; i < 6; i++) put(head, plate, [0.05, 0.34 * (1 - i * 0.13), 0.12], [0, 0.5 + 0.17 * (1 - i * 0.13), -0.22 + i * 0.1]);
     for (const s of [-1, 1]) {
-      chain(head, plate, edge, [s * 0.3, 0.3, 0.05], [0.1, 0, -s * 70 * DEG], 4, 0.4, 0.14, 0.04, 0.04, [0, 0, s * 10 * DEG], s);
-      chain(head, plate, edge, [s * 0.3, 0.2, 0.08], [0.25, 0, -s * 95 * DEG], 3, 0.3, 0.1, 0.03, 0.04, [0, 0, s * 10 * DEG], s);
+      chain(head, plate, edge, [s * 0.27, 0.3, 0.05], [0.1, 0, -s * 70 * DEG], 4, 0.4, 0.14, 0.04, 0.04, [0, 0, s * 10 * DEG], s);
+      chain(head, plate, edge, [s * 0.27, 0.2, 0.08], [0.25, 0, -s * 95 * DEG], 3, 0.3, 0.1, 0.03, 0.04, [0, 0, s * 10 * DEG], s);
     }
   } else if (st.helm === 'halo') {
     // A crown of rays and, above the head, a ring of light that turns.
     for (let i = 0; i < 7; i++) {
       const a = (i / 7) * Math.PI * 2;
-      chain(head, trim, core, [Math.sin(a) * 0.27, 0.45, Math.cos(a) * 0.27], [Math.cos(a) * 0.45, 0, -Math.sin(a) * 0.45], 3, 0.22, 0.07, 0.02, 0.07, [0, 0, 0], 1);
+      chain(head, trim, core, [Math.sin(a) * 0.27, 0.5, Math.cos(a) * 0.27], [Math.cos(a) * 0.45, 0, -Math.sin(a) * 0.45], 3, 0.22, 0.07, 0.02, 0.07, [0, 0, 0], 1);
     }
-    put(head, trim, [0.6, 0.05, 0.6], [0, 0.46, 0]);
+    put(head, trim, [0.58, 0.05, 0.58], [0, 0.505, 0]);
   }
 
-  // ---- the pauldrons: stacked plates, a gold rim, and spikes that fan out and up; the arms: a plate on the upper arm, a bracer and a gauntlet.
+  // ---- the pauldrons: stacked plates that narrow toward the neck (the inner edge stays outside the shoulder, clear of the neck and the helm), a gold rim, a
+  // plate that hangs on the outside, and spikes that fan out and up; at the wrists a ring of light.
   for (const [arm, s] of [[ctx.armL, -1], [ctx.armR, 1]] as const) {
-    put(arm, plate, [0.36, 0.08, 0.38], [s * 0.04, 0.06, 0]);
-    put(arm, plate, [0.31, 0.07, 0.33], [s * 0.06, 0.13, 0]);
-    put(arm, plate, [0.26, 0.06, 0.28], [s * 0.08, 0.19, 0]);
-    put(arm, trim, [0.375, 0.025, 0.395], [s * 0.04, 0.015, 0]);
-    put(arm, plate, [0.06, 0.26, 0.36], [s * 0.2, -0.08, 0]); // the outer plate that hangs
-    put(arm, edge, [0.02, 0.2, 0.3], [s * 0.232, -0.08, 0]);
+    put(arm, plate, [0.3, 0.075, 0.34], [s * 0.06, 0.0375, 0]);
+    put(arm, plate, [0.26, 0.06, 0.3], [s * 0.075, 0.105, 0]);
+    put(arm, plate, [0.22, 0.05, 0.26], [s * 0.09, 0.16, 0]);
+    put(arm, trim, [0.31, 0.02, 0.35], [s * 0.06, 0, 0]);
+    put(arm, plate, [0.04, 0.22, 0.3], [s * 0.145, -0.1, 0]);
+    put(arm, edge, [0.012, 0.17, 0.25], [s * 0.1675, -0.1, 0]);
     for (let i = 0; i < st.spikes; i++) {
       const f = st.spikes === 1 ? 0.5 : i / (st.spikes - 1);
       const z = -0.12 + f * 0.24;
       const lean = 18 + f * 40;
       const len = st.spikeLen * (0.7 + 0.3 * Math.sin(f * Math.PI));
-      chain(arm, plate, core, [s * 0.1, 0.2, z], [(f - 0.5) * 0.9, 0, -s * lean * DEG], 3, len, 0.09, 0.02, 0.09, [0, 0, s * 9 * DEG], s);
+      chain(arm, plate, core, [s * 0.1, 0.17, z], [(f - 0.5) * 0.9, 0, -s * lean * DEG], 3, len, 0.09, 0.02, 0.09, [0, 0, s * 9 * DEG], s);
     }
-    put(arm, plate, [0.28, 0.2, 0.28], [0, -0.2, 0]);
-    put(arm, trim, [0.3, 0.03, 0.3], [0, -0.32, 0]);
-    put(arm, plate, [0.3, 0.26, 0.3], [0, -0.52, 0]); // the bracer
-    put(arm, edge, [0.31, 0.03, 0.31], [0, -0.42, 0]);
-    put(arm, trim, [0.31, 0.03, 0.31], [0, -0.64, 0]);
-    put(arm, plate, [0.27, 0.1, 0.27], [0, -0.7, 0]);
-  }
-
-  // ---- the legs: a thigh plate, a knee guard with a spike, a greave and a boot, with a band of light at the ankle.
-  for (const leg of [ctx.legL, ctx.legR]) {
-    put(leg, plate, [0.29, 0.28, 0.29], [0, -0.17, 0]);
-    put(leg, trim, [0.3, 0.03, 0.3], [0, -0.33, 0]);
-    put(leg, plate, [0.3, 0.1, 0.36], [0, -0.4, -0.03]);
-    chain(leg, plate, core, [0, -0.4, -0.2], [-1.45, 0, 0], 2, 0.13, 0.08, 0.02, 0.08, [0.1, 0, 0]);
-    put(leg, plate, [0.29, 0.22, 0.29], [0, -0.5, 0]); // the greave
-    put(leg, edge, [0.3, 0.03, 0.3], [0, -0.6, 0]);
-    put(leg, plate, [0.3, 0.14, 0.38], [0, -0.675, -0.04]); // the boot
-    put(leg, trim, [0.3, 0.03, 0.39], [0, -0.74, -0.04]);
+    put(arm, edge, [0.262, 0.026, 0.262], [0, -0.594, 0]);
   }
 
   // ---- the wings: curved blades fanned out from the shoulder blades, each with a lit edge; they open and close a little with the clock.
   if (st.blades > 0) {
-    b.wings({ at: [0.1, 1.38, 0.17], blades: st.blades, len: st.bladeLen, curl: st.curl, spread: [28 + (st.blades > 3 ? 8 : 0), 90 + (st.blades > 3 ? 8 : 0)], sweep: [0.5 * (st.blades > 3 ? 1 : 1.1), 0.28 * (st.blades > 3 ? 1 : 1.1)], mat: plate, base: trim, edge, spine: core, width: 0.15 });
+    b.wings({ at: [0.1, 1.38, 0.15], blades: st.blades, len: st.bladeLen, curl: st.curl, spread: [28 + (st.blades > 3 ? 8 : 0), 90 + (st.blades > 3 ? 8 : 0)], sweep: [0.5 * (st.blades > 3 ? 1 : 1.1), 0.28 * (st.blades > 3 ? 1 : 1.1)], mat: plate, base: trim, edge, spine: core, width: 0.15 });
   }
 
   b.halo(st.halo);

@@ -1,6 +1,6 @@
 import type { EntityLight } from './entityLight';
 import * as THREE from 'three';
-import { BASH_ANIM, type MountId } from '@solrift/shared';
+import { BASH_ANIM, type ClassId, type MountId } from '@solrift/shared';
 import { Character, DEFAULT_PALETTE, STAB_TIME, SWING_TIME, figureGlows, figureLoadout, layDown, standUp, type Palette, type SkinVoxel } from './character';
 import type { StepHandler } from './fenrir';
 import { MountRig } from './mountRig';
@@ -87,6 +87,19 @@ export function motionYaw(vx: number, vz: number): number {
   return Math.atan2(-vx, -vz);
 }
 
+/**
+ * The way a figure on the wing faces: the way the view looks, turned part of the way into the way it goes when that is off to a side (half of it, so
+ * sideways it is a quarter round and the rest is a bank), less going back, and nothing while it hardly moves.
+ */
+export function wingedYaw(view: number, vx: number, vz: number, speed: number): number {
+  const go = Math.max(0, Math.min(1, (speed - 1.2) / 3));
+  if (go === 0) return view;
+  const off = wrapAngle(motionYaw(vx, vz) - view);
+  const a = Math.abs(off);
+  const into = a <= 1.6 ? off * 0.5 : off * 0.5 * Math.max(0, Math.min(1, 2.6 - a));
+  return view + into * go;
+}
+
 /** The angle `from` turned toward `to` the short way, by the share of the gap that `rate` (per second) and `dt` make, but no faster than `maxSpeed`. */
 export function turnToward(from: number, to: number, dt: number, rate: number, maxSpeed = 16): number {
   const diff = wrapAngle(to - from);
@@ -139,6 +152,9 @@ export interface SelfState {
   charging?: boolean;
   /** Casting the Emberstone: how far into the cast (0..1), 0 or left out when not. */
   casting?: number;
+  /** The class the player is (the figure moves as it does: see classMotion.ts), and whether a fight is on (an enemy near): it stands to fight. */
+  cls?: ClassId | null;
+  engaged?: boolean;
   /** Lying in a bed: 0 = awake, else 1 + the way the bed points. */
   sleeping: number;
   /** The mount ridden, none on foot. */
@@ -213,6 +229,11 @@ export class SelfView {
     this.bashAge = 0;
   }
 
+  /** Debug: stand to fight as if a monster were near (see debugHooks). */
+  forceEngaged = false;
+  /** Debug: the figure drawn turned this far from where it faces (to look at it from the side, the front, three-quarters), with nothing else changed. */
+  viewTurn = 0;
+
   /** Start one of the things the figure does when left standing (1 sit, 2 stretch, 3 look around; 0 ends it). */
   idle(kind: number): void {
     this.character.playIdle(kind);
@@ -280,7 +301,8 @@ export class SelfView {
     else if (acting) this.bodyYaw = turnToward(this.bodyYaw, s.yaw, dt, 24, 22);
     else if (s.vx === undefined || s.vz === undefined) this.bodyYaw = followBodyYaw(this.bodyYaw, s.yaw, moving, dt);
     // On the wings it faces where the view looks (it flies the way the keys push it, along the view, and the crosshair is where it is going).
-    else if (s.winged && (s.wing ?? 0) > 0) this.bodyYaw = turnToward(this.bodyYaw, s.yaw, dt, 9, 12);
+    // (It turns part of the way into a drift: flying to the left or diagonally it is half round to where it goes, banked into it, not a post carried sideways.)
+    else if (s.winged && (s.wing ?? 0) > 0) this.bodyYaw = turnToward(this.bodyYaw, wingedYaw(s.yaw, s.vx, s.vz, s.speed), dt, 9, 12);
     else if (s.speed > 0.5 && !s.airborne) this.bodyYaw = turnToward(this.bodyYaw, motionYaw(s.vx, s.vz), dt, 14);
     else if (!s.airborne) {
       const gap = Math.abs(wrapAngle(s.yaw - this.bodyYaw));
@@ -288,7 +310,9 @@ export class SelfView {
       else if (gap < 0.08) this.turnToAim = false;
       if (this.turnToAim) this.bodyYaw = turnToward(this.bodyYaw, s.yaw, dt, 9, 12);
     }
-    // (in a jump the body keeps the way the jump was taken)
+    // In a jump the body keeps the way the jump was taken, but as the way it goes bends (the keys or the view change in the air) it comes round
+    // with it, more slowly than on the ground: it can be seen to turn in the air.
+    else if (s.speed > 1) this.bodyYaw = turnToward(this.bodyYaw, motionYaw(s.vx, s.vz), dt, 6, 8);
     if (dt > 0) this.turn += (wrapAngle(this.bodyYaw - before) / dt - this.turn) * (1 - Math.exp(-dt * 10));
     const c = this.character;
     if (s.sleeping > 0) {
@@ -306,7 +330,7 @@ export class SelfView {
     }
     standUp(this.group);
     this.group.position.set(s.x, s.y - (s.sneaking ? 0.1 : 0), s.z);
-    this.group.rotation.y = this.bodyYaw;
+    this.group.rotation.y = this.bodyYaw + this.viewTurn;
     this.group.scale.y = s.sneaking ? 0.92 : 1;
     // The head looks where you aim, though the body eases round behind it (and the neck only turns so far).
     // Walking backward or sideways, the head turns toward the view only as far as a neck can; right round the back it looks along the body.
@@ -330,6 +354,17 @@ export class SelfView {
     c.setWings(mounted ? 0 : (s.wing ?? 0));
     c.roof = s.roof ?? 4;
     c.wingFlying = !mounted && !!s.winged;
+    c.setMotionClass(s.cls ?? null);
+    c.engaged = (!!s.engaged || this.forceEngaged) && !mounted;
+    // Which way it goes against the way it faces: it faces where it walks, but while it aims, blocks or swings it faces the crosshair and goes sideways or back.
+    if (s.vx !== undefined && s.vz !== undefined && s.speed > 0.3) {
+      const by = this.bodyYaw;
+      c.moveF = (-s.vx * Math.sin(by) - s.vz * Math.cos(by)) / s.speed;
+      c.moveR = (s.vx * Math.cos(by) - s.vz * Math.sin(by)) / s.speed;
+    } else {
+      c.moveF = 1;
+      c.moveR = 0;
+    }
     c.animate(dt, s.speed, this.turn, this.attack, load.hand !== 0, s.blocking && !mounted, s.vy, s.airborne, !!s.eating && !mounted);
     c.setArmor(s.armor);
     c.setHeld(load.hand, this.models);

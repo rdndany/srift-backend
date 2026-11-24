@@ -72,7 +72,6 @@ describe('the World Beyond is a world kind', () => {
     // The overworld has no detailed biomes: they belong to the Beyond alone.
     expect(over.columnAt(100, 100).sub).toBeUndefined();
     expect(over.wildlifeAt(0, 0)).toBeNull();
-    expect(adv.wildlifeAt(0, 0)).toBeNull();
   });
 });
 

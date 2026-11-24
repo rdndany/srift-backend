@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { disposeSculptGear, pulseSculptGlow } from './sculptGear';
 
 /**
  * What a Mage wears: a wizard's hat with a brim, a buckled band and a tip that droops, a robe of violet cloth with gold trim, wide sleeves,
@@ -25,6 +26,8 @@ export interface GearCtx {
   armR: THREE.Object3D;
   legL: THREE.Object3D;
   legR: THREE.Object3D;
+  /** The material of the figure's hair (it takes the colour of the hair on the skin): what a look builds of hair-coloured cubes is drawn with it. */
+  hair?: THREE.Material;
 }
 
 /** The cape's pieces from the neck down: each hangs from the one before and is turned a little less than the figure's stride asks of the first. */
@@ -166,9 +169,11 @@ function glow(name: string, color: number, opacity = 1): THREE.MeshBasicMaterial
 export function pulseMageGlow(t: number): void {
   const k = 0.88 + 0.12 * Math.sin(t * 2.6);
   for (const g of glows) g.mat.color.copy(g.base).multiplyScalar(k);
+  pulseSculptGlow(t);
 }
 
 export function disposeMageGear(): void {
+  disposeSculptGear();
   for (const m of materials.values()) m.dispose();
   materials.clear();
   glows.length = 0;
@@ -390,7 +395,7 @@ function propBall(parent: THREE.Object3D, name: string, at: V3, p: number, heart
   }
 }
 
-function buildProp(kind: 'staff' | 'wand' | 'orb'): THREE.Group {
+function buildProp(kind: 'staff' | 'wand' | 'orb' | 'ember_staff'): THREE.Group {
   const root = new THREE.Group();
   const inner = new THREE.Group();
   root.add(inner);
@@ -399,25 +404,42 @@ function buildProp(kind: 'staff' | 'wand' | 'orb'): THREE.Group {
   const leather = propMat('leather', 0x3e2819);
   const gold = propMat('gold', 0xf0c242);
   const goldDark = propMat('goldDark', 0xbe8c2c);
-  if (kind === 'staff') {
+  // The Hollow King's staff: the same shape in dark stone with lava in its rings, and a flame in the claw instead of the violet ball.
+  const ember = kind === 'ember_staff';
+  const stone = propMat('emberStone', 0x4a4256);
+  const stoneDark = propMat('emberStoneDark', 0x2a2432);
+  const stoneLight = propMat('emberStoneLight', 0x766a82);
+  const lava = propMat('emberLava', 0xff7a20);
+  const lavaHot = propMat('emberLavaHot', 0xffd054);
+  if (kind === 'staff' || ember) {
     // Upright, held low at the middle (the grip is a third of the way up the shaft, so the foot hangs just above the ground): a thin
     // shaft of two woods with a leather grip and three brass rings, a foot, and a head of a gold cup, four prongs and a tip round a violet ball.
     // The head is raised on a longer shaft, so the staff stands over the wearer's head.
     const TALL = 0.3;
-    for (let i = 0; i < 7; i++) propBox(inner, i % 2 ? woodDark : wood, [0.055, 0.26, 0.055], [0, -0.35 + 0.13 + i * 0.25, 0]);
+    for (let i = 0; i < 7; i++) propBox(inner, ember ? (i % 3 === 1 ? lava : i % 2 ? stoneDark : stone) : i % 2 ? woodDark : wood, [0.055, 0.26, 0.055], [0, -0.35 + 0.13 + i * 0.25, 0]);
     propBox(inner, leather, [0.075, 0.22, 0.075], [0, 0.34, 0]);
-    for (const y of [0.2, 0.48, 0.78]) propBox(inner, gold, [0.09, 0.035, 0.09], [0, y, 0]);
-    propBox(inner, gold, [0.075, 0.045, 0.075], [0, -0.37, 0]);
-    propBox(inner, goldDark, [0.1, 0.04, 0.1], [0, 1.15 + TALL, 0]);
-    propBox(inner, gold, [0.19, 0.04, 0.19], [0, 1.2 + TALL, 0]);
+    for (const y of [0.2, 0.48, 0.78]) propBox(inner, ember ? lava : gold, [0.09, 0.035, 0.09], [0, y, 0]);
+    propBox(inner, ember ? lava : gold, [0.075, 0.045, 0.075], [0, -0.37, 0]);
+    propBox(inner, ember ? stoneDark : goldDark, [0.1, 0.04, 0.1], [0, 1.15 + TALL, 0]);
+    propBox(inner, ember ? stoneLight : gold, [0.19, 0.04, 0.19], [0, 1.2 + TALL, 0]);
     for (const sx of [-1, 1]) {
       for (const sz of [-1, 1]) {
-        propBox(inner, sx * sz > 0 ? gold : goldDark, [0.036, 0.24, 0.036], [sx * 0.085, 1.34 + TALL, sz * 0.085]);
-        propBox(inner, gold, [0.036, 0.036, 0.036], [sx * 0.07, 1.48 + TALL, sz * 0.07]);
+        propBox(inner, ember ? (sx * sz > 0 ? stoneLight : stone) : sx * sz > 0 ? gold : goldDark, [0.036, 0.24, 0.036], [sx * 0.085, 1.34 + TALL, sz * 0.085]);
+        propBox(inner, ember ? lava : gold, [0.036, 0.036, 0.036], [sx * 0.07, 1.48 + TALL, sz * 0.07]);
       }
     }
-    propBall(inner, 'staffBall', [0, 1.34 + TALL, 0], 0.075, 0xf0e4ff, 0xc89cff, 0x9a5cf0, 0x6a38c0);
-    propBox(inner, gold, [0.05, 0.06, 0.05], [0, 1.52 + TALL, 0]);
+    if (ember) {
+      propBall(inner, 'emberBall', [0, 1.34 + TALL, 0], 0.075, 0xfff4cc, 0xffd054, 0xff7a20, 0xb83a18);
+      // Tongues of flame standing up out of the claw.
+      propBox(inner, lava, [0.07, 0.14, 0.07], [0, 1.58 + TALL, 0]);
+      propBox(inner, lavaHot, [0.04, 0.12, 0.04], [0, 1.7 + TALL, 0]);
+      propBox(inner, lava, [0.04, 0.09, 0.04], [0.07, 1.56 + TALL, 0.02]);
+      propBox(inner, lava, [0.04, 0.08, 0.04], [-0.06, 1.55 + TALL, -0.03]);
+      propBox(inner, lavaHot, [0.025, 0.05, 0.025], [0, 1.8 + TALL, 0]);
+    } else {
+      propBall(inner, 'staffBall', [0, 1.34 + TALL, 0], 0.075, 0xf0e4ff, 0xc89cff, 0x9a5cf0, 0x6a38c0);
+      propBox(inner, gold, [0.05, 0.06, 0.05], [0, 1.52 + TALL, 0]);
+    }
     // Standing straight up beside the hand, which is on the grip (the body keeps it level as the arm swings: see `Character.pose`).
     inner.rotation.set(0, 0, -0.04);
     inner.position.set(0, -0.38, -0.02);
@@ -443,7 +465,7 @@ function buildProp(kind: 'staff' | 'wand' | 'orb'): THREE.Group {
 }
 
 /** What a figure holds in its hand: a copy that shares the shapes and materials of the first, so nothing needs freeing for it. */
-export function mageProp(kind: 'staff' | 'wand' | 'orb'): THREE.Object3D {
+export function mageProp(kind: 'staff' | 'wand' | 'orb' | 'ember_staff'): THREE.Object3D {
   let p = props.get(kind);
   if (!p) {
     p = buildProp(kind);

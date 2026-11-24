@@ -73,7 +73,7 @@ describe('the Auction House in $SOLRIFT, through the real server', () => {
   function visit(p: { teleport: (x: number, y: number, z: number, a: number, b: number) => void; talkNpc: (m: never) => boolean }): void {
     const n = NPCS.find((x) => x.id === AUCTIONEER)!;
     p.teleport(n.x, generator.hubY + 1, n.z + 2, 0, 0);
-    for (let i = 0; i < 6; i++) server.room.tick();
+    for (let i = 0; i < 400 && (i < 6 || !server.room.realm.mobs.mobs.some((m) => m.kind === 'npc' && NPCS[m.variant].id === AUCTIONEER)); i++) server.room.tick();
     const mob = server.room.realm.mobs.mobs.find((m) => m.kind === 'npc' && NPCS[m.variant].id === AUCTIONEER)!;
     expect(p.talkNpc(mob as never)).toBe(true);
   }

@@ -1,0 +1,76 @@
+/* The writing of a sign: a plank with four lines, over the game. */
+#sign-editor-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+}
+#sign-editor {
+  width: min(92vw, 420px);
+  padding: 14px 16px 16px;
+  box-sizing: border-box;
+  font-family: 'Monocraft', 'Courier New', monospace;
+  background: linear-gradient(#231b11, #120d08);
+  border: 2px solid #0b0806;
+  box-shadow:
+    inset 0 0 0 2px #6d5420,
+    inset 0 0 0 3px #000,
+    0 10px 30px rgba(0, 0, 0, 0.7);
+}
+#sign-editor h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 400;
+  text-align: center;
+  color: #ffe9a8;
+  text-shadow: 1px 1px #000;
+}
+#sign-editor .sign-board {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  background: #b29058;
+  border: 3px solid #5c4524;
+  box-shadow: inset 0 0 0 2px #cdb07a;
+}
+#sign-editor .sign-line {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 3px 6px;
+  font: inherit;
+  font-size: 16px;
+  text-align: center;
+  color: #1a1209;
+  background: rgba(255, 255, 255, 0.12);
+  border: 0;
+  border-bottom: 2px solid rgba(60, 40, 14, 0.45);
+  outline: none;
+}
+#sign-editor .sign-line:focus {
+  background: rgba(255, 255, 255, 0.28);
+  border-bottom-color: #3a2406;
+}
+#sign-editor .sign-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+#sign-editor .sign-buttons button {
+  flex: 1;
+  padding: 7px 10px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  color: #f1e4c8;
+  text-shadow: 1px 1px 0 #000;
+  background: linear-gradient(#3a2d1a, #1f170d);
+  border: 2px solid #0b0806;
+  box-shadow: inset 0 0 0 1px #8a6424;
+}
+#sign-editor .sign-buttons button:hover {
+  color: #ffe49a;
+}

@@ -221,6 +221,39 @@ describe('the admin tools', () => {
     expect(watcher.notices()).toContain('[Admin] server restarts soon');
   });
 
+  it('spawns a creature by its id in front of the admin, and lists the ids', () => {
+    const { room, owner, events } = setup();
+    const p = room.player(owner.id!)!;
+    p.teleport(10.5, 80, 10.5);
+    owner.say('/spawn aurelion');
+    expect(owner.last()).toBe('Admin mode is off. Type /admin on.');
+    owner.say('/admin on');
+    owner.say('/spawn aurelion');
+    expect(owner.last()).toContain('King Aurelion (aurelion)');
+    const king = p.mobs.mobs.filter((m) => m.kind === 'aurelion');
+    expect(king).toHaveLength(1);
+    // in front of the player (yaw 0 faces -z), a few blocks away
+    expect(king[0].body.z).toBeLessThan(p.body.z - 2);
+    expect(Math.abs(king[0].body.x - p.body.x)).toBeLessThan(1);
+    p.yaw = Math.PI / 2; // faces -x
+    owner.say('/spawn pig 3');
+    const pigs = p.mobs.mobs.filter((m) => m.kind === 'pig');
+    expect(pigs).toHaveLength(3);
+    expect(pigs.every((m) => m.body.x < p.body.x - 2)).toBe(true);
+    owner.say('/spawn nothing_like_this');
+    expect(owner.last()).toContain('No mob with the id');
+    owner.say('/spawn aurel');
+    expect(owner.last()).toContain('Which one? aurelion');
+    owner.say('/mobs aurel');
+    expect(owner.last()).toContain('aurelion');
+    expect(events.filter((e) => e.action === 'spawn').map((e) => e.detail)).toEqual(['aurelion x1', 'pig x3']);
+    // a stranger is told the commands do not exist
+    const other = new Client(room);
+    other.join('stranger', null, OTHER_WALLET);
+    other.say('/spawn aurelion');
+    expect(other.last()).toBe('Unknown command: /spawn');
+  });
+
   it('tpto and bring move players', () => {
     const { room, owner } = setup();
     owner.say('/admin on');

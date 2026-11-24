@@ -1,13 +1,16 @@
 import type * as THREE from 'three';
 import {
   AnvilMenu,
+  B,
   BLOCKS,
   EnchantMenu,
   GrindstoneMenu,
   TradeMenu,
+  I,
   allItems,
   makeGenerator,
   makeStack,
+  signId,
   mountItemId,
   type Command,
   type GameSession,
@@ -19,6 +22,7 @@ import {
   type WorldKind,
   BEYOND_BIOMES,
   BeyondWorldGenerator,
+  MOBS,
 } from '@solrift/shared';
 import { bumpUi, useUi } from '../ui/store';
 import type { AbilityFx } from './abilityFx';
@@ -35,6 +39,7 @@ import type { DeathFx } from './deathFx';
 import type { HeldItem } from './heldItem';
 import type { Hud } from './hud';
 import type { Input } from './input';
+import type { LandClient } from './landClient';
 import type { MapData } from './mapData';
 import type { Particles } from './particles';
 import type { PlayerRenderer } from './playerRenderer';
@@ -43,6 +48,7 @@ import type { Rain } from './rain';
 import type { RemoteSession } from './remote';
 import { saveBridge } from './saveBridge';
 import type { SelfView } from './selfView';
+import type { SignBoards } from './signBoards';
 import type { SunShadows } from './shadows';
 import type { Sky } from './sky';
 import type { LocalSaveStore } from './storage';
@@ -103,6 +109,9 @@ export interface DebugParts {
   die(variant: number): void;
   /** Hand events to the client as if the server had sent them (a `bossFx`, say). */
   deliver(events: SessionEvent[]): void;
+  /** The Land Surveyor's client (see landClient.ts). */
+  land: LandClient;
+  signBoards: SignBoards;
 }
 
 /**
@@ -212,6 +221,15 @@ export function installDebugHooks(parts: DebugParts): void {
     darkNames: () => ({ ambient: [...RENDERABLE.ambient], boss: [...RENDERABLE.boss] }),
     /** Hand events to the client as if the server had sent them. */
     deliver: (events: SessionEvent[]) => parts.deliver(events),
+    /** The item of an oak sign, and what is written on the board drawn for signs (how many, and whether the editor is up). */
+    signItem: () => signId(0, 0, false),
+    signs: () => ({ fence: B.FENCE, boards: parts.signBoards.count, editing: useUi.getState().signEdit, near: parts.remote ? parts.remote.signs : (parts.local?.blockEntities.signsNear(body.x, body.z, 48) ?? []) }),
+    land: () => ({ holding: parts.land.holding, corners: parts.land.markers.corners.map((c) => [c[0], c[1]]), closed: parts.land.markers.closed, stakes: parts.land.fx.stakesShown, drawn: parts.land.fx.root.visible, mine: useUi.getState().land.mine.map((c) => ({ id: c.id, name: c.name, status: c.status, area: c.area, paid: c.paid, box: c.box })), result: useUi.getState().land.result, nearby: useUi.getState().land.nearby.length, zones: parts.land.zones.map((z) => ({ id: z.id, name: z.name, kind: z.kind, box: z.box })), look: useUi.getState().land.look }),
+    /** Play one of the Land Surveyor's moments in the hand (plant, pluck, seal, claim), or set how its gem looks (a tone: idle, good, warn, bad), for looking at them. */
+    surveyor: (what: 'plant' | 'pluck' | 'seal' | 'claim' | 'idle' | 'good' | 'warn' | 'bad') => {
+      if (what === 'plant' || what === 'pluck' || what === 'seal' || what === 'claim') parts.hand.surveyor.push(what);
+      else parts.hand.surveyor.tone = what;
+    },
     stats: () => world.refreshStats(),
     /** How crowded the scene is and what it costs: draw calls of the last frame, how the other players are drawn. */
     crowd: () => ({ calls: parts.drawn().calls, triangles: parts.drawn().triangles, players: players.stats(), fps: parts.drawn().fps }),
@@ -228,6 +246,7 @@ export function installDebugHooks(parts: DebugParts): void {
     /** A plain piece of gear already raised to +`u`. */
     giveGear: (id: number, u: number) => act(() => L().giveOrDrop({ ...makeStack(id, 1), gear: { r: 0, l: 1, s: [], u } })),
     coins: () => session.coins,
+    heldId: () => session.held?.id ?? 0,
     addCoins: (n: number) => act(() => L().addCoins(n)),
     clearInventory: () => act(() => L().clearInventory()),
     inventory: () => session.inventory.toJSON(),
@@ -251,11 +270,24 @@ export function installDebugHooks(parts: DebugParts): void {
     bowDraw: () => session.bowDraw,
     /** Pretend the pointer is locked (headless browsers cannot lock it). */
     forceLock: () => void (input.locked = true),
+    /** Mark corners with the Surveyor without aiming (replacing what was marked), and close the shape when asked (for screenshots of how straight it is). */
+    landMark: (corners: [number, number][], close = false) => {
+      const m = parts.land.markers;
+      m.clear();
+      for (const [x, z] of corners) m.place(x, z);
+      if (close) m.close();
+    },
+    /** The pointer is let go, as the browser does for Escape (then fire a `pointerlockchange` on the document: the page is told as it would be). */
+    unlock: () => void (input.locked = false),
     /** Hold the first-person swing at one moment of it (0..1, or null to let it play), and fire the guard's hit reaction. */
     holdSwing: (t: number | null, variant = 0) => hand.holdSwing(t, variant),
     blockHit: (parry = false) => hand.blockHit(parry),
     /** Start one of the idle animations of the figure (1 sit, 2 stretch, 3 look around). */
     idle: (kind: number) => selfView.idle(kind),
+    /** Stand to fight, as if a monster were near (true), or not (false). */
+    engage: (on: boolean) => void (selfView.forceEngaged = on),
+    /** Draw the figure turned by an angle (radians) from where it faces, to look at it from the side, the front or three-quarters. */
+    turnFigure: (a: number) => void (selfView.viewTurn = a),
     /** Break your own body into cubes now (0 burst, 1 crumble, 2 ascend; else random), for a look at the death effects. */
     die: (variant = -1) => {
       parts.die(variant);
@@ -315,6 +347,8 @@ export function installDebugHooks(parts: DebugParts): void {
     equipHeld: () => act(() => L().equipHeld()),
     /** Put an item in an armor slot (0 helmet .. 3 boots), or empty it with id 0: how the clothes of a class are taken off. */
     setArmorSlot: (slot: number, id: number) => act(() => L().armor.set(slot, id ? makeStack(id, 1) : null)),
+    /** Wear the wings of a number (1 + the place in WINGS, 0: take them off), as the wing slot of the inventory does. */
+    wearWings: (n: number) => act(() => L().wingSlot.set(0, n ? makeStack(I.WING_BASE + n - 1, 1) : null)),
     hurtByMob: (amount: number) => act(() => L().hurtByMob(amount, 0, 0, 'zombie')),
     // ---- shield hooks ----
     /** A melee hit whose knockback points along (kx, kz), i.e. from the opposite side. */
@@ -451,6 +485,9 @@ export function installDebugHooks(parts: DebugParts): void {
         love: m.love ?? 0,
       })),
     clearMobs: () => L().clearMobs(),
+    /** The live mob (not a copy) and a kind's definition, for scripts that drive a mob's body each frame (scripts/creature-look.mjs). Debugging only. */
+    rawMob: (id: number) => session.mobs.mobs.find((mob) => mob.id === id),
+    mobDef: (kind: MobKind) => MOBS[kind],
     /**
      * Pins properties of a mob (casting: true, hurtTime: 0, yaw: 0, speedNow: 0 ... and pos: [x, y, z]) so that the game cannot change them,
      * for pictures of a pose; holdMob(id) lets go. Debugging only.

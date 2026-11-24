@@ -45,7 +45,6 @@ import {
   outfitSetOfItem,
   outfitsOfClass,
   wornCode,
-  plainTip,
   professionName,
   recipeLayout,
   tooltipLines,

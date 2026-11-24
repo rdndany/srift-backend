@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { OutfitDef } from '@solrift/shared';
-import { DEG, SetBuilder, hex, jitter, lerp, lit, noise, paint16, rgbs, scale, trimTexture, type OrbiterSpec, type RGB, type SetCtx, type SetRig, type SparkKind, type V3 } from './setKit';
+import { DEG, SetBuilder, hex, jitter, lerp, lit, noise, paint16, rgbs, scale, trimTexture, type OrbiterSpec, type RGB, type SetCtx, type SetRig, type SparkKind } from './setKit';
 
 /**
  * The Mage's sets: long robes in cloth that has stars, flames or runes worked into it, with a sash, a hem of light and sleeves that open like bells; a
@@ -147,6 +147,20 @@ function liningTexture(def: OutfitDef): THREE.CanvasTexture {
 
 // ---- the set ----------------------------------------------------------------------------------------------------------------
 
+export type MagePattern = Pattern;
+
+/** What the skin needs to know of a set: the pattern of its robe, and whether its head is in a hood (painted, and over the hair). */
+export function mageLook(id: string): { pattern: MagePattern; hood: boolean } {
+  const st = STYLES[id] ?? STYLES.starweaver;
+  return { pattern: st.pattern, hood: st.hat === 'hood' };
+}
+
+/**
+ * The robe is painted on the body (see `outfitSkin.ts`): the bodice, the neckline, the sash, the sleeves and the cloth of the legs are the colours of
+ * the skin. What is built of blocks is only what stands clear of it: the pieces of the skirt that hang on the legs (so they move with the stride and never
+ * into the other leg), the bells of the sleeves, the caps on the shoulders, the collar, the cloak (kept narrower than the body, so an arm never swings
+ * through it), the hat, the hood, the horns, and the magic.
+ */
 export function dressMageSet(ctx: SetCtx, def: OutfitDef): SetRig {
   const st = STYLES[def.id] ?? STYLES.starweaver;
   const b = new SetBuilder(ctx, def);
@@ -158,74 +172,51 @@ export function dressMageSet(ctx: SetCtx, def: OutfitDef): SetRig {
   const chain = b.chain.bind(b);
   const hs = st.hatSize;
 
-  // ---- the bodice, with a deep neckline edged in metal, a sash with a gem, and its tails.
-  put(t, robe, [0.55, 0.66, 0.31], [0, 1.17, 0]);
-  for (const s of [-1, 1]) {
-    put(t, trim, [0.05, 0.44, 0.03], [s * 0.1, 1.27, -0.165], [0, 0, -s * 0.32]); // the edge of the neckline
-    put(t, edge, [0.02, 0.4, 0.015], [s * 0.1, 1.27, -0.175], [0, 0, -s * 0.32]);
-  }
-  put(t, lining, [0.2, 0.34, 0.02], [0, 1.32, -0.162]); // what shows in the neckline
-  put(t, trim, [0.58, 0.1, 0.34], [0, 0.88, 0]);
-  put(t, trim, [0.16, 0.16, 0.04], [0, 0.88, -0.18]);
-  put(t, gem, [0.09, 0.09, 0.05], [0, 0.88, -0.2]);
-  put(t, trim, [0.58, 0.04, 0.34], [0, 1.0, 0]);
-  put(t, gem, [0.06, 0.06, 0.04], [0, 1.2, 0.17]); // a gem between the shoulder blades
+  // ---- the sash: a buckle with a gem where the painted one is, and a gem between the shoulder blades.
+  put(t, trim, [0.15, 0.12, 0.02], [0, 0.906, -0.135]);
+  put(t, gem, [0.07, 0.07, 0.03], [0, 0.906, -0.16]);
+  put(t, gem, [0.06, 0.06, 0.03], [0, 1.2, 0.14]);
 
-  // ---- the front of the robe hangs in two hinged pieces from the sash, so that it stirs, and a lit hem on the last.
-  b.hang(t, [0, 0.84, -0.215], 2, 0.2, (g, i) => {
-    put(g, lining, [0.3, 0.2, 0.04], [0, -0.1, 0]);
-    if (i === 1) {
-      put(g, trim, [0.31, 0.035, 0.05], [0, -0.2, 0]);
-      put(g, edge, [0.31, 0.015, 0.055], [0, -0.215, 0]);
-      put(g, gem, [0.06, 0.06, 0.03], [0, -0.1, -0.03]);
-    }
-  }, 0.55, 0.05);
-
-  // ---- the skirt: each leg wears a piece of the robe that flares to the hem, so it moves with the stride; the hem is metal and light.
+  // ---- the skirt: each leg wears a front and a back of the robe, to the painted hem, with a hem of metal and light. They hang on the leg, so they stir
+  // with the stride and, being no wider than the leg, never meet.
   for (const leg of [ctx.legL, ctx.legR]) {
-    put(leg, robe, [0.36, 0.7, 0.38], [0, -0.35, 0]);
-    put(leg, lining, [0.38, 0.1, 0.4], [0, -0.64, 0]);
-    put(leg, robe, [0.44, 0.1, 0.46], [0, -0.68, 0]); // the flare
-    put(leg, trim, [0.45, 0.035, 0.47], [0, -0.735, 0]);
-    put(leg, edge, [0.46, 0.015, 0.48], [0, -0.745, 0]);
-    put(leg, trim, [0.37, 0.025, 0.39], [0, -0.3, 0]);
+    for (const side of [-1, 1]) {
+      put(leg, robe, [0.245, 0.54, 0.036], [0, -0.27, side * 0.143]);
+      put(leg, trim, [0.245, 0.03, 0.04], [0, -0.545, side * 0.145]);
+      put(leg, edge, [0.245, 0.012, 0.046], [0, -0.564, side * 0.145]);
+    }
+    put(leg, gem, [0.05, 0.05, 0.02], [0, -0.27, -0.168]);
   }
 
-  // ---- sleeves that open like bells, a cuff with a lit edge, and a yoke on the shoulder.
+  // ---- sleeves that open like bells (the bell grows outward, away from the body), a cuff with a lit edge, and a cap on the shoulder.
   for (const [arm, s] of [[ctx.armL, -1], [ctx.armR, 1]] as const) {
-    put(arm, robe, [0.34, 0.12, 0.34], [0, 0.03, 0]);
-    put(arm, trim, [0.35, 0.025, 0.35], [0, -0.04, 0]);
-    put(arm, robe, [0.3, 0.42, 0.3], [0, -0.22, 0]);
-    put(arm, lining, [0.34, 0.28, 0.34], [0, -0.5, 0]);
-    put(arm, robe, [0.4, 0.14, 0.4], [0, -0.62, 0]); // the bell
-    put(arm, trim, [0.41, 0.035, 0.41], [0, -0.7, 0]);
-    put(arm, edge, [0.42, 0.015, 0.42], [0, -0.715, 0]);
-    put(arm, gem, [0.05, 0.05, 0.04], [s * 0.0, -0.62, -0.21]);
+    put(arm, robe, [0.33, 0.12, 0.33], [s * 0.05, -0.56, 0]);
+    put(arm, trim, [0.34, 0.028, 0.34], [s * 0.05, -0.63, 0]);
+    put(arm, edge, [0.35, 0.012, 0.35], [s * 0.05, -0.65, 0]);
+    put(arm, robe, [0.34, 0.07, 0.34], [s * 0.05, 0.035, 0]);
+    put(arm, trim, [0.35, 0.02, 0.35], [s * 0.05, 0, 0]);
   }
 
   // ---- the collar: stands up behind the neck and fans out; in the tall kind the edge is lit.
   if (st.collar > 0) {
     const tall = st.collar === 2;
-    put(t, lining, [0.54, tall ? 0.46 : 0.28, 0.06], [0, tall ? 1.74 : 1.64, 0.32], [-0.25, 0, 0]);
-    put(t, trim, [0.56, 0.03, 0.08], [0, tall ? 1.96 : 1.78, 0.39], [-0.25, 0, 0]);
+    put(t, lining, [0.5, tall ? 0.46 : 0.28, 0.05], [0, tall ? 1.74 : 1.64, 0.3], [-0.2, 0, 0]);
+    put(t, trim, [0.52, 0.03, 0.07], [0, tall ? 1.96 : 1.78, 0.355], [-0.2, 0, 0]);
     for (const s of [-1, 1]) {
-      chain(t, lining, tall ? edge : null, [s * 0.2, 1.56, 0.3], [-0.2, 0, -s * 38 * DEG], tall ? 3 : 2, tall ? 0.44 : 0.26, 0.14, 0.05, 0.05, [0, 0, s * 10 * DEG], s);
+      chain(t, lining, tall ? edge : null, [s * 0.2, 1.56, 0.28], [-0.2, 0, -s * 38 * DEG], tall ? 3 : 2, tall ? 0.44 : 0.26, 0.14, 0.05, 0.05, [0, 0, s * 10 * DEG], s);
     }
   }
 
-  // ---- the mantle: over the shoulders, a rim of metal and light; and then what hangs or rises from it.
-  put(t, lining, [0.82, 0.1, 0.44], [0, 1.5, 0]);
-  put(t, trim, [0.84, 0.03, 0.46], [0, 1.56, 0]);
-  put(t, edge, [0.83, 0.015, 0.45], [0, 1.45, 0]);
+  // ---- the mantle: what hangs or rises from the shoulders.
   if (st.mantle === 'cape') {
-    // A cloak down the back in three hinged pieces, wider at each, with a lit hem.
-    b.hang(t, [0, 1.46, 0.245], 3, 0.34, (g, i) => {
-      const w = 0.6 + i * 0.08;
+    // A cloak down the back in three hinged pieces with a lit hem. No wider than the body: an arm that swings back passes beside it, not through it.
+    b.hang(t, [0, 1.46, 0.17], 3, 0.34, (g, i) => {
+      const w = 0.46 + i * 0.02;
       put(g, lining, [w, 0.35, 0.04], [0, -0.17, 0]);
-      put(g, robe, [w - 0.14, 0.33, 0.05], [0, -0.17, 0.01]);
+      put(g, robe, [w - 0.1, 0.33, 0.05], [0, -0.17, 0.012]);
       if (i === 2) {
         put(g, trim, [w + 0.01, 0.035, 0.06], [0, -0.35, 0]);
-        put(g, edge, [w + 0.01, 0.015, 0.065], [0, -0.365, 0]);
+        put(g, edge, [w + 0.01, 0.015, 0.067], [0, -0.365, 0]);
         put(g, gem, [0.07, 0.07, 0.04], [0, -0.18, 0.04]);
       }
     }, 0.7, 0.07, 1);
@@ -234,89 +225,84 @@ export function dressMageSet(ctx: SetCtx, def: OutfitDef): SetRig {
     for (const s of [-1, 1]) {
       for (let i = 0; i < 3; i++) {
         const f = i / 2;
-        chain(t, trim, edge, [s * (0.3 + f * 0.1), 1.54, 0.02 + f * 0.08], [0.1 - f * 0.3, 0, -s * (20 + f * 45) * DEG], 4, 0.4 + (1 - f) * 0.15, 0.1, 0.02, 0.07, [0, 0, s * 8 * DEG], s);
+        chain(t, trim, edge, [s * (0.32 + f * 0.1), 1.52, 0.02 + f * 0.08], [0.1 - f * 0.3, 0, -s * (20 + f * 45) * DEG], 4, 0.4 + (1 - f) * 0.15, 0.1, 0.02, 0.07, [0, 0, s * 8 * DEG], s);
       }
     }
   } else if (st.mantle === 'tatter') {
     // Ragged strips of grave-cloth from the shoulders and the back, each of a different length.
-    for (let k = 0; k < 7; k++) {
-      const x = (k - 3) * 0.1;
+    for (let k = 0; k < 5; k++) {
+      const x = (k - 2) * 0.1;
       const len = 3 + (k % 3);
-      b.hang(t, [x * 1.1, 1.44, 0.2], len, 0.24, (g) => {
-        put(g, robe, [0.1, 0.25, 0.03], [0, -0.12, 0]);
-        put(g, edge, [0.02, 0.25, 0.035], [0.045, -0.12, 0]);
+      b.hang(t, [x, 1.44, 0.17], len, 0.24, (g) => {
+        put(g, robe, [0.09, 0.25, 0.03], [0, -0.12, 0]);
+        put(g, edge, [0.02, 0.25, 0.036], [0.035, -0.12, 0]);
       }, 0.8, 0.09, k * 0.9);
     }
   }
 
-  // ---- what the head wears.
-  const flat = (y: number, w: number, d: number, mat: THREE.Material): void => put(head, mat, [w, 0.04, d], [0, y, 0]);
+  // ---- what the head wears. (The top of the head is at 0.5 and the blocks that stand on it keep off that height: a face of a block exactly there fights the head's.)
   if (st.hat === 'witch') {
-    flat(0.36, 0.98 * hs, 0.98 * hs, robe);
-    put(head, edge, [1.0 * hs, 0.012, 0.02], [0, 0.375, -0.49 * hs]);
-    put(head, edge, [1.0 * hs, 0.012, 0.02], [0, 0.375, 0.49 * hs]);
-    put(head, edge, [0.02, 0.012, 0.98 * hs], [-0.5 * hs, 0.375, 0]);
-    put(head, edge, [0.02, 0.012, 0.98 * hs], [0.5 * hs, 0.375, 0]);
-    put(head, trim, [0.6, 0.1, 0.6], [0, 0.43, 0]);
-    put(head, gem, [0.08, 0.08, 0.04], [0, 0.43, -0.31]);
-    chain(head, robe, core, [0, 0.48, 0.02], [-0.18, 0, 0], 7, 0.95 * hs, 0.5, 0.05, 0.5, [0.1, 0, 0], 1, undefined, true);
-    put(head, trim, [0.3, 0.04, 0.3], [0, 0.48, 0.0]);
+    // A brim cut like a disc from three slabs, each a hair higher than the last, a band, and the cone.
+    put(head, robe, [0.98 * hs, 0.04, 0.62 * hs], [0, 0.43, 0]);
+    put(head, robe, [0.62 * hs, 0.04, 0.98 * hs], [0, 0.435, 0]);
+    put(head, robe, [0.78 * hs, 0.04, 0.78 * hs], [0, 0.44, 0], [0, Math.PI / 4, 0]);
+    put(head, trim, [0.6, 0.1, 0.6], [0, 0.51, 0]);
+    put(head, gem, [0.08, 0.08, 0.03], [0, 0.51, -0.31]);
+    chain(head, robe, core, [0, 0.54, 0.02], [-0.18, 0, 0], 7, 0.95 * hs, 0.5, 0.05, 0.5, [0.1, 0, 0], 1, undefined, true);
   } else if (st.hat === 'mitre') {
-    put(head, trim, [0.62, 0.1, 0.62], [0, 0.4, 0]);
-    put(head, robe, [0.58, 0.14, 0.58], [0, 0.5, 0]);
-    chain(head, robe, edge, [0, 0.56, -0.22], [0.2, 0, 0], 5, 0.72 * hs, 0.5, 0.1, 0.06, [0.07, 0, 0]);
-    chain(head, robe, edge, [0, 0.56, 0.22], [-0.2, 0, 0], 5, 0.72 * hs, 0.5, 0.1, 0.06, [-0.07, 0, 0]);
-    put(head, trim, [0.56, 0.04, 0.5], [0, 0.57, 0]);
-    put(head, gem, [0.09, 0.14, 0.05], [0, 0.6, -0.27]);
-    put(head, core, [0.03, 0.4, 0.02], [0, 0.82, -0.25], [0.12, 0, 0]);
-    for (const s of [-1, 1]) put(head, lining, [0.06, 0.4, 0.14], [s * 0.32, 0.1, 0.18]); // two bands that fall behind the ears
+    put(head, trim, [0.62, 0.1, 0.62], [0, 0.46, 0]);
+    put(head, robe, [0.58, 0.12, 0.58], [0, 0.57, 0]);
+    chain(head, robe, edge, [0, 0.63, -0.22], [0.2, 0, 0], 5, 0.72 * hs, 0.5, 0.1, 0.06, [0.07, 0, 0]);
+    chain(head, robe, edge, [0, 0.63, 0.22], [-0.2, 0, 0], 5, 0.72 * hs, 0.5, 0.1, 0.06, [-0.07, 0, 0]);
+    put(head, trim, [0.56, 0.04, 0.5], [0, 0.65, 0]);
+    put(head, gem, [0.09, 0.14, 0.04], [0, 0.62, -0.285]);
+    put(head, core, [0.03, 0.4, 0.02], [0, 0.88, -0.25], [0.12, 0, 0]);
+    for (const s of [-1, 1]) put(head, lining, [0.05, 0.4, 0.14], [s * 0.285, 0.12, 0.18]); // two bands that fall behind the ears
   } else if (st.hat === 'hood') {
-    put(head, robe, [0.62, 0.14, 0.64], [0, 0.42, 0.01]);
-    for (const s of [-1, 1]) {
-      put(head, robe, [0.06, 0.58, 0.5], [s * 0.31, 0.1, 0.06]);
-      put(head, edge, [0.02, 0.5, 0.025], [s * 0.3, 0.12, -0.19]);
-    }
-    put(head, robe, [0.62, 0.6, 0.06], [0, 0.1, 0.32]);
-    put(head, trim, [0.62, 0.07, 0.06], [0, 0.33, -0.3]);
-    put(head, gem, [0.06, 0.06, 0.04], [0, 0.33, -0.335]);
-    chain(head, robe, null, [0, 0.46, 0.14], [-0.5, 0, 0], 4, 0.5, 0.34, 0.05, 0.34, [-0.12, 0, 0], 1, undefined, true); // the point of the hood
+    // The hood is painted on the head; its thickness is a lining on the sides and the back, a slab on top, a band at the brow, and the point behind.
+    for (const s of [-1, 1]) put(head, robe, [0.03, 0.46, 0.5], [s * 0.265, 0.25, 0.04]);
+    put(head, robe, [0.5, 0.46, 0.03], [0, 0.25, 0.265]);
+    put(head, robe, [0.56, 0.03, 0.58], [0, 0.515, 0.015]);
+    put(head, trim, [0.56, 0.05, 0.02], [0, 0.345, -0.26]);
+    put(head, gem, [0.06, 0.06, 0.02], [0, 0.345, -0.278]);
+    chain(head, robe, null, [0, 0.52, 0.14], [-0.5, 0, 0], 4, 0.5, 0.34, 0.05, 0.34, [-0.12, 0, 0], 1, undefined, true); // the point of the hood
     if (st.flames) {
       // A crest of flame: tongues of light that lick up from the crown of the hood.
       for (let i = 0; i < 5; i++) {
         const f = i / 4;
-        chain(head, trim, core, [(f - 0.5) * 0.4, 0.5, -0.1 + Math.abs(f - 0.5) * 0.1], [-0.15 + (Math.abs(f - 0.5)) * 0.1, 0, -(f - 0.5) * 0.7], 4, 0.4 + (1 - Math.abs(f - 0.5) * 2) * 0.28, 0.1, 0.02, 0.06, [0.03, 0, (f - 0.5) * 0.3], 1);
+        chain(head, trim, core, [(f - 0.5) * 0.4, 0.53, -0.1 + Math.abs(f - 0.5) * 0.1], [-0.15 + (Math.abs(f - 0.5)) * 0.1, 0, -(f - 0.5) * 0.7], 4, 0.4 + (1 - Math.abs(f - 0.5) * 2) * 0.28, 0.1, 0.02, 0.06, [0.03, 0, (f - 0.5) * 0.3], 1);
       }
     }
   } else if (st.hat === 'circlet') {
-    put(head, trim, [0.6, 0.07, 0.6], [0, 0.35, 0]);
-    put(head, edge, [0.61, 0.015, 0.61], [0, 0.31, 0]);
-    put(head, gem, [0.1, 0.1, 0.05], [0, 0.36, -0.31]);
+    put(head, trim, [0.58, 0.06, 0.58], [0, 0.365, 0]);
+    put(head, edge, [0.585, 0.012, 0.585], [0, 0.325, 0]);
+    put(head, gem, [0.1, 0.1, 0.03], [0, 0.365, -0.3]);
     // Two horns that rise from the brow and curve toward each other: a crescent, with a gem in the middle.
     for (const s of [-1, 1]) {
-      chain(head, trim, edge, [s * 0.05, 0.38, -0.31], [0, 0, -s * 24 * DEG], 6, 0.5 * hs, 0.1, 0.025, 0.06, [0, 0, s * 14 * DEG], s);
+      chain(head, trim, edge, [s * 0.05, 0.4, -0.29], [0, 0, -s * 24 * DEG], 6, 0.5 * hs, 0.1, 0.025, 0.06, [0, 0, s * 14 * DEG], s);
     }
-    for (const s of [-1, 1]) chain(head, trim, core, [s * 0.3, 0.4, 0], [-0.1, 0, -s * 8 * DEG], 3, 0.24 * hs, 0.05, 0.02, 0.05, [0, 0, s * 8 * DEG], s);
+    for (const s of [-1, 1]) chain(head, trim, core, [s * 0.28, 0.4, 0], [-0.1, 0, -s * 8 * DEG], 3, 0.24 * hs, 0.05, 0.02, 0.05, [0, 0, s * 8 * DEG], s);
   } else if (st.hat === 'skull') {
-    put(head, trim, [0.62, 0.08, 0.62], [0, 0.36, 0]);
+    put(head, trim, [0.58, 0.07, 0.58], [0, 0.37, 0]);
     // A skull on the brow with lit eyes, and a ring of bone spikes round the crown.
-    put(head, trim, [0.24, 0.2, 0.1], [0, 0.5, -0.31]);
-    put(head, trim, [0.16, 0.1, 0.1], [0, 0.37, -0.31]);
-    put(head, core, [0.05, 0.06, 0.02], [-0.06, 0.52, -0.365]);
-    put(head, core, [0.05, 0.06, 0.02], [0.06, 0.52, -0.365]);
-    put(head, lining, [0.025, 0.05, 0.02], [0, 0.43, -0.365]);
+    put(head, trim, [0.24, 0.2, 0.06], [0, 0.5, -0.28]);
+    put(head, trim, [0.16, 0.1, 0.06], [0, 0.37, -0.28]);
+    put(head, core, [0.05, 0.06, 0.02], [-0.06, 0.52, -0.32]);
+    put(head, core, [0.05, 0.06, 0.02], [0.06, 0.52, -0.32]);
+    put(head, lining, [0.025, 0.05, 0.02], [0, 0.43, -0.32]);
     for (let i = 0; i < 6; i++) {
       const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
       const px = Math.sin(a) * 0.27;
       const pz = Math.cos(a) * 0.27;
       if (pz < -0.2) continue;
-      chain(head, trim, core, [px, 0.4, pz], [Math.cos(a) * 0.25, 0, -Math.sin(a) * 0.25], 3, (0.28 + (i % 2) * 0.16) * hs, 0.09, 0.02, 0.09, [0, 0, 0]);
+      chain(head, trim, core, [px, 0.47, pz], [Math.cos(a) * 0.25, 0, -Math.sin(a) * 0.25], 3, (0.28 + (i % 2) * 0.16) * hs, 0.09, 0.02, 0.09, [0, 0, 0]);
     }
   }
   if (st.horns) {
     // Horns that grow from the temples, sweep out and back and curl up.
     for (const s of [-1, 1]) {
       for (let k = 0; k < st.horns; k++) {
-        chain(head, trim, edge, [s * 0.3, 0.44 - k * 0.12, 0.02], [0.45, 0, -s * (58 + k * 24) * DEG], 6, (0.62 - k * 0.14) * hs, 0.13, 0.025, 0.1, [0.03, 0, s * (15 - k * 3) * DEG], s);
+        chain(head, trim, edge, [s * 0.27, 0.44 - k * 0.12, 0.02], [0.45, 0, -s * (58 + k * 24) * DEG], 6, (0.62 - k * 0.14) * hs, 0.13, 0.025, 0.1, [0.03, 0, s * (15 - k * 3) * DEG], s);
       }
     }
   }

@@ -747,3 +747,45 @@
 #home .fp.tk .tk-tier .tk-pays {
   color: #ffe39a;
 }
+
+/* ---- the way to the Shop (what is spent is bought there) ---- */
+#home .fp.tk .tk-toshop {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 24px;
+  margin-top: 18px;
+  padding: 16px 18px;
+  background: rgba(0, 0, 0, 0.32);
+  border: 1px solid rgba(169, 107, 255, 0.35);
+  border-radius: 6px;
+}
+#home .fp.tk .tk-toshop span {
+  display: grid;
+  gap: 3px;
+}
+#home .fp.tk .tk-toshop b {
+  font-weight: 400;
+  font-size: 15px;
+  color: #ffe9a8;
+}
+#home .fp.tk .tk-toshop small {
+  font-family: var(--body);
+  font-size: 13px;
+  color: var(--muted);
+}
+#home .fp.tk .tk-toshop button {
+  padding: 11px 18px;
+  border: none;
+  font-family: var(--pixel);
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  color: #1c1230;
+  background: linear-gradient(#e0c6ff, #a56cf5);
+  box-shadow: inset 0 0 0 2px #2a1049;
+  cursor: pointer;
+}
+#home .fp.tk .tk-toshop button:hover {
+  filter: brightness(1.1);
+}

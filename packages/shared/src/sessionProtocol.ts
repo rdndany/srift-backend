@@ -2,6 +2,8 @@ import { ABILITY_SLOTS, type AbilityId } from './abilities';
 import { AUCTION_CATEGORIES, AUCTION_HOURS, AUCTION_SORTS, cleanQuery, type AuctionCommand, type AuctionHours, type AuctionView } from './auction';
 import type { SoundKind } from './blocks';
 import type { BountyTier, BountyView } from './bounties';
+import { parseLandCommand, type LandCommand, type LandEvent } from './landProtocol';
+import { cleanSignLines } from './signText';
 import { STASH_MAX_SLOTS, type StashCommand, type StashView } from './stash';
 import { MAX_POINTS, ATTR_KEYS, type AttrKey } from './statPoints';
 import type { ClassId } from './classes';
@@ -95,6 +97,8 @@ export type Command =
   | ({ t: 'auction' } & AuctionCommand)
   /** At the Stashkeeper: put an item of the inventory into the wallet's stash, or take one out (see stash.ts). */
   | ({ t: 'stash' } & StashCommand)
+  /** Land claims (see landProtocol.ts): price a shape, buy it, manage it. The server prices, judges and sells; this only asks. */
+  | ({ t: 'land' } & LandCommand)
   /** The party (see party.ts): invite a player, answer an invitation, leave, remove a member or hand over the lead. */
   | { t: 'party'; a: PartyAction; name?: string }
   /** Use the ability on a button of the ability bar (0..3). Only the button: what it does, to what and for how much is the server's to decide. */
@@ -103,7 +107,9 @@ export type Command =
   | { t: 'mount' }
   /** Spend `n` of the stat points a level gives on a stat (see statPoints.ts), or take them all back to spend again. */
   | { t: 'stat'; stat: AttrKey; n: number }
-  | { t: 'statReset' };
+  | { t: 'statReset' }
+  /** Write on the sign at x, y, z (the four lines typed in its editor, or none to leave it as it is). The server cleans the text and says whether the player may write there. */
+  | { t: 'sign'; x: number; y: number; z: number; lines: string[] };
 
 /** What a class player's interface needs to know about their class (sent with every snapshot, so a cooldown on the bar is the server's). */
 export interface ClassView {
@@ -176,7 +182,7 @@ export type SessionEvent =
   | { t: 'boss'; text: string; kind: 'yell' | 'warn' }
   /** A rift: it is tearing open (`omen`), opens, sends the next wave, is sealed or collapses. Shown across the screen, with its own sound; `grade` colours it. */
   | { t: 'rift'; what: 'omen' | 'open' | 'wave' | 'sealed' | 'collapsed'; grade: 'uncommon' | 'rare' | 'epic'; text: string }
-  /** The Gilded Tide, the invasion every half hour: a warning (`omen`), it begins (`open`), Aurelion rises (`boss`), he falls (`slain`) or it fades away. Shown across the screen in gold, with its own sound. */
+  /** The Gilded Tide, the invasion every half hour: a warning (`omen`), it begins (`open`), every golden creature is found (`slain`) or it fades away. (`boss` is kept for old clients; the Tide no longer emits it.) Shown across the screen in gold, with its own sound. */
   | { t: 'invasion'; what: 'omen' | 'open' | 'boss' | 'slain' | 'faded'; text: string }
   /**
    * The sound of a boss fight, for everybody in the copy (the client works the loudness out from where it stands). `wake`: he rises; `cast`: `spell` begins to wind up (`seconds` long); `release`: it lands (at x,y,z);
@@ -207,6 +213,10 @@ export type SessionEvent =
   | { t: 'auction'; view: AuctionView }
   /** What the stash window shows (sent when it opens and after everything done there). */
   | { t: 'stash'; view: StashView }
+  /** The land: the answer to a land command, and the claims round the player as they change. */
+  | { t: 'land'; e: LandEvent }
+  /** A sign was used (or just put up) by somebody who may write on it: open its editor, with the four lines it has now. */
+  | { t: 'signEdit'; x: number; y: number; z: number; lines: string[] }
   | { t: 'equip' }
   /** Something was enchanted at the altar (`glyph` and its new `rank`, `fail` when the roll failed, or `erase` for one taken off) or repaired at the anvil. */
   | { t: 'enchant'; anvil?: boolean; glyph?: number; rank?: number; erase?: boolean; fail?: boolean }
@@ -398,6 +408,15 @@ export function parseSessionMessage(raw: unknown): SessionMessage | null {
       const index = num(raw.index);
       return index !== null && Number.isInteger(index) && index >= 0 && index < 64 ? { t: 'trade', index } : null;
     }
+    case 'sign': {
+      const x = num(raw.x);
+      const y = num(raw.y);
+      const z = num(raw.z);
+      if (x === null || y === null || z === null || !Number.isInteger(x) || !Number.isInteger(y) || !Number.isInteger(z)) return null;
+      if (Math.abs(x) > 30_000_000 || Math.abs(z) > 30_000_000 || y < 0 || y > 4096) return null;
+      const lines = cleanSignLines(raw.lines);
+      return lines ? { t: 'sign', x, y, z, lines } : null;
+    }
     case 'anvilName':
       if (raw.name === null) return { t: 'anvilName', name: null };
       return typeof raw.name === 'string' ? { t: 'anvilName', name: raw.name.slice(0, 64) } : null;
@@ -425,6 +444,10 @@ export function parseSessionMessage(raw: unknown): SessionMessage | null {
     }
     case 'auction':
       return parseAuction(raw);
+    case 'land': {
+      const l = parseLandCommand(raw);
+      return l ? { t: 'land', ...l } : null;
+    }
     case 'stash': {
       const count = whole(raw.count, 1, 64);
       if (count === null) return null;

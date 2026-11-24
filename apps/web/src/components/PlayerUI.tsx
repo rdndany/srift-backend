@@ -5,12 +5,17 @@ import { CLASSES, MOBS, MOB_ROLE_LABEL, MOB_TIER_INFO, NPCS, RANK_OFFICER, mobRo
 import { useUi } from '../ui/store';
 import './player.css';
 
+/** What the loading screen draws of the two target frames (see `warmHud` in the store): the first of each to appear would stand the game still while the browser builds how it is painted. */
+const WARM_PLAYER = { name: 'Aurelia', cls: 'mage' as const, level: 40, guild: 'Dawnwatch' };
+const WARM_MOB = { id: 0, kind: 'zombie' as const, variant: 0, level: 12, hp: 12, max: 20, elite: true };
+
 /** The player the crosshair rests on, next to your own frame: name, class, level and guild. U (or a click) opens their menu. */
 function TargetFrame() {
-  const target = useUi((s) => s.target);
+  const warm = useUi((s) => s.warmHud);
+  const target = useUi((s) => s.target) ?? (warm ? WARM_PLAYER : null);
   const api = useUi((s) => s.api);
   const trading = useUi((s) => !!s.trade);
-  if (!target || !api || trading) return null;
+  if (!target || (!api && !warm) || trading) return null;
   const def = target.cls ? CLASSES[target.cls] : null;
   return (
     <div
@@ -18,7 +23,7 @@ function TargetFrame() {
       data-testid="target-frame"
       style={{ '--cls': def?.color ?? '#d6aa46' } as CSSProperties}
       title="Press U for the menu of this player"
-      onClick={(e) => api.openPlayerMenu(target.name, e.clientX, e.clientY + 24)}
+      onClick={(e) => api?.openPlayerMenu(target.name, e.clientX, e.clientY + 24)}
     >
       <div className="tf-level">{target.level ?? '?'}</div>
       <div className="tf-plate">
@@ -53,7 +58,8 @@ function mobName(kind: string, variant: number): { name: string; title?: string 
  * (hostile, neutral, passive...) and a health bar with the numbers. The same place as a player's frame, which wins when both are in view.
  */
 function MobTargetFrame() {
-  const mob = useUi((s) => s.mobTarget);
+  const warm = useUi((s) => s.warmHud);
+  const mob = useUi((s) => s.mobTarget) ?? (warm ? WARM_MOB : null);
   const player = useUi((s) => !!s.target);
   const trading = useUi((s) => !!s.trade);
   const bossShown = useUi((s) => !!s.boss);

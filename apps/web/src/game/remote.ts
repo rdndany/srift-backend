@@ -36,6 +36,8 @@ import {
   stepPlayer,
   MOBS,
   type Solid,
+  mobSolid,
+  mobTouch,
   type BlockReader,
   type ClassId,
   type BossView,
@@ -186,6 +188,8 @@ export class RemoteSession implements ClientSession {
   readonly drops: { drops: DropLike[]; count: number } = { drops: [], count: 0 };
   /** Food sitting on campfires near this player, from the latest snapshot. */
   campfires: { x: number; y: number; z: number; slots: number[] }[] = [];
+  /** The writing on the signs near this player, from the latest snapshot that carried the list (it is sent again whenever one changes). */
+  signs: { x: number; y: number; z: number; lines: string[] }[] = [];
   readonly xpOrbs: { orbs: XpOrbLike[] } = { orbs: [] };
   readonly bobbers: { bobbers: BobberDraw[] } = { bobbers: [] };
   vehicles: VehicleLike[] = [];
@@ -509,11 +513,13 @@ export class RemoteSession implements ClientSession {
     let out: Solid[] | undefined;
     const b = this.body;
     for (const m of this.mobs.mobs) {
-      if (m.dead || Math.abs(m.body.x - b.x) > 6 || Math.abs(m.body.z - b.z) > 6 || Math.abs(m.body.y - b.y) > 6) continue;
+      if (m.dead) continue;
       const def = MOBS[m.kind];
       const scale = (m.size || 1) * (m.baby ? 0.5 : 1);
       if (!def || def.width * scale < 0.3) continue;
-      (out ??= []).push({ x: m.body.x, y: m.body.y, z: m.body.z, r: (def.width * scale) / 2, h: def.height * scale });
+      const near = 6 + mobTouch(m.kind, scale, def.width * scale);
+      if (Math.abs(m.body.x - b.x) > near || Math.abs(m.body.z - b.z) > near || Math.abs(m.body.y - b.y) > 6 + def.height * scale) continue;
+      (out ??= []).push(mobSolid(m.kind, m.body.x, m.body.y, m.body.z, m.yaw, scale, def.width * scale, def.height * scale));
     }
     return out;
   }
@@ -924,6 +930,7 @@ export class RemoteSession implements ClientSession {
       campfires.push({ x: fires[i], y: fires[i + 1], z: fires[i + 2], slots: [fires[i + 3], fires[i + 4], fires[i + 5], fires[i + 6]] });
     }
     this.campfires = campfires;
+    if (s.signs) this.signs = s.signs.map((g) => ({ x: g.x, y: g.y, z: g.z, lines: g.l }));
     this.xpOrbs.orbs = (s.orbs ?? []).map((o) => ({ id: o.id, value: o.v, x: o.x, y: o.y, z: o.z, age: o.age, phase: o.phase }));
     this.bobbers.bobbers = (s.bobbers ?? []).map((b) => {
       const who = this.others.get(b.o);

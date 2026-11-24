@@ -1,16 +1,17 @@
 import { AdventureWorldGenerator } from './adventure';
 import { BeyondWorldGenerator } from './beyondWorld';
+import { CastleWorldGenerator } from './castleWorld';
 import { B } from './blocks';
 import { CHUNK_SIZE, CHUNK_VOLUME, SEA_LEVEL, blockIndex } from './chunk';
 import { ShowcaseWorldGenerator } from './showcaseWorld';
 import { Biome, WorldGenerator, type Column } from './worldgen';
 
 /** The kinds of world a save can be: the generated one, the flat square platform, the quest world and the planet beyond. */
-export type WorldKind = 'overworld' | 'square' | 'adventure' | 'beyond' | 'showcase';
+export type WorldKind = 'overworld' | 'square' | 'adventure' | 'beyond' | 'showcase' | 'castle';
 
-export const WORLD_KINDS: readonly WorldKind[] = ['overworld', 'square', 'adventure', 'beyond', 'showcase'];
+export const WORLD_KINDS: readonly WorldKind[] = ['overworld', 'square', 'adventure', 'beyond', 'showcase', 'castle'];
 
-export const isWorldKind = (v: unknown): v is WorldKind => v === 'overworld' || v === 'square' || v === 'adventure' || v === 'beyond' || v === 'showcase';
+export const isWorldKind = (v: unknown): v is WorldKind => v === 'overworld' || v === 'square' || v === 'adventure' || v === 'beyond' || v === 'showcase' || v === 'castle';
 
 /** Half the side of the square platform: it spans x and z from -SQUARE_HALF up to SQUARE_HALF - 1. */
 export const SQUARE_HALF = 32;
@@ -59,5 +60,6 @@ export function makeGenerator(seed: number, kind: WorldKind = 'overworld'): Worl
   if (kind === 'adventure') return new AdventureWorldGenerator(seed);
   if (kind === 'beyond') return new BeyondWorldGenerator(seed);
   if (kind === 'showcase') return new ShowcaseWorldGenerator(seed);
+  if (kind === 'castle') return new CastleWorldGenerator(seed);
   return kind === 'square' ? new SquareWorldGenerator(seed) : new WorldGenerator(seed);
 }

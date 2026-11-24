@@ -58,7 +58,7 @@ export function parseBans(v: unknown): Bans {
   return out;
 }
 
-const norm = (s: string): string => s.trim().toLowerCase().replace(/[\s-]+/g, '_');
+export const norm = (s: string): string => s.trim().toLowerCase().replace(/[\s-]+/g, '_');
 
 /** An item by its name (`diamond_sword`, `Diamond Sword`), else the only one whose name holds the words. */
 export function findItem(query: string): ItemDef | null {

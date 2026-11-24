@@ -54,6 +54,11 @@ interface Figure {
   /** Their vertical speed (worked out from how they move, eased) and whether that says they are in the air. */
   lastY: number;
   vy: number;
+  /** Where they were a frame ago and how they are going over the ground (eased): which way they go against the way they face. */
+  lastX: number;
+  lastZ: number;
+  vx: number;
+  vz: number;
   air: boolean;
   full: boolean;
   /** The block has been lit at least once since it last appeared. */
@@ -103,7 +108,7 @@ export class PlayerRenderer {
     block.visible = false;
     group.add(block);
     this.group.add(group);
-    return { group, character: null, rider: null, rig: null, block, blockColor, label: null, labelTex: null, labelKey: '', name: p.name, look: p.look, bodyYaw: p.yaw, turn: 0, lastY: p.y, vy: 0, air: false, full: false, blockLit: false, dead: !!p.dead };
+    return { group, character: null, rider: null, rig: null, block, blockColor, label: null, labelTex: null, labelKey: '', name: p.name, look: p.look, bodyYaw: p.yaw, turn: 0, lastY: p.y, vy: 0, lastX: p.x, lastZ: p.z, vx: 0, vz: 0, air: false, full: false, blockLit: false, dead: !!p.dead };
   }
 
   private makeLabel(f: Figure, p: OtherPlayer): void {
@@ -346,6 +351,23 @@ export class PlayerRenderer {
       const load = p.mount ? { hand: 0, shield: 0 } : figureLoadout(p.held, p.offhand);
       if (dt > 0) f.vy += ((p.y - f.lastY) / dt - f.vy) * (1 - Math.exp(-dt * 12));
       f.lastY = p.y;
+      // Which way they go against the way they face (they face where they look, and may go sideways or back).
+      if (dt > 0) {
+        const k = 1 - Math.exp(-dt * 10);
+        f.vx += ((p.x - f.lastX) / dt - f.vx) * k;
+        f.vz += ((p.z - f.lastZ) / dt - f.vz) * k;
+      }
+      f.lastX = p.x;
+      f.lastZ = p.z;
+      c.setMotionClass(p.cls ?? null);
+      const sp = Math.hypot(f.vx, f.vz);
+      if (sp > 0.5 && p.speed > 0.3) {
+        c.moveF = (-f.vx * Math.sin(f.bodyYaw) - f.vz * Math.cos(f.bodyYaw)) / sp;
+        c.moveR = (f.vx * Math.cos(f.bodyYaw) - f.vz * Math.sin(f.bodyYaw)) / sp;
+      } else {
+        c.moveF = 1;
+        c.moveR = 0;
+      }
       // In the air when they rise or fall fast (with a margin, so the pose does not flicker at the edge).
       f.air = Math.abs(f.vy) > (f.air ? 1.2 : 3);
       // In water that comes up to the chest or has none under the feet (floating at the surface): swimming, not wading, a leap or a fall.

@@ -31,7 +31,7 @@ import {
 } from './index';
 import { BASH_ANIM, SLAM_WIND } from './player';
 import { settleOrbs } from './xpOrbs.testutil';
-import { startInVillage } from './villageStart.testutil';
+import { doObjectives, startInVillage } from './villageStart.testutil';
 
 const SEED = 1337;
 const FLOOR = 100;
@@ -1087,8 +1087,9 @@ describe('class experience from quests', () => {
   };
   const talkTo = (s: GameSession, id: string) => {
     const n = NPCS.find((x) => x.id === id)!;
-    s.teleport(n.x, generator.hubY + 1, n.z + 2, 0, 0);
+    s.teleport(n.x, (n.place ? generator.groundAt(n.place)! : generator.hubY) + 1, n.z + 2, 0, 0);
     run(s, 0.2);
+    for (let i = 0; i < 400 && !npcMob(s, id); i++) run(s, 0.05);
     expect(s.talkNpc(npcMob(s, id))).toBe(true);
   };
 
@@ -1099,13 +1100,14 @@ describe('class experience from quests', () => {
       s.finishLoading();
       startInVillage(s, generator);
       run(s, 1.5);
-      const q = questById('welcome')!;
+      const q = questById('ms01')!;
       talkTo(s, q.giver);
-      s.apply({ t: 'quest', a: 'accept', id: 'welcome' });
+      s.apply({ t: 'quest', a: 'accept', id: 'ms01' });
       s.closeMenu();
+      doObjectives(s, q);
       talkTo(s, q.turnIn);
-      s.apply({ t: 'quest', a: 'complete', id: 'welcome' });
-      expect(s.quests!.status('welcome')).toBe('done');
+      s.apply({ t: 'quest', a: 'complete', id: 'ms01' });
+      expect(s.quests!.status('ms01')).toBe('done');
       if (cls) expect(s.cls!.level).toBe(Math.max(1, Math.min(CLASS_LEVELS.max, s.xp.level)));
       else expect(s.cls).toBeNull();
     }

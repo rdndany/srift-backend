@@ -2,7 +2,6 @@
 
 import { useId, useState, type CSSProperties, type ReactNode } from 'react';
 import { SETTING_RANGE, resetSettings, setSettings, useSettings, type Settings } from '../game/settings';
-import { useUi } from '../ui/store';
 
 /** The keys the pause screen lists: [keys, what they do]. */
 const CONTROLS: readonly (readonly [readonly string[], string])[] = [

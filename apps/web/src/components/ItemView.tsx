@@ -1,10 +1,10 @@
 'use client';
 
-import { ELEMENTS, I, dominantElement, getItem, type ItemStack, type TipLine } from '@solrift/shared';
+import { ELEMENTS, I, dominantElement, getItem, isHollowKingItem, type ItemStack, type TipLine } from '@solrift/shared';
 import type { CSSProperties } from 'react';
 import { useUi } from '../ui/store';
 
-export const isEnchanted = (stack: ItemStack | null): boolean => !!stack && (!!stack.ench || getItem(stack.id).storesEnchants);
+export const isEnchanted = (stack: ItemStack | null): boolean => !!stack && (!!stack.ench || getItem(stack.id).storesEnchants || isHollowKingItem(stack.id)); // (the relics of the Hollow King always burn)
 
 /** Icon + stack count + durability bar for one item stack. Enchanted items shimmer. */
 export function ItemView({ stack }: { stack: ItemStack | null }) {
@@ -19,7 +19,7 @@ export function ItemView({ stack }: { stack: ItemStack | null }) {
   const src = stack.id === I.COMPASS ? api.icons.compassUrl(needle) : api.icons.url(stack.id);
   return (
     <>
-      {glow && <span className="ench-aura" data-ench-aura style={glow} />}
+      {glow && <span className={isHollowKingItem(stack.id) ? 'ench-aura ench-soft' : 'ench-aura'} data-ench-aura style={glow} />}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img className={`${stack.gear?.r === 3 ? 'item-icon epic-icon' : 'item-icon'}${glow ? ' ench-icon' : ''}`} style={glow} src={src} alt={item.name} draggable={false} />
       {glow && <div className="glint" data-glint style={{ maskImage: `url(${src})`, WebkitMaskImage: `url(${src})`, ...glow }} />}

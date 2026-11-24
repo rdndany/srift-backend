@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { B, I, MOUNTS, OUTFIT_CLASSES, allItems, armorId, outfitItems } from '@solrift/shared';
+import { B, I, MOUNTS, OUTFIT_CLASSES, WINGS, allItems, armorId, outfitItems } from '@solrift/shared';
 import { Character } from './character';
 import { Fenrir } from './fenrir';
 
@@ -23,7 +23,7 @@ export interface FigureWarmParts {
   mobs: () => { group: THREE.Group; free: () => void };
   /** Builds the shaders of the inventory figure (see `warmPreview`). */
   inventory: () => void;
-  /** Puts up one window of the interface for the loading screen (steps 0 to 3: the tabs of the inventory; 4: the log, codex, social and party windows), and takes them down (-1). */
+  /** Puts up one window of the interface for the loading screen (steps 0 to 3: the tabs of the inventory; 4: the log, codex, social and party windows; 5: the boss's frame and the trackers), and takes them down (-1). */
   windows: (step: number) => void;
   /** A fishing line with all its parts (see BobberRenderer.warm). */
   bobber: () => { group: THREE.Group; free: () => void };
@@ -61,6 +61,9 @@ export class FigureWarm {
     this.group.position.y = WARM_DEPTH;
     this.stages = [
       { name: 'characters', frames: 1, run: () => this.buildCharacters() },
+      // One pair of wings a frame: the shapes of a pair are built on first wear (a tenth of a second on a slow machine) and the light that
+      // comes off them is a shader of its own; the first pair put on in play would stand the game still for both.
+      ...WINGS.map((_, i) => ({ name: 'the wings', frames: 1, run: () => this.wear(i + 1) })),
       { name: 'the inventory', frames: 1, run: () => this.parts.inventory() },
       // The browser paints each window the first time it is on the screen, and stands still while it does (a tenth of a second or more).
       { name: 'the windows', frames: 3, run: () => this.parts.windows(0) },
@@ -68,6 +71,7 @@ export class FigureWarm {
       { name: 'the windows', frames: 3, run: () => this.parts.windows(2) },
       { name: 'the windows', frames: 3, run: () => this.parts.windows(3) },
       { name: 'the windows', frames: 3, run: () => this.parts.windows(4) },
+      { name: 'the boss frame', frames: 3, run: () => this.parts.windows(5) },
       { name: 'the windows', frames: 1, run: () => this.parts.windows(-1) },
       { name: 'the mount', frames: 1, run: () => this.buildMount() },
       { name: 'creatures', frames: 1, run: () => this.buildCreatures() },
@@ -101,6 +105,14 @@ export class FigureWarm {
       this.open(c.root);
       this.characters.push(c);
     });
+  }
+
+  /** The first body puts on pair `no` of the wings (the one before is taken off: the way of putting them on and off in play). */
+  private wear(no: number): void {
+    const c = this.characters[0];
+    if (!c) return;
+    c.setWings(no);
+    this.open(c.root);
   }
 
   /** The mount, with its lightning (the part of it that only shows when it runs or howls is drawn too). */

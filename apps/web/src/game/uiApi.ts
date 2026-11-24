@@ -30,7 +30,7 @@ export interface UiApiParts {
 /** What the page's windows and buttons can ask of the game: nearly all of it is a command sent the same way a key press is. */
 export function makeUiApi(parts: UiApiParts): UiApi {
   const { session, remote, input, chat, icons, store, guest, sendCommand, openSpellbook } = parts;
-  const { toggleCodex, toggleQuestLog, togglePartyWindow, toggleSocialWindow, openPlayerMenu, closePlayerMenu } = parts.windows;
+  const { toggleCodex, toggleQuestLog, togglePartyWindow, toggleSocialWindow, openPlayerMenu, closePlayerMenu, closeSignEdit } = parts.windows;
   const recipeBook = parts.recipes.book;
 
   return {
@@ -77,6 +77,7 @@ export function makeUiApi(parts: UiApiParts): UiApi {
     tradeAct: (act) => remote?.trade(act),
     openPlayerMenu,
     closePlayerMenu,
+    signDone: (lines) => closeSignEdit(lines),
     whisper: (name) => {
       toggleSocialWindow(false);
       chat.show(`/w ${name} `);

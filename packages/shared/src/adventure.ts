@@ -1,16 +1,19 @@
-import { B, DRESS, IS_LIQUID, IS_SOLID, LEAF_BLOCKS, LOG_BLOCKS, bedId, doorId, slabId, stairId, woolId } from './blocks';
+import { B, IS_LIQUID, IS_SOLID, LEAF_BLOCKS, LOG_BLOCKS, bedId, chestId, doorId, slabId, stairId, woolId } from './blocks';
+import { buildCastle } from './castle';
 import { CHUNK_SIZE, SEA_LEVEL, WORLD_HEIGHT, blockIndex } from './chunk';
 import type { LootTableName } from './loot';
 import type { MobKind } from './mobs';
 import { hash2 } from './noise';
 import { NPCS, type DummyStation, type NpcStation } from './quests';
-import { Lot, auctionHouse, farm, house, lampPost, stall, stashHouse, styleFor, tower, waystone, well } from './villageBuilders';
+import { Lot, type Put, auctionHouse, farm, house, lampPost, stall, stashHouse, styleFor, tower, waystone, well } from './villageBuilders';
 import { banner, bench, cart, crates, fencedRing, flowerGarden, fountain, hayBale, obelisk, shelter, tree } from './villageDecor';
 import { buildWall } from './villageWall';
-import { GREYKEEP, buildCastle } from './castle';
 import { I } from './items';
 import { DEEP_U, DEEP_V, DEEP_V0, buildHollowDeep, type DeepModel } from './hollowDeep';
-import { WorldGenerator, type Column, type InstanceBoss, type InstanceGate, type InstanceMob, type InstanceRequirement } from './worldgen';
+import { BeyondWorldGenerator } from './beyondWorld';
+import { ASHBROOK_GREEN, ASHBROOK_ROAD_TURN_X, CLEARING, GREYKEEP_SHIFT_Z, OUTPOSTS, UNDERCROFT_ORIGIN, VAULTS, VAULT_HALF, WORKSHOPS, WORKSHOP_BENCH, outpostById, type OutpostDef, type VaultDef, type WorkshopSpot } from './outposts';
+import type { RealmMap, RealmSite } from './beyondRealms';
+import { type Column, type InstanceBoss, type InstanceGate, type InstanceMob, type InstanceRequirement, type ProtectedArea } from './worldgen';
 
 /**
  * The world of the Adventure mode. It is the ordinary generated world with two made places set into it
@@ -19,7 +22,6 @@ import { WorldGenerator, type Column, type InstanceBoss, type InstanceGate, type
  *  - Dawnwatch, a small village on a levelled square around the origin, where the quest givers stand (the paved
  *    Landing is where you come back to after a death), and under it the Undercroft, a cave where every new
  *    character wakes, with a stair up to the village;
- *  - Greykeep, a castle on the flat ground north of the village, gate toward the road;
  *  - the Hollow Cellar, a dungeon a little way east along a gravel road: a ruined chapel on the surface with a
  *    portal in it. The dungeon itself is not under the chapel but in a separate map, far from the land: a gatehall
  *    with a warden in it, a great nave with a wing of rooms to each side, a court and an armoury behind an iron gate,
@@ -32,16 +34,20 @@ import { WorldGenerator, type Column, type InstanceBoss, type InstanceGate, type
  */
 
 /** The seed of the Adventure world: a fixed one, so that everybody finds the same village and the same dungeon. */
-export const ADVENTURE_SEED = 2026;
+export const ADVENTURE_SEED = 2036;
 /**
- * Which version of the made places (the village, the Undercroft, the chapel, Greykeep) the generator makes. A saved world keeps the
+ * Which version of the made places (the village, the Undercroft, the chapel) the generator makes. (Version 14 put the Undercroft and the first quests in Ashbrook, a small village of its own, and left Dawnwatch the big city. Version 13 moved the whole Adventure onto the World Beyond, with outposts, vaults and Greykeep out in it; version 12 took Greykeep away: it stands in the
+ * castle world now, see castleWorld.ts, and a saved world has its old ground put back, see `mendProtected`.) A saved world keeps the
  * chunks that were ever changed, as they were; a server that finds it saved an older version puts the protected places
  * back (see `WorldGenerator.mendProtected`). Raise it whenever those places are rebuilt.
  */
-export const ADVENTURE_LAYOUT = 11;
+export const ADVENTURE_LAYOUT = 14;
 /** How far the land is slid under the made places (found by a search for good ground; see the generator). */
-export const ADVENTURE_OFFSET_X = -1536;
-export const ADVENTURE_OFFSET_Z = -832;
+export const ADVENTURE_OFFSET_X = -20;
+export const ADVENTURE_OFFSET_Z = 236;
+
+/** Where Greykeep stood, with the flat ground and the skirt that eased it into the land (x and z, inclusive): see `mendProtected`. */
+const FORMER_CASTLE = { x0: -40, x1: 40, z0: -118, z1: -38 } as const;
 
 /** Dawnwatch is levelled over x and z from -HUB_HALF up to HUB_HALF - 1, with a skirt that eases it into the land. */
 export const HUB_HALF = 38;
@@ -53,6 +59,7 @@ export const DUMMY_SPOTS: readonly { x: number; z: number }[] = [
   { x: 24.5, z: -19.5 },
 ];
 const HUB_SKIRT = 10;
+const VAULT_NAMES: Record<VaultDef['id'], string> = { reed_grotto: 'The Reed Grotto', sand_crypt: 'The Sand Crypt', frost_vault: 'The Frost Vault' };
 /** The Landing, where everybody arrives: a SPAWN_SIZE x SPAWN_SIZE square of paving, from (x0, z0). */
 export const SPAWN_SIZE = 12;
 export const SPAWN_X0 = -6;
@@ -63,28 +70,30 @@ export const DUNGEON_Z = 0;
 const RUIN_HALF = 6;
 const RUIN_SKIRT = 6;
 /**
- * The Undercroft: a cave under Dawnwatch where every new character wakes (the hunters found them half dead in the forest and
- * carried them down here). Its floor lies this far under the village's ground; a long stair climbs from its west end to a
- * stone house in the south-west of the village.
+ * The Undercroft: a cave under Ashbrook, the small village where every new character wakes (the hunters found them half dead in the
+ * forest and carried them down here). Its floor lies this far under the village's ground; a long stair climbs from its west end to a
+ * stone house in the south-west of the village. The points below are drawn round `UNDERCROFT_ORIGIN`.
  */
+const UX = UNDERCROFT_ORIGIN.x;
+const UZ = UNDERCROFT_ORIGIN.z;
 export const UNDERCROFT_DEPTH = 17;
 /** The chambers of the cave: ellipses (middle and radii, in blocks), whose roofs arch from 3 up to 7 blocks above the floor. */
 const CAVE_BLOBS: readonly { x: number; z: number; rx: number; rz: number }[] = [
-  { x: -4, z: 12, rx: 10, rz: 7 },
-  { x: 2, z: 22, rx: 7, rz: 6 },
-  { x: 10, z: 10, rx: 6, rz: 5 },
+  { x: UX - 4, z: UZ + 12, rx: 10, rz: 7 },
+  { x: UX + 2, z: UZ + 22, rx: 7, rz: 6 },
+  { x: UX + 10, z: UZ + 10, rx: 6, rz: 5 },
 ];
 /** Where the stair meets the cave: a short hall, flat and 4 high. */
-const CAVE_HALL = { x0: -16, x1: -12, z0: 11, z1: 13 };
+const CAVE_HALL = { x0: UX - 16, x1: UX - 12, z0: UZ + 11, z1: UZ + 13 };
 /** The cave lies inside this box (x and z, inclusive). */
-const CAVE_BOX = { x0: -17, x1: 17, z0: 4, z1: 29 };
+const CAVE_BOX = { x0: UX - 17, x1: UX + 17, z0: UZ + 4, z1: UZ + 29 };
 /** The cellar house over the stair: its outer walls (inclusive). The stair runs east to west under it, three wide (z 11..13), one step down for every block. */
-export const CELLAR_HOUSE = { x0: -35, x1: -28, z0: 9, z1: 15 } as const;
+export const CELLAR_HOUSE = { x0: UX - 35, x1: UX - 28, z0: UZ + 9, z1: UZ + 15 } as const;
 /** The block where the stair starts (x of its first step) and the z of its middle. */
 const STAIR_X0 = CELLAR_HOUSE.x0 + 2;
-const STAIR_Z = 12;
+const STAIR_Z = UZ + 12;
 /** Twelve places to wake up on, in front of the healer. */
-export const UNDERCROFT_SPAWNS: readonly { x: number; z: number }[] = [-6.5, -4.5, -2.5, -0.5].flatMap((x) => [10.5, 12.5, 14.5].map((z) => ({ x, z })));
+export const UNDERCROFT_SPAWNS: readonly { x: number; z: number }[] = [-6.5, -4.5, -2.5, -0.5].flatMap((x) => [10.5, 12.5, 14.5].map((z) => ({ x: UX + x, z: UZ + z })));
 /** The experience level the Hollow Cellar asks for. */
 export const DUNGEON_MIN_LEVEL = 5;
 
@@ -152,7 +161,7 @@ const smooth = (t: number): number => t * t * (3 - 2 * t);
 
 const WOODY = new Set<number>([...LEAF_BLOCKS, ...LOG_BLOCKS]);
 
-export class AdventureWorldGenerator extends WorldGenerator {
+export class AdventureWorldGenerator extends BeyondWorldGenerator {
   override readonly kind = 'adventure' as const;
 
   /** The height of the village's ground. */
@@ -170,19 +179,37 @@ export class AdventureWorldGenerator extends WorldGenerator {
   private readonly plots: Plot[];
   private readonly paint = new Map<string, number>();
   private readonly voxels = new Map<string, number[]>();
-  private readonly ops: Op[] = [];
-  /** Greykeep's ops, kept in order and by chunk: the castle is thousands of boxes, and most chunks touch none of them. */
-  private readonly castleOps = new Map<string, Op[]>();
+  /** The boxes, in the order they were drawn (later ones cut into earlier ones), kept by chunk since most chunks touch none of them. */
+  private readonly ops = new Map<string, Op[]>();
+  /** The ground of each outpost, of each vault and of the clearing. */
+  private readonly outpostY = new Map<string, number>();
+  private readonly vaultY = new Map<string, number>();
+  private clearingY = 0;
+  private readonly outpostPlots = new Map<string, Plot>();
+  private readonly vaultPlots: Plot[] = [];
+  /** What each vault cage makes, by the cage block. */
+  private readonly vaultSpawners = new Map<string, MobKind>();
   private readonly chests = new Map<string, LootTableName>();
 
   /** How far the land under this world is slid: the village stands where the generated land is good, not at the origin. */
-  readonly offsetX: number;
-  readonly offsetZ: number;
+  readonly offsetX = ADVENTURE_OFFSET_X;
+  readonly offsetZ = ADVENTURE_OFFSET_Z;
 
-  constructor(seed: number, offsetX = ADVENTURE_OFFSET_X, offsetZ = ADVENTURE_OFFSET_Z) {
+  /** The realms, slid with the land: what the realm features draw must lie where the land says the realm is. */
+  protected override realmHost(): Pick<RealmMap, 'at' | 'nearby'> {
+    const real = this.land.realms;
+    const slide = (s: RealmSite): RealmSite => ({ ...s, cx: s.cx - ADVENTURE_OFFSET_X, cz: s.cz - ADVENTURE_OFFSET_Z });
+    return {
+      at: (x, z) => {
+        const hit = real.at(x + ADVENTURE_OFFSET_X, z + ADVENTURE_OFFSET_Z);
+        return hit ? { ...hit, site: slide(hit.site) } : null;
+      },
+      nearby: (x, z, rings) => real.nearby(x + ADVENTURE_OFFSET_X, z + ADVENTURE_OFFSET_Z, rings).map(slide),
+    };
+  }
+
+  constructor(seed: number) {
     super(seed);
-    this.offsetX = offsetX;
-    this.offsetZ = offsetZ;
     // No wandering villages near the made ones: their land is spoken for.
     const v = this.villages;
     const natural = v.siteInRegion.bind(v);
@@ -198,21 +225,43 @@ export class AdventureWorldGenerator extends WorldGenerator {
 
     this.hubY = clamp(median(heights([-30, -15, 0, 15, 30], [-30, -15, 0, 15, 30])), SEA_LEVEL + 2, SEA_LEVEL + 22);
     this.ruinY = clamp(median(heights([DUNGEON_X - 4, DUNGEON_X, DUNGEON_X + 4], [DUNGEON_Z - 4, DUNGEON_Z, DUNGEON_Z + 4])), SEA_LEVEL + 2, SEA_LEVEL + 40);
-    // The village is never lower than SEA_LEVEL + 2, so the floor never comes near the bedrock.
-    this.undercroftY = this.hubY - UNDERCROFT_DEPTH;
     this.plots = [
       { cx: 0, cz: 0, half: HUB_HALF, skirt: HUB_SKIRT, g: this.hubY },
       { cx: DUNGEON_X, cz: DUNGEON_Z, half: RUIN_HALF + 3, skirt: RUIN_SKIRT, g: this.ruinY },
-      // North of Dawnwatch. The flat ground stops at z=-47, short of the village, and the towers need the extra air.
-      { cx: 0, cz: -78, half: 32, skirt: 8, g: this.hubY, air: 48 },
     ];
+    // The outposts, the vaults and the clearing: each is levelled at the median height of the land it covers.
+    const spread = (cx: number, cz: number, half: number): number[] => [-0.6, -0.3, 0, 0.3, 0.6].map((t) => Math.round(t * half));
+    const groundOf = (cx: number, cz: number, half: number, lo: number, hi: number): number => {
+      const s = spread(cx, cz, half);
+      return clamp(median(heights(s.map((d) => cx + d), s.map((d) => cz + d))), lo, hi);
+    };
+    for (const o of OUTPOSTS) {
+      const grey = o.id === 'greykeep';
+      const pcz = grey ? o.z - 20 : o.z;
+      const g = groundOf(o.x, pcz, o.half, SEA_LEVEL + 2, SEA_LEVEL + 30);
+      const plot: Plot = { cx: o.x, cz: pcz, half: o.half, skirt: 8, g, ...(grey ? { air: 46 } : {}) };
+      this.outpostY.set(o.id, g);
+      this.outpostPlots.set(o.id, plot);
+      this.plots.push(plot);
+    }
+    // Ashbrook is never lower than SEA_LEVEL + 2, so the floor of the cave under it never comes near the bedrock.
+    this.undercroftY = (this.outpostY.get('ashbrook') ?? this.hubY) - UNDERCROFT_DEPTH;
+    for (const v of VAULTS) {
+      const g = groundOf(v.x, v.z, VAULT_HALF, SEA_LEVEL + 3, SEA_LEVEL + 30);
+      const plot: Plot = { cx: v.x, cz: v.z, half: VAULT_HALF, skirt: 6, g };
+      this.vaultY.set(v.id, g);
+      this.vaultPlots.push(plot);
+      this.plots.push(plot);
+    }
+    this.clearingY = groundOf(CLEARING.x, CLEARING.z, CLEARING.r, SEA_LEVEL + 2, SEA_LEVEL + 40);
+    this.plots.push({ cx: CLEARING.x, cz: CLEARING.z, half: CLEARING.r, skirt: 6, g: this.clearingY });
 
     this.buildVillage();
-    this.buildGreykeep();
     this.buildCellarHouse();
     this.buildUndercroft();
     this.scatterGreens();
     this.buildRuin();
+    this.buildOutposts();
     // The dungeon: a cave system, built once and copied into every instance's chunks.
     this.deep = buildHollowDeep(seed, INSTANCE_FLOOR);
     for (const c of this.deep.chests) this.chests.set(`${INSTANCE_X0 + c.u},${c.y},${this.roomZ + c.v}`, c.table);
@@ -225,11 +274,11 @@ export class AdventureWorldGenerator extends WorldGenerator {
    * every seed has a river, is a good place for a village. Everything else in the generator asks these two.
    */
   override columnAt(wx: number, wz: number): Column {
-    return super.columnAt(wx + this.offsetX, wz + this.offsetZ);
+    return super.columnAt(wx + ADVENTURE_OFFSET_X, wz + ADVENTURE_OFFSET_Z);
   }
 
   override climateAt(wx: number, wz: number): { t: number; h: number } {
-    return super.climateAt(wx + this.offsetX, wz + this.offsetZ);
+    return super.climateAt(wx + ADVENTURE_OFFSET_X, wz + ADVENTURE_OFFSET_Z);
   }
 
   override generateChunk(cx: number, cz: number): Uint16Array {
@@ -247,9 +296,8 @@ export class AdventureWorldGenerator extends WorldGenerator {
       }
     }
     this.road(blocks, ox, oz);
-    for (const op of this.ops) this.write(blocks, op, ox, oz);
-    const castle = this.castleOps.get(`${cx},${cz}`);
-    if (castle) for (const op of castle) this.write(blocks, op, ox, oz);
+    this.ashbrookRoad(blocks, ox, oz);
+    for (const op of this.ops.get(`${cx},${cz}`) ?? []) this.write(blocks, op, ox, oz);
     return blocks;
   }
 
@@ -258,16 +306,30 @@ export class AdventureWorldGenerator extends WorldGenerator {
   }
 
   /**
-   * Everyone arrives on the Landing, a paved square, each on a different block: the slot is the n-th arrival,
-   * and the steps of 37 visit all 144 blocks (37 and 144 share no factor) before any is used twice.
+   * Whoever comes back to life (and anybody who arrives without a story: a creative character) is put on the green of Ashbrook, each on a
+   * different block: the slot is the n-th arrival, and the steps of 37 visit all 144 blocks (37 and 144 share no factor) before any is used twice.
+   * (Dawnwatch has a Landing of its own, a paved square that nobody is born on: see `landingFor`.)
    */
   override spawnFor(slot: number): { x: number; y: number; z: number } {
+    const o = outpostById('ashbrook')!;
+    const n = ASHBROOK_GREEN.size;
+    const cell = ((Math.floor(slot) % (n * n)) * 37 + 5) % (n * n);
+    return { x: o.x + ASHBROOK_GREEN.x0 + (cell % n) + 0.5, y: this.startY + 1, z: o.z + ASHBROOK_GREEN.z0 + Math.floor(cell / n) + 0.5 };
+  }
+
+  /** The n-th spot on the Landing, the paved square at the south gate of Dawnwatch where the road from the south comes in (see `SPAWN_X0`). */
+  landingFor(slot: number): { x: number; y: number; z: number } {
     const cell = ((Math.floor(slot) % (SPAWN_SIZE * SPAWN_SIZE)) * 37 + 5) % (SPAWN_SIZE * SPAWN_SIZE);
     return { x: SPAWN_X0 + (cell % SPAWN_SIZE) + 0.5, y: this.hubY + 1, z: SPAWN_Z0 + Math.floor(cell / SPAWN_SIZE) + 0.5 };
   }
 
+  /** The ground of Ashbrook, the village where the story starts. */
+  get startY(): number {
+    return this.outpostY.get('ashbrook') ?? this.hubY;
+  }
+
   /**
-   * A new character does not arrive at the Landing: they wake in the Undercroft, the cave under the village, in front of
+   * A new character does not arrive on the green: they wake in the Undercroft, the cave under Ashbrook, in front of
    * its healer, each on a spot of their own (the steps of 5 visit all twelve before any is used twice).
    */
   override startFor(slot: number): { x: number; y: number; z: number } {
@@ -276,7 +338,12 @@ export class AdventureWorldGenerator extends WorldGenerator {
   }
 
   override npcStations(): readonly NpcStation[] {
-    const made = NPCS.flatMap((npc, index): NpcStation[] => (npc.dungeon ? [] : [{ npc, index, x: npc.x, y: (npc.cellar ? this.undercroftY : this.hubY) + 1, z: npc.z }]));
+    const made = NPCS.flatMap((npc, index): NpcStation[] => {
+      if (npc.dungeon) return [];
+      // The people of the outposts stand on the ground of their own place (their x and z are already the world's).
+      if (npc.place) return [{ npc, index, x: npc.x, y: (npc.cellar ? this.undercroftY : (this.outpostY.get(npc.place) ?? this.hubY)) + 1, z: npc.z }];
+      return [{ npc, index, x: npc.x, y: (npc.cellar ? this.undercroftY : this.hubY) + 1, z: npc.z }];
+    });
     // A dungeon's person stands in every copy of it, at the same spot.
     const inCopies = NPCS.flatMap((npc, index): NpcStation[] =>
       npc.dungeon ? Array.from({ length: INSTANCE_SLOTS }, (_, slot) => ({ npc, index, key: 1000 + index * INSTANCE_SLOTS + slot, x: npc.x, y: this.cellarY + 1, z: npc.z + slot * INSTANCE_STRIDE })) : [],
@@ -293,11 +360,18 @@ export class AdventureWorldGenerator extends WorldGenerator {
     const bz = Math.floor(z);
     if (this.instanceAt(bx, bz) >= 0) return 'hollow_cellar';
     const inVillage = bx >= -HUB_HALF && bx < HUB_HALF && bz >= -HUB_HALF && bz < HUB_HALF;
-    // Below the village's ground (the cave and the stair down to it): the first step on the stair is already in the village.
-    if (inVillage && y < this.hubY + 0.75) return 'undercroft';
+    // Ashbrook: below its ground (the cave and the stair down to it; the first step on the stair is already in the village) is the Undercroft.
+    const ash = this.outpostPlots.get('ashbrook');
+    if (ash && this.inPlot(ash, bx, bz, 4)) return y < ash.g + 0.75 ? 'undercroft' : 'ashbrook';
     if (bx >= YARD.x0 && bx <= YARD.x1 && bz >= YARD.z0 && bz <= YARD.z1) return 'training_yard';
     if (inVillage) return 'dawnwatch';
-    if (bx >= GREYKEEP.x0 && bx <= GREYKEEP.x1 && bz >= GREYKEEP.z0 && bz <= GREYKEEP.z1) return 'greykeep';
+    for (const v of VAULTS) if (this.inVault(v, bx, y, bz)) return v.id;
+    for (const o of OUTPOSTS) {
+      const p = this.outpostPlots.get(o.id);
+      if (p && this.inPlot(p, bx, bz, 4)) return o.id;
+    }
+    if (Math.hypot(bx + 0.5 - CLEARING.x, bz + 0.5 - CLEARING.z) <= CLEARING.r) return 'whisper_clearing';
+    if (Math.abs(bx - DUNGEON_X) <= RUIN_HALF + 4 && Math.abs(bz - DUNGEON_Z) <= RUIN_HALF + 4) return 'chapel_ruin';
     return null;
   }
 
@@ -321,11 +395,14 @@ export class AdventureWorldGenerator extends WorldGenerator {
     return { x0: INSTANCE_X0, y0: 1, z0, x1: INSTANCE_X0 + INSTANCE_LENGTH - 1, y1: WORLD_HEIGHT - 1, z1: z0 + INSTANCE_STRIDE - 1 };
   }
 
-  /** Dawnwatch and Greykeep are safe: no monster is born in them or within `SAFE_BUFFER` blocks, and none that wanders in stays. */
+  /** Dawnwatch is safe: no monster is born in it or within `SAFE_BUFFER` blocks, and none that wanders in stays. */
   override safeFromMonsters(x: number, z: number, margin = 0): boolean {
     const h = HUB_HALF + margin;
     if (x >= -h && x < h && z >= -h && z < h) return true;
-    return x >= GREYKEEP.x0 - margin && x <= GREYKEEP.x1 + margin && z >= GREYKEEP.z0 - margin && z <= GREYKEEP.z1 + margin;
+    const bx = Math.floor(x);
+    const bz = Math.floor(z);
+    for (const p of this.outpostPlots.values()) if (this.inPlot(p, bx, bz, margin)) return true;
+    return false;
   }
 
   /** The Hollow Cellar is not for beginners, and its portal opens only for a Hollow Sigil (a Warden Scroll joined to a Hollow Bone), which a new copy uses up. */
@@ -362,7 +439,7 @@ export class AdventureWorldGenerator extends WorldGenerator {
 
   /** The cages of a copy make nothing: they are locks (see `instanceGates`). */
   override spawnerAt(x: number, y: number, z: number): MobKind | null {
-    return this.instanceAt(x, z) < 0 ? super.spawnerAt(x, y, z) : null;
+    return this.vaultSpawners.get(`${x},${y},${z}`) ?? (this.instanceAt(x, z) < 0 ? super.spawnerAt(x, y, z) : null);
   }
 
   /** The dungeon's monsters, each put at its post, one or two of a kind and a few strong ones (elites) by the cages. They stand until they see somebody (see `Mob.guard`). */
@@ -410,14 +487,56 @@ export class AdventureWorldGenerator extends WorldGenerator {
     const by = Math.floor(y);
     const bz = Math.floor(z);
     if (bx >= -HUB_HALF && bx < HUB_HALF && bz >= -HUB_HALF && bz < HUB_HALF) return true;
-    // Greykeep, from bedrock to sky, so a saved world grows the castle when the layout version rises.
-    if (bx >= GREYKEEP.x0 && bx <= GREYKEEP.x1 && bz >= GREYKEEP.z0 && bz <= GREYKEEP.z1) return true;
+    // The outposts and the vaults, from bedrock to sky: nobody tears down a village or breaks a cage.
+    for (const p of this.outpostPlots.values()) if (this.inPlot(p, bx, bz)) return true;
+    for (const p of this.vaultPlots) if (this.inPlot(p, bx, bz)) return true;
     // The chapel: its ring and the portal in it, from bedrock to sky.
     if (Math.abs(bx - DUNGEON_X) <= RUIN_HALF && Math.abs(bz - DUNGEON_Z) <= RUIN_HALF) return true;
     // The dungeon is free to dig and build in (its walls and seals are bedrock): only the bars of its gates and the portal back stay.
     const slot = this.instanceAt(bx, bz);
     if (slot < 0) return false;
     return this.deep.protectedAt(bx - INSTANCE_X0, by, bz - (INSTANCE_Z0 + slot * INSTANCE_STRIDE - DEEP_V0));
+  }
+
+  /** The protected places of `isProtected` that are square (the town, the outposts, the vaults, the chapel), named, for those touching the box. */
+  override protectedAreas(x0: number, z0: number, x1: number, z1: number): readonly ProtectedArea[] {
+    const out: ProtectedArea[] = [];
+    const add = (name: string, a0: number, b0: number, a1: number, b1: number): void => {
+      if (a1 >= x0 && a0 <= x1 && b1 >= z0 && b0 <= z1) out.push({ name, x0: a0, z0: b0, x1: a1, z1: b1 });
+    };
+    add('Dawnwatch', -HUB_HALF, -HUB_HALF, HUB_HALF - 1, HUB_HALF - 1);
+    for (const o of OUTPOSTS) {
+      const p = this.outpostPlots.get(o.id);
+      if (p) add(o.name, p.cx - p.half, p.cz - p.half, p.cx + p.half - 1, p.cz + p.half - 1);
+    }
+    this.vaultPlots.forEach((p, i) => add(VAULTS[i] ? VAULT_NAMES[VAULTS[i].id] : 'Vault', p.cx - p.half, p.cz - p.half, p.cx + p.half - 1, p.cz + p.half - 1));
+    add('The Chapel Ruin', DUNGEON_X - RUIN_HALF, DUNGEON_Z - RUIN_HALF, DUNGEON_X + RUIN_HALF, DUNGEON_Z + RUIN_HALF);
+    return out;
+  }
+
+  /**
+   * Besides the protected places: the ground Greykeep stood on (the castle and the flat land and skirt round it) goes back to the land as
+   * it is now, in a world that was saved while the castle was there. Nobody could change the castle, so only the plain round it can lose a build.
+   */
+  override mendProtected(cx: number, cz: number, data: Uint16Array): boolean {
+    let mended = super.mendProtected(cx, cz, data);
+    let fresh: Uint16Array | null = null;
+    for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+      for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+        const x = cx * CHUNK_SIZE + lx;
+        const z = cz * CHUNK_SIZE + lz;
+        if (x < FORMER_CASTLE.x0 || x > FORMER_CASTLE.x1 || z < FORMER_CASTLE.z0 || z > FORMER_CASTLE.z1) continue;
+        fresh ??= this.generateChunk(cx, cz);
+        for (let y = 0; y < WORLD_HEIGHT; y++) {
+          const i = blockIndex(lx, y, lz);
+          if (data[i] !== fresh[i]) {
+            data[i] = fresh[i];
+            mended = true;
+          }
+        }
+      }
+    }
+    return mended;
   }
 
   override lootAt(x: number, y: number, z: number): LootTableName | null {
@@ -458,6 +577,16 @@ export class AdventureWorldGenerator extends WorldGenerator {
   /** The gravel road from the village to the chapel: whatever the land is there, a three-wide strip of gravel with the trees cleared. */
   private road(blocks: Uint16Array, ox: number, oz: number): void {
     this.strip(blocks, ox, oz, HUB_HALF, DUNGEON_X - RUIN_HALF - 1, DUNGEON_Z - 1, DUNGEON_Z + 1);
+  }
+
+  /** The gravel road from Ashbrook to the west gate of Dawnwatch: east along the village's road, north, and east again (three wide, over whatever the land is). */
+  private ashbrookRoad(blocks: Uint16Array, ox: number, oz: number): void {
+    const o = outpostById('ashbrook')!;
+    const east = o.x + o.half;
+    const tx = ASHBROOK_ROAD_TURN_X;
+    this.strip(blocks, ox, oz, east - 1, tx + 1, o.z - 1, o.z + 1);
+    this.strip(blocks, ox, oz, tx - 1, tx + 1, 0 - 1, o.z + 1);
+    this.strip(blocks, ox, oz, tx - 1, -HUB_HALF, -1, 1);
   }
 
   /** A strip of gravel over the rectangle [x0..x1] x [z0..z1]: whatever the land is there, with the trees cleared. */
@@ -508,31 +637,15 @@ export class AdventureWorldGenerator extends WorldGenerator {
   // ---- plans ------------------------------------------------------------------------------------
 
   private box(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, id: number, mode: OpMode = 'set'): void {
-    this.ops.push({ x0: Math.min(x0, x1), y0: Math.min(y0, y1), z0: Math.min(z0, z1), x1: Math.max(x0, x1), y1: Math.max(y0, y1), z1: Math.max(z0, z1), id, mode });
-  }
-
-  private chest(x: number, y: number, z: number, table: LootTableName): void {
-    this.box(x, y, z, x, y, z, B.CHEST);
-    this.chests.set(`${x},${y},${z}`, table);
-  }
-
-  /** The castle: every box goes to the chunks it touches, in the order it was drawn, so later boxes cut into earlier ones. */
-  private buildGreykeep(): void {
-    const put = (x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, id: number): void => {
-      const op: Op = { x0: Math.min(x0, x1), y0: Math.min(y0, y1), z0: Math.min(z0, z1), x1: Math.max(x0, x1), y1: Math.max(y0, y1), z1: Math.max(z0, z1), id, mode: 'set' };
-      for (let cz = Math.floor(op.z0 / CHUNK_SIZE); cz <= Math.floor(op.z1 / CHUNK_SIZE); cz++) {
-        for (let cx = Math.floor(op.x0 / CHUNK_SIZE); cx <= Math.floor(op.x1 / CHUNK_SIZE); cx++) {
-          const k = `${cx},${cz}`;
-          let list = this.castleOps.get(k);
-          if (!list) this.castleOps.set(k, (list = []));
-          list.push(op);
-        }
+    const op: Op = { x0: Math.min(x0, x1), y0: Math.min(y0, y1), z0: Math.min(z0, z1), x1: Math.max(x0, x1), y1: Math.max(y0, y1), z1: Math.max(z0, z1), id, mode };
+    for (let cz = Math.floor(op.z0 / CHUNK_SIZE); cz <= Math.floor(op.z1 / CHUNK_SIZE); cz++) {
+      for (let cx = Math.floor(op.x0 / CHUNK_SIZE); cx <= Math.floor(op.x1 / CHUNK_SIZE); cx++) {
+        const k = `${cx},${cz}`;
+        let list = this.ops.get(k);
+        if (!list) this.ops.set(k, (list = []));
+        list.push(op);
       }
-    };
-    buildCastle(this.hubY, put, (x, y, z, id, table) => {
-      put(x, y, z, x, y, z, id);
-      this.chests.set(`${x},${y},${z}`, table);
-    });
+    }
   }
 
   private vox(base: number): (x: number, dy: number, z: number, id: number) => void {
@@ -630,6 +743,29 @@ export class AdventureWorldGenerator extends WorldGenerator {
 
     this.buildDistricts(put, rand, road);
     buildWall(put, (x, z) => hash2(this.seed + 95, x, z));
+    this.workshop(WORKSHOPS.dawnwatch, put, (x0, z0, x1, z1, b) => this.pave(x0, z0, x1, z1, b));
+  }
+
+  /**
+   * A workshop: eight benches in a row (crafting tables and furnaces, see `WORKSHOP_BENCH`) under a plank roof on four posts, on a cobblestone pad
+   * with a gravel path to the road. Every village and town has one, so the quests never ask anybody to make a table or a furnace of their own.
+   * (`put` and `pv` are in the same frame as the spot: the plaza's middle, or the world's origin for Dawnwatch.)
+   */
+  private workshop(w: WorkshopSpot, put: Put, pv: (x0: number, z0: number, x1: number, z1: number, b: number) => void): void {
+    const { x0, zb, dir } = w;
+    const zf = zb + dir * 2;
+    const zlo = Math.min(zb, zf);
+    const zhi = Math.max(zb, zf);
+    pv(x0 - 1, zlo, x0 + 8, zhi, B.COBBLE);
+    const toRoad = dir > 0 ? -2 : 2;
+    pv(x0 + 3, Math.min(zf + dir, toRoad), x0 + 3, Math.max(zf + dir, toRoad), B.GRAVEL);
+    WORKSHOP_BENCH.forEach((kind, i) => put(x0 + i, 1, zb, kind === 'table' ? B.CRAFTING_TABLE : B.FURNACE));
+    for (const x of [x0, x0 + 7]) {
+      for (let dy = 2; dy <= 3; dy++) put(x, dy, zb, B.FENCE);
+      for (let dy = 1; dy <= 3; dy++) put(x, dy, zf, B.FENCE);
+    }
+    for (let z = zlo; z <= zhi; z++) for (let x = x0 - 1; x <= x0 + 8; x++) put(x, 4, z, B.PLANKS);
+    for (const x of [x0 - 1, x0 + 8]) for (const z of [zlo, zhi]) put(x, 5, z, B.TORCH);
   }
 
   /**
@@ -777,7 +913,7 @@ export class AdventureWorldGenerator extends WorldGenerator {
     const reserve = (x: number, z: number, r: number): void => {
       for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) taken.add(key(Math.round(x) + dx, Math.round(z) + dz));
     };
-    for (const npc of NPCS) if (!npc.cellar) reserve(Math.floor(npc.x), Math.floor(npc.z), 2);
+    for (const npc of NPCS) if (!npc.cellar && !npc.place && !npc.dungeon) reserve(Math.floor(npc.x), Math.floor(npc.z), 2);
     for (const d of DUMMY_SPOTS) reserve(Math.floor(d.x), Math.floor(d.z), 2);
     // The Landing is the spawn: keep its surroundings plain.
     for (let z = SPAWN_Z0 - 2; z < SPAWN_Z0 + SPAWN_SIZE + 2; z++) for (let x = SPAWN_X0 - 2; x < SPAWN_X0 + SPAWN_SIZE + 2; x++) taken.add(key(x, z));
@@ -879,12 +1015,12 @@ export class AdventureWorldGenerator extends WorldGenerator {
 
   // ---- the Undercroft ---------------------------------------------------------------------------
 
-  /** The cellar house, a small stone house in the south-west of the village: its door faces the road, and a stair goes down through its floor. */
+  /** The cellar house, a small stone house in the south-west of Ashbrook: its door faces the road, and a stair goes down through its floor. */
   private buildCellarHouse(): void {
-    const put = this.vox(this.hubY);
+    const put = this.vox(this.startY);
     const { x0, x1, z0, z1 } = CELLAR_HOUSE;
     const doorX = x0 + 1;
-    this.pave(doorX, 2, doorX, z0 - 1, B.GRAVEL);
+    this.pave(doorX, UZ + 2, doorX, z0 - 1, B.GRAVEL);
     for (let z = z0; z <= z1; z++) {
       for (let x = x0; x <= x1; x++) {
         const edge = x === x0 || x === x1 || z === z0 || z === z1;
@@ -912,7 +1048,7 @@ export class AdventureWorldGenerator extends WorldGenerator {
    * `carveUndercroft`, chunk by chunk; what stands in it is planned here.)
    */
   private buildUndercroft(): void {
-    const hy = this.hubY;
+    const hy = this.startY;
     const fy = this.undercroftY;
     const step = stairId(4, false, 1);
     for (let k = 0; k < UNDERCROFT_DEPTH; k++) {
@@ -930,9 +1066,10 @@ export class AdventureWorldGenerator extends WorldGenerator {
       }
     }
 
-    // What stands in the cave (always inside it: see `caveTop`).
-    const put = this.vox(fy);
-    const inside = (x: number, z: number, height = 3): boolean => this.caveTop(x, z) >= height;
+    // What stands in the cave (always inside it: see `caveTop`). Its places are written from the middle of the Undercroft's own frame (UX, UZ).
+    const base = this.vox(fy);
+    const put = (x: number, dy: number, z: number, id: number): void => base(UX + x, dy, UZ + z, id);
+    const inside = (x: number, z: number, height = 3): boolean => this.caveTop(UX + x, UZ + z) >= height;
     // Three cots along the north wall, their heads to it.
     for (const x of [-8, -5, -2]) {
       if (inside(x, 7) && inside(x, 8)) {
@@ -954,10 +1091,10 @@ export class AdventureWorldGenerator extends WorldGenerator {
       }
     }
     // A few stalagmites in the far chambers (the near one stays clear, where people wake up).
-    for (let z = CAVE_BOX.z0; z <= CAVE_BOX.z1; z++) {
-      for (let x = CAVE_BOX.x0; x <= CAVE_BOX.x1; x++) {
+    for (let z = CAVE_BOX.z0 - UZ; z <= CAVE_BOX.z1 - UZ; z++) {
+      for (let x = CAVE_BOX.x0 - UX; x <= CAVE_BOX.x1 - UX; x++) {
         if (x <= 2 && z >= 6 && z <= 19) continue;
-        const h = hash2(this.seed + 81, x, z);
+        const h = hash2(this.seed + 81, UX + x, UZ + z);
         if (h < 0.03 && inside(x, z, 4)) for (let dy = 1; dy <= 1 + Math.floor(h * 100) % 2; dy++) put(x, dy, z, B.MOSSY_COBBLE);
       }
     }
@@ -1027,7 +1164,7 @@ export class AdventureWorldGenerator extends WorldGenerator {
           const tall = corner ? 5 : Math.abs(dx) === h && Math.abs(dz) === 2 ? 4 : 1 + Math.floor(hash2(this.seed + 51, x, z) * 3);
           if (!gate) for (let y = 1; y <= tall; y++) put(x, y, z, y > 1 && hash2(this.seed + 52, x + y, z) < 0.25 ? B.MOSSY_COBBLE : B.STONE_BRICKS);
           if (corner) put(x, 6, z, B.TORCH);
-        } else if (roll > 0.93) {
+        } else if (roll > 0.93 && !(dx < 0 && Math.abs(dz) <= 1)) {
           put(x, 1, z, B.COBBLE);
         }
       }
@@ -1044,5 +1181,320 @@ export class AdventureWorldGenerator extends WorldGenerator {
       put(cx, 4, cz + dz, B.OBSIDIAN);
     }
     for (const dz of [-3, 3]) put(cx - 1, 1, cz + dz, B.TORCH);
+  }
+
+  // ---- the outposts, the vaults and the clearing -------------------------------------------------
+
+  /** Is the block inside this plot's square, widened by `margin`? */
+  private inPlot(p: Plot, x: number, z: number, margin = 0): boolean {
+    return x >= p.cx - p.half - margin && x < p.cx + p.half + margin && z >= p.cz - p.half - margin && z < p.cz + p.half + margin;
+  }
+
+  /** Is this (block x, y, z) in the chamber of a vault, or on its ramp, under the ground? */
+  private inVault(v: VaultDef, bx: number, y: number, bz: number): boolean {
+    const g = this.vaultY.get(v.id) ?? 0;
+    const dx = bx - v.x;
+    const dz = bz - v.z;
+    const inside = (Math.abs(dx) <= 8 && dz >= 0 && dz <= 11) || (Math.abs(dx) <= 2 && dz >= -11 && dz < 0);
+    return inside && y < g - 2;
+  }
+
+  /** The height of the ground (the block under your feet) at an outpost or a vault, or null. */
+  groundAt(id: string): number | null {
+    return id === 'clearing' ? this.clearingY : (this.outpostY.get(id) ?? this.vaultY.get(id) ?? null);
+  }
+
+  private buildOutposts(): void {
+    for (const o of OUTPOSTS) this.buildOutpost(o);
+    for (const v of VAULTS) this.buildVault(v);
+    this.buildClearing();
+  }
+
+  /**
+   * An outpost: a plaza with a waystone, two roads through it and what its people need. Reedhollow has ponds and reeds, Sandmere a well and
+   * cacti on sand, Frostgate a palisade and a tower in the snow, Highmarket a palisade wall with gates and a lane of houses, and Greykeep the
+   * castle behind its bridge. (Their people stand in `NPCS`, measured from the middle of the plaza.)
+   */
+  private buildOutpost(o: OutpostDef): void {
+    const g = this.outpostY.get(o.id) ?? this.hubY;
+    const base = this.vox(g);
+    const { x: cx, z: cz } = o;
+    const put: Put = (x, dy, z, id) => base(cx + x, dy, cz + z, id);
+    const pv = (x0: number, z0: number, x1: number, z1: number, b: number | (() => number)): void => this.pave(cx + x0, cz + z0, cx + x1, cz + z1, b);
+    const lot = (x0: number, z0: number, x1: number, z1: number, front: number): Lot => this.lot(cx + x0, cz + z0, cx + x1, cz + z1, front, base);
+    let salt = 0;
+    const rand = (): (() => number) => {
+      const s = ++salt * 31 + cx;
+      let i = 0;
+      return () => hash2(this.seed + s, i++, cz + s);
+    };
+    const grey = o.id === 'greykeep';
+
+    // The ground: every kind of country has its own earth.
+    if (!grey) {
+      for (let z = -o.half; z < o.half; z++) {
+        for (let x = -o.half; x < o.half; x++) {
+          const r = hash2(this.seed + 120, cx + x, cz + z);
+          const b = o.ground === 'peat' ? (r < 0.2 ? B.PODZOL : r < 0.3 ? B.COARSE_DIRT : 0) : o.ground === 'sand' ? (r < 0.12 ? B.SANDSTONE : B.SAND) : o.ground === 'snow' ? (r < 0.12 ? B.SNOW_BLOCK : B.SNOW) : 0;
+          if (b) this.paint.set(key(cx + x, cz + z), b);
+        }
+      }
+    }
+    // The roads.
+    let n = 0;
+    const road = (): number => (hash2(this.seed + 121, n++, cx) < 0.12 ? B.COBBLE : B.GRAVEL);
+    if (grey) {
+      pv(-16, -1, 16, 1, road);
+      pv(-1, -6, 1, 16, road);
+    } else {
+      const reach = o.id === 'highmarket' ? 37 : o.half - 1;
+      pv(-reach, -1, reach, 1, road);
+      pv(-1, -reach, 1, reach, road);
+    }
+    // The plaza, in rings of stone brick and cobblestone, with the waystone in the middle.
+    for (let r = 0; r <= 4; r++) {
+      for (let z = -r; z <= r; z++) {
+        for (let x = -r; x <= r; x++) if (Math.max(Math.abs(x), Math.abs(z)) === r) this.paint.set(key(cx + x, cz + z), r === 4 ? B.STONE_BRICKS : B.COBBLE);
+      }
+    }
+    waystone(put);
+    for (const [x, z] of [[-7, -2], [7, -2], [-7, 2], [7, 2]]) lampPost(put, x, z);
+
+    const north = (x0: number, z0: number, x1: number, z1: number, kind: 'large' | 'small' | 'smithy'): void => {
+      const mid = x0 + ((x1 - x0) >> 1);
+      pv(mid, z1 + 1, mid, -2, B.GRAVEL);
+      house(lot(x0, z0, x1, z1, 2), kind, styleFor(o.style, rand()), rand());
+    };
+    const south = (x0: number, z0: number, x1: number, z1: number, kind: 'large' | 'small' | 'smithy'): void => {
+      const mid = x0 + ((x1 - x0) >> 1);
+      pv(mid, 2, mid, z0 - 1, B.GRAVEL);
+      house(lot(x0, z0, x1, z1, 3), kind, styleFor(o.style, rand()), rand());
+    };
+    const pond = (px: number, pz: number, rx: number, rz: number, bed: number, rim: number): void => {
+      for (let z = Math.floor(pz - rz - 3); z <= pz + rz + 3; z++) {
+        for (let x = Math.floor(px - rx - 3); x <= px + rx + 3; x++) {
+          const d = Math.hypot((x + 0.5 - px) / rx, (z + 0.5 - pz) / rz);
+          const r = hash2(this.seed + 122, cx + x, cz + z);
+          if (d < 1) {
+            this.paint.set(key(cx + x, cz + z), bed);
+            put(x, 0, z, B.WATER);
+            put(x, -1, z, B.WATER);
+            put(x, -2, z, B.CLAY);
+            if (d < 0.8 && r < 0.12) put(x, 1, z, B.LILY_PAD);
+          } else if (d < 1.3 && r < 0.85) {
+            this.paint.set(key(cx + x, cz + z), rim);
+            if (d < 1.15 && r < 0.3 && o.id === 'reedhollow') for (let dy = 1; dy <= 2 + (r < 0.1 ? 1 : 0); dy++) put(x, dy, z, B.SUGAR_CANE);
+          }
+        }
+      }
+    };
+
+    if (grey) {
+      // The castle: drawn where it was designed, shifted so that its bridge ends at the plaza.
+      const dz = cz + GREYKEEP_SHIFT_Z;
+      buildCastle(
+        g,
+        (x0, y0, z0, x1, y1, z1, id) => this.box(x0 + cx, y0, z0 + dz, x1 + cx, y1, z1 + dz, id),
+        (x, y, z, id, table) => {
+          this.box(x + cx, y, z + dz, x + cx, y, z + dz, id);
+          this.chests.set(`${x + cx},${y},${z + dz}`, table);
+        },
+      );
+      this.workshop(WORKSHOPS.greykeep, put, pv);
+      return;
+    }
+
+    if (o.id === 'ashbrook') {
+      // The reeve's hall and the smithy north of the road, the inn and a cottage south of it, a farm, and the green. (The cellar house is built apart: see buildCellarHouse.)
+      north(-14, -12, -8, -7, 'large');
+      north(6, -11, 12, -7, 'smithy');
+      south(8, 5, 14, 10, 'large');
+      south(-13, 5, -9, 9, 'small');
+      farm(lot(-27, -13, -19, -7, 2), rand());
+      pv(-23, -6, -23, -2, B.GRAVEL);
+      hayBale(put, 17, -6, 2);
+      crates(put, 17, 4, 2);
+      cart(put, 22, -9, false);
+      for (const [x, z] of [[-27, 21], [25, -14], [26, 18], [-27, -20], [14, 22]]) tree(put, x, z, 'oak', 4 + (Math.abs(x + z) % 2));
+      for (const x of [-28, 22, 16, -16]) {
+        lampPost(put, x, -2);
+        lampPost(put, x, 2);
+      }
+      // The green: a border of cobblestone round the grass where somebody who falls is put back on their feet.
+      const { x0, z0, size } = ASHBROOK_GREEN;
+      for (let i = 0; i < size; i++) {
+        for (const [x, z] of [[x0 + i, z0], [x0 + i, z0 + size - 1], [x0, z0 + i], [x0 + size - 1, z0 + i]]) {
+          if (!this.paint.has(key(cx + x, cz + z))) this.paint.set(key(cx + x, cz + z), B.COBBLE);
+        }
+      }
+      this.workshop(WORKSHOPS.ashbrook, put, pv);
+      return;
+    }
+
+    // Four houses round the plaza and two stalls, as in every village.
+    north(-14, -12, -8, -7, 'large');
+    north(7, -11, 11, -7, 'small');
+    south(8, 5, 14, 10, 'large');
+    south(-13, 5, -9, 9, 'small');
+    stall(lot(-20, 5, -16, 7, 3), rand());
+    stall(lot(14, -8, 18, -6, 2), rand());
+    for (const x of [-30, -22, -16, 16, 22, 30]) {
+      if (Math.abs(x) >= o.half - 1) continue;
+      lampPost(put, x, -2);
+      lampPost(put, x, 2);
+    }
+
+    if (o.id === 'reedhollow') {
+      // Reeds and two ponds, the water that gives the village its name.
+      pond(-14, 16, 6.5, 4.5, B.COARSE_DIRT, B.PODZOL);
+      pond(15, -17, 5.5, 3.5, B.COARSE_DIRT, B.PODZOL);
+      for (const [x, z] of [[-20, -12], [20, 12], [-19, -19], [19, 19]]) tree(put, x, z, 'oak', 5);
+      hayBale(put, 18, 4, 2);
+      crates(put, -6, 8, 1);
+    } else if (o.id === 'sandmere') {
+      // A well at the edge of the plaza, a caravan and cacti on the sand.
+      well(lot(-19, -12, -17, -10, 2));
+      cart(put, 19, -12, true);
+      crates(put, 20, 6, 2);
+      crates(put, 21, 6, 1);
+      hayBale(put, -6, 9, 2);
+      for (const [x, z] of [[-20, -16], [20, 14], [-21, 12], [14, 19], [19, -20]]) {
+        for (let dy = 1; dy <= 2 + (Math.abs(x + z) % 2); dy++) put(x, dy, z, B.CACTUS);
+      }
+      for (const [x, z] of [[-18, 16], [-4, 18], [6, -16], [18, 16]]) put(x, 1, z, B.DEAD_BUSH);
+    } else if (o.id === 'frostgate') {
+      // A palisade of spruce logs with a gate on each side, and a watch tower inside it.
+      tower(lot(-18, -18, -14, -14, 2));
+      pv(-16, -13, -16, -2, B.GRAVEL);
+      const H = 20;
+      for (let u = -H; u <= H; u++) {
+        for (const [x, z] of [[u, -H], [u, H], [-H, u], [H, u]]) {
+          if (Math.abs(u) <= 1) continue;
+          const corner = Math.abs(x) === H && Math.abs(z) === H;
+          put(x, 0, z, B.COBBLE);
+          for (let y = 1; y <= 3; y++) put(x, y, z, B.SPRUCE_LOG);
+          put(x, 4, z, B.FENCE);
+          if (corner) put(x, 5, z, B.TORCH);
+        }
+      }
+      for (const [x, z] of [[-2, -H], [2, -H], [-2, H], [2, H], [-H, -2], [-H, 2], [H, -2], [H, 2]]) lampPost(put, x, z);
+      pond(-12, 14, 5, 3.5, B.PACKED_ICE, B.SNOW_BLOCK);
+      crates(put, -6, 8, 2);
+    } else if (o.id === 'highmarket') {
+      // The town: a wall with gates, a lane of houses on each side and a market of stalls.
+      buildWall(put, (x, z) => hash2(this.seed + 95, x, z));
+      north(-32, -14, -26, -9, 'large');
+      north(15, -12, 21, -7, 'large');
+      north(24, -11, 28, -7, 'small');
+      south(-32, 5, -26, 10, 'large');
+      south(18, 5, 22, 9, 'small');
+      south(26, 5, 30, 9, 'small');
+      stall(lot(-26, -8, -22, -6, 2), rand());
+      stall(lot(-26, 5, -22, 7, 3), rand());
+      stall(lot(-6, -8, -2, -6, 2), rand());
+      stall(lot(2, 12, 6, 14, 3), rand());
+      stall(lot(-6, 12, -2, 14, 3), rand());
+      fountain(put, 0, -14);
+      pv(-5, -17, 5, -11, B.STONE_BRICKS);
+      for (const [x, z] of [[-4, -12], [4, -12], [-4, -16], [4, -16]]) lampPost(put, x, z);
+      banner(put, -33, -3, 14);
+      banner(put, 33, -3, 14);
+    }
+    this.workshop(WORKSHOPS[o.id], put, pv);
+  }
+
+  /**
+   * A vault: a chamber cut in the rock under a levelled square, with a ramp down to it from the square's north side, two cages that keep
+   * making monsters while someone is near, a chest and an altar at the back. Flooded (the Reed Grotto), dry and sandy (the Sand Crypt), or ice.
+   */
+  private buildVault(v: VaultDef): void {
+    const g = this.vaultY.get(v.id) ?? this.hubY;
+    const { x: vx, z: vz } = v;
+    const wall = v.theme === 'crypt' ? B.SANDSTONE : v.theme === 'frozen' ? B.PACKED_ICE : B.STONE_BRICKS;
+    const pillar = v.theme === 'crypt' ? B.CHISELED_SANDSTONE : v.theme === 'frozen' ? B.ICE : B.MOSSY_COBBLE;
+    const floorAt = (x: number, z: number): number => {
+      const r = hash2(this.seed + 130, x, z);
+      if (v.theme === 'crypt') return (x + z) % 2 === 0 ? B.SANDSTONE : B.CHISELED_SANDSTONE;
+      if (v.theme === 'frozen') return r < 0.5 ? B.PACKED_ICE : B.STONE_BRICKS;
+      return r < 0.4 ? B.MOSSY_COBBLE : r < 0.7 ? B.COBBLE : B.STONE_BRICKS;
+    };
+    // Rock all round (it closes any cave of the land that the cut would open), then the walls, floor and roof, then the air.
+    this.box(vx - 9, g - 14, vz - 1, vx + 9, g - 1, vz + 12, B.STONE, 'fill');
+    this.box(vx - 8, g - 12, vz, vx + 8, g - 5, vz + 11, wall);
+    this.box(vx - 7, g - 11, vz + 1, vx + 7, g - 7, vz + 10, B.AIR);
+    for (let z = vz + 1; z <= vz + 10; z++) for (let x = vx - 7; x <= vx + 7; x++) this.box(x, g - 12, z, x, g - 12, z, floorAt(x, z));
+    // The ramp: three wide, a stair step for every block, walled in stone brick, four blocks of headroom.
+    for (let k = 0; k <= 11; k++) {
+      const z = vz - 11 + k;
+      const y = g - k;
+      this.box(vx - 2, y - 1, z, vx + 2, y - 1, z, B.STONE, 'fill');
+      this.box(vx - 2, y, z, vx - 2, g, z, B.STONE_BRICKS);
+      this.box(vx + 2, y, z, vx + 2, g, z, B.STONE_BRICKS);
+      this.box(vx - 1, y + 1, z, vx + 1, y + 4, z, B.AIR);
+      this.box(vx - 1, y, z, vx + 1, y, z, stairId(4, false, 3));
+    }
+    // A gate of stone brick over the top of the ramp, with a torch on each post.
+    for (const dx of [-2, 2]) {
+      this.box(vx + dx, g + 1, vz - 11, vx + dx, g + 4, vz - 11, B.STONE_BRICKS);
+      this.box(vx + dx, g + 6, vz - 11, vx + dx, g + 6, vz - 11, B.TORCH);
+    }
+    this.box(vx - 2, g + 5, vz - 11, vx + 2, g + 5, vz - 11, B.STONE_BRICKS);
+    this.pave(vx - 3, vz - 12, vx + 3, vz - 9, B.COBBLE);
+
+    // Pillars with a torch on each, and what the place is: a black pool with a causeway, a row of tombs, or ice.
+    for (const px of [vx - 7, vx + 7]) {
+      for (const pz of [vz + 2, vz + 9]) {
+        this.box(px, g - 11, pz, px, g - 8, pz, pillar);
+        this.box(px, g - 7, pz, px, g - 7, pz, B.TORCH);
+      }
+    }
+    if (v.theme === 'flooded') {
+      this.box(vx - 5, g - 13, vz + 4, vx + 5, g - 12, vz + 7, B.WATER);
+      this.box(vx - 1, g - 12, vz + 4, vx + 1, g - 12, vz + 7, B.STONE_BRICKS);
+      for (let z = vz + 4; z <= vz + 7; z++) for (let x = vx - 5; x <= vx + 5; x++) if (Math.abs(x - vx) > 1 && hash2(this.seed + 131, x, z) < 0.25) this.box(x, g - 11, z, x, g - 11, z, B.LILY_PAD);
+    } else {
+      for (const side of [-1, 1]) {
+        for (const tz of [vz + 3, vz + 7]) {
+          const x0 = vx + side * 4;
+          const x1 = vx + side * 6;
+          this.box(x0, g - 11, tz, x1, g - 11, tz, wall);
+          if (v.theme === 'crypt') this.box(x0, g - 10, tz, x1, g - 10, tz, B.CHISELED_SANDSTONE, 'set');
+          else this.box(x0 + (side < 0 ? 1 : 0), g - 10, tz, x1 - (side > 0 ? 1 : 0), g - 10, tz, B.ICE);
+        }
+      }
+    }
+    // The altar at the back, and a chest.
+    this.box(vx - 1, g - 11, vz + 9, vx + 1, g - 11, vz + 9, B.OBSIDIAN);
+    this.box(vx, g - 10, vz + 9, vx, g - 10, vz + 9, B.GLOWSTONE);
+    const cy = g - 11;
+    this.box(vx + 5, cy, vz + 10, vx + 5, cy, vz + 10, chestId(3, 0));
+    this.chests.set(`${vx + 5},${cy},${vz + 10}`, 'ruin');
+    // The cages.
+    v.mobs.forEach((kind, i) => {
+      const sx = vx + (i === 0 ? -5 : 5);
+      const sz = vz + 5;
+      this.box(sx, g - 11, sz, sx, g - 11, sz, B.SPAWNER);
+      this.vaultSpawners.set(`${sx},${g - 11},${sz}`, kind);
+    });
+  }
+
+  /** The clearing in the woods: a ring of mossy stones round a cold fire pit, on bare earth. */
+  private buildClearing(): void {
+    const base = this.vox(this.clearingY);
+    const { x: cx, z: cz, r } = CLEARING;
+    for (let z = -r; z <= r; z++) {
+      for (let x = -r; x <= r; x++) {
+        const d = Math.hypot(x + 0.5, z + 0.5);
+        const roll = hash2(this.seed + 140, cx + x, cz + z);
+        if (d <= r - 1) this.paint.set(key(cx + x, cz + z), d < 2.4 ? B.GRAVEL : roll < 0.5 ? B.COARSE_DIRT : B.PODZOL);
+        if (d >= 6.6 && d <= 7.6 && roll < 0.6) base(cx + x, 1, cz + z, B.MOSSY_COBBLE);
+        if (d >= 1.2 && d <= 1.9) base(cx + x, 1, cz + z, B.COBBLE);
+      }
+    }
+    for (const [x, z] of [[7, 0], [-7, 0], [0, 7], [0, -7]]) {
+      base(cx + x, 1, cz + z, B.MOSSY_COBBLE);
+      base(cx + x, 2, cz + z, B.TORCH);
+    }
+    for (let x = -4; x <= -2; x++) base(cx + x, 1, cz + 4, B.LOG);
   }
 }

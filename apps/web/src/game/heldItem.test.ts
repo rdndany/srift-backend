@@ -209,7 +209,7 @@ describe('the first-person hand', () => {
     const tool = (kind: string): number => items.find((i) => i.tool?.kind === kind)!.id;
     const food = items.find((i) => i.food)!.id;
     const lanterns = items.filter((i) => i.carry === 'hang').map((i) => i.id);
-    const ids = [0, B.STONE, B.TORCH, ...lanterns, tool('sword'), tool('pickaxe'), tool('hoe'), I.GREATSWORD, 0, I.DAGGER, I.STAFF, 0, I.WAND, I.BOW, I.CROSSBOW, I.ORB, I.COMPASS, I.SHIELD, I.MAP, food, I.BUCKET];
+    const ids = [0, B.STONE, B.TORCH, ...lanterns, tool('sword'), tool('pickaxe'), tool('hoe'), I.GREATSWORD, 0, I.DAGGER, I.STAFF, 0, I.WAND, I.BOW, I.CROSSBOW, I.ORB, I.COMPASS, I.LAND_SURVEYOR, I.SHIELD, I.MAP, food, I.BUCKET];
     const offs = [0, 0, I.SHIELD, I.ORB, I.DAGGER, I.MAP, lanterns[0]];
     let seed = 99;
     const rnd = (): number => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
@@ -243,6 +243,9 @@ describe('the first-person hand', () => {
       if (rnd() < 0.008) eat = eat > 0 ? 0 : 0.4;
       if (rnd() < 0.01) hand.setMapUp(rnd() < 0.5);
       if (rnd() < 0.05) hand.setCompass(Math.floor(rnd() * 64) - 16);
+      if (rnd() < 0.02) hand.surveyor.surveying = !hand.surveyor.surveying;
+      if (rnd() < 0.03) hand.surveyor.tone = pick(['idle', 'good', 'warn', 'bad'] as const);
+      if (rnd() < 0.05) hand.surveyor.push(pick(['plant', 'pluck', 'seal', 'claim'] as const));
       if (rnd() < 0.01) walk = pick([0, 0, 2, 4.3, 7]);
       if (rnd() < 0.01) hand.setLight(new THREE.Color(rnd() * 1.4, rnd() * 1.4, rnd() * 1.4));
       if (rnd() < 0.004) void hand.figureModel(pick(ids));
@@ -252,4 +255,126 @@ describe('the first-person hand', () => {
     }
     hand.dispose();
   });
-});
+
+  describe('the Land Surveyor', () => {
+    const pivotOf = (hand: Hand): THREE.Group => (hand as unknown as { pivot: THREE.Group }).pivot;
+    const halo = (hand: Hand): THREE.Mesh => {
+      let found: THREE.Mesh | undefined;
+      hand.scene.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (m.isMesh && (m.material as THREE.Material).blending === THREE.AdditiveBlending) found = m;
+      });
+      return found as unknown as THREE.Mesh;
+    };
+    const run = (hand: Hand, frames: number): THREE.Vector3[] => {
+      const out: THREE.Vector3[] = [];
+      for (let i = 0; i < frames; i++) {
+        hand.update(1 / 60, I.LAND_SURVEYOR, 0, 16 / 9, 0, false, 0);
+        out.push(pivotOf(hand).position.clone());
+      }
+      return out;
+    };
+
+    it('is driven into the ground at a corner: the hand goes forward and down, then comes back to where it rests', () => {
+      const hand = makeHand();
+      settle(hand, I.LAND_SURVEYOR);
+      hand.surveyor.surveying = true;
+      run(hand, 60);
+      const still = run(hand, 1)[0];
+      hand.surveyor.push('plant');
+      const path = run(hand, 40);
+      const low = Math.min(...path.map((p) => p.y));
+      const far = Math.min(...path.map((p) => p.z));
+      expect(low).toBeLessThan(still.y - 0.1);
+      expect(far).toBeLessThan(still.z - 0.07);
+      // ...and it was lifted first (the wind-up).
+      expect(Math.max(...path.map((p) => p.y))).toBeGreaterThan(still.y + 0.03);
+      const after = run(hand, 40).at(-1)!;
+      expect(Math.abs(after.y - still.y)).toBeLessThan(0.03);
+      expect(Math.abs(after.z - still.z)).toBeLessThan(0.03);
+      hand.dispose();
+    });
+
+    it('leans out toward the crosshair while a shape is marked, and settles when it is not', () => {
+      const hand = makeHand();
+      settle(hand, I.LAND_SURVEYOR);
+      const idle = run(hand, 60).at(-1)!;
+      hand.surveyor.surveying = true;
+      const aimed = run(hand, 90).at(-1)!;
+      expect(aimed.x).toBeLessThan(idle.x - 0.04);
+      expect(aimed.z).toBeLessThan(idle.z - 0.02);
+      hand.surveyor.surveying = false;
+      const back = run(hand, 120).at(-1)!;
+      expect(Math.abs(back.x - idle.x)).toBeLessThan(0.01);
+      hand.dispose();
+    });
+
+    it('glows the colour of what the server said of the shape, and gold at the purchase', () => {
+      const hand = makeHand();
+      settle(hand, I.LAND_SURVEYOR);
+      hand.surveyor.surveying = true;
+      const color = (): THREE.Color => ((halo(hand).material as THREE.MeshBasicMaterial).color).clone();
+      const hue = (c: THREE.Color): number => c.getHSL({ h: 0, s: 0, l: 0 }).h;
+      const tones: Record<string, number> = { good: 0.4, warn: 0.11, bad: 0 };
+      for (const [tone, h] of Object.entries(tones)) {
+        hand.surveyor.tone = tone as 'good' | 'warn' | 'bad';
+        run(hand, 60);
+        const got = hue(color());
+        expect(Math.min(Math.abs(got - h), 1 - Math.abs(got - h)), tone).toBeLessThan(0.08);
+      }
+      hand.surveyor.push('claim');
+      run(hand, 40);
+      expect(hue(color())).toBeGreaterThan(0.1);
+      expect(hue(color())).toBeLessThan(0.16);
+      hand.dispose();
+    });
+
+    it('raises the staff for a purchase, turns it once to close a shape, and plays a purchase before the corners that waited', () => {
+      const hand = makeHand();
+      settle(hand, I.LAND_SURVEYOR);
+      hand.surveyor.surveying = true;
+      const still = run(hand, 60).at(-1)!;
+      hand.surveyor.push('claim');
+      const high = Math.max(...run(hand, 80).map((p) => p.y));
+      expect(high).toBeGreaterThan(still.y + 0.1);
+      run(hand, 120);
+      hand.surveyor.push('seal');
+      const view = (hand as unknown as { view: { object: THREE.Object3D } }).view;
+      let turned = 0;
+      let last = view.object.rotation.y;
+      for (let i = 0; i < 50; i++) {
+        hand.update(1 / 60, I.LAND_SURVEYOR, 0, 16 / 9, 0, false, 0);
+        turned += Math.abs(view.object.rotation.y - last);
+        last = view.object.rotation.y;
+      }
+      expect(turned).toBeGreaterThan(Math.PI);
+      // A purchase cuts in at once and empties the queue of corners behind it.
+      hand.surveyor.push('plant');
+      hand.surveyor.push('pluck');
+      hand.surveyor.push('claim');
+      expect(hand.surveyor.pending).toBe(1);
+      hand.dispose();
+    });
+
+    it('holds nothing of its own once put away, and is plain on a figure and in the other hand', () => {
+      const hand = makeHand();
+      settle(hand, I.LAND_SURVEYOR);
+      hand.surveyor.surveying = true;
+      run(hand, 30);
+      expect(halo(hand).visible).toBe(true);
+      const shown = (root: THREE.Object3D): number => {
+        let n = 0;
+        root.traverse((o) => {
+          const m = o as THREE.Mesh;
+          if (m.isMesh && (m.material as THREE.Material).blending === THREE.AdditiveBlending && m.visible) n++;
+        });
+        return n;
+      };
+      expect(shown(hand.figureModel(I.LAND_SURVEYOR)!)).toBe(0);
+      expect(look(hand.figureModel(I.LAND_SURVEYOR)!).shown).toBeGreaterThan(0);
+      settle(hand, 0);
+      // (nothing of it is in the hand's scene any more, and its glow is off for the next time it is carried as a plain picture)
+      expect(halo(hand)).toBeUndefined();
+      hand.dispose();
+    });
+  });});

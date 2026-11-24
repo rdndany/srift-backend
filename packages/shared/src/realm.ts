@@ -1,13 +1,15 @@
-import { B, BLOCKS, FALLS, IS_LEAVES, IS_LOG, SOUL_WARD_HEIGHT, SOUL_WARD_RADIUS, chestId, chestInfo, chestPartnerPos, doorId, doorInfo, doorKind, isAnvil, isChest } from './blocks';
+import { B, BLOCKS, FALLS, IS_LEAVES, IS_LOG, SOUL_WARD_HEIGHT, SOUL_WARD_RADIUS, chestId, chestInfo, chestPartnerPos, doorId, doorInfo, doorKind, isAnvil, isChest, signInfo } from './blocks';
 import { WORLD_HEIGHT } from './chunk';
 import { LOOT_TABLES, positionRand, rollChest, spawnerKind } from './loot';
 import { bodyOverlapsBlock, type Solid } from './physics';
+import { mobSolid, mobTouch } from './mobSolids';
 import { BlockEntities } from './blockEntities';
 import { DAY_LENGTH_SECONDS, daylightAt } from './daylight';
 import { DropWorld, type DropCollector } from './dropEntities';
 import { XpOrbWorld } from './xpOrbs';
 import { BOBBER_LEASH, FishingWorld, type FishingEvents } from './fishing';
 import type { WorldAccess } from './headlessWorld';
+import type { LandService } from './landService';
 import { BOTTLE_XP_MAX, BOTTLE_XP_MIN, blockDrops, getItem, toolId } from './items';
 import { makeStack, type ItemStack } from './inventory';
 import { ChestMenu } from './menu';
@@ -21,6 +23,8 @@ import { StashVault } from './stash';
 import { bagDrop } from './bags';
 import { skillBookDrop } from './skillbooks';
 import { gearDrop, pickRarity, randomGear, type GearRoll } from './gear';
+import { randomHollowKingRelic } from './hollowKing';
+import { tooltipName } from './tooltip';
 import type { DungeonView } from './dungeonView';
 import { BossBrain, type BossArenaDef, type BossTarget, type BossView, type BossWorld } from './boss';
 import { jewelDrop, jewelKind } from './jewels';
@@ -155,6 +159,10 @@ export class Realm {
   readonly world: WorldAccess;
   readonly generator: WorldGenerator;
   readonly rand: () => number;
+  /** The land of this world (claims and what was changed), when it has one: the server's rooms do. Set by whoever owns the realm. */
+  land: LandService | null = null;
+  /** How to write a player's save as it is now, so a purchase can be stored in the same transaction as the Auren it took (set by the room with the land). */
+  landSave: ((p: Player) => [key: string, value: unknown] | null) | null = null;
 
   readonly blockEntities = new BlockEntities();
   /** The mobs (made in the constructor, from the realm's own dice: a seeded realm must roll the same for them as for everything else). */
@@ -286,13 +294,15 @@ export class Realm {
       },
       hiss: (x, y, z) => this.emitNear(x, y, z, { t: 'splash', vol: 0.5 }),
       isProtected: (x, y, z) => this.isProtected(x, y, z),
+      // Water and lava do not run from the wild into somebody's land.
+      crossBlocked: (fx, fy, fz, x, y, z) => this.land?.fluidBlocked(fx, fy, fz, x, y, z) ?? false,
     });
     this.fire = new FireSim({
       getBlock: (x, y, z) => this.world.getBlock(x, y, z),
       // Flames do not start in a protected place, and what is there does not burn (so neither does it need to be put out).
-      setBlock: (x, y, z, id) => (id === B.FIRE && this.isProtected(x, y, z) ? false : this.world.setBlock(x, y, z, id)),
+      setBlock: (x, y, z, id) => (id === B.FIRE && this.isGriefProof(x, y, z) ? false : this.world.setBlock(x, y, z, id)),
       consume: (x, y, z) => {
-        if (this.isProtected(x, y, z)) return;
+        if (this.isGriefProof(x, y, z)) return;
         const id = this.world.getBlock(x, y, z);
         if (id === B.TNT) this.primeTnt(x, y, z, 0.2);
         this.world.setBlock(x, y, z, B.AIR);
@@ -385,7 +395,10 @@ export class Realm {
         for (const p of this.players) {
           if (p.screen === 'dead' || p.spectating) continue;
           if (Math.hypot(p.body.x - mob.body.x, p.body.z - mob.body.z) > KILL_CREDIT_RANGE) continue;
-          if (p.quests) p.questEvent({ t: 'kill', mob: mob.kind });
+          if (p.quests) {
+            p.questEvent({ t: 'kill', mob: mob.kind });
+            p.questKill(mob.kind, this.rand);
+          }
           p.achKill(mob);
         }
         if (this.rifts && mob.rift !== 0) {
@@ -1227,15 +1240,29 @@ export class Realm {
     return this.invasions.view();
   }
 
+  /**
+   * The players the Gilded Tide can start for and keep alive: alive, out in the open (not in a dungeon copy). Creative is allowed
+   * (unlike rifts): the Tide is a hunt for shy gold, and an admin in creative still needs to be able to start and find it.
+   */
+  private tidePlayers(): (RiftPlayer & { player: Player })[] {
+    const out: (RiftPlayer & { player: Player })[] = [];
+    for (const p of this.players) {
+      if (p.screen === 'dead' || p.spectating || this.copyAt(p) >= 0) continue;
+      out.push({ ref: p, player: p, x: p.body.x, y: p.body.y, z: p.body.z });
+    }
+    return out;
+  }
+
   /** Begin the Gilded Tide right now near the players (a cheat, a test). Returns false when one is on already, or there is no one about or no ground for it. */
   startInvasion(): boolean {
-    return !!this.invasions && this.invasions.open(this.riftPlayers());
+    return !!this.invasions && this.invasions.open(this.tidePlayers());
   }
 
   private invasionHost(clock: () => number): InvasionHost {
     return {
       now: clock,
-      players: () => this.riftPlayers(),
+      players: () => this.tidePlayers(),
+      chunks: () => this.world.chunkCoords?.() ?? [],
       groundAt: (x, z) => this.world.surfaceY(Math.floor(x), Math.floor(z)),
       standable: (x, y, z) => {
         const bx = Math.floor(x);
@@ -1269,15 +1296,61 @@ export class Realm {
       const piece = randomGear(7 + Math.floor(this.rand() * 3), pickRarity([0, 62, 38], this.rand), p.cls?.classId, this.rand);
       const a = this.rand() * Math.PI * 2;
       this.drops.spawn(piece, x, y + 0.5, z, Math.cos(a) * 1.6, 4, Math.sin(a) * 1.6, 0.5);
+      // The Hollow King besides leaves each of them one of his nine relics, all of them burning (see hollowKing.ts).
+      if (mob.kind === 'hollow_king') {
+        const relic = randomHollowKingRelic(this.rand);
+        const b = this.rand() * Math.PI * 2;
+        this.drops.spawn(relic, x, y + 1, z, Math.cos(b) * 1.3, 5, Math.sin(b) * 1.3, 0.5);
+        p.emit({ t: 'toast', text: `The Hollow King's hoard burns on the floor: ${tooltipName(relic)}` });
+      }
     }
+    if (mob.kind === 'hollow_king') this.placeHoardChest(slot, x, y, z);
+  }
+
+  /**
+   * The Hollow King's chest of loot, set down by where he fell: on the closest floor around the middle with room for it, facing
+   * the middle, filled from the hoard's table. Where there is no such floor, what would have been in it is dropped at the middle.
+   */
+  private placeHoardChest(slot: number, x: number, y: number, z: number): void {
+    // The portal out is made across the way where he fell (see `ensureExit`): the chest keeps clear of it.
+    const exit = this.generator.instanceBoss(slot)?.exit;
+    const cx = Math.floor(x);
+    const cz = Math.floor(z);
+    const cy = Math.floor(y);
+    const slots = rollChest(LOOT_TABLES.hollow_king, this.rand);
+    const ring: { dx: number; dz: number }[] = [];
+    for (let dx = -6; dx <= 6; dx++) for (let dz = -6; dz <= 6; dz++) if (Math.max(Math.abs(dx), Math.abs(dz)) >= 3) ring.push({ dx, dz });
+    ring.sort((a, b) => a.dx * a.dx + a.dz * a.dz - (b.dx * b.dx + b.dz * b.dz) || a.dx - b.dx || a.dz - b.dz);
+    for (const { dx, dz } of ring) {
+      const bx = cx + dx;
+      const bz = cz + dz;
+      if (exit && Math.abs(bx - exit.x) <= 3 && Math.abs(bz - exit.z) <= 4) continue;
+      // The floor within a few blocks of where he stood: solid below, two clear blocks above.
+      for (let by = cy + 3; by >= cy - 3; by--) {
+        const below = BLOCKS[this.world.getBlock(bx, by - 1, bz)];
+        if (!below.solid || below.liquid || this.world.getBlock(bx, by, bz) !== B.AIR || this.world.getBlock(bx, by + 1, bz) !== B.AIR) continue;
+        const dir = Math.abs(dx) > Math.abs(dz) ? (dx < 0 ? 0 : 1) : dz < 0 ? 2 : 3;
+        this.world.setBlock(bx, by, bz, chestId(dir, 0));
+        this.blockChanged(bx, by, bz);
+        const chest = this.blockEntities.chest(bx, by, bz);
+        slots.forEach((s, k) => chest.set(k, s));
+        this.emitNear(bx + 0.5, by + 0.5, bz + 0.5, { t: 'burst', id: B.GOLD_ORE, x: bx, y: by, z: bz, count: 24 });
+        return;
+      }
+    }
+    for (const s of slots) if (s) this.drops.spawn(s, x, y + 0.5, z, (this.rand() - 0.5) * 3, 4, (this.rand() - 0.5) * 3, 0.5);
   }
 
   /** The monsters and villagers close to a spot, as things a player cannot walk through (undefined when none is). */
   solidsNear(x: number, y: number, z: number): Solid[] | undefined {
     let out: Solid[] | undefined;
     for (const m of this.mobs.mobs) {
-      if (m.dead || m.width < 0.3 || Math.abs(m.body.x - x) > 6 || Math.abs(m.body.z - z) > 6 || Math.abs(m.body.y - y) > 6) continue;
-      (out ??= []).push({ x: m.body.x, y: m.body.y, z: m.body.z, r: m.width / 2, h: m.height });
+      if (m.dead || m.width < 0.3) continue;
+      // (Its size next to its model, as for a blow: see `Mob.hitDistance`; a giant's arm reaches further than 6 blocks from its middle.)
+      const k = m.def.height > 0 ? m.height / m.def.height : 1;
+      const near = 6 + mobTouch(m.def.kind, k, m.width);
+      if (Math.abs(m.body.x - x) > near || Math.abs(m.body.z - z) > near || Math.abs(m.body.y - y) > 6 + m.height) continue;
+      (out ??= []).push(mobSolid(m.def.kind, m.body.x, m.body.y, m.body.z, m.yaw, k, m.width, m.height));
     }
     return out;
   }
@@ -1285,6 +1358,11 @@ export class Realm {
   /** Is this block part of a place players may not change? (See `WorldGenerator.isProtected`.) */
   isProtected(x: number, y: number, z: number): boolean {
     return this.generator.isProtected(x, y, z);
+  }
+
+  /** Nobody's hand (a blast, a fire) leaves this block alone: a protected place, and anything somebody has claimed. */
+  isGriefProof(x: number, y: number, z: number): boolean {
+    return this.generator.isProtected(x, y, z) || (this.land?.blocksEnvironment(x, y, z) ?? false);
   }
 
   // ---- villagers -------------------------------------------------------------
@@ -1624,6 +1702,12 @@ export class Realm {
     return this.blockEntities.remove(id, x, y, z);
   }
 
+  /** The signs with writing on them within 
+ blocks of (x, z) that are still signs (one whose block was destroyed some other way is not shown). */
+  signsAround(x: number, z: number, r: number): { x: number; y: number; z: number; lines: string[] }[] {
+    return this.blockEntities.signsNear(x, z, r).filter((s) => signInfo(this.world.getBlock(s.x, s.y, s.z)) !== null);
+  }
+
   /** A block was placed, changed or removed here: liquids and redstone look at what it touches. */
   blockChanged(x: number, y: number, z: number): void {
     this.fluids.notify(x, y, z);
@@ -1652,6 +1736,8 @@ export class Realm {
         const nz = sz + dz;
         const id = this.world.getBlock(nx, ny, nz);
         if (id === B.AIR || canStayAt(id, this.world, nx, ny, nz)) continue;
+        // What is on somebody's land is not knocked off by a change made on the other side of its edge.
+        if (this.land?.fluidBlocked(x, y, z, nx, ny, nz)) continue;
         const def = BLOCKS[id];
         this.world.setBlock(nx, ny, nz, B.AIR);
         this.emitNear(nx, ny, nz, { t: 'burst', id, x: nx, y: ny, z: nz, count: 6 });
@@ -1725,7 +1811,7 @@ export class Realm {
           const wy = y0 + iy;
           const wz = z0 + iz;
           if (!IS_LEAVES[this.world.getBlock(wx, wy, wz)] || queued.has((wy * 65536 + wx) * 65536 + wz)) continue;
-          if (this.isProtected(wx, wy, wz)) continue;
+          if (this.isProtected(wx, wy, wz) || this.land?.fluidBlocked(x, y, z, wx, wy, wz)) continue;
           this.fading.push({ x: wx, y: wy, z: wz, t: 0.4 + this.rand() * 4.6, drops: withDrops });
           found++;
         }
@@ -1874,7 +1960,7 @@ export class Realm {
           const id = this.world.getBlock(bx, by, bz);
           const def = BLOCKS[id];
           if (id === B.AIR || def.liquid || !Number.isFinite(def.hardness)) continue;
-          if (this.isProtected(bx, by, bz)) continue;
+          if (this.isGriefProof(bx, by, bz)) continue;
           // The blast sets other TNT off rather than breaking it.
           if (id === B.TNT) {
             this.primeTnt(bx, by, bz, 0.3 + rand() * 0.9);

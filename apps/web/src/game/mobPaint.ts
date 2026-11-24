@@ -72,6 +72,17 @@ export interface Part {
   glow?: boolean;
   /** A boss's arm (or what it holds) while the boss gathers a spell: turned this much more (radians) as the spell builds. */
   raise?: number;
+  /**
+   * An arm that carries a weapon: its blow is the weapon's overhead chop worked by the shoulder, the elbow (`elbow`) and the wrist (`grip`), not
+   * the arm turning as one stiff piece (see `bladeSwing` in creatureRig.ts).
+   */
+  armed?: boolean;
+  /** The forearm of an armed arm (`of` the arm): the elbow it bends at. */
+  elbow?: boolean;
+  /** What an armed arm holds (`of` the forearm). Its place is the grip: the part's origin is the middle of the handle, which is in the middle of the fist; the wrist turns it. */
+  grip?: boolean;
+  /** For a grip part: where the wrist is, in the forearm's frame (the middle of the fist). The weapon turns about this point, so the grip stays in the hand. */
+  wrist?: [number, number, number];
   /** Lit from within (a block of lava stone): at least this bright (0..1) whatever light falls on it, shaded by side. */
   selfLit?: number;
   /**
@@ -92,5 +103,8 @@ export interface Part {
   pulse?: number;
 }
 
-/** One cube of a cluster: x, y, z, w, h, d, shade, skin (see `Part.bricks`). */
-export type Brick = [number, number, number, number, number, number, number, number];
+/**
+ * One cube of a cluster: x, y, z, w, h, d, shade, skin (see `Part.bricks`), and optionally a mask of the sides that are drawn
+ * (bit 0..5 = +x, -x, +y, -y, +z, -z; all six when it is left out): a voxel sculpture leaves out the sides that touch another cube.
+ */
+export type Brick = [number, number, number, number, number, number, number, number, number?];

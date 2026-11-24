@@ -460,7 +460,7 @@ export function poseDeep(kind: HollowDeepKind, g: THREE.Object3D, parts: readonl
       const cur = (g.userData.lean as number | undefined) ?? 0;
       const next = lerp(cur, lean, dt * 9);
       g.userData.lean = next;
-      g.rotation.x = next;
+      g.rotation.x += next;
       const sw = one('swordArm');
       const sh = one('shieldArm');
       const w = k * (c === 2 ? 1 : 0.9);

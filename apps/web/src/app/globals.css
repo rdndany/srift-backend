@@ -42,3 +42,4 @@
 @import './styles/bags.css';              /* the bag bar and the bag windows */
 @import './styles/hud-scale.css';         /* the HUD scaled to the screen: --hud, set by HudScale.tsx */
 @import './styles/landing.css';           /* the presentation page (/welcome, the bare domain) */
+@import './styles/land.css';              /* the land: the Land Surveyor's keys and price, the confirmation, the window of the player's lands */

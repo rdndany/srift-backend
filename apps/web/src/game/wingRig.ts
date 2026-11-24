@@ -1,12 +1,17 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { WingDef } from '@solrift/shared';
+import type { WingPose, WingSide } from './flightMotion';
 
 /**
  * The wings on a hero's back (see wings.ts): a pair, each a group hinged at the shoulder blade that opens and closes with the clock, and beats hard
  * while the wearer flies. Three kinds are drawn: the long feathers of a bird (laid like the rows of a real wing: coverts, secondaries and the long
  * primaries), the glassy blades of an insect, and a bat's skin stretched on bone. They are solid and lit like the armor, with a bright tip
  * on the second wings, and nothing floats off them.
+ *
+ * Each wing is a chain of three pieces hinged where a real one bends (the shoulder, the elbow, the wrist), so that the wing can fold, unfold, beat from
+ * the shoulder out and let its tip trail: the arm and the short feathers by the shoulder; the forearm and the middle feathers; the hand, and the long
+ * feathers at the tip. The blocks are the same as ever, only parted among the three groups: the wing at rest looks as it did.
  */
 
 type V3 = [number, number, number];
@@ -16,8 +21,8 @@ const DEG = Math.PI / 180;
 export interface WingRig {
   /** The geometries to light (they carry vertex colours, painted by the figure like the rest of its blocks). */
   geos: THREE.BufferGeometry[];
-  /** `flying`: the wings beat; `lift` (0..1) how hard the figure is moving. */
-  update(t: number, dt: number, flying: boolean, lift: number): void;
+  /** Pose the wings (see flightMotion.ts) and let the light come off them: `t` is the clock, `dt` the time since the last frame. */
+  apply(pose: WingPose, t: number, dt: number): void;
   dispose(): void;
 }
 
@@ -34,11 +39,14 @@ const shade = (hex: string, k: number): THREE.Color => {
 
 /** The blocks of one wing, collected by material and joined into one mesh each at the end. */
 class Batch {
-  private readonly by = new Map<THREE.Material, THREE.BufferGeometry[]>();
+  /** The piece of the wing that what is added now belongs to: 0 the arm from the shoulder to the elbow, 1 the forearm, 2 the hand and the long tips. */
+  seg = 0;
+  private readonly by: Map<THREE.Material, THREE.BufferGeometry[]>[] = [new Map(), new Map(), new Map()];
   add(mat: THREE.Material, geo: THREE.BufferGeometry): void {
-    const list = this.by.get(mat);
+    const by = this.by[this.seg];
+    const list = by.get(mat);
     if (list) list.push(geo);
-    else this.by.set(mat, [geo]);
+    else by.set(mat, [geo]);
   }
 
   /**
@@ -82,20 +90,32 @@ class Batch {
     this.add(mat, geo);
   }
 
-  /** Join the blocks of each material and hang them on `parent`; returns the joined geometries. */
-  flush(parent: THREE.Object3D, geos: THREE.BufferGeometry[]): void {
-    for (const [mat, list] of this.by) {
-      // (The parts of a fan have no index and those of a box have: they are made alike before they are joined.)
-      const same = list.map((g) => (g.index ? g.toNonIndexed() : g));
-      const merged = mergeGeometries(same);
-      for (const g of list) g.dispose();
-      for (const g of same) if (!list.includes(g)) g.dispose();
-      if (!merged) continue;
-      parent.add(new THREE.Mesh(merged, mat));
-      geos.push(merged);
-    }
-    this.by.clear();
+  /** Join the blocks of each material in each piece (moved so that the joint of the piece is the origin); returns the joined geometry of each. */
+  flush(pivots: V3[]): WingPart[] {
+    const out: WingPart[] = [];
+    this.by.forEach((by, seg) => {
+      for (const [mat, list] of by) {
+        // (The parts of a fan have no index and those of a box have: they are made alike before they are joined.)
+        const same = list.map((g) => (g.index ? g.toNonIndexed() : g));
+        const merged = mergeGeometries(same);
+        for (const g of list) g.dispose();
+        for (const g of same) if (!list.includes(g)) g.dispose();
+        if (!merged) continue;
+        merged.translate(-pivots[seg][0], -pivots[seg][1], -pivots[seg][2]);
+        merged.computeBoundingSphere();
+        out.push({ seg, mat, geo: merged });
+      }
+      by.clear();
+    });
+    return out;
   }
+}
+
+/** The blocks of one material in one piece of a wing. */
+interface WingPart {
+  seg: number;
+  mat: THREE.Material;
+  geo: THREE.BufferGeometry;
 }
 
 type Mats = { bodyG: THREE.Material[]; deepG: THREE.Material[]; body: THREE.Material; deep: THREE.Material; edge: THREE.Material; light: THREE.Material; pale: THREE.Material };
@@ -134,13 +154,18 @@ function bone(batch: Batch, mat: THREE.Material, from: V3, to: V3, w: number, z 
  * bends out and down to the tip (the shape of an angel's wing, a dragon's, an insect's): feathers, blades or the fingers of a bat hang from the arm
  * and fan out, the short ones by the shoulder and the longest at the tip, so that their ends make the long curve of the lower edge.
  */
-function buildWing(def: WingDef, mats: Mats, batch: Batch): void {
+function buildWing(def: WingDef, mats: Mats, batch: Batch): V3[] {
   const t2 = def.tier === 2;
   const { body, deep, edge, light, pale } = mats;
   // The size of the wing (blocks from the shoulder to the tip): the second wings are half as big again.
   const S = t2 ? 1.3 : 0.95;
   // The arm: up and out from the shoulder, over the top, and down toward the tip.
   const arm: V3[] = [[0, 0, 0], [0.14 * S, 0.22 * S, 0], [0.36 * S, 0.34 * S, 0], [0.66 * S, 0.36 * S, 0], [0.95 * S, 0.26 * S, 0], [1.12 * S, 0.1 * S, 0]];
+  // The joints: the shoulder, the elbow (the third point of the arm) and the wrist (the fifth).
+  const pivots: V3[] = [[0, 0, 0], [...arm[2]], [...arm[4]]];
+  // The piece a bone of the arm (the one that ends at point `i`) or a feather that hangs at `u` of the way along it belongs to.
+  const boneSeg = (i: number): number => (i <= 2 ? 0 : i <= 4 ? 1 : 2);
+  const uSeg = (u: number): number => (u < 0.38 ? 0 : u < 0.83 ? 1 : 2);
 
   if (def.shape === 'bat') {
     // Skin on bone: an arm with a wrist, fingers that spread from it, and the skin sagging between the fingers in panels of two shades.
@@ -152,10 +177,16 @@ function buildWing(def: WingDef, mats: Mats, batch: Batch): void {
       return [mx + (wrist[0] - mx) * 0.3, my + (wrist[1] - my) * 0.3, 0];
     };
     const body0: V3 = [0.02, -0.5 * S * 0.55, 0];
+    batch.seg = 1;
     batch.fan(deep, [arm[0], arm[1], arm[2], arm[3], wrist]); // the skin under the arm
-    for (let i = 0; i < tips.length - 1; i++) batch.fan(i % 2 ? deep : body, [wrist, tips[i], mid(tips[i], tips[i + 1]), tips[i + 1]]);
     batch.fan(body, [arm[0], wrist, tips[tips.length - 1], body0]);
-    for (let i = 1; i < arm.length; i++) bone(batch, edge, arm[i - 1], arm[i], 0.1 - i * 0.012);
+    batch.seg = 2;
+    for (let i = 0; i < tips.length - 1; i++) batch.fan(i % 2 ? deep : body, [wrist, tips[i], mid(tips[i], tips[i + 1]), tips[i + 1]]);
+    for (let i = 1; i < arm.length; i++) {
+      batch.seg = boneSeg(i);
+      bone(batch, edge, arm[i - 1], arm[i], 0.1 - i * 0.012);
+    }
+    batch.seg = 2;
     for (const tip of tips) {
       bone(batch, edge, wrist, tip, 0.055);
       // A hook at the end of each finger.
@@ -163,13 +194,14 @@ function buildWing(def: WingDef, mats: Mats, batch: Batch): void {
     }
     batch.blade(edge, null, [wrist[0], wrist[1], 0.01], 95 * DEG, 0, 0.3, 3, (i, n) => 0.09 * (1 - i / n), 0.05, 0.3); // the claw at the wrist
     if (t2) for (const tip of tips) bone(batch, light, [wrist[0] + (tip[0] - wrist[0]) * 0.25, wrist[1] + (tip[1] - wrist[1]) * 0.25, 0], [wrist[0] + (tip[0] - wrist[0]) * 0.92, wrist[1] + (tip[1] - wrist[1]) * 0.92, 0], 0.025, 0.035);
-    return;
+    return pivots;
   }
 
   const bulge = (w: number) => (i: number, n: number): number => w * (0.28 + 0.72 * Math.sin(Math.PI * (0.1 + 0.82 * ((i + 0.5) / n))));
   // A feather (or a blade of glass) hangs from `u` of the way along the arm, pointing `a` degrees from outward (negative: down), `len` long.
   const hang = (u: number, a: number, len: number, w: number, mat: THREE.Material | THREE.Material[], z: number, tip: THREE.Material | null, rim: THREE.Material | null, curl: number): void => {
     const p = along(arm, u);
+    batch.seg = uSeg(u);
     const segs = Math.max(4, Math.round(len * 8));
     batch.blade(mat, rim, [p.at[0], p.at[1], z], a * DEG, 0.12, len, segs, def.shape === 'feather' ? bulge(w) : (i, n) => w * (0.3 + 0.7 * Math.sin(((i + 0.55) / (n + 0.1)) * Math.PI)), 0.035, curl, tip ?? undefined);
   };
@@ -187,16 +219,39 @@ function buildWing(def: WingDef, mats: Mats, batch: Batch): void {
     if (!feather) hang(u, a, long * 0.84, 0.03 * S, light, 0.03 + i * 0.002, null, null, -0.07); // the vein of a blade
     hang(u + 0.02, a + 3, long * 0.36, 0.17 * S, pale, 0.03 + i * 0.002, null, null, -0.04);
   }
-  for (let i = 1; i < arm.length; i++) bone(batch, edge, arm[i - 1], arm[i], 0.09 - i * 0.012, 0.045);
-  if (t2) for (const p of [arm[3], arm[4]]) batch.blade(light, null, [p[0], p[1] + 0.02, 0.05], 85 * DEG, 0, 0.22, 2, (i, n) => 0.07 * (1 - i / n), 0.05, 0.2);
+  for (let i = 1; i < arm.length; i++) {
+    batch.seg = boneSeg(i);
+    bone(batch, edge, arm[i - 1], arm[i], 0.09 - i * 0.012, 0.045);
+  }
+  if (t2) {
+    batch.seg = 1;
+    batch.blade(light, null, [arm[3][0], arm[3][1] + 0.02, 0.05], 85 * DEG, 0, 0.22, 2, (i, n) => 0.07 * (1 - i / n), 0.05, 0.2);
+    batch.seg = 2;
+    batch.blade(light, null, [arm[4][0], arm[4][1] + 0.02, 0.05], 85 * DEG, 0, 0.22, 2, (i, n) => 0.07 * (1 - i / n), 0.05, 0.2);
+  }
+  return pivots;
 }
 
-/** The wings of `def` on `torso`, hung on the back between the shoulder blades. */
-export function buildWings(def: WingDef, torso: THREE.Object3D): WingRig {
-  const root = new THREE.Group();
-  root.position.set(0, 1.36, 0.16);
-  root.scale.setScalar(1);
-  torso.add(root);
+/**
+ * What a pair of wings is made of, built once and shared by everyone who wears it: the joined blocks of one wing (the other is it turned over) and
+ * the materials. Building them is most of the cost of putting wings on (a tenth of a second of the page's thread on a slow machine), and the first
+ * wearer of each pair paid it in the middle of play: now they are made while the game loads (`prepareWings`, see `FigureWarm`) and every wearer
+ * after takes them from here. Each wearer has geometries of their own only for what the figure changes (the light on the vertices, `lend`); the
+ * positions, the normals, the index and the materials are the kit's, and a wearer taking the wings off lets go of its own part only.
+ */
+interface WingKit {
+  mats: Mats;
+  parts: WingPart[];
+  /** Where the elbow and the wrist are (the hinges of the second and third pieces), in the frame of the wing. */
+  pivots: V3[];
+  /** The points of light that come off the wings (the same for every wearer of the pair). */
+  pmat: THREE.PointsMaterial;
+}
+const kits = new Map<string, WingKit>();
+
+function kitOf(def: WingDef): WingKit {
+  let kit = kits.get(def.id);
+  if (kit) return kit;
   const mk = (color: THREE.Color, lit = true): THREE.MeshBasicMaterial => new THREE.MeshBasicMaterial({ vertexColors: lit, color, side: THREE.DoubleSide });
   // The colour runs from a deeper tone at the root of every feather to the colour of its light at the tip.
   const rampOf = (from: THREE.Color, to: THREE.Color, n: number, dark = 0): THREE.Material[] =>
@@ -212,27 +267,88 @@ export function buildWings(def: WingDef, torso: THREE.Object3D): WingRig {
     // (the light of the tips is not lit by the sun: it shines by itself)
     light: mk(shade(def.glow, 0.05), false),
   };
+  const batch = new Batch();
+  const pivots = buildWing(def, mats, batch);
+  batch.seg = 0;
+  // The shoulder plate the wing grows from.
+  const plate = boxGeo(0.12, 0.2, 0.07);
+  plate.translate(0.0, -0.04, 0.0);
+  batch.add(mats.edge, plate);
+  if (def.tier === 2) {
+    const core = boxGeo(0.07, 0.1, 0.09);
+    core.translate(0.0, -0.04, 0.01);
+    batch.add(mats.light, core);
+  }
+  kit = { mats, parts: batch.flush(pivots), pivots, pmat: new THREE.PointsMaterial({ size: def.tier === 2 ? 0.1 : 0.08, vertexColors: true, transparent: true, depthWrite: false, sizeAttenuation: true }) };
+  kits.set(def.id, kit);
+  return kit;
+}
+
+/** Makes the parts of a pair of wings ahead of their first wearer (a no-op when they are made). Returns whether it had to make them. */
+export function prepareWings(def: WingDef): boolean {
+  const had = kits.has(def.id);
+  kitOf(def);
+  return !had;
+}
+
+/** Lets go of every kit (call once at shutdown, with the renderer's other shared things). */
+export function disposeWingKits(): void {
+  for (const kit of kits.values()) {
+    for (const p of kit.parts) p.geo.dispose();
+    for (const m of Object.values(kit.mats).flat()) m.dispose();
+    kit.pmat.dispose();
+  }
+  kits.clear();
+}
+
+/** A geometry for one wearer: the kit's positions, normals and index, and a copy of the vertex colours that the figure paints for itself. */
+function lend(src: THREE.BufferGeometry): THREE.BufferGeometry {
+  const g = new THREE.BufferGeometry();
+  for (const [name, attr] of Object.entries(src.attributes)) {
+    g.setAttribute(name, name === 'color' ? new THREE.BufferAttribute(new Float32Array(attr.array as Float32Array), attr.itemSize) : attr);
+  }
+  if (src.index) g.setIndex(src.index);
+  g.boundingSphere = src.boundingSphere ? src.boundingSphere.clone() : null;
+  return g;
+}
+
+/** Gives back a lent geometry: what it shares is taken off first, so that freeing it frees only what it owns (its colours), not the kit's buffers on the card. */
+function unlend(g: THREE.BufferGeometry): void {
+  for (const name of Object.keys(g.attributes)) if (name !== 'color') g.deleteAttribute(name);
+  g.setIndex(null);
+  g.dispose();
+}
+
+/** The wings of `def` on `torso`, hung on the back between the shoulder blades. */
+export function buildWings(def: WingDef, torso: THREE.Object3D): WingRig {
+  const root = new THREE.Group();
+  root.position.set(0, 1.36, 0.16);
+  root.scale.setScalar(1);
+  torso.add(root);
+  const kit = kitOf(def);
   const geos: THREE.BufferGeometry[] = [];
-  const sides: THREE.Group[] = [];
+  /** For each wing (right, left): the hinge at the shoulder and the groups of the elbow and the wrist, each inside the one before. */
+  const chains: THREE.Group[][] = [];
+  const [, elbow, wrist] = kit.pivots;
   for (const s of [1, -1]) {
     const hinge = new THREE.Group();
     hinge.position.set(s * 0.1, 0, 0);
     // The left wing is the right one turned over (so every material is drawn on both faces).
     hinge.scale.x = s;
-    const batch = new Batch();
-    buildWing(def, mats, batch);
-    // The shoulder plate the wing grows from.
-    const plate = boxGeo(0.12, 0.2, 0.07);
-    plate.translate(0.0, -0.04, 0.0);
-    batch.add(mats.edge, plate);
-    if (def.tier === 2) {
-      const core = boxGeo(0.07, 0.1, 0.09);
-      core.translate(0.0, -0.04, 0.01);
-      batch.add(mats.light, core);
+    const g1 = new THREE.Group();
+    g1.position.set(elbow[0], elbow[1], elbow[2]);
+    const g2 = new THREE.Group();
+    g2.position.set(wrist[0] - elbow[0], wrist[1] - elbow[1], wrist[2] - elbow[2]);
+    hinge.add(g1);
+    g1.add(g2);
+    const pieces = [hinge, g1, g2];
+    for (const p of kit.parts) {
+      const geo = lend(p.geo);
+      pieces[p.seg].add(new THREE.Mesh(geo, p.mat));
+      geos.push(geo);
     }
-    batch.flush(hinge, geos);
     root.add(hinge);
-    sides.push(hinge);
+    chains.push(pieces);
   }
   // The light that comes off them, as the effects of the sets do (see setKit.ts): embers that rise off bat wings, motes that drift down off the
   // feathers, and sparks that glint in the glass. Each is a point of light (a pixel of it) that is born, drifts and fades out; the second wings shed more.
@@ -273,7 +389,7 @@ export function buildWings(def: WingDef, torso: THREE.Object3D): WingRig {
   const pgeo = new THREE.BufferGeometry();
   pgeo.setAttribute('position', new THREE.BufferAttribute(ppos, 3));
   pgeo.setAttribute('color', new THREE.BufferAttribute(pcol, 4));
-  const pmat = new THREE.PointsMaterial({ size: t2 ? 0.1 : 0.08, vertexColors: true, transparent: true, depthWrite: false, sizeAttenuation: true });
+  const pmat = kit.pmat;
   const points = new THREE.Points(pgeo, pmat);
   points.frustumCulled = false;
   root.add(points);
@@ -296,28 +412,24 @@ export function buildWings(def: WingDef, torso: THREE.Object3D): WingRig {
     pgeo.attributes.color.needsUpdate = true;
   };
   shine(0, 0);
-  let fly = 0;
+  const pose = (pieces: THREE.Group[], s: number, sd: WingSide): void => {
+    // (The hinge is turned over for the left wing, so its own turns carry the sign of the side; the pieces inside it are turned over with it and take the same angles.)
+    pieces[0].rotation.set(sd.roll, -s * sd.sweep, s * sd.phi);
+    pieces[1].rotation.set(0, sd.elbowY, sd.elbowZ);
+    pieces[2].rotation.set(sd.wristX, sd.wristY, sd.wristZ);
+  };
   return {
     geos,
-    update(t, dt, flying, lift) {
+    apply(wp, t, dt) {
       shine(Math.min(dt, 0.1), t);
-      fly += ((flying ? 1 : 0) - fly) * Math.min(1, dt * 5);
-      if (fly < 0.002) fly = 0;
-      const beat = Math.sin(t * (2.1 + lift * 0.9) * Math.PI * 2);
-      // At rest the wings stand a little open and breathe; on the wing they open wide and beat.
-      const phi = 0.2 + lift * 0.06 + Math.sin(t * 1.7) * 0.04 * (1 - fly) + (beat * 0.55 - 0.05) * fly;
-      const sweep = 0.5 - 0.22 * fly + Math.sin(t * 1.3) * 0.04 * (1 - fly) - beat * 0.08 * fly;
-      sides.forEach((h, i) => {
-        const s = i === 0 ? 1 : -1;
-        h.rotation.z = s * phi;
-        h.rotation.y = -s * sweep;
-      });
+      pose(chains[0], 1, wp.r);
+      pose(chains[1], -1, wp.l);
     },
     dispose() {
-      for (const g of geos) g.dispose();
-      for (const m of Object.values(mats).flat()) m.dispose();
+      // (The materials and the shapes are the kit's, and stay for the next wearer.)
+      for (const g of geos) unlend(g);
+      geos.length = 0;
       pgeo.dispose();
-      pmat.dispose();
       root.parent?.remove(root);
     },
   };

@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ACHIEVEMENTS, ACH_CATEGORIES, ACH_TIERS, AUCTIONEER, BOUNTY_TIERS, BOUNTY_TIER_NAME, QUESTS, RIFT_GRADE_DEFS, STASHKEEPER, formatCoins, getItem, makeStack, npcById, questById, rewardCoins, rewardItems, shopOf, skillBookAbility, tooltipName, zoneDef, type AchCategory, type QuestDef, type QuestLog } from '@solrift/shared';
+import { ACHIEVEMENTS, ACH_CATEGORIES, ACH_TIERS, AUCTIONEER, BOUNTY_TIERS, BOUNTY_TIER_NAME, QUESTS, RIFT_GRADE_DEFS, formatCoins, getItem, makeStack, npcById, questById, rewardCoins, rewardItems, shopOf, skillBookAbility, tooltipName, zoneDef, type AchCategory, type DungeonView, type QuestDef, type QuestLog } from '@solrift/shared';
 import './achievements.css';
-import { useUi } from '../ui/store';
+import { useUi, type RiftHud } from '../ui/store';
 import { useToken } from '../token/store';
 import { ItemView } from './ItemView';
 import { AuctionWindow } from './AuctionUI';
@@ -90,7 +90,7 @@ function DialogPanel() {
   // The Auctioneer has no wares and no quests: his window is the Auction House.
   if (npc.id === AUCTIONEER) return <AuctionWindow npc={npc} />;
   // The Stashkeeper has no wares and no quests either: his window is the stash.
-  if (npc.id === STASHKEEPER) return <StashWindow npc={npc} />;
+  if (npc.stash) return <StashWindow npc={npc} />;
   const shop = shopOf(npc.id);
   // A merchant with no quest business opens the counter at once; one who has quests talks first, with a button to the wares.
   const shopOnly = !!shop && idle;
@@ -161,9 +161,14 @@ function DialogPanel() {
   );
 }
 
+/** What the loading screen draws of the rift and dungeon trackers (see `warmHud` in the store). */
+const WARM_RIFT: RiftHud = { grade: 'epic', name: 'Epic Rift', phase: 'fighting', wave: 2, waves: 5, left: 7, seconds: 140, x: 0, y: 0, z: 0, score: 12, dist: 60, dir: 'north' };
+const WARM_DUNGEON: DungeonView = { name: 'The Hollow Keep', cages: 1, cagesTotal: 4, gates: 0, gatesTotal: 2, boss: 'fighting' };
+
 /** The rift that is open near the player: what it is, the wave it is at, how many monsters are left, the time, where it lies and what you have done in it. */
 function RiftBlock() {
-  const rift = useUi((s) => s.rift);
+  const warm = useUi((s) => s.warmHud);
+  const rift = useUi((s) => s.rift) ?? (warm ? WARM_RIFT : null);
   if (!rift) return null;
   const color = RIFT_GRADE_DEFS[rift.grade].color;
   const near = rift.dist <= 48;
@@ -201,8 +206,9 @@ function QuestTracker() {
   const log = useUi((s) => s.quests);
   const screen = useUi((s) => s.screen);
   const logOpen = useUi((s) => s.questLogOpen);
-  const dungeon = useUi((s) => s.dungeon);
-  const rift = useUi((s) => s.rift);
+  const warm = useUi((s) => s.warmHud);
+  const dungeon = useUi((s) => s.dungeon) ?? (warm ? WARM_DUNGEON : null);
+  const rift = useUi((s) => s.rift) ?? (warm ? WARM_RIFT : null);
   useUi((s) => s.questsVersion);
   // (A rift is told of everywhere, in any world; the quests only in Adventure.)
   if ((!adventure && !rift) || screen === 'dead' || (adventure && logOpen && !rift)) return null;
@@ -500,7 +506,7 @@ function QuestLogPanel() {
 /** Everything the Adventure mode adds to the screen. Draws nothing in the other worlds. */
 export function QuestUI() {
   const adventure = useUi((s) => s.adventure);
-  const rift = useUi((s) => !!s.rift);
+  const rift = useUi((s) => !!s.rift || s.warmHud);
   // (Only the tracker is shown outside Adventure, and only for a rift.)
   if (!adventure) return rift ? <QuestTracker /> : null;
   return (

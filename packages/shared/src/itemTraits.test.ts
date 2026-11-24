@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { LANTERN_LIGHT, SOUL_LANTERN_LIGHT, B, lanternInfo } from './blocks';
 import { BONE_MEAL, I, allItems, bagSlotsOf, bedItemColor, getItem, holdsInOffhand, isUndroppable, mountOfItem, skillBookAbility, usedOnBlock, type ItemKind, type ItemUse } from './items';
 import { jewelKind } from './jewels';
+import { HK } from './hollowKingData';
+import { QUEST_ITEMS } from './questDrops';
 import { itemKind } from './tooltip';
 
 /**
@@ -20,7 +22,7 @@ describe('what the item table says about each item', () => {
     expect(withUse('armor_stand')).toEqual([I.ARMOR_STAND]);
     expect(withUse('emberstone')).toEqual([I.EMBERSTONE]);
     expect(withUse('bow')).toEqual([I.BOW]);
-    expect(withUse('crossbow')).toEqual([I.CROSSBOW]);
+    expect(withUse('crossbow')).toEqual([I.CROSSBOW, HK.CROSSBOW]);
     expect(withUse('flint')).toEqual([I.FLINT_AND_STEEL]);
     // Every wooden, iron and nether door is used the way the oak one is.
     expect(withUse('door')).toContain(I.DOOR);
@@ -48,7 +50,7 @@ describe('what the item table says about each item', () => {
   it('has lanterns hang from the hand and light the way (a torch lights it too), a staff and a wand carried as the Mage carries them, and all else in the fist', () => {
     for (const item of allItems()) {
       const lantern = lanternInfo(item.id);
-      const carry = lantern ? 'hang' : item.id === I.STAFF ? 'staff' : item.id === I.WAND ? 'wand' : 'hand';
+      const carry = lantern ? 'hang' : item.id === I.STAFF || item.id === HK.STAFF ? 'staff' : item.id === I.WAND ? 'wand' : 'hand';
       expect(item.carry, item.name).toBe(carry);
       expect(item.heldLight !== null, item.name).toBe(lantern !== null || item.id === B.TORCH); // the torch lights too, if less
     }
@@ -69,7 +71,7 @@ describe('what the item table says about each item', () => {
     const having = (trait: 'shears' | 'undroppable' | 'storesEnchants'): number[] => allItems().filter((i) => i[trait]).map((i) => i.id);
     expect(withUse('map')).toEqual([I.MAP]);
     expect(having('shears')).toEqual([I.SHEARS]);
-    expect(having('undroppable')).toEqual([I.MAP, I.EMBERSTONE].sort((a, b) => a - b));
+    expect(having('undroppable')).toEqual([I.MAP, I.EMBERSTONE, ...QUEST_ITEMS].sort((a, b) => a - b)); // and the things only a quest makes fall (see questDrops.ts)
     expect(having('storesEnchants')).toEqual([I.ENCHANTED_BOOK]);
     for (const item of allItems()) {
       expect(isUndroppable(item.id), item.name).toBe(item.undroppable);
@@ -80,7 +82,7 @@ describe('what the item table says about each item', () => {
   it('says what kind of thing each item is', () => {
     const called = (kind: ItemKind): number[] => allItems().filter((i) => itemKind(i.id) === kind).map((i) => i.id);
     expect(called('Glyph Tome')).toEqual([I.ENCHANTED_BOOK]);
-    expect(called('Special')).toEqual([I.MAP, I.COMPASS, I.EMBERSTONE, I.HOLLOW_SIGIL, I.AURELION_CODEX].sort((a, b) => a - b));
+    expect(called('Special')).toEqual([I.MAP, I.COMPASS, I.EMBERSTONE, I.HOLLOW_SIGIL, I.AURELION_CODEX, ...Array.from({ length: 17 }, (_, i) => 600 + i)].sort((a, b) => a - b));
     for (const item of allItems()) {
       const kind = itemKind(item.id);
       expect(kind === 'Skill Book', item.name).toBe(skillBookAbility(item.id) !== null);

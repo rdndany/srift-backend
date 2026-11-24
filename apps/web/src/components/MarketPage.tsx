@@ -26,7 +26,7 @@ import { Blocks } from './BlockCube';
 import { ItemPicture } from './CharacterSheet';
 import { ClickSparks, Embers, Reveal, useFrontMotion } from './fx';
 import { lobbyUrl } from '../game/route';
-import { SCROLL_KEY, goToken, goCamp } from './frontNav';
+import { SCROLL_KEY, goToken, goCamp, goShop } from './frontNav';
 import { ART } from './homeAssets';
 import { Tip } from './ItemView';
 import { CoinIcon } from './ShopUI';
@@ -275,6 +275,7 @@ export function MarketPage() {
             <button className="fp-link-market" aria-current="page" onClick={() => scrollTo('mk-top')}>
               Market
             </button>
+          <button className="fp-link-shop" onClick={goShop}>Shop</button>
           <button className="fp-link-token" onClick={goToken}>Token</button>
           </nav>
           <div className="fp-account">

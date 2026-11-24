@@ -109,10 +109,9 @@ export class CharacterPreview {
     this.frame();
   }
 
-  /** Wear armor and clothes (item ids). A tall hat needs the camera pulled back a little. */
+  /** Wear armor and clothes (item ids). The figure keeps its size whatever it wears: a tall hat may reach out of the picture. */
   setArmor(ids: readonly number[]): void {
     this.character.setArmor(ids);
-    this.tall = ids[0] ? getItem(ids[0]).armor?.outfit === 'mage' : false;
     this.frame();
   }
 
@@ -136,7 +135,6 @@ export class CharacterPreview {
     this.frame();
   }
 
-  private tall = false;
   private pet = 0; // 1 + the place of the companion in COMPANIONS (0: none)
   private winged = false; // wings are as wide as the figure is tall: the camera is pulled back so they show
   private grounded = false;
@@ -148,11 +146,9 @@ export class CharacterPreview {
   }
 
   private frame(): void {
-    // The figure is the same size with a set on as without (a set may reach out of the picture, which is fine): the camera is placed for the hero,
-    // and for the hat of a mage, whether it is the clothes of the class or a set of the class that is worn.
-    const tall = this.tall || this.character.setClass === 'mage';
+    // The figure is the same size with a set or a hat on as without (they may reach out of the picture, which is fine): the camera is placed for the hero.
     if (this.grounded) {
-      const span = (tall ? 4.0 : 3.1) * (this.winged ? 1.25 : 1) * (this.pet ? 1.12 : 1); // world units from the soles up, to a little above the head or hat
+      const span = 3.1 * (this.winged ? 1.25 : 1) * (this.pet ? 1.12 : 1); // world units from the soles up, to a little above the head or hat
       const dist = span / 2 / Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
       const y = -1.0 + span / 2 - 0.07; // (the boots reach out a little toward the camera: lower on screen than the soles' centre)
       this.camera.position.set(0, y, dist);
@@ -161,8 +157,8 @@ export class CharacterPreview {
     }
     const back = (this.winged ? 1.25 : 1) * (this.pet ? 1.12 : 1);
     const up = this.winged ? 0.3 : 0; // (the figure floats, and the wings rise to its head)
-    this.camera.position.set(0, (tall ? 0.28 : 0.05) + up, (tall ? 5.6 : 4.9) * back);
-    this.camera.lookAt(0, (tall ? 0.22 : 0) + up, 0);
+    this.camera.position.set(0, 0.05 + up, 4.9 * back);
+    this.camera.lookAt(0, 0 + up, 0);
   }
 
   /** Turn the figure slowly all the way round (so the back, where a cape hangs, shows too). */

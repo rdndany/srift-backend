@@ -9,10 +9,12 @@ import { StaffBoltView } from './staffFx';
 import { WandBoltView } from './wandFx';
 import { BOSS_SKINS, hollowKingRig } from './mobBoss';
 import { DEEP_RIGS, DEEP_SKINS, isDeepKind, poseDeep } from './mobDeep';
-import { GILDED_RIGS, GILDED_SKINS } from './mobGilded';
+import { AURELION_RIG, GILDED_RIGS, GILDED_SKINS } from './mobGilded';
 import { batRig, creeperRig, endermanRig, HOSTILE_SKINS, slimeRig, spiderRig, undeadRig } from './mobHostile';
 import { eyes, hash, jit, mix, mul, plain, rect, withFeatures, type Brick, type Feature, type Painter, type Part, type RGB } from './mobPaint';
 import { paintTile } from './atlas';
+import { CreatureMotion, archetypeOf, type Archetype } from './creatureMotion';
+import { classifyRig, guessArchetype, poseRig, type RigInfo } from './creatureRig';
 
 // ---- skins ---------------------------------------------------------------------
 const SKINS: Record<string, Painter> = {
@@ -250,9 +252,12 @@ const bossStrikeArm = (k: number): number => {
  */
 const strikeArm = (k: number): number => {
   if (k <= 0 || k >= 1) return 0;
-  if (k < 0.3) return 0.55 * (k / 0.3);
-  if (k < 0.55) return 0.55 - 1.65 * ((k - 0.3) / 0.25);
-  return -1.1 * (1 - (k - 0.55) / 0.45);
+  // The blow lands when the swing begins (the game hurts at once), so the arm is drawn back only a moment, comes down, and is lifted back slowly:
+  // the same beat as the body's lunge (see `Pose` in creatureMotion.ts, which peaks at 0.3).
+  if (k < 0.12) return 0.55 * (k / 0.12);
+  if (k < 0.38) return 0.55 - 1.65 * ((k - 0.12) / 0.26);
+  const t = (k - 0.38) / 0.62;
+  return -1.1 * (1 - t) ** 1.4;
 };
 
 /**
@@ -583,7 +588,8 @@ const bird = (skin: string): Part[] => [
   { size: [0.06, 0.2, 0.06], at: [0.08, 0.24, 0], skin: 'parrot_beak', hang: true, swing: -1 },
 ];
 
-const RIGS: Record<MobKind, Part[]> = {
+/** The parts of each kind's model (see `mobSolidsBuild.ts`, which makes the shape a body bumps into from them). */
+export const RIGS: Record<MobKind, Part[]> = {
   dummy: dummyRig(),
   armor_stand: standRig(0),
   npc: [], // built by npcRig(variant)
@@ -623,6 +629,7 @@ const RIGS: Record<MobKind, Part[]> = {
   hollow_king: hollowKingRig(),
   ...DEEP_RIGS,
   ...GILDED_RIGS,
+  aurelion: AURELION_RIG,
   pig: [
     { size: [0.5, 0.5, 0.5], at: [0, 0.68, -0.6], skin: 'pig_body', front: 'pig_face', isHead: true },
     { size: [0.62, 0.5, 0.95], at: [0, 0.6, 0.05], skin: 'pig_body' },
@@ -727,18 +734,23 @@ const brickGeos = new Map<Brick[], THREE.BufferGeometry>();
 function brickGeo(bricks: Brick[], skins: number): THREE.BufferGeometry {
   let g = brickGeos.get(bricks);
   if (g) return g;
-  const n = bricks.length;
-  const pos = new Float32Array(n * 24 * 3);
-  const uv = new Float32Array(n * 24 * 2);
-  const col = new Float32Array(n * 24 * 3);
-  const idx = new Uint32Array(n * 36);
+  // Only the sides that are drawn (a cube of a sculpture hides the sides it shares with its neighbours).
+  let n = 0;
+  for (const b of bricks) for (let f = 0; f < 6; f++) if (((b[8] ?? 63) >> f) & 1) n++;
+  const pos = new Float32Array(n * 4 * 3);
+  const uv = new Float32Array(n * 4 * 2);
+  const col = new Float32Array(n * 4 * 3);
+  const idx = new Uint32Array(n * 6);
   const eu = 0.6 / (16 * skins);
   const ev = 0.6 / 16;
-  bricks.forEach(([x, y, z, w, h, d, shade, skin], b) => {
+  let face = 0;
+  bricks.forEach(([x, y, z, w, h, d, shade, skin, mask]) => {
     for (let f = 0; f < 6; f++) {
+      if (!(((mask ?? 63) >> f) & 1)) continue;
       const k = BRICK_SHADE[f] * shade;
+      const fi = face++;
       for (let c = 0; c < 4; c++) {
-        const v = b * 24 + f * 4 + c;
+        const v = fi * 4 + c;
         const [cx, cy, cz] = BRICK_FACES[f][c];
         pos[v * 3] = x + (cx * w) / 2;
         pos[v * 3 + 1] = y + (cy * h) / 2;
@@ -749,9 +761,8 @@ function brickGeo(bricks: Brick[], skins: number): THREE.BufferGeometry {
         col[v * 3 + 1] = k;
         col[v * 3 + 2] = k;
       }
-      const o = b * 36 + f * 6;
-      const v0 = b * 24 + f * 4;
-      idx.set([v0, v0 + 2, v0 + 1, v0 + 2, v0 + 3, v0 + 1], o);
+      const v0 = fi * 4;
+      idx.set([v0, v0 + 2, v0 + 1, v0 + 2, v0 + 3, v0 + 1], fi * 6);
     }
   });
   g = new THREE.BufferGeometry();
@@ -854,6 +865,10 @@ interface View {
   /** A quest giver's name plate and quest marks (a mob that is not one has neither). */
   plate?: THREE.Sprite;
   marks?: Record<QuestMark, THREE.Sprite>;
+  /** What each part is for, and the shape of the body (see creatureRig.ts); and how it moves (made when the first frame of this creature is drawn). */
+  rig: RigInfo;
+  arch: Archetype;
+  motion?: CreatureMotion;
 }
 
 const spriteTex = (draw: (ctx: CanvasRenderingContext2D, w: number, h: number) => void, w: number, h: number): THREE.CanvasTexture => {
@@ -932,6 +947,9 @@ function tintRig(parts: Part[], from: string, to: string): Part[] {
 /** A sheep that has been shorn is drawn with the key `variant + SHORN`. */
 const SHORN = 1000;
 
+/** How many mobs get a view (their parts, materials and first draw) in one frame; a crowd that arrives at once takes a few frames to show. */
+const NEW_VIEWS_PER_FRAME = 4;
+
 function buildView(kind: MobKind, key: number, gear: readonly number[] = []): View {
   const shorn = kind === 'sheep' && key >= SHORN;
   const variant = key % SHORN;
@@ -972,7 +990,10 @@ function buildView(kind: MobKind, key: number, gear: readonly number[] = []): Vi
   heart.position.set(0, MOBS[kind].height + 0.45, 0);
   heart.visible = false;
   group.add(heart);
-  const view: View = { variant: key, gearKey: kind === 'armor_stand' ? gear.join(',') : '', heart, group, parts, flames };
+  const height = MOBS[kind].height;
+  const arch = archetypeOf(kind) ?? guessArchetype(rig, height);
+  group.rotation.order = 'YXZ';
+  const view: View = { variant: key, gearKey: kind === 'armor_stand' ? gear.join(',') : '', heart, group, parts, flames, rig: classifyRig(rig, arch, height), arch };
   if (kind === 'npc') {
     const plate = new THREE.Sprite(new THREE.SpriteMaterial({ map: plateTexture(variant), transparent: true, toneMapped: false, fog: false }));
     plate.scale.set(1.6, 0.36, 1);
@@ -1056,6 +1077,19 @@ export class MobRenderer {
   private readonly faceF = new Float32Array(6);
   private readonly faceRGB = new Float32Array(18);
 
+  /** The player the creatures take notice of: their heads turn to it, a shy animal freezes, a villager turns to face it. */
+  private readonly focus = { x: 0, y: 0, z: 0 };
+  private focusOn = false;
+  /** Where the player stands (the feet), or nobody (`null`: a menu, a death, a spectator). Set by the game before `sync`. */
+  setFocus(at: { x: number; y: number; z: number } | null): void {
+    this.focusOn = !!at;
+    if (at) {
+      this.focus.x = at.x;
+      this.focus.y = at.y;
+      this.focus.z = at.z;
+    }
+  }
+
   /** What to show over a quest giver (an id of `NPCS`): set by the game from the player's quest log. */
   markerFor: ((npc: string) => QuestMark | null) | null = null;
 
@@ -1109,8 +1143,12 @@ export class MobRenderer {
     this.env = env;
   }
 
+  /** The views made in this frame so far (see `NEW_VIEWS_PER_FRAME`). */
+  private newViews = 0;
+
   sync(mobs: readonly MobLike[], arrows: readonly ArrowLike[], dt: number, brightness: number): void {
     this.time += dt;
+    this.newViews = 0;
     const seen = new Set<number>();
     const light = 0.55 + 0.45 * brightness;
 
@@ -1133,44 +1171,57 @@ export class MobRenderer {
         v = nv;
       }
       if (!v) {
+        // A crowd that arrives at once (a wave, a rift, a village loading in) is shown a few at a time: each new view is dozens of materials that
+        // three.js sets up on their first draw, and thirty of them in one frame stood the picture still for 80 ms. The rest are a frame or
+        // two late, which no one sees; the mob itself is in the world from the start.
+        if (this.newViews >= NEW_VIEWS_PER_FRAME) continue;
+        this.newViews++;
         v = buildView(m.kind, key, worn);
         v.group.rotation.y = m.yaw;
         this.views.set(m.id, v);
         this.group.add(v.group);
       }
       const g = v.group;
-      g.position.set(m.body.x, m.body.y, m.body.z);
+      const def = MOBS[m.kind];
+      const big = (m.kind === 'slime' ? m.size : 1) * (m.baby ? 0.5 : 1);
+      // How it moves (creatureMotion.ts): what it did on the screen, and what it means to do, make the pose of the body, the head and the limbs.
+      const motion = (v.motion ??= new CreatureMotion(m.kind, m.id, v.rig.body, v.arch));
+      const pose = motion.update({
+        x: m.body.x,
+        y: m.body.y,
+        z: m.body.z,
+        yaw: m.yaw,
+        dt,
+        time: this.time,
+        dead: m.dead,
+        deathTime: m.deathTime,
+        hurtTime: m.hurtTime,
+        attackTime: m.attackTime ?? 99,
+        casting: m.casting ?? 0,
+        focus: this.focusOn ? this.focus : null,
+        height: def.height * big,
+        width: def.width * big,
+        scale: big,
+      });
+      g.position.set(m.body.x - Math.sin(pose.yaw) * pose.fwd, m.body.y + pose.lift, m.body.z - Math.cos(pose.yaw) * pose.fwd);
+      g.rotation.set(pose.pitch, pose.yaw, pose.roll);
 
-      // Smoothly turn toward the facing the AI chose.
-      let diff = m.yaw - g.rotation.y;
-      diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-      g.rotation.y += diff * Math.min(1, dt * 12);
-
-      // A melee swing (it plays whether or not the blow lands: a raised shield stops the damage, not the attack):
-      // the body lunges the way it faces and the arms come down.
-      const bossy = MOBS[m.kind].boss === true;
+      // A melee swing (it plays whether or not the blow lands: a raised shield stops the damage, not the attack): the arms come down
+      // (the body's own part of it is in the pose).
+      const bossy = def.boss === true;
       const swingLen = bossy ? BOSS_ANIM : ATTACK_ANIM;
       const swingK = !m.dead && m.attackTime !== undefined && m.attackTime >= 0 && m.attackTime < swingLen ? m.attackTime / swingLen : -1;
       // An archer does not lunge: the swing is its shot (the string hand springs forward and draws again, see below).
       const archer = m.kind === 'skeleton' || m.kind === 'stray';
-      if (swingK >= 0 && !archer) {
-        const lunge = bossy ? 0.5 * Math.max(0, Math.sin(Math.PI * Math.min(1, Math.max(0, (swingK - bossHit + 0.05) / 0.3)))) : 0.38 * Math.sin(Math.PI * Math.min(1, swingK * 1.25)) * (m.kind === 'slime' ? 1.3 : 1);
-        g.position.x -= Math.sin(g.rotation.y) * lunge;
-        g.position.z -= Math.cos(g.rotation.y) * lunge;
-      }
       const armTurn = swingK >= 0 ? (bossy ? bossStrikeArm(swingK) : strikeArm(swingK)) : 0;
       // The string is drawn at rest and springs loose when the arrow leaves, then is drawn again.
       const pull = swingK >= 0 ? Math.min(1, swingK * 1.15) ** 1.5 * 0.95 : 1;
       const bend = archer ? drawArm(pull) : null;
       const kick = swingK >= 0 ? 0.22 * (1 - swingK) ** 2 : 0;
 
-      // Death: tip over. Creeper: swell while the fuse burns.
-      g.rotation.z = m.dead ? (Math.PI / 2) * Math.min(1, m.deathTime / 0.35) : 0;
+      // Creeper: swell while the fuse burns (and the squash and stretch of the pose).
       const swell = 1 + m.fuseFraction * 0.3;
-      const big = (m.kind === 'slime' ? m.size : 1) * (m.baby ? 0.5 : 1);
-      // A slime wobbles as it sits and squashes and stretches as it hops.
-      const jelly = m.kind === 'slime' && !m.dead ? Math.sin(this.time * 5 + m.id) * 0.04 + Math.min(1, m.speedNow / 1.2) * Math.sin(this.time * 9 + m.id) * 0.12 : 0;
-      g.scale.set(swell * big * (1 - jelly * 0.6), (1 + m.fuseFraction * 0.12) * big * (1 + jelly), swell * big * (1 - jelly * 0.6));
+      g.scale.set(swell * big * pose.sx, (1 + m.fuseFraction * 0.12) * big * pose.sy, swell * big * pose.sz);
 
       v.heart.visible = !m.dead && (m.love ?? 0) > 0;
       if (v.heart.visible) {
@@ -1183,10 +1234,6 @@ export class MobRenderer {
         for (const k of MARKS) v.marks[k].visible = k === mark;
         if (mark) v.marks[mark].position.y = MOBS.npc.height + 0.95 + Math.sin(this.time * 3 + m.id) * 0.06;
       }
-
-      const moving = Math.min(1, m.speedNow / 1.2);
-      const swing = Math.sin(m.walkPhase) * 0.85 * moving;
-      const bob = m.dead ? 0 : Math.sin(this.time * 1.7 + m.id) * 0.03;
 
       // Light: the world's (sky colour, caves, torches, the sun on each face) when there is one, else a plain level.
       const faceR = this.faceRGB;
@@ -1227,6 +1274,8 @@ export class MobRenderer {
           this.fire.ember(this.flameV.x, this.flameV.y + hgt, this.flameV.z, fl.def.size[0]);
         }
       }
+      // The head, the legs, the arms, the wings and the tail (what each part is was worked out from the model when it was built).
+      poseRig(v.rig, v.parts, pose, motion.profile, armTurn, castK, this.time, m.id);
       for (const p of v.parts) {
         const d = p.def;
         if (d.flame !== undefined) {
@@ -1243,14 +1292,6 @@ export class MobRenderer {
           p.mesh.quaternion.copy(this.flameQ).multiply(this.flameS.setFromEuler(this.flameE));
           continue;
         }
-        if (d.swing) p.mesh.rotation.x = (d.rotX ?? 0) + swing * d.swing + (d.strike ? armTurn * d.strike : 0);
-        if (d.raise) p.mesh.rotation.x = (d.rotX ?? 0) + (d.swing ? swing * d.swing : 0) + (d.strike ? armTurn * d.strike : 0) + castK * d.raise + Math.sin(this.time * 1.4 + m.id) * 0.035 * (1 - moving);
-        if (d.swingY) p.mesh.rotation.y = (d.rotY ?? 0) + swing * d.swingY;
-        if (d.flap) p.mesh.rotation.z = (d.rotZ ?? 0) + Math.sin(this.time * (m.kind === 'bat' ? 22 : 14) + m.id) * d.flap * (m.kind === 'bat' ? 1 : 0.3 + moving);
-        // A knee or an elbow folds back as the limb it hangs from swings back.
-        if (d.bend !== undefined && d.of !== undefined) p.mesh.rotation.x = (d.rotX ?? 0) + d.bend * Math.min(0, v.parts[d.of].mesh.rotation.x);
-        if (d.isHead) p.mesh.rotation.y = Math.sin(this.time * 0.9 + m.id * 3) * 0.12 * (1 - moving);
-        p.mesh.position.y = d.at[1] + (d.isHead ? bob : 0);
         if (bend) {
           if (d.arm === 'bow') p.mesh.rotation.set(Math.PI / 2 - 0.03 + kick + Math.sin(this.time * 1.3 + m.id) * 0.015, BOW_YAW, 0);
           else if (d.arm === 'draw') p.mesh.rotation.set(Math.PI / 2, bend.up, 0);

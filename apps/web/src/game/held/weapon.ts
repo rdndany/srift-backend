@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { I, type ItemDef } from '@solrift/shared';
+import { HK, I, type ItemDef } from '@solrift/shared';
 import { POSE, SWING_STYLES, sampleSwing } from './swings';
 import { AXIS_X, AXIS_Y, AXIS_Z, DEG, type HandFrame, type HeldKit, type HeldView } from './view';
 
@@ -35,9 +35,9 @@ const LOOKS: Record<WeaponKind, WeaponLook> = {
 /** Which weapon an item is held as (null: not one). */
 export function weaponKind(item: ItemDef): WeaponKind | null {
   if (item.tool?.kind === 'sword') return 'sword';
-  if (item.id === I.GREATSWORD) return 'heavy';
+  if (item.id === I.GREATSWORD || item.id === HK.BLADE) return 'heavy';
   if (item.id === I.DAGGER) return 'dagger';
-  if (item.id === I.STAFF) return 'staff';
+  if (item.id === I.STAFF || item.id === HK.STAFF) return 'staff';
   if (item.id === I.WAND) return 'cast';
   return null;
 }

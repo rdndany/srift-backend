@@ -20,7 +20,6 @@ import {
   glyphOptions,
   inscribed,
   failedPrice,
-  withEnchants,
   type AnvilResult,
   type GrindResult,
   type GlyphOption,
@@ -30,7 +29,7 @@ import type { CreativeAmount } from './creative';
 import { canRollGear } from './gear';
 import { ACCESSORY_SLOT_COUNT, NECKLACE_SLOT, accessorySlotsOf } from './accessories';
 import { I, accessoryOfItem, allItems, bagSlotsOf, companionOfItem, getItem, holdsInOffhand, mountOfItem, outfitSetFits, outfitSetOfItem, prefersOffhand, wingOfItem } from './items';
-import { FORGE_CHANCE, FORGE_TIME, canForge, forgeCells, forgeCost, forgeLayout, forgeOutcome, forgePiece, forgeTarget, jewelKind, useJewel, type ForgeOutcome } from './jewels';
+import { FORGE_CHANCE, FORGE_TIME, canForge, forgeCost, forgeLayout, forgeOutcome, forgePiece, forgeTarget, jewelKind, useJewel, type ForgeOutcome } from './jewels';
 import { FURNACE_FUEL, FURNACE_INPUT, FURNACE_OUTPUT, SMELTING, isFuel, type Furnace } from './smelting';
 import { addVillagerXp, canTradeOffer, type Offer, type TradeBook } from './trading';
 

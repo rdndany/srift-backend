@@ -81,6 +81,24 @@ export class MapSheet {
     this.glyph(ch, x - 1, y - 2, ink);
   }
 
+  /** Your own land: a little gold house (a roof over a wall with a door), so it can be told from a quest or a friend. */
+  private house(x: number, y: number): void {
+    const g = this.g;
+    x = Math.round(x);
+    y = Math.round(y);
+    g.fillStyle = INK;
+    g.fillRect(x - 5, y - 1, 11, 7); // the walls' outline
+    g.fillRect(x - 3, y - 4, 7, 3); // the roof's
+    g.fillRect(x - 1, y - 5, 3, 1);
+    g.fillStyle = '#ffd34d';
+    g.fillRect(x - 4, y, 9, 5); // the walls
+    g.fillStyle = '#e0702f';
+    g.fillRect(x - 2, y - 3, 5, 2); // the roof
+    g.fillRect(x - 1, y - 4, 3, 1);
+    g.fillStyle = '#4a2a00';
+    g.fillRect(x, y + 2, 1, 3); // the door
+  }
+
   /** A party member: a green square with a pale one in it. */
   private friend(x: number, y: number): void {
     const g = this.g;
@@ -170,19 +188,20 @@ export class MapSheet {
         g.fillRect(x - 1, y - 1, 3, 3);
       }
       // The quests first, so that the more urgent pins are on top of them; party members stay on the edge when they are out of view.
-      const order: Record<string, number> = { waiting: 0, offer: 1, ready: 2, party: 3 };
+      const order: Record<string, number> = { waiting: 0, offer: 1, ready: 2, land: 3, party: 4 };
       for (const p of [...map.pins].sort((a, b) => order[a.kind] - order[b.kind])) {
         let dx = (p.x - map.x) * per;
         let dy = (p.z - map.z) * per;
         const dist = Math.max(Math.abs(dx), Math.abs(dy));
         if (dist > reach) {
-          if (p.kind !== 'party') continue;
+          if (p.kind !== 'party' && p.kind !== 'land') continue;
           dx *= reach / dist;
           dy *= reach / dist;
         }
         if (p.kind === 'offer') this.badge(mid + dx, mid + dy, '!', '#ffd34d', '#4a2a00');
         else if (p.kind === 'ready') this.badge(mid + dx, mid + dy, '?', '#ffd34d', '#4a2a00');
         else if (p.kind === 'waiting') this.badge(mid + dx, mid + dy, '?', '#aeb2bb', '#2b2f38');
+        else if (p.kind === 'land') this.house(mid + dx, mid + dy);
         else this.friend(mid + dx, mid + dy);
       }
       this.arrow(mid, mid, map.yaw);

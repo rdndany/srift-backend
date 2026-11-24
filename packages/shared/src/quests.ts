@@ -1,9 +1,8 @@
 import type { RGB } from './biomeColors';
-import { B } from './blocks';
-import type { AbilityId } from './abilities';
-import type { ClassId } from './classes';
-import { I, bagId, skillBookId, toolId } from './items';
+import { isClassId, type ClassId } from './classes';
 import type { MobKind } from './mobs';
+import { outpostById } from './outposts';
+import { STORY_QUESTS } from './storyQuests';
 
 /**
  * Quests, for the Adventure game mode: who gives them, what they ask for and what they pay, and a
@@ -50,8 +49,8 @@ export interface QuestReward {
   classItems?: Partial<Record<ClassId, readonly ItemReward[]>>;
 }
 
-/** The first quest of every new Adventure character: they wake in the Undercroft, the cave under Dawnwatch, and are sent up into the village. */
-export const FIRST_QUEST = 'out_of_the_dark';
+/** The first quest of every new Adventure character: they wake in the Undercroft, the cave under the village of Ashbrook, and are sent up into the village. */
+export const FIRST_QUEST = 'ms00';
 
 /** The coins a quest pays. */
 export const rewardCoins = (r: QuestReward): number => r.coins ?? r.xp * 2;
@@ -59,25 +58,13 @@ export const rewardCoins = (r: QuestReward): number => r.coins ?? r.xp * 2;
 /** Every item a quest hands over to a character of this class (null: no class): the plain rewards, then the class's own. */
 export const rewardItems = (r: QuestReward, classId: ClassId | null): readonly ItemReward[] => (classId && r.classItems?.[classId] ? [...r.items, ...r.classItems[classId]!] : r.items);
 
-/** A class's skill book as a quest reward. */
-const book = (ability: AbilityId): ItemReward => ({ id: skillBookId(ability), count: 1 });
-
-/**
- * The skill books the early quests give, one per ability of each class, in button order. A new character knows no
- * ability: these (the monsters' drops and the merchants' counters are the other ways) are how they learn them.
- */
-const BOOK_REWARDS: readonly Record<ClassId, readonly ItemReward[]>[] = [
-  { warrior: [book('ground_slam')], mage: [book('fireball')], ranger: [book('piercing_shot')] },
-  { warrior: [book('shield_bash')], mage: [book('frost_nova')], ranger: [book('evasive_roll')] },
-  { warrior: [book('charge')], mage: [book('meteor')], ranger: [book('bear_trap')] },
-  { warrior: [book('iron_defense')], mage: [book('arcane_shield')], ranger: [book('rain_of_arrows')] },
-];
-
 export interface QuestDef {
   id: string;
   name: string;
   /** The chapter it belongs to, for the log. */
   chapter: string;
+  /** Only a character of this class is offered it (the class lines); left out, everybody is. */
+  class?: ClassId;
   /** The NPC who gives it, and the one who takes it in (the same one, mostly). */
   giver: string;
   turnIn: string;
@@ -108,6 +95,10 @@ export interface NpcDef {
   cellar?: boolean;
   /** Stands in a dungeon, one for every copy of it: x and z are where they stand in the first copy, and the others are the same place shifted (see NpcStation.key). */
   dungeon?: boolean;
+  /** Stands in an outpost of the story (see `OUTPOSTS`) and not in Dawnwatch: x and z are then measured from the outpost's middle. */
+  place?: string;
+  /** Keeps a stash: talking to them opens the wallet's Stash (see stash.ts). Every village and town has one such person. */
+  stash?: boolean;
   /** What they say when you have no quest business with them. */
   greeting: string;
   /** How they are drawn. */
@@ -142,11 +133,22 @@ export interface ZoneDef {
 
 /** Named places, shown as a banner when the player walks into one. */
 export const ZONES: readonly ZoneDef[] = [
-  { id: 'dawnwatch', name: 'Dawnwatch', sub: 'A small village at the edge of the Rift' },
-  { id: 'greykeep', name: 'Greykeep', sub: 'The castle north of Dawnwatch' },
-  { id: 'undercroft', name: 'The Undercroft', sub: 'The old storm cellars under Dawnwatch' },
+  { id: 'ashbrook', name: 'Ashbrook', sub: 'A small village at the edge of the Whisperwood' },
+  { id: 'dawnwatch', name: 'Dawnwatch', sub: 'The walled city at the edge of the Rift' },
+  { id: 'greykeep', name: 'Greykeep', sub: 'A castle that has held out for three hundred years' },
+  { id: 'whisper_clearing', name: 'The Clearing', sub: 'Where the Whisperwood gave you back' },
+  { id: 'reedhollow', name: 'Reedhollow', sub: 'A village on stilts in the marsh' },
+  { id: 'sandmere', name: 'Sandmere', sub: 'A caravan village on the edge of the dunes' },
+  { id: 'frostgate', name: 'Frostgate', sub: 'A walled village in the snow' },
+  { id: 'highmarket', name: 'Highmarket', sub: 'The walled town of the Warden houses' },
+  { id: 'undercroft', name: 'The Undercroft', sub: 'The old storm cellars under Ashbrook' },
   { id: 'training_yard', name: 'Training Yard', sub: 'Hit the dummies to test your damage and abilities' },
   { id: 'hollow_cellar', name: 'The Hollow Cellar', sub: 'Dungeon' },
+  { id: 'reed_grotto', name: 'The Reed Grotto', sub: 'Cold water under the marsh' },
+  { id: 'sand_crypt', name: 'The Sand Crypt', sub: 'Bones in the dry dark' },
+  { id: 'frost_vault', name: 'The Frost Vault', sub: 'Ice that does not melt' },
+  { id: 'chapel_ruin', name: 'The Chapel Ruin', sub: 'Where the gravel road ends' },
+  // The caves of the ordinary worlds (shown as a banner when you walk into one; see `caveKindAt`).
   { id: 'lush_cave', name: 'Lush Cave', sub: 'Moss, vines and glowing berries' },
   { id: 'dripstone_cave', name: 'Dripstone Cave', sub: 'Stalactites and stalagmites' },
   { id: 'deep_dark', name: 'The Deep Dark', sub: 'Nothing grows here but sculk' },
@@ -154,7 +156,7 @@ export const ZONES: readonly ZoneDef[] = [
 
 export const zoneDef = (id: string): ZoneDef | null => ZONES.find((z) => z.id === id) ?? null;
 
-export const NPCS: readonly NpcDef[] = [
+const BASE_NPCS: readonly NpcDef[] = [
   {
     id: 'maren',
     name: 'Elder Maren',
@@ -169,7 +171,8 @@ export const NPCS: readonly NpcDef[] = [
     id: 'brannoc',
     name: 'Smith Brannoc',
     title: 'Master Craftsman',
-    x: 12.5,
+    place: 'ashbrook',
+    x: 9.5,
     z: -3.5,
     yaw: Math.PI,
     greeting: 'Hands make everything, friend. A table, a pick, a fire. The rest is just more of the same, done harder.',
@@ -179,6 +182,7 @@ export const NPCS: readonly NpcDef[] = [
     id: 'isolde',
     name: 'Ranger Isolde',
     title: 'Warden of the Wilds',
+    place: 'ashbrook',
     x: -9.5,
     z: -3.5,
     yaw: Math.PI,
@@ -246,17 +250,29 @@ export const NPCS: readonly NpcDef[] = [
     greeting: 'The Rift hums for those who listen. Wands, staves, and the small things the old magic is made of.',
     look: { robe: [46, 52, 124], trim: [144, 204, 244], hair: [222, 222, 236], hat: 'wide', beard: false },
   },
-  // The healer of the Undercroft, the cave under the village where everyone starts.
+  // The people of Ashbrook, the small village where everyone starts (x and z are measured from its plaza, see outposts.ts): the healer of the Undercroft, the cave under it, and its reeve.
   {
     id: 'mirel',
     name: 'Healer Mirel',
     title: 'Keeper of the Undercroft',
-    x: -9.5,
+    place: 'ashbrook',
+    x: 2.5,
     z: 12.5,
     yaw: -Math.PI / 2,
     cellar: true,
-    greeting: 'Rest while you can. The stair at the west end of the cave climbs up into Dawnwatch, whenever you are ready for the light.',
+    greeting: 'Rest while you can. The stair at the west end of the cave climbs up into Ashbrook, whenever you are ready for the light.',
     look: { robe: [196, 188, 160], trim: [92, 140, 96], hair: [120, 72, 40], hat: 'hood', beard: false },
+  },
+  {
+    id: 'edda',
+    name: 'Reeve Edda',
+    title: 'Reeve of Ashbrook',
+    place: 'ashbrook',
+    x: 2.5,
+    z: -3.5,
+    yaw: Math.PI,
+    greeting: 'Ashbrook is small, and we like it so. Mind the fields, mind the dark, and come to me if you need work.',
+    look: { robe: [104, 116, 70], trim: [214, 190, 110], hair: [186, 176, 164], hat: 'hood', beard: false },
   },
   // The Auctioneer of the market square (see auction.ts: his id is `AUCTIONEER`). He stands behind the counter of the stall in the south-east corner.
   {
@@ -272,6 +288,7 @@ export const NPCS: readonly NpcDef[] = [
   // The Stashkeeper of the market square (see stash.ts: his id is `STASHKEEPER`). He stands behind the counter of the stall in the north of the square.
   {
     id: 'stashkeeper',
+    stash: true,
     name: 'Stashkeeper Bram',
     title: 'The Stash',
     x: 19.5,
@@ -292,229 +309,235 @@ export const NPCS: readonly NpcDef[] = [
     greeting: 'Keep your voice down and your torch up. Whatever is awake in here does not need much of a reason.',
     look: { robe: [70, 84, 110], trim: [196, 172, 96], hair: [120, 112, 104], hat: 'helm', beard: true },
   },
+  // More people of the story: the farmer and the cook of Ashbrook, and the sister of the chapel road.
+  {
+    id: 'wick',
+    name: 'Farmer Wick',
+    title: 'Keeper of the Fields',
+    place: 'ashbrook',
+    x: -22.5,
+    z: -4.5,
+    yaw: 0,
+    greeting: 'Seeds in the soil, patience in the arms, and a hat against the sun. That is all a farm is.',
+    look: { robe: [120,92,50], trim: [196,170,90], hair: [110,80,50], hat: 'wide', beard: false },
+  },
+  {
+    id: 'nell',
+    name: 'Nell Hearthwood',
+    title: 'Innkeeper',
+    place: 'ashbrook',
+    x: 11.5,
+    z: 2.5,
+    yaw: 0,
+    greeting: 'Sit, sit. There is stew, and there is more stew. Nobody leaves my fire hungry.',
+    look: { robe: [150,60,50], trim: [240,220,190], hair: [90,50,30], hat: 'none', beard: false },
+  },
+  {
+    id: 'ilse',
+    name: 'Sister Ilse',
+    title: 'Keeper of the Chapel Road',
+    x: 30.5,
+    z: -4.5,
+    yaw: 1.5707963267948966,
+    greeting: 'The road east is long, and the dead are patient. Walk it with respect.',
+    look: { robe: [220,220,226], trim: [120,120,160], hair: [60,50,44], hat: 'hood', beard: false },
+  },
+  // The outposts: x and z are measured from the middle of each (see outposts.ts).
+  {
+    id: 'tamsin',
+    name: 'Headwoman Tamsin',
+    title: 'Headwoman of Reedhollow',
+    place: 'reedhollow',
+    x: 2.5,
+    z: -3.5,
+    yaw: 3.141592653589793,
+    greeting: 'The water is wrong, and the reeds know it. Mind your feet on the planks.',
+    look: { robe: [70,110,90], trim: [190,210,140], hair: [120,120,110], hat: 'none', beard: false },
+  },
+  {
+    id: 'dunstan',
+    name: 'Dunstan the Fisher',
+    title: 'Fisher of Reedhollow',
+    place: 'reedhollow',
+    x: -4.5,
+    z: 2.5,
+    yaw: 0,
+    greeting: 'Patience, friend. The marsh gives to those who wait, and takes from those who hurry.',
+    look: { robe: [90,100,70], trim: [170,150,100], hair: [140,110,70], hat: 'wide', beard: true },
+  },
+  {
+    id: 'idris',
+    name: 'Caravan-master Idris',
+    title: 'Caravan-master of Sandmere',
+    place: 'sandmere',
+    x: 2.5,
+    z: -3.5,
+    yaw: 3.141592653589793,
+    greeting: 'A guest brings water, and a friend brings news. Which are you?',
+    look: { robe: [200,150,70], trim: [250,230,170], hair: [50,40,36], hat: 'wide', beard: true },
+  },
+  {
+    id: 'oska',
+    name: 'Delver Oska',
+    title: 'Delver of Sandmere',
+    place: 'sandmere',
+    x: -4.5,
+    z: 2.5,
+    yaw: 0,
+    greeting: 'The old shafts run under the dunes for miles. I know them all, and I do not go down them alone.',
+    look: { robe: [150,110,80], trim: [210,190,150], hair: [90,60,40], hat: 'cap', beard: false },
+  },
+  {
+    id: 'halvard',
+    name: 'Warden Halvard',
+    title: 'Warden of Frostgate',
+    place: 'frostgate',
+    x: 2.5,
+    z: -3.5,
+    yaw: 3.141592653589793,
+    greeting: 'Frostgate stands because we stand. Warm yourself, and then tell me what you want.',
+    look: { robe: [90,110,150], trim: [220,230,240], hair: [200,200,200], hat: 'helm', beard: true },
+  },
+  {
+    id: 'sigrun',
+    name: 'Hunter Sigrun',
+    title: 'Hunter of Frostgate',
+    place: 'frostgate',
+    x: -4.5,
+    z: 2.5,
+    yaw: 0,
+    greeting: 'Winter feeds the hungry and starves the proud. I hunt for the gate. What do you hunt for?',
+    look: { robe: [120,130,140], trim: [200,210,220], hair: [170,130,80], hat: 'hood', beard: false },
+  },
+  {
+    id: 'thessaly',
+    name: 'Burgomaster Thessaly',
+    title: 'Burgomaster of Highmarket',
+    place: 'highmarket',
+    x: 2.5,
+    z: -3.5,
+    yaw: 3.141592653589793,
+    greeting: 'The Warden houses built this town to remember. I mean to make sure it does.',
+    look: { robe: [120,50,80], trim: [230,200,120], hair: [180,170,170], hat: 'none', beard: false },
+  },
+  {
+    id: 'vael',
+    name: 'Enchantress Vael',
+    title: 'Enchantress',
+    place: 'highmarket',
+    x: -4.5,
+    z: 2.5,
+    yaw: 0,
+    greeting: 'Every piece of gear can be more than it is. The trick is knowing how far it will bend.',
+    look: { robe: [60,60,140], trim: [170,140,230], hair: [70,40,90], hat: 'hood', beard: false },
+  },
+  {
+    id: 'ivo',
+    name: 'Skywright Ivo',
+    title: 'Skywright',
+    place: 'highmarket',
+    x: 8.5,
+    z: 2.5,
+    yaw: 0,
+    greeting: 'Wings are only frames and promises. I make both, and I am very good at one of them.',
+    look: { robe: [140,110,60], trim: [230,200,120], hair: [60,60,60], hat: 'cap', beard: true },
+  },
+  {
+    id: 'aldren',
+    name: 'Castellan Aldren',
+    title: 'Castellan of Greykeep',
+    place: 'greykeep',
+    x: 2.5,
+    z: -3.5,
+    yaw: 3.141592653589793,
+    greeting: 'Greykeep has not fallen in three hundred years. I do not intend to be the one to let it.',
+    look: { robe: [80,80,90], trim: [200,200,210], hair: [190,190,190], hat: 'helm', beard: true },
+  },
+  // The stashkeepers of the villages and towns: each stands at the end of the workshop of the place (see WORKSHOPS in outposts.ts), and opens the same wallet stash as Bram in Dawnwatch.
+  {
+    id: 'stash_ashbrook',
+    stash: true,
+    name: 'Cellarer Odo',
+    title: 'The Stash',
+    place: 'ashbrook',
+    x: 22.5,
+    z: -14.5,
+    yaw: Math.PI,
+    greeting: 'Leave it with me and it keeps. Ashbrook has stored its grain and its secrets in the dark for a hundred years; your things will be no trouble.',
+    look: { robe: [110, 86, 60], trim: [210, 180, 110], hair: [160, 150, 140], hat: 'cap', beard: true },
+  },
+  {
+    id: 'stash_reedhollow',
+    stash: true,
+    name: 'Netkeeper Brin',
+    title: 'The Stash',
+    place: 'reedhollow',
+    x: 12.5,
+    z: 13.5,
+    yaw: 0,
+    greeting: 'Everything dries in the end, if it is stored right. Put your things on the high shelf, away from the water.',
+    look: { robe: [80, 104, 84], trim: [180, 200, 130], hair: [110, 90, 60], hat: 'wide', beard: false },
+  },
+  {
+    id: 'stash_sandmere',
+    stash: true,
+    name: 'Warehouser Zahir',
+    title: 'The Stash',
+    place: 'sandmere',
+    x: 12.5,
+    z: 13.5,
+    yaw: 0,
+    greeting: 'Under the sand it is cool and nothing spoils. Give me what you cannot carry, and take it back at any gate of the land.',
+    look: { robe: [196, 156, 84], trim: [244, 226, 170], hair: [40, 32, 30], hat: 'wide', beard: true },
+  },
+  {
+    id: 'stash_frostgate',
+    stash: true,
+    name: 'Tallyman Ketil',
+    title: 'The Stash',
+    place: 'frostgate',
+    x: 12.5,
+    z: 13.5,
+    yaw: 0,
+    greeting: 'Winter is long. A wise traveller leaves a little behind for the thaw, and I count every piece.',
+    look: { robe: [100, 116, 150], trim: [214, 224, 238], hair: [190, 190, 196], hat: 'hood', beard: true },
+  },
+  {
+    id: 'stash_highmarket',
+    stash: true,
+    name: 'Vaultkeeper Orsolya',
+    title: 'The Stash',
+    place: 'highmarket',
+    x: 16.5,
+    z: -14.5,
+    yaw: Math.PI,
+    greeting: 'The Warden houses kept their wealth in vaults, and so does Highmarket. Your things share a vault with your other heroes, and with nobody else.',
+    look: { robe: [110, 56, 86], trim: [226, 196, 120], hair: [70, 50, 60], hat: 'none', beard: false },
+  },
+  {
+    id: 'stash_greykeep',
+    stash: true,
+    name: 'Quartermaster Hadrian',
+    title: 'The Stash',
+    place: 'greykeep',
+    x: 12.5,
+    z: 13.5,
+    yaw: 0,
+    greeting: 'The keep has stores for a three-year siege. There is room in them for a spare blade.',
+    look: { robe: [86, 88, 98], trim: [196, 196, 208], hair: [150, 150, 150], hat: 'helm', beard: true },
+  },
 ];
+
+/** The people of the outposts are written with x and z from the middle of their place; here they are put where they stand in the world. */
+export const NPCS: readonly NpcDef[] = BASE_NPCS.map((n) => {
+  const o = n.place ? outpostById(n.place) : null;
+  return o ? { ...n, x: n.x + o.x, z: n.z + o.z } : n;
+});
 
 export const npcById = (id: string): NpcDef | null => NPCS.find((n) => n.id === id) ?? null;
 
-const LOGS = [B.LOG, B.BIRCH_LOG, B.SPRUCE_LOG];
-const COOKED = [I.COOKED_MEAT, I.COOKED_MUTTON, I.COOKED_CHICKEN, I.COOKED_RABBIT];
-const FARM_ANIMALS: readonly MobKind[] = ['pig', 'cow', 'sheep', 'chicken'];
-
-const CH1 = 'Chapter 1: Dawnwatch';
-const CH2 = 'Chapter 2: The Hollow Cellar';
-
-const CH0 = 'Prologue: The Rift';
-
-export const QUESTS: readonly QuestDef[] = [
-  {
-    id: FIRST_QUEST,
-    name: 'Out of the Dark',
-    chapter: CH0,
-    giver: 'mirel',
-    turnIn: 'maren',
-    requires: [],
-    summary: 'Climb out of the Undercroft into Dawnwatch and find Elder Maren.',
-    offer:
-      'Easy now, do not try to stand too fast. Do you know where you are? No? Then listen.\n\nThe hunters of Dawnwatch found you at dusk at the edge of the Whisperwood, face down in the leaves and nearly dead: frost in your hair, the Rift\'s mark on your skin, and not a stitch of gear on you. They carried you down here, into the Undercroft, the old storm cellars under the village where we keep the wounded out of the Rift\'s sight. You have lain on that cot three nights.\n\nYou are mending, and there is nothing more I can do for you down here. The stair at the west end of the cave climbs into a stone house in the village. Go up into the light, and ask for Elder Maren. She will want to meet the one the forest gave back.',
-    progress: 'The stair at the west end of the cave climbs up into a stone house in Dawnwatch. Go up and out into the village, then find Elder Maren, north of the plaza.',
-    complete:
-      'So you are the one the hunters carried in. Mirel sent word that you were on your feet, but I wanted to see it for myself. Few come back from the Whisperwood, and fewer still from the Rift\'s mark.\n\nYou have nothing, so we will begin with what we have. Here is a map of the lands around Dawnwatch: hold it and press the right mouse button to read it; the little chart in the corner of your screen is drawn from it too. And this was my husband\'s compass. Hold it and turn around, and its red needle will always find north. You will not be lost again.',
-    objectives: [{ kind: 'enter', zone: 'dawnwatch', count: 1, label: 'Climb out into Dawnwatch' }],
-    reward: { xp: 25, items: [{ id: I.MAP, count: 1 }, { id: I.COMPASS, count: 1 }] },
-  },
-  {
-    id: 'a_blade_for_the_road',
-    name: 'A Blade for the Road',
-    chapter: CH0,
-    giver: 'maren',
-    turnIn: 'garrick',
-    requires: [FIRST_QUEST],
-    summary: 'Visit Garrick Bladesworn, the weaponsmith, and take the weapon he has for you.',
-    offer:
-      'The hunters carried you in with nothing on you, not even a knife. That is bad luck, but it is not a plan. Nobody should walk out there unarmed.\n\nGarrick Bladesworn, our weaponsmith, owes me an old favour. Go to his stall at the east of the market and tell him Maren sent you. He will put something in your hand.',
-    progress: 'Garrick keeps the weapon stall in the east of the market, past the forge.',
-    complete:
-      'Maren sent you, did she? Then you are the one the hunters pulled out of the Whisperwood with nothing. Here, this was paid for long ago and nobody has come to collect it.\n\nKeep it sharp. Steel does not care how brave you are.',
-    objectives: [],
-    reward: {
-      xp: 25,
-      items: [{ id: toolId('sword', 'stone'), count: 1 }],
-      classItems: {
-        warrior: [{ id: I.SHIELD, count: 1 }],
-        mage: [{ id: I.WAND, count: 1 }, { id: I.ORB, count: 1 }],
-        ranger: [{ id: I.BOW, count: 1 }, { id: I.ARROW, count: 32 }, { id: I.DAGGER, count: 1 }],
-      },
-    },
-  },
-  {
-    id: 'welcome',
-    name: 'Welcome to Dawnwatch',
-    chapter: CH1,
-    giver: 'maren',
-    turnIn: 'brannoc',
-    requires: [FIRST_QUEST],
-    summary: 'Speak with Smith Brannoc.',
-    offer:
-      'So the Rift has sent us another one. Welcome to Dawnwatch, traveller. We are a small village, but an honest one.\n\nBefore you do anything else, go and see Brannoc, our smith, at the forge to the east. He will show you how things are done here. Take this bread, you look hungry.',
-    progress: 'Brannoc is the broad man at the forge, east of the plaza. Do not keep him waiting.',
-    complete:
-      'Maren sent you? Good. She does not send me idle hands. A newcomer who can learn is worth ten who cannot.\n\nLet us find out which you are.\n\nHere is an Emberstone, to bring you home: hold it and press the right mouse button, and once you have stood still a few seconds it takes you to your bed, or to the village if you have none.\n\nAnd one more thing, for the road: a skill book of your calling. You know no ability yet, traveller; you learn each one from its book. Right-click the book, in your pack or in your hand, and what is written in it becomes yours. More are sold at the market, and the things that crawl out of the Rift carry them now and then.',
-    objectives: [],
-    reward: { xp: 20, items: [{ id: I.EMBERSTONE, count: 1 }, { id: I.BREAD, count: 3 }, { id: bagId(0), count: 1 }], classItems: BOOK_REWARDS[0] },
-  },
-  {
-    id: 'first_timber',
-    name: 'First Timber',
-    chapter: CH1,
-    giver: 'brannoc',
-    turnIn: 'brannoc',
-    requires: ['welcome'],
-    summary: 'Gather logs from the trees around Dawnwatch.',
-    offer:
-      'Everything starts with wood. Take any tree around the village and punch it until a log falls off. Yes, with your bare hands; it works, it just takes a while.\n\nBring me five logs. Oak, birch or spruce, I am not picky.',
-    progress: 'Five logs. The trees are right there. Hold the left mouse button on the trunk.',
-    complete: 'Fine logs. Rough, but they will burn or build, and you can make planks out of them in the 2x2 grid of your inventory. Press E.',
-    objectives: [{ kind: 'collect', items: LOGS, count: 5, label: 'Logs' }],
-    reward: { xp: 30, items: [{ id: B.TORCH, count: 6 }], classItems: BOOK_REWARDS[1] },
-  },
-  {
-    id: 'workbench',
-    name: 'A Proper Workbench',
-    chapter: CH1,
-    giver: 'brannoc',
-    turnIn: 'brannoc',
-    requires: ['first_timber'],
-    summary: 'Craft a crafting table and a wooden pickaxe.',
-    offer:
-      'Planks first: put a log in your inventory grid and take the planks. Four planks in a square make a crafting table, and with a table you can craft almost anything.\n\nMake one, then use it to craft a wooden pickaxe: three planks across the top, two sticks down the middle. Show me when you are done.',
-    progress: 'A crafting table (four planks in a 2x2 square) and then a wooden pickaxe at it. Right-click the table to open it.',
-    complete: 'That is a tool, not a stick with ambitions. Now you can break stone. Take some coal for the furnace you will want soon.',
-    objectives: [
-      { kind: 'craft', items: [B.CRAFTING_TABLE], count: 1, label: 'Craft a crafting table' },
-      { kind: 'craft', items: [toolId('pickaxe', 'wood')], count: 1, label: 'Craft a wooden pickaxe' },
-    ],
-    reward: { xp: 40, items: [{ id: I.COAL, count: 4 }, { id: bagId(1), count: 1 }] },
-  },
-  {
-    id: 'stone_age',
-    name: 'The Stone Age',
-    chapter: CH1,
-    giver: 'brannoc',
-    turnIn: 'brannoc',
-    requires: ['workbench'],
-    summary: 'Mine stone and craft a stone pickaxe.',
-    offer:
-      'Wood breaks easy and wears out quick. Stone is better. Find grey rock, there is plenty past the village edge, and mine ten blocks of it with your pickaxe. It drops cobblestone.\n\nThen craft a stone pickaxe: cobblestone on top, sticks below. A better pick opens the way to iron, and iron changes everything.',
-    progress: 'Ten blocks of stone, then a stone pickaxe: three cobblestone and two sticks.',
-    complete: 'There. A real tool. You are no longer a visitor, you are a worker. I will not tell Maren you did it with a smile, though.',
-    objectives: [
-      { kind: 'mine', blocks: [B.STONE], count: 10, label: 'Mine stone' },
-      { kind: 'craft', items: [toolId('pickaxe', 'stone')], count: 1, label: 'Craft a stone pickaxe' },
-    ],
-    reward: { xp: 60, items: [{ id: B.COBBLE, count: 16 }], classItems: BOOK_REWARDS[2] },
-  },
-  {
-    id: 'forge_fire',
-    name: 'Fire and Forge',
-    chapter: CH1,
-    giver: 'brannoc',
-    turnIn: 'brannoc',
-    requires: ['stone_age'],
-    summary: 'Craft a furnace and smelt something in it.',
-    offer:
-      'Ore is no use as it comes out of the ground. You smelt it. A furnace is eight cobblestone in a ring around an empty middle.\n\nBuild one, put it down, and cook something in it: coal as fuel on the bottom, whatever you like to cook on top. Sand makes glass, raw meat makes dinner. Do it three times and you will have the idea.',
-    progress: 'Craft a furnace (eight cobblestone in a ring), then take three things out of it. Coal goes in the bottom slot as fuel.',
-    complete: 'Now you have the whole trade in your hands: dig, craft, smelt. Everything else is a question of how big a thing you want to make.',
-    objectives: [
-      { kind: 'craft', items: [B.FURNACE], count: 1, label: 'Craft a furnace' },
-      { kind: 'smelt', count: 3, label: 'Smelt items' },
-    ],
-    reward: { xp: 70, items: [{ id: I.IRON_INGOT, count: 3 }, { id: bagId(2), count: 1 }] },
-  },
-  {
-    id: 'hungry_mouths',
-    name: 'Hungry Mouths',
-    chapter: CH1,
-    giver: 'isolde',
-    turnIn: 'isolde',
-    requires: ['welcome'],
-    summary: 'Hunt pigs, cows, sheep or chickens.',
-    offer:
-      'You look like you can swing something. Good. The village is low on meat, and the herds around Dawnwatch have grown thick.\n\nHunt six animals, any of the farm sort: pigs, cows, sheep, chickens. Hit them until they stop. They do not hit back.',
-    progress: 'Six animals so far? Pigs, cows, sheep and chickens all count. They graze on the grass around the village.',
-    complete: 'Good hunting. Do not waste any of it; everything those animals drop will be useful, even the feathers.',
-    objectives: [{ kind: 'kill', mobs: FARM_ANIMALS, count: 6, label: 'Animals hunted' }],
-    reward: { xp: 50, items: [{ id: I.ARROW, count: 8 }] },
-  },
-  {
-    id: 'hot_meal',
-    name: 'A Hot Meal',
-    chapter: CH1,
-    giver: 'isolde',
-    turnIn: 'isolde',
-    requires: ['hungry_mouths', 'forge_fire'],
-    summary: 'Cook meat in a furnace.',
-    offer:
-      'Raw meat will keep you alive and make you sick of it. Cooked meat will keep you alive and strong.\n\nYou have a furnace now, thanks to Brannoc. Cook three pieces of meat and bring them to me. Eat one on the way, hunger is a poor travelling companion.',
-    progress: 'Put raw meat in a furnace with coal under it. Three cooked pieces.',
-    complete: 'Now that is a meal. Keep some in your pack always. A full stomach heals you faster than any potion.',
-    objectives: [{ kind: 'collect', items: COOKED, count: 3, label: 'Cooked meat' }],
-    reward: { xp: 60, items: [{ id: I.BOW, count: 1 }] },
-  },
-  {
-    id: 'night_watch',
-    name: 'The Night Watch',
-    chapter: CH1,
-    giver: 'isolde',
-    turnIn: 'isolde',
-    requires: ['hot_meal'],
-    summary: 'Slay zombies and skeletons that come out at night.',
-    offer:
-      'Once the sun goes down the dead walk. Zombies shamble, skeletons shoot. They burn in daylight, so the worst of them wait for the dark.\n\nStand your ground near the village after sunset and put down four zombies and two skeletons. Keep your back to something solid, and use that bow I gave you.',
-    progress: 'Four zombies and two skeletons. They come out at night, or in the dark of a cave.',
-    complete: 'You are still standing. That is more than most manage on the first night. Varro has been asking about you. Go and see the Captain.',
-    objectives: [
-      { kind: 'kill', mobs: ['zombie'], count: 4, label: 'Zombies slain' },
-      { kind: 'kill', mobs: ['skeleton'], count: 2, label: 'Skeletons slain' },
-    ],
-    reward: { xp: 100, items: [{ id: I.ARROW, count: 16 }, { id: I.COOKED_MEAT, count: 4 }, { id: bagId(3), count: 1 }], classItems: BOOK_REWARDS[3] },
-  },
-  {
-    id: 'into_the_dark',
-    name: 'Into the Dark',
-    chapter: CH2,
-    giver: 'varro',
-    turnIn: 'hale',
-    requires: ['night_watch', 'stone_age'],
-    summary: 'Take the Hollow Sigil east to the ruined chapel, step through the portal, and report to Warden Hale just inside.',
-    offer:
-      'Follow the road east out of the village. A mile on there is a ruined chapel, and in it a portal of black stone that was not there in my father\'s day. It leads to the Hollow Cellar, and something has been waking down there. The dead we keep fighting are coming from it.\n\nThe portal does not open for just anybody. It wants a Hollow Sigil, and a Sigil is two halves joined: a Warden Scroll and a Hollow Bone. Tobin keeps both on his shelves if you ever need another. I have had one made up for you; take it. Each time you go into a new cellar, the portal keeps the Sigil.\n\nI sent Warden Hale down a week ago to hold the entrance. Find him just inside the portal and tell him I sent you; he will know what is wanted. The portal turns back anyone below level 5, so earn some experience first. The cellar is yours alone: it is made fresh for whoever goes in. Bring torches, a sword, and food. It is dark in there.',
-    progress: 'East along the gravel road to the ruin, then through the portal (level 5 and up, and the Hollow Sigil I gave you). Warden Hale waits just inside.',
-    complete:
-      'Varro sent you? Then the Watch has not forgotten us. I am Hale. I went down with six, and I am what is left. We held this hall for three days, and then we stopped being able to hold anything past it.\n\nThe cellar is not one hall but a maze of them, and every way on is shut. Cages, old iron things, are what keep the gates closed, and what make the dead. Smash the cages and the gates open; leave one standing and you will not pass. I will be here, at the door. Take a torch from me for the road.',
-    objectives: [{ kind: 'enter', zone: 'hollow_cellar', count: 1, label: 'Enter the Hollow Cellar' }],
-    give: [{ id: I.HOLLOW_SIGIL, count: 1 }, { id: B.TORCH, count: 12 }],
-    reward: { xp: 80, items: [{ id: B.TORCH, count: 16 }] },
-  },
-  {
-    id: 'cellar_cleanse',
-    name: 'Cleansing the Cellar',
-    chapter: CH2,
-    giver: 'hale',
-    turnIn: 'hale',
-    requires: ['into_the_dark'],
-    summary: 'Smash the three cages that hold the Hollow Cellar shut, and put down the Hollow King on his throne.',
-    offer:
-      'Here is what I learned before the rest of mine fell. The cellar has three cages, and each is a lock. Two are in the side chambers off the great nave: one in the north wing, one in the south. Break those two and the iron gate at the east of the nave opens, onto the Warden\'s Court. Beyond the court there is a third cage, in the armoury, and when it is gone the way to the throne hall opens.\n\nThe dead here are not a crowd; they stand where they were put, and they wake when they see you. Take them a few at a time, and mind the ones that wear armour. When one is hurt, those beside it hear. Do not stand in the nave and shout.\n\nAt the end is the Hollow King. He gathers his spells slowly enough that you can see them coming: where the ground glows, do not stand. When he calls his court, kill the court first, or he will shrug off most of what you do. Come back to me when it is done. If you all fall, he heals, and the dead rise no more, but he will be waiting.',
-    progress: 'Two cages in the side chambers of the nave open the iron gate; the armoury holds the third, past the Warden\'s Court. Then the throne hall. Hale waits at the entrance.',
-    complete:
-      'The Hollow King is ash? Then the dead are finally at rest, and I can take the Watch home. You did what six of us could not. Take this, and the thanks of Dawnwatch.\n\nThere is more under the Rift than one cellar. But that is a story for another day.',
-    objectives: [
-      { kind: 'mine', blocks: [B.SPAWNER], count: 3, label: 'Cages smashed' },
-      { kind: 'kill', mobs: ['hollow_king'], count: 1, label: 'The Hollow King slain' },
-    ],
-    reward: { xp: 250, items: [{ id: toolId('sword', 'iron'), count: 1 }, { id: I.SHIELD, count: 1 }, { id: I.EMERALD, count: 6 }, { id: bagId(5), count: 1 }] },
-  },];
+/** Every quest of the game: the story of the Adventure world (see storyQuests.ts and docs/adventure). */
+export const QUESTS: readonly QuestDef[] = STORY_QUESTS;
 
 const questMap = new Map(QUESTS.map((q) => [q.id, q]));
 export const questById = (id: string): QuestDef | null => questMap.get(id) ?? null;
@@ -537,6 +560,8 @@ export interface QuestLogJSON {
   d: string[];
   /** Quests under way, with each objective's progress. */
   a: [string, number[]][];
+  /** The class of whoever keeps the log (for the class lines). */
+  c?: ClassId;
 }
 
 /** The things the game tells the log about. */
@@ -548,7 +573,7 @@ export type QuestEvent =
   | { t: 'place'; block: number }
   | { t: 'enter'; zone: string };
 
-const MAX_ACTIVE = 12;
+const MAX_ACTIVE = 15;
 
 /** One player's quests. */
 export class QuestLog {
@@ -561,10 +586,14 @@ export class QuestLog {
     return this.done.size === 0 && this.active.size === 0;
   }
 
+  /** The class of whoever keeps this log (the class lines are only offered to their own class). Set by the player, or by the client that draws a copy of the log. */
+  classId: ClassId | null = null;
+
   status(id: string): QuestStatus {
     const q = this.defs.get(id);
     if (!q) return 'locked';
     if (this.done.has(id)) return 'done';
+    if (q.class && q.class !== this.classId && !this.active.has(id)) return 'locked';
     const p = this.active.get(id);
     if (p) return this.isComplete(q, p) ? 'ready' : 'active';
     return q.requires.every((r) => this.done.has(r)) ? 'available' : 'locked';
@@ -683,7 +712,7 @@ export class QuestLog {
   }
 
   toJSON(): QuestLogJSON {
-    return { d: [...this.done], a: [...this.active].map(([id, p]) => [id, [...p]]) };
+    return { d: [...this.done], a: [...this.active].map(([id, p]) => [id, [...p]]), ...(this.classId ? { c: this.classId } : {}) };
   }
 
   /** Read a saved or received log; anything unknown or malformed is dropped. */
@@ -691,7 +720,8 @@ export class QuestLog {
     this.done.clear();
     this.active.clear();
     if (typeof raw !== 'object' || raw === null) return;
-    const r = raw as { d?: unknown; a?: unknown };
+    const r = raw as { d?: unknown; a?: unknown; c?: unknown };
+    if (isClassId(r.c)) this.classId = r.c;
     if (Array.isArray(r.d)) for (const id of r.d) if (typeof id === 'string' && this.defs.has(id)) this.done.add(id);
     if (Array.isArray(r.a)) {
       for (const entry of r.a) {

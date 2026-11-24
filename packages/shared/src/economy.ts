@@ -109,7 +109,7 @@ const armorPieces = (material: ArmorSet, rarity: Rarity, level: number): ShopIte
 export const SHOPS: readonly ShopDef[] = [
   {
     npc: 'tobin',
-    line: 'Bread, torches and a sturdy pick: everything a traveller forgets to pack. Coin for goods, goods for coin.',
+    line: 'Bread, torches and a sturdy pick: everything a traveller forgets to pack. Coin for goods, goods for coin. And if you mean to settle: the Auren Land Surveyor is on the hook by the door. Hold it, mark the corners of the ground you want, and the Land Office will sell it to you. What you build there is yours for good; out in the wild, the land puts itself back after a few days.',
     stock: [
       ware(I.BREAD, 4, 24),
       ware(I.COOKED_MEAT, 4, 40),
@@ -130,6 +130,7 @@ export const SHOPS: readonly ShopDef[] = [
       ware(I.MILK_BUCKET, 1, 18),
       ware(I.MAP, 1, 60),
       ware(I.EMBERSTONE, 1, 30),
+      ware(I.LAND_SURVEYOR, 1, 400),
       ware(I.WARDEN_SCROLL, 1, 90),
       ware(I.HOLLOW_BONE, 1, 140),
       ware(I.BED, 1, 70),

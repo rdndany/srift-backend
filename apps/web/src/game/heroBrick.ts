@@ -9,7 +9,7 @@
  * seam to be found.
  */
 import { beyondTiles } from '@solrift/shared';
-import { fbm, h2, mix, ramp, ridge, shade, vn, wrap, type HeroPainter, type HeroPixel, type RGB } from './heroKit';
+import { fbm, h2, mix, ramp, shade, vn, wrap, type HeroPainter, type HeroPixel, type RGB } from './heroKit';
 
 const N = 64;
 const smooth = (a: number, b: number, t: number): number => {
@@ -150,7 +150,6 @@ function brickPainter(spec: BrickSpec): (x: number, y: number, v: number) => RGB
     while (k < row.edges.length - 2 && row.edges[k + 1] <= x2) k++;
     const bx = x2 - row.edges[k];
     const bw = row.edges[k + 1] - row.edges[k];
-    const id = k % (row.edges.length - 1);
     const seamBrick = k === row.edges.length - 2;
     const gx = h2(r * 8 + k, 0, s + 4);
 

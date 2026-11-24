@@ -9,7 +9,7 @@ import { TokenEconomy } from './TokenEconomy';
 import { useToken, type TokenLiveInfo } from '../token/store';
 import { ClickSparks, Embers, Reveal, useFrontMotion } from './fx';
 import { lobbyUrl } from '../game/route';
-import { SCROLL_KEY, goMarket, goCamp } from './frontNav';
+import { SCROLL_KEY, goMarket, goCamp, goShop } from './frontNav';
 import { ART } from './homeAssets';
 import { CASHOUT, FAIR_PLAY, STAGE_LABEL, TOKEN, earningsFor, roadmapFor, utilitiesFor } from './tokenInfo';
 import './home.css';
@@ -117,6 +117,7 @@ export function TokenPage() {
             <button className="fp-link-market" onClick={goMarket}>
               Market
             </button>
+            <button className="fp-link-shop" onClick={goShop}>Shop</button>
             <button className="fp-link-token" aria-current="page" onClick={() => scrollTo('tk-top')}>
               Token
             </button>

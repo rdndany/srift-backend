@@ -135,6 +135,7 @@ export function createGameServer(opts: GameServerOptions): GameServer {
   const room = new GameRoom({
     seed: opts.seed,
     store: repo.room,
+    ...(repo.land ? { land: repo.land } : {}),
     onAchievement: (e) => token.reward(e.wallet, e.account, e.id),
     onClear: (e) => token.rewardClear(e.wallet, e.account),
     onBounty: (e) => token.rewardBounty(e.wallet, e.account, e.day, e.id),

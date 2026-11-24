@@ -1,7 +1,11 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import type { BossView } from '@solrift/shared';
 import { useUi } from '../ui/store';
+
+/** What the loading screen draws of the boss's frame (see `warmHud` in the store): every part of it, so that all of its painting is built once. */
+const WARM_BOSS: BossView = { name: 'King Aurelion', level: 60, hp: 0.62, health: 6200, max: 10000, phase: 2, marks: [0.7, 0.4], cast: { name: 'Judgement', t: 0.4, seconds: 3 }, shield: 1, enraged: 1, adds: 2 };
 
 /** The Hollow King's face in pixel art, 16 x 16: a crown of gold spikes over a skull whose sockets burn. */
 const SKULL = [
@@ -65,10 +69,11 @@ function SkullPortrait() {
  * the time left to stop it or to get out of the way.
  */
 export function BossFrame() {
-  const boss = useUi((s) => s.boss);
+  const warm = useUi((s) => s.warmHud);
+  const boss = useUi((s) => s.boss) ?? (warm ? WARM_BOSS : null);
   const screen = useUi((s) => s.screen);
   const spectating = useUi((s) => s.spectating);
-  if (!boss || spectating || (screen !== 'none' && screen !== 'dead')) return null;
+  if (!boss || (!warm && (spectating || (screen !== 'none' && screen !== 'dead')))) return null;
   const pct = Math.round(boss.hp * 100);
   const left = boss.cast ? Math.max(0, boss.cast.seconds * (1 - boss.cast.t)) : 0;
   return (
@@ -128,7 +133,8 @@ export function BossFrame() {
 
 /** What the boss says, or the raid warning, across the screen under the frame. Each new line restarts the animation. */
 export function BossBanner() {
-  const line = useUi((s) => s.bossLine);
+  const warm = useUi((s) => s.warmHud);
+  const line = useUi((s) => s.bossLine) ?? (warm ? { text: 'You will kneel.', kind: 'yell' as const, stamp: 0 } : null);
   const boss = useUi((s) => s.boss);
   if (!line) return null;
   return (

@@ -293,7 +293,6 @@ class Site {
 }
 
 type Rand = () => number;
-const pickOf = <T>(list: readonly T[], rand: Rand): T => list[Math.floor(rand() * list.length)];
 
 // ---- archetype builders ------------------------------------------------------------------------------------------
 

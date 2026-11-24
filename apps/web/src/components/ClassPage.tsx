@@ -9,7 +9,7 @@ import { CharacterPreview } from './CharacterPreview';
 import { ABILITY_GUIDE, ABILITY_KEY_LABELS, GUIDE, LEVEL_GAINS, abilityFacts, bookPrice, itemTitle, num, statRows, unlockSteps } from './classGuide';
 import { ClickSparks, Embers, Reveal, Spot, useFrontMotion } from './fx';
 import { lobbyUrl } from '../game/route';
-import { SCROLL_KEY, goMarket, goToken, goCamp } from './frontNav';
+import { SCROLL_KEY, goMarket, goToken, goCamp, goShop } from './frontNav';
 import { ART } from './homeAssets';
 import { ItemSprite } from './ItemSprite';
 import type { HomeMode } from './modes';
@@ -144,6 +144,7 @@ export function ClassPage({ id }: { id: ClassId }) {
             <button onClick={() => toFront('l-expansions')}>Expansions</button>
             <button className="fp-link-camp" onClick={goCamp}>Camp</button>
             <button className="fp-link-market" onClick={goMarket}>Market</button>
+            <button className="fp-link-shop" onClick={goShop}>Shop</button>
             <button className="fp-link-token" onClick={goToken}>Token</button>
           </nav>
           <div className="fp-account">

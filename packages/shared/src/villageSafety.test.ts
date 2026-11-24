@@ -10,7 +10,7 @@ function make(spawning: boolean) {
   const s = new GameSession({ seed: ADVENTURE_SEED, world, generator, naturalSpawning: spawning, rand: mulberry32(11) });
   s.finishLoading();
   // A new character wakes in the wilds; these tests are about the village, so start on its Landing.
-  const land = generator.spawnFor(0);
+  const land = generator.landingFor(0);
   s.teleport(land.x, land.y, land.z, 0, 0);
   return s;
 }

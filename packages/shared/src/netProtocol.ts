@@ -378,6 +378,14 @@ export interface BobberView {
   own?: 1;
 }
 
+/** A sign with writing on it, near the player: its block, and the four lines. */
+export interface SignView {
+  x: number;
+  y: number;
+  z: number;
+  l: string[];
+}
+
 export interface Snapshot {
   t: 'snap';
   tick: number;
@@ -394,6 +402,8 @@ export interface Snapshot {
   drops: DropView[];
   /** Food on campfires near you, packed `x, y, z` and four item ids (0 is an empty place). Left out when none are near. */
   fires?: number[];
+  /** The signs with writing on them near you, whole: sent when one near you changes or you have walked on, and left out otherwise (the client keeps the last list; an empty one clears it). */
+  signs?: SignView[];
   /** Experience orbs near the player (left out when there are none). */
   orbs?: XpOrbView[];
   /** Fishing bobbers near the player (left out when there are none). */

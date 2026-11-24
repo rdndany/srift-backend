@@ -2,7 +2,8 @@ import { mkdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { isClassId, type ClassId } from '@solrift/shared';
+import { isClassId, type ClassId, type LandStore } from '@solrift/shared';
+import { SqliteLandStore } from './landStore';
 import { SqliteCloud, type CloudRepo } from './cloudRepo';
 import { SqliteRoomStore, type RoomStore } from './roomStore';
 import { PERK_HERO_SLOT, SqliteTokenRepo, type TokenRepo } from './tokenRepo';
@@ -42,6 +43,8 @@ export interface Repo {
   readonly cloud: CloudRepo;
   /** The multiplayer room's world and player progress. */
   readonly room: RoomStore;
+  /** Land claims, the record of what was changed in the wild, and the receipts of land purchases. */
+  readonly land?: LandStore;
   /** The $SOLRIFT ledger (rewards and withdrawals, per wallet). */
   readonly tokens: TokenRepo;
   /** Log a wallet in: the character it played last, or a fresh one on first login. Refreshes `lastLoginAt`. */
@@ -113,6 +116,7 @@ export class SqliteRepo implements Repo {
   private readonly db: DatabaseSync;
   readonly cloud: CloudRepo;
   readonly room: RoomStore;
+  readonly land: SqliteLandStore;
   readonly tokens: TokenRepo;
 
   constructor(file: string = ':memory:') {
@@ -150,6 +154,7 @@ export class SqliteRepo implements Repo {
     `);
     this.cloud = new SqliteCloud(this.db);
     this.room = new SqliteRoomStore(this.db);
+    this.land = new SqliteLandStore(this.db);
     this.tokens = new SqliteTokenRepo(this.db);
   }
 

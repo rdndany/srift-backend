@@ -8,7 +8,7 @@ import { COUNTS } from './beyondGuide';
 import { Blocks } from './BlockCube';
 import { BlurWords, ClickSparks, CountUp, Embers, Marquee, Reveal, Spot, useFrontMotion } from './fx';
 import { ItemSprite } from './ItemSprite';
-import { SCROLL_KEY, goMarket, goToken, goCamp } from './frontNav';
+import { SCROLL_KEY, goMarket, goToken, goCamp, goShop } from './frontNav';
 import { ART, SHOT } from './homeAssets';
 import { MODES, type HomeMode } from './modes';
 import { WayDialog, type Way } from './WayDialog';
@@ -30,14 +30,14 @@ const FEATURES: { title: string; text: string; shot: string; span: number }[] = 
   { title: 'Embark on quests', text: 'Dawnwatch has nine people to talk to, a quest log, and a coin of its own called Auren.', shot: SHOT.quests, span: 4 },
   { title: 'Three ways to fight', text: 'Warrior, Mage or Ranger. Each has a resource bar and four abilities, learned from skill books.', shot: SHOT.spellbook, span: 2 },
   { title: 'Forge your gear', text: 'Mine, smelt, craft and enchant. The recipe book shows what your bags can make.', shot: SHOT.recipes, span: 2 },
-  { title: 'A world that changes', text: 'The sun sets, rain rolls in, and torches hold the dark. Caves, villages and dungeons wait under it.', shot: SHOT.dusk, span: 4 },
+  { title: 'A world that changes', text: 'The sun sets, rain rolls in, and torches hold the dark. Rifts tear open, and every half hour a golden tide sweeps the land.', shot: SHOT.dusk, span: 4 },
   { title: 'Bring your friends', text: 'One shared realm, a party of four, and the Hollow Cellar to walk into together.', shot: SHOT.party, span: 3 },
   { title: 'Never lose the way', text: 'A map you can hold and unfold, a compass, and quest markers on the map.', shot: SHOT.hud, span: 3 },
 ];
 
 const ROMAN = ['', 'I', 'II', 'III', 'IV'] as const;
 
-const STRIP = ['Mine', 'Craft', 'Build', 'Quest', 'Fish', 'Trade', 'Raid dungeons', 'Slay bosses', 'Play with friends'] as const;
+const STRIP = ['Mine', 'Craft', 'Build', 'Quest', 'Fish', 'Trade', 'Raid dungeons', 'Slay bosses', 'Seal rifts', 'Take to the air', 'Play with friends'] as const;
 
 /** The little picture on each mode's badge. */
 const MODE_ICON: Record<HomeMode, number> = {
@@ -121,6 +121,7 @@ export function Landing({ onEnter }: { onEnter: (way: Way, mode: HomeMode | null
             <button onClick={() => scrollTo('l-expansions')}>Expansions</button>
             <button className="fp-link-camp" onClick={goCamp}>Camp</button>
             <button className="fp-link-market" onClick={goMarket}>Market</button>
+            <button className="fp-link-shop" onClick={goShop}>Shop</button>
             <button className="fp-link-token" onClick={goToken}>Token</button>
           </nav>
           <div className="fp-account">

@@ -97,6 +97,15 @@ export const LAVA_LEVEL = 10;
 export const SAFE_BUFFER = 24;
 
 /** The boss of a dungeon copy: where it stands (and returns to after a wipe), which way it faces, and the room it fights in (x0..x1, z0..z1 inclusive). */
+/** A place players may not change, as a square: what it is called, and its corners (block coordinates, both ends included). */
+export interface ProtectedArea {
+  name: string;
+  x0: number;
+  z0: number;
+  x1: number;
+  z1: number;
+}
+
 export interface InstanceBoss {
   x: number;
   y: number;
@@ -169,7 +178,7 @@ export class WorldGenerator {
   /** Villages: where they are and what they look like. */
   readonly villages: VillageGenerator;
   /** Which kind of world this makes ('square' is the flat platform of squareWorld.ts, 'adventure' the quest world of adventure.ts). */
-  readonly kind: 'overworld' | 'square' | 'adventure' | 'beyond' | 'showcase' = 'overworld';
+  readonly kind: 'overworld' | 'square' | 'adventure' | 'beyond' | 'showcase' | 'castle' = 'overworld';
 
   /** The land of the world. The World Beyond makes its own (the constructor asks, before anything else is set up). */
   protected createTerrain(seed: number): TerrainSource {
@@ -477,6 +486,22 @@ export class WorldGenerator {
    */
   isProtected(_x: number, _y: number, _z: number): boolean {
     return false;
+  }
+
+  /**
+   * The made places that players may not change, as squares named for the player (a town, a vault) touching the box: the same ground
+   * `isProtected` guards, said in a way that can be drawn. Corners are block coordinates (both ends included). None in an ordinary world.
+   */
+  protectedAreas(_x0: number, _z0: number, _x1: number, _z1: number): readonly ProtectedArea[] {
+    return [];
+  }
+
+  /**
+   * The public landmarks of the land that a claim must keep away from (villages, ruins, temples, castles): circles (a centre and a radius)
+   * touching the box. Players keep these accessible to everybody, so nobody can buy them. None in an ordinary world.
+   */
+  landmarksIn(_x0: number, _z0: number, _x1: number, _z1: number): readonly { x: number; z: number; r: number }[] {
+    return [];
   }
 
   /**

@@ -1,0 +1,395 @@
+/* ---- The land: the Land Surveyor's keys and live price, the confirmation, and the window of the player's lands ---- */
+#land-keys {
+  position: fixed;
+  left: 50%;
+  /* Above the line the game writes its messages on (138px), so that "Entering ..." is never printed over the keys. */
+  bottom: 172px;
+  transform: translateX(-50%);
+  z-index: 41;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 16px;
+  max-width: 92vw;
+  padding: 6px 14px;
+  color: #e8dcc0;
+  font-size: 12px;
+  background: linear-gradient(rgba(20, 14, 6, 0.7), rgba(10, 8, 4, 0.6));
+  border: 1px solid rgba(214, 170, 70, 0.45);
+  text-shadow: 1px 1px 0 #000;
+  pointer-events: none;
+}
+#land-keys kbd,
+#land-tutorial kbd {
+  font-family: inherit;
+  font-size: 10px;
+  padding: 0 5px;
+  margin-right: 4px;
+  color: #ffe9a8;
+  background: linear-gradient(#3a2d1a, #1c150c);
+  border: 1px solid rgba(214, 170, 70, 0.6);
+}
+
+#land-price {
+  position: fixed;
+  top: 130px;
+  right: 16px;
+  z-index: 41;
+  width: 240px;
+  padding: 10px 12px 12px;
+  color: #f2ead2;
+  font-size: 12px;
+  background: linear-gradient(rgba(20, 14, 6, 0.78), rgba(10, 8, 4, 0.68));
+  border: 1px solid rgba(214, 170, 70, 0.55);
+  border-left-width: 4px;
+  text-shadow: 1px 1px 0 #000;
+  pointer-events: none;
+}
+#land-price.tone-good {
+  border-left-color: #4dff8f;
+}
+#land-price.tone-warn {
+  border-left-color: #ffc04a;
+}
+#land-price.tone-bad {
+  border-left-color: #ff4a4a;
+}
+#land-price.tone-info {
+  border-left-color: #bfe9ff;
+}
+.land-price-title {
+  margin-bottom: 6px;
+  color: #ffd86a;
+  font-size: 11px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+#land-price dl,
+.land-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 12px;
+  margin: 0;
+}
+#land-price dt,
+.land-facts dt {
+  color: #b9ad8a;
+}
+#land-price dd,
+.land-facts dd {
+  margin: 0;
+  text-align: right;
+}
+.land-facts dd {
+  text-align: left;
+}
+.land-total {
+  color: #ffd86a;
+  font-weight: 700;
+}
+.neg {
+  color: #ff8a6a;
+}
+.land-straight {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #cfe9ff;
+  opacity: 0.85;
+}
+.land-straight.perfect {
+  color: #ffffff;
+  opacity: 1;
+  font-weight: 700;
+  text-shadow: 0 0 8px rgba(190, 230, 255, 0.8);
+}
+.land-straight + .land-status {
+  margin-top: 4px;
+}
+.land-status {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(214, 170, 70, 0.3);
+}
+#land-price.tone-good .land-status {
+  color: #7dffaa;
+}
+#land-price.tone-warn .land-status {
+  color: #ffd27a;
+}
+#land-price.tone-bad .land-status {
+  color: #ff8a8a;
+}
+
+#land-look {
+  position: fixed;
+  left: 50%;
+  top: calc(50% + 46px);
+  transform: translateX(-50%);
+  z-index: 41;
+  min-width: 220px;
+  padding: 6px 12px;
+  text-align: center;
+  color: #f2ead2;
+  font-size: 12px;
+  background: rgba(10, 8, 4, 0.62);
+  border: 1px solid rgba(214, 170, 70, 0.4);
+  text-shadow: 1px 1px 0 #000;
+  pointer-events: none;
+}
+.land-look-name {
+  font-size: 13px;
+  letter-spacing: 1px;
+}
+.land-look-line {
+  color: #cbbd95;
+  font-size: 11px;
+}
+#land-look.kind-mine {
+  border-color: #58f0a0;
+}
+#land-look.kind-guild {
+  border-color: #5aa8ff;
+}
+#land-look.kind-shared {
+  border-color: #4de8e0;
+}
+#land-look.kind-other {
+  border-color: #ff8a4a;
+}
+#land-look.kind-protected {
+  border-color: #b86bff;
+  box-shadow: 0 0 14px rgba(184, 107, 255, 0.35);
+}
+#land-look.kind-protected .land-look-name {
+  color: #dcb8ff;
+}
+#land-look.kind-wild {
+  border-color: #bfe9ff;
+}
+
+#land-hint {
+  position: fixed;
+  left: 50%;
+  top: 22%;
+  transform: translateX(-50%);
+  z-index: 42;
+  max-width: 80vw;
+  padding: 6px 16px;
+  color: #f2ead2;
+  font-size: 14px;
+  background: rgba(10, 8, 4, 0.7);
+  border: 1px solid rgba(214, 170, 70, 0.5);
+  text-shadow: 1px 1px 0 #000;
+  pointer-events: none;
+  animation: land-hint-fade 4.5s ease-out forwards;
+}
+#land-hint.tone-good {
+  border-color: #4dff8f;
+}
+#land-hint.tone-warn {
+  border-color: #ffc04a;
+}
+#land-hint.tone-bad {
+  border-color: #ff4a4a;
+}
+@keyframes land-hint-fade {
+  0% {
+    opacity: 0;
+  }
+  6% {
+    opacity: 1;
+  }
+  75% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+#land-tutorial {
+  position: fixed;
+  left: 16px;
+  top: 40%;
+  z-index: 41;
+  width: 270px;
+  padding: 12px 14px;
+  color: #f2ead2;
+  font-size: 12px;
+  background: linear-gradient(rgba(20, 14, 6, 0.85), rgba(10, 8, 4, 0.78));
+  border: 1px solid rgba(214, 170, 70, 0.55);
+  text-shadow: 1px 1px 0 #000;
+}
+.land-tutorial-title {
+  color: #ffd86a;
+  font-size: 12px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+#land-tutorial p {
+  margin: 8px 0;
+  line-height: 1.4;
+}
+#land-tutorial ol {
+  margin: 0 0 10px;
+  padding-left: 18px;
+  line-height: 1.5;
+}
+
+/* The windows */
+#land-window {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding-bottom: 60px;
+  background: rgba(0, 0, 0, 0.45);
+}
+.land-card {
+  display: flex;
+  flex-direction: column;
+  width: min(820px, 96vw);
+  height: min(640px, 92vh);
+}
+.land-card.small {
+  width: min(520px, 96vw);
+  height: auto;
+  max-height: 92vh;
+}
+.land-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 24px 8px;
+}
+.land-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.land-field input,
+.land-row input,
+.land-row select {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 5px 8px;
+  color: #f2ead2;
+  font: inherit;
+  background: #14100a;
+  border: 1px solid rgba(214, 170, 70, 0.5);
+}
+.land-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+}
+.land-row select {
+  flex: none;
+}
+.land-verdict {
+  margin: 10px 0;
+  padding: 6px 10px;
+  border-left: 4px solid #bfe9ff;
+  background: rgba(0, 0, 0, 0.3);
+}
+.land-verdict.tone-good {
+  border-left-color: #4dff8f;
+  color: #8dffb4;
+}
+.land-verdict.tone-warn {
+  border-left-color: #ffc04a;
+  color: #ffd27a;
+}
+.land-verdict.tone-bad {
+  border-left-color: #ff4a4a;
+  color: #ff9a9a;
+}
+.land-note {
+  margin: 8px 0 0;
+  color: #cbbd95;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.land-cols {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 230px 1fr;
+  gap: 12px;
+  padding: 8px 20px 0;
+}
+.land-list,
+.land-pane {
+  min-height: 0;
+  overflow-y: auto;
+}
+.land-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.land-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 7px 10px;
+  color: #f2ead2;
+  font: inherit;
+  text-align: left;
+  background: var(--w-cell);
+  border: 1px solid rgba(214, 170, 70, 0.35);
+  cursor: pointer;
+}
+.land-item span {
+  color: #b9ad8a;
+  font-size: 11px;
+}
+.land-item.sel,
+.land-item:hover {
+  border-color: #ffd86a;
+}
+.land-detail h3 {
+  margin: 14px 0 4px;
+  color: #ffd86a;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+.land-grant {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0;
+}
+.land-grant .role {
+  margin-left: auto;
+  color: #b9ad8a;
+}
+.land-perms {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 12px;
+}
+.land-perms label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.land-actions {
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.land-warn {
+  flex: 1 1 100%;
+  color: #ffd27a;
+  font-size: 12px;
+}

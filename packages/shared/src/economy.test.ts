@@ -29,7 +29,7 @@ import {
   type InputFrame,
   type SessionEvent,
 } from './index';
-import { startInVillage } from './villageStart.testutil';
+import { doObjectives, startInVillage } from './villageStart.testutil';
 
 const idle = (over: Partial<InputFrame> = {}): InputFrame => ({ t: 'frame', dt: 1 / 20, locked: true, yaw: 0, pitch: 0, forward: 0, strafe: 0, jump: false, sprint: false, sneak: false, left: false, right: false, ...over });
 
@@ -188,10 +188,11 @@ describe('an Adventure player with coins', () => {
 
   it('is paid for handing in a quest', () => {
     const s = make();
-    const q = questById('welcome')!;
+    const q = questById('ms01')!;
     talkTo(s, q.giver);
     s.apply({ t: 'quest', a: 'accept', id: q.id });
     s.closeMenu();
+    doObjectives(s, q);
     talkTo(s, q.turnIn);
     s.apply({ t: 'quest', a: 'complete', id: q.id });
     expect(s.quests!.status(q.id)).toBe('done');

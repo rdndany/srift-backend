@@ -102,7 +102,7 @@ describe('a new character', () => {
     expect(s.inventory.countOf(I.EMBERSTONE)).toBe(1);
     expect(s.inventory.countOf(I.MAP)).toBe(1);
     // Only the Adventure world gives one, for climbing out of the Undercroft (see quests.ts).
-    expect(QUESTS.filter((q) => q.reward.items?.some((it) => it.id === I.MAP)).map((q) => q.id)).toEqual(['out_of_the_dark']);
+    expect(QUESTS.filter((q) => q.reward.items?.some((it) => it.id === I.MAP)).map((q) => q.id)).toEqual(['ms00']);
   });
 
   it('keeps the two slots whatever the class, and the class kit takes the free ones around them', () => {

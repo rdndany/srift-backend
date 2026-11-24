@@ -48,7 +48,7 @@ import { CharacterSheet } from './CharacterSheet';
 import { ClassSkills } from './ClassSkills';
 import { statLines } from './ClassPicker';
 import { ClickSparks, Embers, useFrontMotion } from './fx';
-import { FRONT_MENU, SCROLL_KEY, frontUrl, goMarket, goToken, goCamp } from './frontNav';
+import { FRONT_MENU, SCROLL_KEY, frontUrl, goMarket, goToken, goCamp, goShop } from './frontNav';
 import { HANDOFF_KEYS, siteUrl, whereAmI } from '../game/route';
 import { ART } from './homeAssets';
 import { ItemSprite } from './ItemSprite';
@@ -247,7 +247,7 @@ function RealmAbout() {
       <summary>Embers of the Hollow King &middot; preview</summary>
       <div id="adventure-about">
         <p>
-          You wake with nothing in a cave under the village of Dawnwatch. Climb out, meet {NPCS.filter((n) => !n.dungeon).length} villagers, take up {QUESTS.length} quests that teach you the whole game, and clear the Hollow Cellar together.
+          You wake with nothing in a cave under the small village of Ashbrook. Climb out, meet {NPCS.filter((n) => !n.dungeon).length} villagers, take up {QUESTS.length} quests that teach you the whole game, walk the road to the city of Dawnwatch, follow it on through five outposts and a castle in the World Beyond, and clear the Hollow Cellar together.
         </p>
         <ul>
           <li>Quest givers, a quest log (L) and a tracker</li>
@@ -683,6 +683,7 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
             ))}
             <button className="fp-link-camp" onClick={goCamp}>Camp</button>
             <button className="fp-link-market" onClick={goMarket}>Market</button>
+            <button className="fp-link-shop" onClick={goShop}>Shop</button>
             <button className="fp-link-token" onClick={goToken}>Token</button>
           </nav>
           <div className="fp-account">
@@ -1011,7 +1012,7 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
                     characters={account?.characters}
                     selfId={account?.id}
                     source={sheetSource}
-                    empty={way === 'multi' ? 'This character has not entered the realm yet. It starts at level 1, in a cave under Dawnwatch.' : `No saved ${info.name} world for this character yet. Press Play to start one at level 1.`}
+                    empty={way === 'multi' ? 'This character has not entered the realm yet. It starts at level 1, in a cave under the village of Ashbrook.' : `No saved ${info.name} world for this character yet. Press Play to start one at level 1.`}
                   />
                 </>
               )}

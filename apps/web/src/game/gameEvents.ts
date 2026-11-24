@@ -1,5 +1,5 @@
 import type * as THREE from 'three';
-import { BLOCKS, ENCHANTS, I, RIFT_GRADE_DEFS, abilitiesOf, getItem, type SessionEvent } from '@solrift/shared';
+import { BLOCKS, ENCHANTS, I, RIFT_GRADE_DEFS, abilitiesOf, getItem, type LandEvent, type SessionEvent } from '@solrift/shared';
 import { bumpUi, pushPickup, pushQuestNote, setParty, setQuests, showBossLine, showZone, useUi } from '../ui/store';
 import type { AbilityFx } from './abilityFx';
 import type { GameAudio } from './audio';
@@ -46,6 +46,10 @@ export interface EventParts {
   breakSelf(): void;
   /** The boss of this copy has fallen (where he stood): a hook for whatever follows the fight (the way out, say). Optional. */
   bossDown?(x?: number, y?: number, z?: number): void;
+  /** The land's side of the client (see landClient.ts): what the server says about claims. */
+  landEvent?(e: LandEvent): void;
+  /** The writing of a sign opens (the editor over the game; see gameWindows.ts). */
+  signEdit?(x: number, y: number, z: number, lines: string[]): void;
 }
 
 /**
@@ -324,6 +328,12 @@ export function makeEventHandler(parts: EventParts): (events: SessionEvent[]) =>
         case 'quest':
           pushQuestNote(e.what, e.text);
           audio.quest(e.what);
+          break;
+        case 'land':
+          parts.landEvent?.(e.e);
+          break;
+        case 'signEdit':
+          parts.signEdit?.(e.x, e.y, e.z, e.lines);
           break;
       }
     }

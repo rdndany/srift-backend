@@ -1,13 +1,22 @@
 import * as THREE from 'three';
-import { BASH_ANIM, BED_DIRS, I, getItem, wingByNumber, type ArmorMaterial, type Carry, type OutfitClass, type OutfitDef } from '@solrift/shared';
+import { B, BASH_ANIM, BED_DIRS, I, getItem, wingByNumber, type ArmorMaterial, type Carry, type OutfitClass, type OutfitDef, type WingDef } from '@solrift/shared';
 import type { EntityLight } from './entityLight';
-import { disposeMageGear, dressMage, pulseMageGlow, type GearCtx, type MageRig } from './mageGear';
+import { disposeMageGear, pulseMageGlow, type GearCtx, type MageRig } from './mageGear';
+import { dressMageSculpt } from './mageLook';
+import { dressRangerSculpt } from './rangerLook';
+import { dressWarriorSculpt } from './warriorLook';
 import { disposeSetGear, dressSet, type SetRig } from './setGear';
 import { buildWings, type WingRig } from './wingRig';
-import { disposeClassGear, dressRanger, dressWarrior } from './classGear';
+import { FlightMotion, type FlightInput } from './flightMotion';
+import { disposeClassGear } from './classGear';
+import { PAINTED_CLASSES, paintClassSkin } from './classSkin';
+import { outfitHead, outfitSole, paintOutfitSkin } from './outfitSkin';
 import { HAIR_STYLES, PARTS, THREE_FACE_ORDER, isSkinSize, legacyToModern, paintSkin, partRects, SKIN_SIZE, type FaceName, type Look, type PartName, type Rect } from './skin';
 import { StoneHeat } from './held/heat';
 import { addAura, stripAura } from './enchantFx';
+import { addFlame } from './emberFlame';
+import { JOINT_Y, Limb, addToLimb } from './limb';
+import { ClassMotion, gaitLegs, gaitRate, stretchAt, type Legs, type Loadout, type MotionClass, type StretchKey } from './classMotion';
 
 /** How high a figure with wings floats above the ground (blocks). */
 const WING_HOVER = 0.42;
@@ -97,7 +106,11 @@ const px = (g: CanvasRenderingContext2D, x: number, y: number, c: string, w = 1,
 
 /** Each material has a main plate and a darker trim (belts, cuffs, boots, the crown of a helmet): a whole suit in one tone is what made it look like a brick. */
 export type ArmorTone = 'plate' | 'trim';
-const ARMOR_BASE: Record<ArmorMaterial, Record<ArmorTone, RGB>> = {
+/** What a piece of armor is made of: the four materials, and the burning stone and the lava of the Hollow King's armor. */
+export type ArmorLook = ArmorMaterial | 'ember' | 'lava';
+const ARMOR_BASE: Record<ArmorLook, Record<ArmorTone, RGB>> = {
+  ember: { plate: [104, 94, 120], trim: [58, 50, 72] },
+  lava: { plate: [255, 132, 38], trim: [214, 70, 22] },
   leather: { plate: [160, 102, 62], trim: [92, 58, 36] },
   gold: { plate: [246, 208, 52], trim: [186, 134, 34] },
   iron: { plate: [188, 196, 210], trim: [98, 106, 124] },
@@ -107,7 +120,7 @@ const ARMOR_BASE: Record<ArmorMaterial, Record<ArmorTone, RGB>> = {
 const textureCache = new Map<string, THREE.CanvasTexture>();
 
 /** A 16x16 plate of the material with a bevel and the details that tell the materials apart: stitching, brushed steel and rivets, crystal facets. */
-export function armorTexture(material: ArmorMaterial, hole = false, tone: ArmorTone = 'plate'): THREE.CanvasTexture {
+export function armorTexture(material: ArmorLook, hole = false, tone: ArmorTone = 'plate'): THREE.CanvasTexture {
   const key = `${material}-${tone}${hole ? '-hole' : ''}`;
   const hit = textureCache.get(key);
   if (hit) return hit;
@@ -149,6 +162,17 @@ export function armorTexture(material: ArmorMaterial, hole = false, tone: ArmorT
           if (!edge && (x + y) % 8 === 0) d += 28;
           if (!plate) d -= y * 2.4 - 14; // darker toward the foot
           if (noise(x * 5, y * 3, 4) > 0.97) over = [236, 255, 250];
+        } else if (material === 'ember') {
+          // Dark rough stone with lava breathing through its cracks.
+          d += (noise(x * 2, y * 2, 5) - 0.5) * 24;
+          const crack = plate ? ((x * 3 + y * 2) % 7 === 0 && noise(x, y, 13) > 0.2) || ((x * 2 - y * 3 + 40) % 9 === 0 && noise(x, y, 17) > 0.45) || ((x === 7 || x === 8) && y > 3 && y < 13 && noise(x, y, 3) > 0.25) : (y === 7 || y === 8) && x % 3 === 0;
+          if (crack && !edge) over = noise(x, y, 21) > 0.55 ? [255, 214, 90] : [255, 128, 36];
+        } else if (material === 'lava') {
+          // Molten: orange with hot gold veins and a few darker clots.
+          const n = noise(x * 2, y * 2, 6);
+          d += (n - 0.5) * 60;
+          if (n > 0.72) over = [255, 226, 120];
+          else if (n < 0.2) d -= 40;
         } else {
           d += (noise(x * 3, y * 7, 9) > 0.86 ? 30 : 0) + (plate ? (y === 7 ? -34 : y === 8 ? 16 : 0) : y % 4 === 0 ? 22 : y % 4 === 1 ? -22 : 0);
         }
@@ -204,6 +228,8 @@ function paintFaces(geo: THREE.BufferGeometry, tint: THREE.Color, light: ArrayLi
   const attr = geo.getAttribute('color') as THREE.BufferAttribute;
   const nor = geo.getAttribute('normal') as THREE.BufferAttribute;
   const a = attr.array as Float32Array;
+  // Sculpted clothes (see sculptGear.ts) carry the colour of each cube, shaded, in `base`: the light is multiplied into it.
+  const base = geo.getAttribute('base') as THREE.BufferAttribute | undefined;
   for (let i = 0; i < attr.count; i++) {
     const nx = nor.getX(i);
     const ny = nor.getY(i);
@@ -212,15 +238,15 @@ function paintFaces(geo: THREE.BufferGeometry, tint: THREE.Color, light: ArrayLi
     const wy = ny * ny;
     const wz = nz * nz;
     const l = (wx * (nx >= 0 ? light[0] : light[1]) + wy * (ny >= 0 ? light[2] : light[3]) + wz * (nz >= 0 ? light[4] : light[5])) / (wx + wy + wz || 1);
-    a[i * 3] = tint.r * l;
-    a[i * 3 + 1] = tint.g * l;
-    a[i * 3 + 2] = tint.b * l;
+    a[i * 3] = tint.r * l * (base ? base.getX(i) : 1);
+    a[i * 3 + 1] = tint.g * l * (base ? base.getY(i) : 1);
+    a[i * 3 + 2] = tint.b * l * (base ? base.getZ(i) : 1);
   }
   attr.needsUpdate = true;
 }
 
 /** The metal that picks out each material's trim: brass on leather and steel, a gem on gold. */
-const ACCENT: Record<ArmorMaterial, ArmorMaterial> = { leather: 'gold', gold: 'diamond', iron: 'gold', diamond: 'gold' };
+const ACCENT: Record<ArmorLook, ArmorLook> = { leather: 'gold', gold: 'diamond', iron: 'gold', diamond: 'gold', ember: 'lava', lava: 'lava' };
 
 /** A block this big is one plate's picture at the scale of the big armor pieces (a 16x16 plate over 0.58 blocks): a small block shows only a part of it. */
 function plateUv(geo: THREE.BufferGeometry, w: number, h: number, d: number): void {
@@ -293,7 +319,7 @@ function strip(sources: THREE.Texture[]): THREE.CanvasTexture {
 /** One shared material per armor look (the tint lives in the vertex colours, so characters can share it). */
 const armorMaterials = new Map<string, THREE.MeshBasicMaterial>();
 const helmetAtlases = new Map<string, THREE.CanvasTexture>();
-function armorMaterial(mat: ArmorMaterial, helmet: boolean, tone: ArmorTone = 'plate'): THREE.MeshBasicMaterial {
+function armorMaterial(mat: ArmorLook, helmet: boolean, tone: ArmorTone = 'plate'): THREE.MeshBasicMaterial {
   const key = `${mat}-${tone}${helmet ? '-helmet' : ''}`;
   let m = armorMaterials.get(key);
   if (m) return m;
@@ -328,6 +354,37 @@ export interface SkinVoxel {
   b: number;
 }
 /** How far forward (radians) the arm that holds a staff hangs, so the staff stands a little in front of the body. */
+/**
+ * How the left hand carries something that is not a shield. The arm comes forward and the forearm up, so the thing is held out in front of the
+ * body at about the height of the belt and chest (not hung at the hip), and it is kept in its own way as the arm moves (`keep`: how much of the arm's
+ * turn is taken back by the wrist; `lean`: how far it tips forward from there). `swing` is how much of the stride the arm still takes.
+ */
+export interface OffCarry {
+  arm: number;
+  elbow: number;
+  keep: number;
+  lean: number;
+  scale: number;
+  swing: number;
+  inward: number;
+  turn: number;
+  /** tipped out to the side (rad) */
+  roll: number;
+}
+export const OFF_CARRY = {
+  /** upright, flame up and a little out */
+  torch: { arm: 0.3, elbow: 0.65, keep: 1, lean: -0.15, scale: 1.15, swing: 0.3, inward: 0.05, turn: 0, roll: 0.22 },
+  /** point forward and a little up, as a blade held ready */
+  dagger: { arm: 0.35, elbow: 0.6, keep: 1, lean: 0.1, scale: 1.1, swing: 0.3, inward: 0.08, turn: 0, roll: 0 },
+  /** in the palm, in front of the chest */
+  orb: { arm: 0.3, elbow: 0.55, keep: 1, lean: 0, scale: 1.2, swing: 0.3, inward: 0.1, turn: 0, roll: 0 },
+  /** held open at the chest, its face to the one who holds it */
+  map: { arm: 0.3, elbow: 0.6, keep: 1, lean: -0.55, scale: 0.85, swing: 0.2, inward: 0.15, turn: Math.PI / 2, roll: 0 },
+} satisfies Record<string, OffCarry>;
+/** The carry of an item that goes in the left hand (not a shield). */
+export const offCarryOf = (id: number): OffCarry =>
+  id === B.TORCH ? OFF_CARRY.torch : id === I.ORB ? OFF_CARRY.orb : id === I.DAGGER ? OFF_CARRY.dagger : getItem(id).use === 'map' ? OFF_CARRY.map : OFF_CARRY.dagger;
+
 const STAFF_ARM = 0.36;
 /** How far (radians) the held staff leans, its head toward the front and its foot back, instead of standing straight up. */
 const STAFF_LEAN = 0.2;
@@ -344,6 +401,8 @@ export const SWING_TIME = 0.3;
 /** Seconds a stab of the left hand takes. */
 export const STAB_TIME = 0.3;
 
+/** The share of the lift of a stepping foot that is still made by raising the whole leg (the knee folding makes the rest). */
+const KNEE_LIFT = 0.35;
 /** The styles of a jump: feet together, a stride with one leg ahead and one behind, knees pulled up, arms and legs flung out, a long leap at a run, and the flailing of a fall. */
 const JUMP_PLAIN = 0;
 const JUMP_STRIDE = 1;
@@ -403,14 +462,22 @@ interface SwingKey {
   out: number;
   twist: number;
   lunge: number;
+  /** How far the forearm is folded (a blade or a tool in the hand: cocked at the wind-up, straight at the strike). */
+  elbow: number;
+  /** The turn of the wrist (added to what keeps the hand's item as it was): the blade goes up over the shoulder, through level, and down across the body. */
+  wrist: number;
 }
-/** A swing: it winds up (the arm up and back, the shoulders turned away), strikes fast (the arm down and across, the shoulders and the weight thrown forward), follows through and recovers. */
+/**
+ * A swing: it winds up (the arm up and back with the elbow folded and the blade cocked up over the shoulder, the shoulders turned away),
+ * strikes fast (the arm comes down and across the body, the wrist turns the blade through level, the shoulders and the weight thrown forward),
+ * follows through (the blade ends low on the far side) and recovers.
+ */
 const SWING: readonly SwingKey[] = [
-  { t: 0, arm: 0, out: 0, twist: 0, lunge: 0 },
-  { t: 0.22, arm: 1.95, out: 0.32, twist: -0.3, lunge: 0.05 },
-  { t: 0.44, arm: 0.5, out: -0.2, twist: 0.4, lunge: 1 },
-  { t: 0.62, arm: 0.1, out: -0.28, twist: 0.32, lunge: 0.75 },
-  { t: 1, arm: 0, out: 0, twist: 0, lunge: 0 },
+  { t: 0, arm: 0, out: 0, twist: 0, lunge: 0, elbow: 0, wrist: 0 },
+  { t: 0.22, arm: 2.05, out: 0.5, twist: -0.34, lunge: 0.05, elbow: 1.05, wrist: -1.12 },
+  { t: 0.44, arm: 1, out: -0.4, twist: 0.42, lunge: 1, elbow: 0.15, wrist: -2.1 },
+  { t: 0.62, arm: 0.45, out: -0.62, twist: 0.36, lunge: 0.75, elbow: 0.1, wrist: -2.6 },
+  { t: 1, arm: 0, out: 0, twist: 0, lunge: 0, elbow: 0, wrist: 0 },
 ];
 const smooth = (x: number): number => x * x * (3 - 2 * x);
 /** The moment of a swing `p` (0..1 through it), eased between its keys. */
@@ -424,16 +491,19 @@ function swingAt(p: number, out: SwingKey): SwingKey {
   out.out = a.out + (b.out - a.out) * k;
   out.twist = a.twist + (b.twist - a.twist) * k;
   out.lunge = a.lunge + (b.lunge - a.lunge) * k;
+  out.elbow = a.elbow + (b.elbow - a.elbow) * k;
+  out.wrist = a.wrist + (b.wrist - a.wrist) * k;
   return out;
 }
 
 export class Character {
   readonly root = new THREE.Group();
   readonly headPivot = new THREE.Group();
-  readonly armL = new THREE.Group();
-  readonly armR = new THREE.Group();
-  readonly legL = new THREE.Group();
-  readonly legR = new THREE.Group();
+  /** The limbs bend at the elbow and the knee (see limb.ts): what dresses them is put on as it was for one stiff piece. */
+  readonly armL = new Limb(0.125);
+  readonly armR = new Limb(0.125);
+  readonly legL = new Limb(-0.125);
+  readonly legR = new Limb(-0.125);
   /** Body and everything that is worn on it. */
   readonly torso = new THREE.Group();
 
@@ -444,6 +514,8 @@ export class Character {
   private geos: THREE.BufferGeometry[] = [];
   private armorGroup: THREE.Object3D[] = [];
   private armorGeos: THREE.BufferGeometry[] = [];
+  /** The parts of armor that glow by themselves (the lava of the Hollow King's): never darkened by the light. */
+  private armorGlowGeos: THREE.BufferGeometry[] = [];
   private armorKey = '';
   /**
    * The clothes of the classes that are worn (a Warrior's helm, a Mage's robe...): items in the armor slots like any armor, drawn from
@@ -452,12 +524,13 @@ export class Character {
   private outfits = new Map<OutfitClass, { rig: MageRig; parts: THREE.Object3D[]; geos: THREE.BufferGeometry[] }>();
   /** The class whose clothes are worn in each armor slot (helmet, chestplate, leggings, boots); null where there are none. */
   private outfitSlot: (OutfitClass | null)[] = [null, null, null, null];
+  /** 'leather' in each armor slot that holds a piece of the leather set (painted on the skin like the class outfits). */
+  private paintedSlot: (string | null)[] = [null, null, null, null];
   /** The shapes of every rig that is worn (painted with the light, freed with the figure). */
   private classGeos: THREE.BufferGeometry[] = [];
   /** The cape that is worn (it swings as the figure walks), and the lower pieces of one that is made of several (each hangs from the one above and bends a little less than the stride asks). */
   private capePivot: THREE.Group | null = null;
   private capeSegs: THREE.Group[] = [];
-  private armorIds: readonly number[] = [];
   /** What the hero wears as armor, whatever is seen of it (a set of armor takes its place in the picture while one is worn). */
   private wantedArmor: readonly number[] = [];
   /** The set of armor of an outfit that is worn: its blocks, and the light that stands clear of the body. */
@@ -474,6 +547,11 @@ export class Character {
   private hairStyle = -1;
   /** A helmet of plate is on: the hair blocks (which stand off the head) would poke out of it. */
   private helmed = false;
+  /** The plate helmet that is worn (null: none). */
+  private helmedBy: ArmorLook | null = null;
+  /** The skin without the painted clothes, and the sole of the boots. */
+  private readonly baseSkin = new Uint8ClampedArray(SKIN_SIZE * SKIN_SIZE * 4);
+  private soleMat: THREE.MeshBasicMaterial | null = null;
   private paintedLook = true;
   private lookBits: THREE.Object3D[] = [];
   /** Where the right hand holds an item: just below the end of the arm, a little forward. */
@@ -490,14 +568,50 @@ export class Character {
   private carry: Carry = 'hand';
   /** Where the left hand holds an orb or a dagger (the mirror of the right hand's mount). */
   private readonly offMount = new THREE.Group();
+  /** The upper body (chest, head, arms) as one: it tips about the hip, to a side, as the spine bends. Everything above the hip is in it; the legs are not. */
+  readonly upper = new THREE.Group();
   /** Where the left arm carries a shield. */
   private readonly shieldMount = new THREE.Group();
   private shieldObj: THREE.Object3D | null = null;
   private shieldId = 0;
   /** The off-hand item is a shield (the only one that is raised to block). */
   private shieldIsShield = false;
+  /** How the left hand carries what it holds, when that is not a shield. */
+  private offSpec: OffCarry | null = null;
   /** 0..1: how far the shield is raised. */
   private raise = 0;
+
+  /**
+   * What makes the figure move as its class does (see classMotion.ts): the weights of fighting, walking and sprinting, the stride, what the body
+   * does standing about and what trails behind it. It decides nothing about the bones: this class still writes every one of them.
+   */
+  readonly motion = new ClassMotion();
+  /** Something is going on that is a fight (an enemy near: set by whoever draws the figure each frame): it stands to fight until it is over. */
+  engaged = false;
+  /** The way the figure goes against the way it faces: ahead (1) or back (-1), and to its right (1) or left (-1), as a share of its speed. 1, 0: forward. */
+  moveF = 1;
+  moveR = 0;
+  private mf = 1;
+  private mr = 0;
+  private readonly legs: Legs = { r: 0, l: 0, liftR: 0, liftL: 0, step: 0, since: 0, thud: 0, xr: 0, xl: 0, kneeR: 0, kneeL: 0 };
+  private readonly load: Loadout = { shield: false, carry: 'none', bow: false };
+  private readonly motionIn = { speed: 0, walk: 0, run: 0, amp: 0, air: 0, still: 0, engaged: false, fighting: false, swinging: false, stretching: 0, busy: false, accel: 0, turn: 0, load: this.load };
+  /** The stretch being played, and how far the shoulders are turned (the arms go round with them: the torso block alone turns by `torso.rotation.y`). */
+  private readonly sk: StretchKey = { t: 0, armLx: 0, armLz: 0, armRx: 0, armRz: 0, armLy: 0, armRy: 0, torsoYaw: 0, lean: 0, headX: 0, headY: 0, headZ: 0, bend: 0, rise: 0 };
+  private shoulderTwist = 0;
+  private readonly legSpringL = { x: 0, v: 0 };
+  private readonly legSpringR = { x: 0, v: 0 };
+  /** How far a frame brings the shield and the like to where they are going (a share, not the same at any frame rate: set from the time of the frame). */
+  private poseEase = 0.35;
+  private static readonly TWIST_AXIS = new THREE.Vector3(0, 1, 0);
+  private static readonly twistQ = new THREE.Quaternion();
+
+  /** Move as a Warrior, a Mage or a Ranger (null: none): the way it stands, walks, runs, fights and stretches is the class's own. (Not `setClass`: that is the class of the set that is worn.) */
+  setMotionClass(cls: MotionClass | null): void {
+    if (cls === this.motion.classId) return;
+    this.motion.setClass(cls);
+    this.idleAfter = this.motion.stretchAfter;
+  }
 
   constructor(palette: Palette = DEFAULT_PALETTE()) {
     this.root.scale.setScalar(BODY_SCALE);
@@ -551,17 +665,43 @@ export class Character {
     this.headPivot.position.y = 1.65;
     addPart(this.torso, 'body', 0, 1.125);
 
-    const mkLimb = (pivot: THREE.Group, part: PartName, x: number, y: number): void => {
+    /** A limb: its skin is two boxes each (above and below the joint), the lower a hair wider so where the bent lower part passes the side of the upper one it is the one on top. */
+    const mkLimb = (pivot: Limb, part: PartName, x: number, y: number): void => {
       pivot.position.set(x, y, 0);
-      addPart(pivot, part, 0, -0.375);
+      const s = PARTS[part];
+      for (const layer of ['base', 'over'] as const) {
+        const grow = layer === 'over' ? 0.6 : 0; // pixels, in total
+        const rects = partRects(part, layer);
+        const half = (r: Rect, lower: boolean): Rect => ({ x: r.x, y: r.y + (lower ? r.h / 2 : 0), w: r.w, h: r.h / 2 });
+        const halves = (lower: boolean): Record<FaceName, Rect> => ({ ...rects, front: half(rects.front, lower), back: half(rects.back, lower), right: half(rects.right, lower), left: half(rects.left, lower) });
+        const mat = layer === 'over' ? overMat : baseMat;
+        const edge = grow / 32; // how far the outer layer stands beyond the end of the limb, at each end
+        const w = (s.w + grow) / 16;
+        const d = (s.d + grow) / 16;
+        // The upper part: from the pivot (a hair above it, for the outer layer) down to the joint.
+        const upperH = -JOINT_Y + edge;
+        const upper = g(box(w, upperH, d));
+        skinUv(upper, halves(false));
+        const um = new THREE.Mesh(upper, mat);
+        um.position.set(0, JOINT_Y + upperH / 2, 0);
+        pivot.addUpper(um);
+        // The lower part, in the space of the joint: from it down to the end of the limb (a hair beyond, for the outer layer).
+        const lowerH = -JOINT_Y + edge;
+        const lower = g(box(w + 0.004, lowerH, d));
+        skinUv(lower, halves(true));
+        const lm = new THREE.Mesh(lower, mat);
+        lm.position.set(0, -lowerH / 2, -pivot.hinge);
+        pivot.shin.add(lm);
+      }
     };
     mkLimb(this.armL, 'armL', -0.375, 1.5);
     mkLimb(this.armR, 'armR', 0.375, 1.5);
+    // The hand holds things: they go on the forearm, and turn with it at the elbow. (The shield stays on the arm as a whole.)
     this.heldMount.position.set(0, -0.75, -0.12);
     this.armR.add(this.heldMount);
     this.shieldMount.position.copy(SHIELD_REST_POS);
     this.shieldMount.quaternion.copy(SHIELD_REST_Q);
-    this.armL.add(this.shieldMount);
+    this.armL.addUpper(this.shieldMount);
     this.offMount.position.set(0, -0.75, -0.12);
     this.armL.add(this.offMount);
     mkLimb(this.legL, 'legL', -0.125, 0.75);
@@ -573,6 +713,7 @@ export class Character {
     const brass = new THREE.MeshBasicMaterial({ vertexColors: true, color: 0xc9a23a });
     const sole = new THREE.MeshBasicMaterial({ vertexColors: true, color: 0x2a1d14 });
     this.mats.push(brass, sole);
+    this.soleMat = sole;
     const bit = (parent: THREE.Object3D, mat: THREE.Material, size: [number, number, number], at: [number, number, number]): THREE.Mesh => {
       const mesh = new THREE.Mesh(g(box(...size)), mat);
       mesh.position.set(...at);
@@ -582,7 +723,9 @@ export class Character {
     this.lookBits.push(bit(this.torso, brass, [0.1, 0.07, 0.04], [0, 0.906, -0.165]));
     for (const leg of [this.legL, this.legR]) bit(leg, sole, [0.275, 0.05, 0.31], [0, -0.725, -0.03]);
 
-    this.root.add(this.torso, this.headPivot, this.armL, this.armR, this.legL, this.legR);
+    // The chest, head and arms hang from the spine and the legs from the hips: the spine leans to a side about the hip (see `spineStep`) and the legs stay under the body.
+    this.upper.add(this.torso, this.headPivot, this.armL, this.armR);
+    this.root.add(this.upper, this.legL, this.legR);
     this.buildHair(lookOf(palette).style);
     this.applyBrightness();
   }
@@ -631,10 +774,11 @@ export class Character {
   /** The hair blocks take the colour of the hair on the skin (the middle of its top). */
   private sampleHair(): void {
     try {
-      const g = this.skinCanvas.getContext('2d')!;
+      // (From the bare skin: a helm painted on the head must not turn the hair gray.)
       const at = (layer: 'over' | 'base'): Uint8ClampedArray => {
         const r = partRects('head', layer).top;
-        return g.getImageData(Math.floor(r.x + r.w / 2), Math.floor(r.y + r.h / 2), 1, 1).data;
+        const i = (Math.floor(r.y + r.h / 2) * SKIN_SIZE + Math.floor(r.x + r.w / 2)) * 4;
+        return this.baseSkin.subarray(i, i + 4);
       };
       let d = at('over');
       if (d[3] < 128) d = at('base');
@@ -647,12 +791,40 @@ export class Character {
   /** The blocks that go with the painted looks (hair, buckle) show only for those: another picture has its own. */
   private showLookBits(show: boolean): void {
     this.paintedLook = show;
-    for (const m of this.hairMeshes) m.visible = show && !this.helmed;
-    for (const o of this.lookBits) o.visible = show;
+    this.fitLookBits();
   }
+  /** Wear this picture as the bare skin; the clothes that are painted (see `classSkin.ts`) go over it. */
   private writeSkin(rgba: Uint8ClampedArray): void {
+    this.baseSkin.set(rgba);
+    this.repaintSkin();
+  }
+
+  /** Draw the bare skin with the painted clothes of the armor slots on it. */
+  private repaintSkin(): void {
     const g = this.skinCanvas.getContext('2d')!;
-    g.putImageData(new ImageData(new Uint8ClampedArray(rgba), SKIN_SIZE, SKIN_SIZE), 0, 0);
+    const rgba = this.dressed ? paintOutfitSkin(this.baseSkin, this.dressed.def) : paintClassSkin(this.baseSkin, this.paintSlots());
+    g.putImageData(new ImageData(rgba, SKIN_SIZE, SKIN_SIZE), 0, 0);
+  }
+
+  /** What is painted on the skin for each armor slot: the class clothes, or the leather of a leather set (a token outfit paints all four: see `outfitSkin.ts`). */
+  private paintSlots(): (string | null)[] {
+    if (this.dressed) return ['outfit', 'outfit', 'outfit', 'outfit'];
+    return this.outfitSlot.map((c, i) => c ?? this.paintedSlot[i]);
+  }
+
+  /** Is this armor slot painted on the skin (a class outfit or leather), not built of blocks? */
+  private painted(slot: number): boolean {
+    const c = this.paintSlots()[slot];
+    return c !== null && PAINTED_CLASSES.has(c);
+  }
+
+  /** What hangs on the painted look follows what is worn: no buckle over a painted belt, soles in the colour of the boots, and no hair under a helm. */
+  private fitLookBits(): void {
+    for (const o of this.lookBits) o.visible = this.paintedLook && !this.painted(1);
+    this.soleMat?.color.set(this.dressed ? outfitSole(this.dressed.def) : this.paintSlots()[3] === 'iron' ? 0x2c3040 : this.paintSlots()[3] === 'gold' ? 0x68400f : this.paintSlots()[3] === 'diamond' ? 0x0c4254 : this.outfitSlot[3] === 'warrior' ? 0x23252b : this.outfitSlot[3] === 'mage' ? 0x1a0c33 : this.outfitSlot[3] === 'ranger' ? 0x10241a : 0x2a1d14);
+    // (A helm is painted over the hair; the hat of a mage or a ranger stands on it.)
+    this.helmed = this.helmedBy !== null || this.outfitSlot[0] === 'warrior' || (this.dressed !== null && outfitHead(this.dressed.def) !== null);
+    for (const m of this.hairMeshes) m.visible = this.paintedLook && !this.helmed;
   }
 
   /** Repaint the default skin for another look. */
@@ -681,13 +853,11 @@ export class Character {
       const geos: THREE.BufferGeometry[] = [];
       const ctx = {
         box,
-        add: (parent: THREE.Object3D, geo: THREE.BufferGeometry, mat: THREE.Material | THREE.Material[]): THREE.Mesh => {
-          const mesh = new THREE.Mesh(geo, mat);
-          parent.add(mesh);
-          parts.push(mesh);
-          geos.push(geo);
-          return mesh;
-        },
+        add: (parent: THREE.Object3D, geo: THREE.BufferGeometry, mat: THREE.Material | THREE.Material[]): THREE.Mesh =>
+          addToLimb(parent, geo, mat, (m, g) => {
+            parts.push(m);
+            geos.push(g);
+          }),
         root: this.root,
         head: this.headPivot,
         torso: this.torso,
@@ -701,6 +871,8 @@ export class Character {
       rig.halo.visible = this.haloOn;
       this.dressed = { def, rig, parts, geos };
     }
+    this.repaintSkin();
+    this.skinTex.needsUpdate = true;
     this.refreshClassGeos();
     this.armorKey = '';
     this.wearArmor(this.dressed ? [0, 0, 0, 0] : this.wantedArmor);
@@ -753,6 +925,12 @@ export class Character {
       const g = this.skinCanvas.getContext('2d')!;
       g.clearRect(0, 0, SKIN_SIZE, SKIN_SIZE);
       g.drawImage(source, 0, 0);
+      try {
+        this.baseSkin.set(g.getImageData(0, 0, SKIN_SIZE, SKIN_SIZE).data);
+        this.repaintSkin();
+      } catch {
+        /* a picture that cannot be read back is worn as it is, without painted clothes */
+      }
     } else {
       const tmp = document.createElement('canvas');
       tmp.width = w;
@@ -762,6 +940,7 @@ export class Character {
       this.writeSkin(legacyToModern(t.getImageData(0, 0, w, h).data));
     }
     this.skinTex.needsUpdate = true;
+    this.sampleHair();
     this.showLookBits(false);
     return true;
   }
@@ -777,17 +956,18 @@ export class Character {
     const key = ids.join(',');
     if (key === this.armorKey) return;
     this.armorKey = key;
-    this.armorIds = ids;
     this.syncOutfits(ids);
     for (const o of this.armorGroup) o.parent?.remove(o);
     this.armorGroup = [];
     for (const geo of this.armorGeos) geo.dispose();
     this.armorGeos = [];
+    for (const geo of this.armorGlowGeos) geo.dispose();
+    this.armorGlowGeos = [];
 
     // (The clothes of a class are not plate: they are drawn by their own rig, see `syncOutfits`.)
-    const material = (i: number): ArmorMaterial | null => (ids[i] && !getItem(ids[i]).armor?.outfit ? (getItem(ids[i]).armor?.material ?? null) : null);
+    const material = (i: number): ArmorLook | null => (ids[i] && !getItem(ids[i]).armor?.outfit ? (getItem(ids[i]).armor?.set === 'hollow_king' ? 'ember' : (getItem(ids[i]).armor?.material ?? null)) : null);
 
-    const piece = (parent: THREE.Object3D, w: number, h: number, d: number, y: number, mat: ArmorMaterial, faceHole = false, x = 0, tone: ArmorTone = 'plate'): void => {
+    const piece = (parent: THREE.Object3D, w: number, h: number, d: number, y: number, mat: ArmorLook, faceHole = false, x = 0, tone: ArmorTone = 'plate'): void => {
       const geo = box(w, h, d);
       // A helmet's texture strip has the plain plate first and the one with the face hole second.
       if (faceHole) atlasUv(geo, 2, (f) => (f === 5 ? 1 : 0));
@@ -798,7 +978,7 @@ export class Character {
       this.armorGeos.push(geo);
     };
     /** A small block of armor (a rivet, a spike, a plate edge) at `at` in the parent: the plate's picture at the same scale as on the big pieces. `tilt` turns it about the front-to-back axis. */
-    const bit = (parent: THREE.Object3D, mat: ArmorMaterial, size: [number, number, number], at: [number, number, number], tone: ArmorTone = 'plate', tilt = 0): void => {
+    const bit = (parent: THREE.Object3D, mat: ArmorLook, size: [number, number, number], at: [number, number, number], tone: ArmorTone = 'plate', tilt = 0): void => {
       const [w, h, d] = size;
       const geo = box(w, h, d);
       plateUv(geo, w, h, d);
@@ -807,7 +987,7 @@ export class Character {
       mesh.rotation.z = tilt;
       parent.add(mesh);
       this.armorGroup.push(mesh);
-      this.armorGeos.push(geo);
+      (mat === 'lava' ? this.armorGlowGeos : this.armorGeos).push(geo);
     };
 
     const helmet = material(0);
@@ -815,50 +995,95 @@ export class Character {
     const legs = material(2);
     const boots = material(3);
     const head = this.headPivot;
-    this.helmed = !!helmet;
-    for (const m of this.hairMeshes) m.visible = this.paintedLook && !helmet;
+    // Leather and iron are painted on the skin; only what stands out of it (a button, ear flaps, a brim, shoulder plates) is a block.
+    const paintedNow = [helmet, chest, legs, boots].map((m) => (m === 'leather' || m === 'iron' || m === 'gold' || m === 'diamond' ? m : null));
+    if (paintedNow.join() !== this.paintedSlot.join()) {
+      this.paintedSlot = paintedNow;
+      this.repaintSkin();
+      this.skinTex.needsUpdate = true;
+    }
+    this.helmedBy = helmet;
+    this.fitLookBits();
     if (helmet) {
       const gem = ACCENT[helmet];
       // The skull is a little smaller than a cube of plate, and the helm is built up from it in steps: a band at the brow, a stepped crown, a guard behind the neck.
       // The face stays open, forehead to chin: a cap over the top of the head, a shell over the back and a plate over each ear.
-      bit(head, helmet, [0.58, 0.16, 0.58], [0, 0.3, 0]);
-      bit(head, helmet, [0.58, 0.46, 0.1], [0, 0.12, 0.24]);
-      for (const s of [-1, 1]) bit(head, helmet, [0.06, 0.4, 0.4], [s * 0.27, 0.15, 0.08]);
-      bit(head, helmet, [0.61, 0.07, 0.61], [0, 0.3, 0], 'trim');
-      bit(head, helmet, [0.5, 0.2, 0.04], [0, -0.07, 0.3], 'trim');
+      if (helmet !== 'leather' && helmet !== 'iron' && helmet !== 'gold' && helmet !== 'diamond') {
+        bit(head, helmet, [0.58, 0.16, 0.58], [0, 0.3, 0]);
+        bit(head, helmet, [0.58, 0.46, 0.1], [0, 0.12, 0.24]);
+        for (const s of [-1, 1]) bit(head, helmet, [0.06, 0.4, 0.4], [s * 0.27, 0.15, 0.08]);
+        bit(head, helmet, [0.61, 0.07, 0.61], [0, 0.3, 0], 'trim');
+        bit(head, helmet, [0.5, 0.2, 0.04], [0, -0.07, 0.3], 'trim');
+      }
       if (helmet === 'leather') {
-        // A cap with a rolled brim, flaps over the ears and a pad of leather at the crown.
-        bit(head, helmet, [0.5, 0.07, 0.5], [0, 0.4, 0]);
-        bit(head, helmet, [0.34, 0.06, 0.34], [0, 0.46, 0], 'trim');
-        for (const s of [-1, 1]) bit(head, helmet, [0.04, 0.22, 0.2], [s * 0.3, -0.02, -0.05], 'trim');
-        bit(head, gem, [0.07, 0.07, 0.04], [0, 0.3, -0.315]);
+        // The cap is painted on the head; a button on the crown, a flap over each ear and a brass stud at the brow stand out of it.
+        bit(head, helmet, [0.2, 0.06, 0.2], [0, 0.4, 0], 'trim');
+        for (const s of [-1, 1]) bit(head, helmet, [0.035, 0.19, 0.17], [s * 0.2775, 0.07, -0.025], 'trim');
+        bit(head, gem, [0.06, 0.06, 0.03], [0, 0.27, -0.265]);
       } else if (helmet === 'iron') {
-        // A kettle helm: a wide brim, a high rounded crown with a ridge along it, cheek plates and a nasal bar.
-        bit(head, helmet, [0.72, 0.04, 0.72], [0, 0.34, 0], 'trim');
-        bit(head, helmet, [0.5, 0.1, 0.5], [0, 0.42, 0]);
-        bit(head, helmet, [0.32, 0.08, 0.32], [0, 0.51, 0]);
-        bit(head, helmet, [0.06, 0.08, 0.44], [0, 0.57, 0], 'trim');
-        for (const s of [-1, 1]) bit(head, helmet, [0.04, 0.26, 0.2], [s * 0.3, -0.04, -0.1], 'trim');
+        // A kettle helm: the skull is painted; a thin wide brim, a crown in two steps with a ridge along it, a plate over each ear and a gold stud stand out of it.
+        bit(head, helmet, [0.68, 0.03, 0.68], [0, 0.33, 0], 'trim');
+        bit(head, helmet, [0.44, 0.07, 0.44], [0, 0.385, 0]);
+        bit(head, helmet, [0.28, 0.07, 0.28], [0, 0.455, 0]);
+        bit(head, helmet, [0.05, 0.06, 0.42], [0, 0.52, 0], 'trim');
+        for (const s of [-1, 1]) bit(head, helmet, [0.035, 0.19, 0.17], [s * 0.2775, 0.07, -0.025], 'trim');
+        bit(head, gem, [0.05, 0.05, 0.03], [0, 0.385, -0.235]);
       } else if (helmet === 'gold') {
+        // The skull cap is painted; the points of a crown stand on its front and back edge, with a stone set at the brow.
         for (const [x, h] of [[-0.2, 0.08], [-0.1, 0.12], [0, 0.16], [0.1, 0.12], [0.2, 0.08]] as const) {
-          bit(head, helmet, [0.07, h, 0.07], [x, 0.34 + h / 2, -0.26], 'trim');
-          bit(head, helmet, [0.07, h, 0.07], [x, 0.34 + h / 2, 0.26], 'trim');
+          bit(head, helmet, [0.07, h, 0.07], [x, 0.35 + h / 2, -0.22], 'trim');
+          bit(head, helmet, [0.07, h, 0.07], [x, 0.35 + h / 2, 0.22], 'trim');
         }
-        bit(head, helmet, [0.5, 0.05, 0.5], [0, 0.4, 0]);
-        bit(head, gem, [0.08, 0.08, 0.04], [0, 0.3, -0.315]);
+        bit(head, gem, [0.07, 0.07, 0.03], [0, 0.27, -0.265]);
+      } else if (helmet === 'ember') {
+        // A crown of stone horns, each tipped with fire, over a brow band of lava, with a flame standing up out of it.
+        bit(head, helmet, [0.5, 0.07, 0.5], [0, 0.4, 0]);
+        bit(head, 'lava', [0.62, 0.035, 0.62], [0, 0.255, 0]);
+        const tall = [0.14, 0.2, 0.3, 0.2, 0.14];
+        [-0.22, -0.11, 0, 0.11, 0.22].forEach((x, k) => {
+          const h = tall[k];
+          for (const z of [-0.26, 0.26]) {
+            bit(head, helmet, [0.07, h, 0.07], [x, 0.43 + h / 2, z], 'trim');
+            bit(head, 'lava', [0.05, 0.05, 0.05], [x, 0.43 + h + 0.025, z]);
+          }
+        });
+        for (const s of [-1, 1]) {
+          for (const z of [-0.1, 0.1]) {
+            bit(head, helmet, [0.07, 0.16, 0.07], [s * 0.28, 0.51, z], 'trim');
+            bit(head, 'lava', [0.05, 0.05, 0.05], [s * 0.28, 0.61, z]);
+          }
+        }
+        bit(head, 'lava', [0.1, 0.1, 0.04], [0, 0.3, -0.315]);
+        this.armorGroup.push(addFlame(head, [0, 0.55, 0], 0.5, 0.66, 0));
+        this.armorGroup.push(addFlame(head, [-0.19, 0.52, 0], 0.3, 0.44, 2));
+        this.armorGroup.push(addFlame(head, [0.19, 0.52, 0], 0.3, 0.44, 3));
       } else {
-        // A crystal crown: fins sweeping up and out from each temple and a tall blade down the middle.
+        // A crystal crown: the skull is painted; fins sweep up and out from each temple, a blade stands along the crown, with a gold stud at the brow.
         for (const s of [-1, 1]) {
           bit(head, helmet, [0.05, 0.16, 0.12], [s * 0.32, 0.2, 0], 'plate', s * -0.12);
           bit(head, helmet, [0.05, 0.14, 0.1], [s * 0.37, 0.33, 0.02], 'plate', s * -0.25);
           bit(head, helmet, [0.05, 0.12, 0.08], [s * 0.43, 0.44, 0.04], 'plate', s * -0.4);
         }
-        bit(head, helmet, [0.5, 0.06, 0.5], [0, 0.4, 0]);
-        bit(head, helmet, [0.07, 0.14, 0.44], [0, 0.5, 0], 'trim');
-        bit(head, gem, [0.08, 0.08, 0.04], [0, 0.3, -0.315]);
+        bit(head, helmet, [0.06, 0.12, 0.4], [0, 0.41, 0], 'plate');
+        bit(head, helmet, [0.05, 0.1, 0.26], [0, 0.52, 0], 'trim');
+        bit(head, gem, [0.06, 0.06, 0.03], [0, 0.27, -0.265]);
       }
     }
-    if (chest) {
+    if (chest === 'leather') {
+      // The vest and the sleeves are painted; a thin leather cap lies on each shoulder, with a brass stud on it.
+      for (const [arm, s] of [[this.armL, -1], [this.armR, 1]] as const) {
+        bit(arm, chest, [0.27, 0.05, 0.31], [s * 0.035, 0.02, 0], 'plate', -s * 0.1);
+        bit(arm, ACCENT[chest], [0.05, 0.04, 0.05], [s * 0.065, 0.065, 0], 'plate', -s * 0.1);
+      }
+    } else if (chest === 'iron' || chest === 'gold' || chest === 'diamond') {
+      // The cuirass and the sleeves are painted; two thin lames lie on each shoulder like tiles, the upper one tilted further out.
+      for (const [arm, s] of [[this.armL, -1], [this.armR, 1]] as const) {
+        bit(arm, chest, [0.28, 0.05, 0.34], [s * 0.045, 0.02, 0], 'plate', -s * 0.14);
+        bit(arm, chest, [0.22, 0.05, 0.28], [s * 0.07, 0.065, 0], 'trim', -s * 0.28);
+        if (chest === 'diamond') bit(arm, chest, [0.06, 0.14, 0.06], [s * 0.1, 0.18, 0], 'trim', -s * 0.35); // a crystal on the shoulder
+        else bit(arm, ACCENT[chest], [0.05, 0.04, 0.05], [s * 0.085, 0.105, 0], 'plate', -s * 0.28);
+      }
+    } else if (chest) {
       const gem = ACCENT[chest];
       // Broad across the chest and narrower at the waist (a plain block of plate is a brick): a breastplate, a waist band under a belt, a collar round the neck.
       piece(this.torso, 0.6, 0.58, 0.34, 1.24, chest);
@@ -877,15 +1102,24 @@ export class Character {
         bit(arm, chest, [0.4, 0.05, 0.38], [s * 0.05, 0.0, 0], 'plate', -s * 0.16);
         bit(arm, chest, [0.34, 0.05, 0.34], [s * 0.065, 0.06, 0], 'trim', -s * 0.28);
         bit(arm, chest, [0.24, 0.06, 0.28], [s * 0.075, 0.115, 0], 'plate', -s * 0.4);
-        if (chest === 'leather') bit(arm, gem, [0.05, 0.05, 0.05], [s * 0.09, 0.17, -0.1]);
-        else bit(arm, chest, [0.06, 0.14, 0.06], [s * 0.11, 0.2, 0], 'trim', -s * 0.35);
+        bit(arm, chest, [0.06, 0.14, 0.06], [s * 0.11, 0.2, 0], 'trim', -s * 0.35);
         piece(arm, 0.31, 0.34, 0.31, -0.19, chest);
         bit(arm, chest, [0.34, 0.08, 0.34], [0, -0.38, 0], 'trim');
         piece(arm, 0.3, 0.3, 0.3, -0.55, chest); // (no narrower than the sleeve layer of the skin, 0.2875, or its wristband shows through)
         piece(arm, 0.31, 0.17, 0.31, -0.665, chest, false, 0, 'trim');
       }
+      if (chest === 'ember') {
+        // The heart of the king glows in the breastplate, with a seam of lava down each side, and a horn on each shoulder with a fire on it.
+        bit(this.torso, 'lava', [0.26, 0.3, 0.03], [0, 1.27, -0.19]);
+        for (const s of [-1, 1]) bit(this.torso, 'lava', [0.03, 0.3, 0.03], [s * 0.2, 1.2, -0.185]);
+        for (const [arm, s] of [[this.armL, -1], [this.armR, 1]] as const) {
+          bit(arm, chest, [0.07, 0.2, 0.07], [s * 0.14, 0.3, 0], 'trim', -s * 0.45);
+          bit(arm, 'lava', [0.05, 0.05, 0.05], [s * 0.2, 0.41, 0]);
+          this.armorGroup.push(addFlame(arm, [s * 0.16, 0.36, 0], 0.3, 0.42, s > 0 ? 1 : 4));
+        }
+      }
     }
-    if (legs) {
+    if (legs && legs !== 'leather' && legs !== 'iron' && legs !== 'gold' && legs !== 'diamond') {
       const gem = ACCENT[legs];
       piece(this.torso, 0.54, 0.05, 0.3, 0.745, legs, false, 0, 'trim');
       for (const leg of [this.legL, this.legR]) {
@@ -897,14 +1131,19 @@ export class Character {
         bit(leg, legs, [0.34, 0.1, 0.35], [0, -0.35, 0], 'trim');
         bit(leg, gem, [0.05, 0.05, 0.04], [0, -0.35, -0.19]);
         piece(leg, 0.3, 0.2, 0.3, -0.46, legs);
+        if (legs === 'ember') bit(leg, 'lava', [0.06, 0.14, 0.03], [0, -0.12, -0.195]);
       }
     }
-    if (boots) {
+    if (boots && boots !== 'leather' && boots !== 'iron' && boots !== 'gold' && boots !== 'diamond') {
       for (const leg of [this.legL, this.legR]) {
         piece(leg, 0.31, 0.26, 0.33, -0.6, boots, false, 0, 'trim');
         bit(leg, boots, [0.35, 0.07, 0.37], [0, -0.465, 0]);
         bit(leg, boots, [0.27, 0.12, 0.1], [0, -0.66, -0.2]);
         bit(leg, boots, [0.33, 0.04, 0.41], [0, -0.73, -0.03], 'trim');
+        if (boots === 'ember') {
+          bit(leg, 'lava', [0.29, 0.04, 0.37], [0, -0.69, -0.03]);
+          this.armorGroup.push(addFlame(leg, [0, -0.7, 0.02], 0.3, 0.3, leg === this.legL ? 2 : 0));
+        }
       }
     }
     this.applied.fill(-1); // the new pieces still have plain white vertices
@@ -918,7 +1157,12 @@ export class Character {
    */
   private syncOutfits(ids: readonly number[]): void {
     const worn = [0, 1, 2, 3].map((i) => (ids[i] ? (getItem(ids[i]).armor?.outfit ?? null) : null));
+    const before = this.outfitSlot.map((c) => (c !== null && PAINTED_CLASSES.has(c) ? c : '')).join();
     this.outfitSlot = worn;
+    if (before !== worn.map((c) => (c !== null && PAINTED_CLASSES.has(c) ? c : '')).join()) {
+      this.repaintSkin();
+      this.skinTex.needsUpdate = true;
+    }
     const need = new Set(worn.filter((c): c is OutfitClass => c !== null));
     let changed = false;
     for (const [cls, o] of this.outfits) {
@@ -948,21 +1192,20 @@ export class Character {
     const geos: THREE.BufferGeometry[] = [];
     const ctx: GearCtx = {
       box,
-      add: (parent, geo, mat) => {
-      const mesh = new THREE.Mesh(geo, mat);
-      parent.add(mesh);
-        parts.push(mesh);
-        geos.push(geo);
-      return mesh;
-      },
+      add: (parent, geo, mat) =>
+        addToLimb(parent, geo, mat, (m, g) => {
+          parts.push(m);
+          geos.push(g);
+        }),
       head: this.headPivot,
       torso: this.torso,
       armL: this.armL,
       armR: this.armR,
       legL: this.legL,
       legR: this.legR,
+      hair: this.hairMat,
     };
-    const rig = cls === 'warrior' ? dressWarrior(ctx) : cls === 'mage' ? dressMage(ctx) : dressRanger(ctx);
+    const rig = cls === 'warrior' ? dressWarriorSculpt(ctx) : cls === 'mage' ? dressMageSculpt(ctx) : dressRangerSculpt(ctx);
     return { rig, parts, geos };
   }
 
@@ -1040,6 +1283,7 @@ export class Character {
     if (id === this.heldId) return;
     this.heldId = id;
     this.carry = getItem(id).carry;
+    this.heldBlade = !!id && this.carry === 'hand' && (!!getItem(id).tool || getItem(id).weapon?.kind === 'melee');
     const use = id ? getItem(id).use : undefined;
     this.aimKind = use === 'bow' || use === 'crossbow' ? use : null;
     if (this.heldObj) this.heldMount.remove(this.heldObj);
@@ -1057,6 +1301,9 @@ export class Character {
     if (this.shieldObj) this.shieldObj.parent?.remove(this.shieldObj);
     this.shieldObj = id ? make(id) : null;
     this.shieldIsShield = !!id && getItem(id).shield;
+    this.offSpec = this.shieldObj && !this.shieldIsShield ? offCarryOf(id) : null;
+    this.offMount.scale.setScalar(this.offSpec?.scale ?? 1);
+    this.offMount.rotation.y = this.offSpec?.turn ?? 0;
     if (this.shieldObj) (this.shieldIsShield ? this.shieldMount : this.offMount).add(this.shieldObj);
   }
 
@@ -1066,15 +1313,39 @@ export class Character {
    * carrying something does. `blocking` brings the left arm, and its shield, up in front of the body.
    */
   pose(swing: number, attack = 0, holding = false, blocking = false, armSwing = swing): void {
-    this.raise += ((blocking && this.shieldObj && this.shieldIsShield ? 1 : 0) - this.raise) * 0.35;
+    const mo = this.motion;
+    // (Straight limbs: the stride, the pose of a fight and the rest bend them where they ask to, in `humanize`.)
+    this.armL.bend(0);
+    this.armR.bend(0);
+    this.legL.bend(0);
+    this.legR.bend(0);
+    // (What is held in the off hand is turned back against the elbow in `elbows`, so it starts each frame from level: left alone it turns a little more every frame.)
+    this.offMount.rotation.x = 0;
+    this.offMount.rotation.z = 0;
+    this.upper.position.set(0, 0, 0);
+    this.upper.rotation.set(0, 0, 0);
+    this.armStruck = attack > 0 && attack < 1;
+    const wA = mo.combatArms;
+    const cp = mo.pose;
+    // (Standing to fight with a shield, it is held part way up, over the chest.)
+    const stance = this.shieldObj && this.shieldIsShield ? cp.shield * wA : 0;
+    this.raise += ((blocking && this.shieldObj && this.shieldIsShield ? 1 : stance) - this.raise) * this.poseEase;
     const r = this.raise < 0.01 ? 0 : this.raise;
-    this.armL.rotation.x = armSwing * (1 - r) + 1.35 * r;
+    // (The arms are brought to the pose of a fight as far as the class is in it; the stride swings what is left, and a blow is made from there.)
+    this.armL.rotation.y = 0;
+    this.armR.rotation.y = 0;
+    const leftSwing = armSwing + (cp.armLx - armSwing) * wA;
+    // (Something carried in the left hand holds the arm out in front, and it swings less. It gives way to the fight, to wings and to the water.)
+    const os = this.offSpec;
+    const carryW = os ? (1 - this.wingW) * (1 - this.swimW) * (1 - 0.5 * wA) : 0;
+    this.armL.rotation.x = os ? leftSwing * (1 - carryW * (1 - os.swing)) + os.arm * carryW : leftSwing * (1 - r) + 1.35 * r;
     this.shieldMount.position.lerpVectors(SHIELD_REST_POS, SHIELD_UP_POS, r);
     this.shieldMount.quaternion.slerpQuaternions(SHIELD_REST_Q, SHIELD_UP_Q, r);
     // A staff is held low on the shaft, the arm a little forward, and stays upright with its foot by the ground however the arm swings.
     const staff = this.carry === 'staff';
     const lantern = this.carry === 'hang';
-    const base = staff ? STAFF_ARM - armSwing * 0.3 : lantern ? LANTERN_ARM - armSwing * 0.25 : -armSwing + (holding ? 0.35 : 0);
+    const base0 = staff ? STAFF_ARM - armSwing * 0.3 : lantern ? LANTERN_ARM - armSwing * 0.25 : -armSwing + (holding ? 0.35 : 0);
+    const base = lantern ? base0 : base0 + (cp.armRx - base0) * wA;
     let right = base;
     let lift = 0;
     const swinging = attack > 0 && attack < 1;
@@ -1086,24 +1357,28 @@ export class Character {
         lift = Math.sin(Math.sqrt(attack) * Math.PI) * 1.5;
         right += lift;
         // (the body only leans into it a little)
-        this.sw.arm = this.sw.out = 0;
+        this.sw.arm = this.sw.out = this.sw.elbow = this.sw.wrist = 0;
         this.sw.twist *= 0.3;
         this.sw.lunge *= 0.4;
       } else {
         right += this.sw.arm;
         lift = this.sw.arm;
+        // (only a blade or a tool is swung from the wrist and the elbow; a placed block is not)
+        if (!this.heldBlade) this.sw.elbow = this.sw.wrist = 0;
       }
     } else {
-      this.sw.arm = this.sw.out = this.sw.twist = this.sw.lunge = 0;
+      this.sw.arm = this.sw.out = this.sw.twist = this.sw.lunge = this.sw.elbow = this.sw.wrist = 0;
     }
     this.armR.rotation.x = right;
     // A staff or a wand is cast with its tip, so as the arm comes up it turns against it and ends up aimed forward (left alone it would turn
     // over with the arm and point its foot at the target).
-    this.heldMount.rotation.x = staff ? -base - STAFF_LEAN - lift * 1.9 : this.carry === 'wand' ? -lift * 1.1 : 0;
+    // (A weapon in the hand keeps its way as far as the class asks when the arm is brought up for the fight: a blade is not carried pointing at the ground.)
+    const keep = -(base - base0) * cp.keep;
+    this.heldMount.rotation.x = staff ? -base - STAFF_LEAN - lift * 1.9 : this.carry === 'wand' ? -lift * 1.1 + keep : keep + this.sw.wrist;
     this.legL.rotation.x = -swing;
     this.legR.rotation.x = swing;
-    // The cape hangs a little off the back and streams out further the faster the figure walks.
-    this.setCape(-(0.07 + Math.min(1, Math.abs(swing) / 0.8) * 0.5));
+    // The cape hangs a little off the back and streams out further the faster the figure walks, and trails the speeding up and the stopping.
+    this.setCape(-(0.07 + Math.min(1, Math.abs(swing) / 0.8) * 0.5) + mo.second.capeX);
   }
 
   /** Show each piece of clothes only while it is worn, and the cape only with the chest piece it belongs to. */
@@ -1114,7 +1389,12 @@ export class Character {
     for (const [cls, o] of this.outfits) {
       names.forEach((name, i) => {
         const on = this.outfitSlot[i] === cls;
-        for (const m of o.rig.slots[name]) m.visible = on;
+        for (const m of o.rig.slots[name]) {
+          m.visible = on;
+          // (A piece on a limb is cut at the joint: the lower half is the twin of the upper.)
+          const twin = m.userData.twin as THREE.Object3D | undefined;
+          if (twin) twin.visible = on;
+        }
       });
       const cape = o.rig.cape[0];
       const hangs = this.outfitSlot[1] === cls;
@@ -1133,6 +1413,7 @@ export class Character {
     this.capeA = a;
     if (!this.capePivot) return;
     this.capePivot.rotation.x = a;
+    this.capePivot.rotation.z = this.motion.second.capeZ;
     // The lower pieces follow the stride a little less, and always hang a touch further out: the cape billows toward its hem.
     const bend = [0.4, 0.3];
     this.capeSegs.forEach((s, i) => (s.rotation.x = a * (bend[i] ?? 0.3) - 0.08));
@@ -1155,6 +1436,11 @@ export class Character {
   private wasAir = false;
   /** Which leg leads in the air, and the fastest fall of this jump (how hard the landing is). */
   private legDir = 1;
+  /** Which way it goes in the air against the way it faces: ahead (1) or back (-1), to the right (1) or to the left (-1); straight ahead while it hardly moves. */
+  private airF = 1;
+  private airS = 0;
+  /** How fast the body is turning (radians a second, positive to the left). */
+  private turnNow = 0;
   private fallV = 0;
   /** The style of the jump in progress (JUMP_*), and the seconds since it left the ground. */
   private jumpStyle = 0;
@@ -1225,21 +1511,33 @@ export class Character {
   animate(dt0: number, speed: number, turn: number, attack = 0, holding = false, blocking = false, vy = 0, airborne = false, eating = false): void {
     const dt = Math.min(dt0, 0.05);
     const ease = (rate: number): number => 1 - Math.exp(-dt * rate);
+    this.poseEase = 1 - Math.exp(-dt * 24);
+    const resp = this.motion.profileNow.response;
     // Eating: the food comes up to the mouth and the jaw works. It eases in and out; the chewing runs on its own clock, from the first bite.
     this.eatK += ((eating ? 1 : 0) - this.eatK) * ease(eating ? 14 : 10);
     if (this.eatK < 0.003) this.eatK = 0;
     if (eating) this.chew += dt;
     else if (this.eatK === 0) this.chew = 0;
-    this.spd += (speed - this.spd) * ease(8);
+    this.spd += (speed - this.spd) * ease(resp.speed);
     const spd = this.spd < 0.05 ? 0 : this.spd;
     const walk = Math.min(1, spd / 4);
     // (a walk is 4.3 blocks a second and a sprint 5.9, a little more for a quick class: that is the range of walking to running)
     const run = Math.min(1, Math.max(0, spd - 4.6) / 1.6);
     const shuffle = spd < 0.3 ? Math.min(0.4, Math.abs(turn) * 0.08) : 0;
-    this.amp += (Math.max(walk, shuffle) - this.amp) * ease(7);
+    this.amp += (Math.max(walk, shuffle) - this.amp) * ease(resp.amp);
     if (this.amp < 0.002) this.amp = 0;
     this.clock += dt;
-    if (this.amp > 0) this.gait += (spd > 0.3 ? Math.min(spd, 8) * 3.4 : 6) * dt;
+    // Which way it goes against the way it faces (a figure that aims while it walks goes sideways and back as well as forward).
+    this.mf += (this.moveF - this.mf) * ease(14);
+    this.mr += (this.moveR - this.mr) * ease(14);
+    // Which way it goes in a jump against the way it faces (nothing in particular while it hardly moves), and how fast it turns.
+    const going = clamp01((spd - 0.8) / 2.2);
+    this.airF = 1 + (Math.max(-1, Math.min(1, this.mf)) - 1) * going;
+    this.airS = Math.max(-1, Math.min(1, this.mr)) * going;
+    this.turnNow = turn;
+    const gaitNow = this.motion.gait;
+    // The gait turns at the pace that keeps the foot on the ground going back as fast as the ground goes by (see `gaitRate`).
+    if (this.amp > 0) this.gait += (spd > 0.3 ? gaitRate(spd, gaitNow, this.amp * Math.min(1, Math.abs(this.mf) + 0.7 * Math.abs(this.mr)), Character.LEG, BODY_SCALE) : 6) * dt;
 
     // The jump: leaves the ground with a leading leg and the arms thrown up, falls with the arms out, lands crouched.
     if (airborne && !this.wasAir) {
@@ -1251,6 +1549,8 @@ export class Character {
       const luck = Math.random();
       const sp = this.spd;
       if (vy < 1) this.jumpStyle = JUMP_FALL;
+      // (Sideways or backward there is no long stride to take: the knees come up, or the body is flung wide.)
+      else if (sp > 1.2 && this.airF < 0.55) this.jumpStyle = luck < 0.55 ? JUMP_TUCK : luck < 0.85 ? JUMP_PLAIN : JUMP_STAR;
       else if (sp > 5) this.jumpStyle = luck < 0.8 ? JUMP_LEAP : JUMP_STRIDE;
       else if (sp > 1.2) this.jumpStyle = luck < 0.55 ? JUMP_STRIDE : luck < 0.8 ? JUMP_TUCK : JUMP_PLAIN;
       else this.jumpStyle = luck < 0.45 ? JUMP_PLAIN : luck < 0.75 ? JUMP_TUCK : JUMP_STAR;
@@ -1270,12 +1570,15 @@ export class Character {
     const air = this.air;
     const rise = Math.max(-1, Math.min(1, vy / 7));
 
-    const a = this.amp * (1 + run * 0.3) * (1 - air);
+    const g = gaitNow;
+    const a = this.amp * (1 - air);
     const s = Math.sin(this.gait);
-    const walkLegs = s * 0.8 * a;
+    const lg = gaitLegs(this.gait, g, this.amp, this.mf, this.legs);
+    // (How far the legs swing, as far as the cape and the like are told.)
+    const walkLegs = lg.step * g.stride * a;
     const legs = walkLegs * (1 - air) + this.legDir * (0.5 + 0.15 * rise) * air;
     // (On wings the stride does not swing the arms: see `wingStep`.)
-    const arms = Math.sin(this.gait - 0.35) * 0.65 * a * (1 - 0.9 * this.wingW);
+    const arms = Math.sin(this.gait - g.armLag) * g.armSwing * a * (1 - 0.9 * this.wingW);
     // A Ground Slam: each part comes in quickly, the dive and the way out more slowly. The shield is out in front for all of it.
     const sk = this.slamW;
     const ph = this.slamPhase;
@@ -1306,22 +1609,55 @@ export class Character {
     this.castT = this.casting > 0 ? this.castT + dt : 0;
     const charged = this.chargeW > 0.05 || this.castW > 0.05;
     this.idleStep(dt, speed, turn, attack, blocking || bashing || charged, airborne, eating);
+    {
+      // What the class makes of it all: how far it is in a fight, a walk, a run, a stretch; what it does standing; what trails behind.
+      const mi = this.motionIn;
+      mi.speed = this.spd;
+      mi.walk = walk;
+      mi.run = run;
+      mi.amp = this.amp;
+      mi.air = air;
+      mi.still = (1 - this.amp) * (1 - air);
+      mi.engaged = this.engaged && !this.riding;
+      // (A swing alone is not a fight: the same swing breaks a block. Blocking, drawing a bow, an ability or a spell are.)
+      mi.fighting = blocking || this.aimDraw > 0.02 || ph > 0 || bashing || charged || this.stabAge < STAB_TIME * 2;
+      mi.swinging = attack < 1;
+      mi.stretching = this.idleW.stretch;
+      mi.busy = attack < 1 || blocking || eating;
+      mi.accel = this.accel;
+      mi.turn = turn;
+      this.load.shield = !!this.shieldObj && this.shieldIsShield;
+      this.load.carry = this.heldId ? this.carry : 'none';
+      this.load.bow = this.aimKind !== null;
+      this.motion.update(dt, mi);
+    }
     this.pose(legs, attack, holding, blocking || ph > 0 || bashing || charged, arms);
+    // The legs go by the gait (the stride that keeps each foot on the ground), as far as they are not in the air.
+    if (air < 1) {
+      const onGround = 1 - air;
+      this.legR.rotation.x += (lg.r - this.legR.rotation.x) * onGround;
+      this.legL.rotation.x += (lg.l - this.legL.rotation.x) * onGround;
+    }
 
-    const breath = Math.sin(this.clock * 1.9);
+    // The breath (it is gone as the body moves, and the class says how it breathes) and its size.
+    const idleNow = this.motion.idle;
+    const breath = idleNow.breath;
     const still = (1 - this.amp) * (1 - air);
-    // Dip with the stride, lowest when the legs are furthest apart, as the hips are when they take the weight; sink into a landing.
-    this.root.position.y = -0.75 * (1 - Math.cos(walkLegs)) * 0.3 * (1 - air) - 0.15 * crouch + breath * 0.004 * still;
+    // Sink into a landing and when a foot lands (the dip of the hips in the stride itself is made by planting the feet: see `plantFeet`).
+    this.root.position.y = -0.15 * crouch - g.impact * lg.thud * (1 - air) + breath * idleNow.shoulder * 0.5;
     this.root.scale.set(1 + 0.05 * crouch, 1 - 0.07 * crouch + 0.03 * Math.max(0, rise) * air, 1 + 0.05 * crouch).multiplyScalar(BODY_SCALE);
     // Lean forward as the speed rises, into a turn and into a landing.
     this.lean += ((-0.03 * walk - 0.07 * run) - this.lean) * ease(6);
     this.bank += (Math.max(-0.07, Math.min(0.07, turn * 0.02)) * (0.4 + 0.6 * walk) - this.bank) * ease(5);
     this.root.rotation.x = this.lean - 0.14 * crouch;
-    this.root.rotation.z = this.bank * (1 - air);
+    // (In the air the body leans into the way it goes: to the side it is going, and into a turn more than on the ground.)
+    this.root.rotation.z = this.bank * (1 - air) + air * (Math.max(-0.2, Math.min(0.2, this.turnNow * 0.03)) - this.airS * 0.16);
     // Shoulders against hips; the arms hang a touch out and in again as the chest breathes.
-    this.torso.rotation.y = -s * 0.1 * a;
-    this.torso.position.y = breath * 0.004 * still;
-    const out = 0.03 + breath * 0.012 * still + a * 0.03;
+    this.shoulderTwist = 0;
+    this.torso.rotation.y = -s * g.shoulderYaw * a;
+    this.shoulderTwist = this.torso.rotation.y;
+    this.torso.position.y = breath * idleNow.shoulder * 0.5;
+    const out = 0.03 + breath * idleNow.shoulder * 2.5 + a * 0.03;
     // In the air the arms fly up and forward on the way up, and out to the sides on the way down.
     const airX = 0.35 + 1.25 * Math.max(rise, 0);
     const airZ = 0.3 + 0.55 * Math.max(-rise, 0) + 0.15 * Math.max(rise, 0);
@@ -1333,7 +1669,7 @@ export class Character {
     this.armR.rotation.z = out * (1 - wR) + airZ * wR;
     // A lantern hangs straight down from the hand whatever the arm does.
     if (this.carry === 'hang') this.heldMount.rotation.x = -this.armR.rotation.x;
-    this.headPivot.position.y = 1.65 + breath * 0.004 * still;
+    this.headPivot.position.y = 1.65 + breath * idleNow.shoulder * 0.5;
     const eatK = this.eatK;
     if (eatK > 0) {
       // The right arm folds up to the face (held in toward the middle) and the hand bobs with each bite; the head dips a little to meet it.
@@ -1362,28 +1698,39 @@ export class Character {
     this.wingStep(dt, ease, vy, turn, busy, holding);
   }
 
-  /** The wings on the back (see wingRig.ts), the number the wire gives (1 + the place in WINGS, 0: none), and whether the wearer flies on them. */
+  /**
+   * The wings on the back (see wingRig.ts), the number the wire gives (1 + the place in WINGS, 0: none), and whether the wearer flies on them. What they
+   * do and what the body does with them (floating, the takeoff, the flight, the bank, the landing) is worked out in flightMotion.ts; this class only
+   * says what the body is doing and writes down what comes back, so nothing else moves these joints.
+   */
   private wingRig: WingRig | null = null;
+  private wingDef: WingDef | null = null;
   private wingNo = 0;
   wingFlying = false;
   private wingW = 0;
-  /** How far into a flight on them the figure is (0..1, eased): it lies forward and banks. */
-  private wingFlyW = 0;
+  private readonly flight = new FlightMotion();
+  private readonly flightIn: FlightInput = { wings: false, flying: false, speed: 0, vy: 0, turn: 0, accel: 0, cls: null, top: 7.3, shape: null, brace: 0, combat: 0 };
   /** How much the hands are busy with something (0..1, eased): the pose of the wings gives way to it. */
   private wingBusy = 0;
   /** How much room there is over the figure's head (blocks, 4: plenty). A figure with wings floats as high as there is room for, so its head does not go through a low door or a roof. */
   roof = 4;
   private hover = WING_HOVER;
 
-  /** Wear this pair of wings (0: none). */
+  /** Wear this pair of wings (0: none). Put on, they open from folded (see `FlightMotion.equip`); the same pair put on again is left alone. */
   setWings(no: number): void {
     if (no === this.wingNo) return;
     this.wingNo = no;
     this.wingRig?.dispose();
     this.wingRig = null;
     const def = wingByNumber(no);
-    if (def) this.wingRig = buildWings(def, this.torso);
-    if (!def) {
+    this.wingDef = def;
+    if (def) {
+      this.wingRig = buildWings(def, this.torso);
+      this.flight.equip();
+      // (Folded at first: the wings are posed before the first frame they are drawn in.)
+      this.wingRig.apply(this.flight.update(0, this.wingInput(true, false, 0, 0, 0, 0, 0)).wing, this.clock, 0);
+    } else {
+      this.flight.reset();
       this.root.position.y = 0;
       this.legL.rotation.x = 0;
       this.legR.rotation.x = 0;
@@ -1392,76 +1739,97 @@ export class Character {
     this.applyBrightness();
   }
 
+  /** What the wings are told of the body this frame (one object, filled again every time: nothing is made per frame). */
+  private wingInput(on: boolean, flies: boolean, vy: number, turn: number, brace: number, combat: number, accel: number): FlightInput {
+    const i = this.flightIn;
+    i.wings = on;
+    i.flying = flies;
+    i.speed = this.spd;
+    i.vy = vy;
+    i.turn = turn;
+    i.accel = accel;
+    i.cls = this.motion.classId;
+    i.top = 4.3 * (this.wingDef?.fly ?? 1.7);
+    i.shape = this.wingDef?.shape ?? null;
+    i.brace = brace;
+    i.combat = combat;
+    i.fwd = this.airF;
+    i.side = this.airS;
+    return i;
+  }
+
   /** Move the wings of a figure that is only posed (a menu): `animate` does it for the rest. */
   updateWings(t: number, dt: number): void {
-    this.wingRig?.update(t, dt, false, 0);
     if (!this.wingRig) return;
+    const o = this.flight.update(dt, this.wingInput(true, false, 0, 0, 0, 0, 0));
+    this.wingRig.apply(o.wing, t, dt);
     // (It floats there too: the legs hang and drift.)
-    this.root.position.y = WING_HOVER + Math.sin(t * 2.4) * 0.05;
-    this.legL.rotation.x = -0.1 + Math.sin(t * 2.2) * 0.06;
-    this.legR.rotation.x = -0.08 - Math.sin(t * 2.2) * 0.06;
+    this.root.position.y = (WING_HOVER + o.bob) * o.rise;
+    this.legL.rotation.x = o.legLx;
+    this.legR.rotation.x = o.legRx;
+    this.legL.rotation.z = o.legLz;
+    this.legR.rotation.z = o.legRz;
   }
 
   /**
-   * A figure with wings on never touches the ground: it floats a little above it, upright, the legs hanging and drifting, the arms a little out,
-   * bobbing as it breathes, and leans into the move as it speeds up. The wings beat only while it flies on them. Blended over what `humanize`
-   * and the swimming did (a mount or the water take the figure out of it).
+   * A figure with wings on never touches the ground: it floats a little above it, the legs hanging and drifting, bobbing as it breathes; moving, it
+   * glides with the wings a little busier; and on the wing it flies, leaning, banking and trailing its legs, the wings beating from the shoulder out.
+   * Blended over what `humanize` and the swimming did (a mount or the water take the figure out of it), by how far the figure is in the wings: the
+   * hands keep what they are doing (a blow, a guard, a bow drawn, a spell, a shield), and the wings brace for it.
    */
   private wingStep(dt: number, ease: (rate: number) => number, vy: number, turn: number, busy: boolean, holding: boolean): void {
     const on = this.wingRig !== null && !this.riding && !this.afloat;
     this.wingW += ((on ? 1 : 0) - this.wingW) * ease(on ? 6 : 8);
     if (this.wingW < 0.002) this.wingW = 0;
-    const flies = on && this.wingFlying;
-    this.wingFlyW += ((flies ? 1 : 0) - this.wingFlyW) * ease(flies ? 4 : 5);
-    if (this.wingFlyW < 0.002) this.wingFlyW = 0;
-    this.wingRig?.update(this.clock, dt, flies, Math.min(1, this.spd / 6));
-    const w = this.wingW;
-    if (w === 0) return;
     this.wingBusy += ((busy ? 1 : 0) - this.wingBusy) * ease(busy ? 22 : 7);
     if (this.wingBusy < 0.002) this.wingBusy = 0;
+    if (this.wingRig === null) return;
+    const flies = on && this.wingFlying;
+    const o = this.flight.update(dt, this.wingInput(on, flies, vy, turn, this.wingBusy, this.motion.combat, this.accel));
+    this.wingRig.apply(o.wing, this.clock, dt);
+    const w = this.wingW * o.rise;
+    if (w === 0) return;
     // How much of the pose of the wings the figure takes: all of it, less while it is acting (its blow, its guard and its stance are its own).
     const free = w * (1 - this.wingBusy);
     const lite = w * (1 - 0.8 * this.wingBusy);
-    const f = this.wingFlyW;
-    const sp = Math.min(1, this.spd / 9);
-    const fsp = Math.min(1, this.spd / 7.5);
-    // Floating, the figure stands up and leans a little as it moves; flying, it lies forward into the flight (more the faster it goes), nose up
-    // in a climb and down in a dive, and banks into a turn like a bird.
-    const lean = mix(-0.04 - 0.3 * sp, -(0.1 + 0.65 * fsp) + Math.max(-0.3, Math.min(0.3, vy * 0.035)), f);
-    const bank = Math.max(-0.5, Math.min(0.5, turn * 0.12)) * (0.3 + 0.7 * fsp) * f;
-    this.root.rotation.x = mix(this.root.rotation.x, lean, lite);
-    this.root.rotation.z = mix(this.root.rotation.z, bank, lite);
-    // (The figure turns about its middle, not about its feet: the body is lifted and shifted to make up for the lean.)
+    // A figure in a fight keeps the hand of its stance (the casting hand, the string hand) in the air as well.
+    const armKeep = 1 - 0.8 * this.motion.combat;
+    const pitch = -o.lean + o.climb;
+    const root = this.root;
+    root.rotation.x = mix(root.rotation.x, pitch, lite);
+    root.rotation.z = mix(root.rotation.z, o.bank, lite);
+    // (The figure turns about its middle, not about its feet: the body is lifted and shifted to make up for the lean and the bank. The float is only what is
+    // drawn: the body the physics moves is not touched.)
     // (It sinks quickly under a lintel and rises slowly out from it. Flying, the figure is lifted by its lean as well: that is allowed for.)
-    const room = Math.max(0, Math.min(WING_HOVER, this.roof - 0.04 - 0.9 * (1 - Math.cos(lean)) * f));
+    const cb = Math.cos(o.bank);
+    const lift = 0.9 * (1 - cb * Math.cos(pitch));
+    const room = Math.max(0, Math.min(WING_HOVER, this.roof - 0.04 - lift * o.fly));
     this.hover += (room - this.hover) * ease(room < this.hover ? 14 : 3);
-    this.root.position.y = mix(this.root.position.y, this.hover * (1 + Math.sin(this.clock * 2.4) * 0.12 * (1 - 0.6 * f)) + 0.9 * (1 - Math.cos(lean)), w);
-    this.root.position.z = mix(this.root.position.z, -0.9 * Math.sin(lean), lite);
-    const trail = mix(0.1 + 0.45 * sp, 0.1 + 0.3 * fsp, f);
-    const flutter = Math.sin(this.clock * (2.2 + 3 * f)) * (0.06 - 0.02 * f);
-    this.legL.rotation.x = mix(this.legL.rotation.x, -trail + flutter, lite);
-    this.legR.rotation.x = mix(this.legR.rotation.x, -trail * 0.8 - flutter, lite);
+    root.position.y = mix(root.position.y, (this.hover + o.bob) * 1 + lift, w);
+    root.position.z = mix(root.position.z, -0.9 * cb * Math.sin(pitch), lite);
+    root.position.x = mix(root.position.x, 0.9 * Math.sin(o.bank), lite);
+    this.torso.rotation.y += o.torsoY * lite;
+    this.headPivot.rotation.x += o.headX * lite;
+    this.headPivot.rotation.z += o.headZ * lite;
+    this.legL.rotation.x = mix(this.legL.rotation.x, o.legLx, lite);
+    this.legR.rotation.x = mix(this.legR.rotation.x, o.legRx, lite);
     // (The legs do not step: the foot picked up at each stride of the walk is put back, so they hang and drift instead.)
     this.legL.position.y = mix(this.legL.position.y, Character.HIP, lite);
     this.legR.position.y = mix(this.legR.position.y, Character.HIP, lite);
-    this.legL.rotation.z = mix(this.legL.rotation.z, -0.04 - 0.05 * f, lite);
-    this.legR.rotation.z = mix(this.legR.rotation.z, 0.04 + 0.05 * f, lite);
-    // The arms of a figure on wings do not swing as a walker's do: empty, they hang loose and drift a little (a touch out and back with the speed);
-    // in flight they are swept back along the body, out a little and rocking with the beat of the wings. A hand with a weapon or a tool in it, and an
-    // arm with a shield on it, keep the pose they have (the weapon stays up and ready, and the swing and the guard are drawn on it): the stride that
-    // would swing them is taken out of them in `animate`.
-    const drift = Math.sin(this.clock * 1.7);
-    const rock = Math.sin(this.clock * (1.7 + 2.6 * f));
-    const armX = mix(0.06 - 0.22 * sp, -0.2 - 0.3 * fsp, f);
-    const out = mix(0.16 + 0.12 * sp, 0.26 + 0.14 * fsp, f);
-    const sway = (0.06 - 0.02 * f) * rock;
+    this.legL.rotation.z = mix(this.legL.rotation.z, o.legLz, lite);
+    this.legR.rotation.z = mix(this.legR.rotation.z, o.legRz, lite);
+    // The arms of a figure on wings do not swing as a walker's do: empty, they hang loose and drift; a hand with a weapon or a tool in it, and an arm with a
+    // shield on it, keep the pose they have (the weapon stays up and ready, and the swing and the guard are drawn on it): the stride that would swing
+    // them is taken out of them in `animate`.
     const shielded = this.shieldId !== 0 && this.shieldIsShield;
-    const freeR = holding ? 0 : free;
-    const freeL = shielded ? 0 : free;
-    if (this.carry === 'hand') this.armR.rotation.x = mix(this.armR.rotation.x, armX + sway + 0.03 * drift, freeR);
-    this.armL.rotation.x = mix(this.armL.rotation.x, armX - sway - 0.03 * drift, freeL);
-    this.armL.rotation.z = mix(this.armL.rotation.z, -out - 0.03 * rock, freeL);
-    this.armR.rotation.z = mix(this.armR.rotation.z, out + 0.03 * rock, freeR);
+    const freeR = holding ? 0 : free * armKeep;
+    const freeL = shielded ? 0 : free * armKeep;
+    if (this.carry === 'hand') this.armR.rotation.x = mix(this.armR.rotation.x, o.armRx, freeR);
+    this.armL.rotation.x = mix(this.armL.rotation.x, o.armLx, freeL);
+    this.armL.rotation.z = mix(this.armL.rotation.z, o.armLz, freeL);
+    this.armR.rotation.z = mix(this.armR.rotation.z, o.armRz, freeR);
+    // The cape streams back with the speed.
+    this.setCape(this.capeA + (o.cape - this.capeA) * free * 0.8);
   }
 
   /**
@@ -1608,13 +1976,27 @@ export class Character {
         p.lean = -0.04 * r + 0.04 * down;
       }
     }
+    // A long stride goes the way the body goes: sideways the legs and arms hardly reach (the legs step out to the side instead, see `humanize`),
+    // and backward they reach the other way. (The direction may change in the air: the pose follows it.)
+    if (this.jumpStyle === JUMP_STRIDE || this.jumpStyle === JUMP_LEAP) {
+      const k = Math.max(-0.7, Math.min(1, this.airF * 1.25));
+      p.lead *= k;
+      p.trail *= k;
+      p.armLead *= k;
+      p.armTrail *= k;
+      p.twist *= Math.abs(k);
+    }
+    // Backward the body leans back, as it does moving that way on the ground.
+    p.lean += Math.min(0, this.airF) * 0.1;
   }
 
   /** The speed (eased) a frame ago, and how fast it is changing (eased): speeding up leans the body forward, stopping rocks it back. */
   private lastSpd = 0;
   private accel = 0;
   /** Where the swing of the arm is now (see `SWING`): set by `pose`, used by `humanize` for the body. */
-  private readonly sw: SwingKey = { t: 0, arm: 0, out: 0, twist: 0, lunge: 0 };
+  private readonly sw: SwingKey = { t: 0, arm: 0, out: 0, twist: 0, lunge: 0, elbow: 0, wrist: 0 };
+  /** What is held is a blade or a tool (swung with the wrist: see `SwingKey.wrist`), not a block or a cast. */
+  private heldBlade = false;
   private momentum = 0;
 
   /** One step of a damped spring pulling `s.x` to `target` (`w` stiffness in radians a second, `z` damping: below 1 it overshoots). */
@@ -1665,8 +2047,7 @@ export class Character {
     ease: (rate: number) => number,
     m: { s: number; a: number; walk: number; run: number; air: number; rise: number; crouch: number; still: number; breath: number; eatK: number; wL: number; wR: number },
   ): void {
-    const { s, a, walk, run, air, rise, crouch, still, breath, eatK, wL, wR } = m;
-    const t = this.clock;
+    const { s, a, walk, run, air, rise, crouch, breath, eatK, wL, wR } = m;
     const c = Math.cos(this.gait);
     // How fast it is speeding up or slowing down (blocks/s per second, eased).
     if (dt > 0) this.accel += (Math.max(-30, Math.min(30, (this.spd - this.lastSpd) / dt)) - this.accel) * ease(9);
@@ -1675,13 +2056,23 @@ export class Character {
 
     // ---- the waist ----
     // (In the air the lean of the stride and the run is let go: the body goes up fairly upright.)
-    let lean = (0.04 * walk + 0.14 * run) * (1 - air) + this.momentum * (1 - air) + 0.2 * crouch;
+    const mo = this.motion;
+    const g = mo.gait;
+    const lg = this.legs;
+    const cp = mo.pose;
+    const idleNow = mo.idle;
+    // How far the body is in the stance of a fight (the stance of the legs is made further down, and goes as the legs stride).
+    const fightBody = mo.combat * (1 - 0.6 * run) * (1 - air) * (1 - this.idleW.stretch);
+    if (this.idleW.stretch > 0.002 && mo.stretchSeconds > 0) stretchAt(mo.classId, this.idleClock, this.sk);
+    let lean = g.lean * walk * (1 - air) + this.momentum * (1 - air) + 0.2 * crouch + idleNow.lean + cp.lean * fightBody;
     // In the air the body leans as the style of the jump asks.
     if (air > 0) this.jumpShape(rise);
     lean += air * Math.max(-0.08, Math.min(0.06, this.jp.lean));
+    // The back is not held still in a stride: the chest pumps forward and back twice a stride, a hair behind the feet.
+    lean += Math.cos(this.gait * 2 - 0.5) * g.spineBob * a;
     lean *= 1 - 0.7 * eatK;
     // Sitting the back is rounded a little; in a stretch it arches.
-    lean += 0.12 * this.idleW.sit - 0.22 * this.idleW.stretch;
+    lean += 0.12 * this.idleW.sit + (mo.stretchSeconds > 0 ? this.sk.lean * this.idleW.stretch : -0.22 * this.idleW.stretch);
     // Thrown into a blow, the body goes forward with it.
     const sw = this.sw;
     lean += sw.lunge * 0.17;
@@ -1714,7 +2105,7 @@ export class Character {
     const th = this.waist.x;
     // The trunk is squeezed by a push off the ground and pulled long by a fall (and fills a little with each breath), about the hip: the
     // chest, shoulders and head ride up and down with it.
-    const sy = 1 - Math.max(-0.05, Math.min(0.05, this.liftAccel * 0.0009)) + breath * 0.007 * still * (1 - eatK);
+    const sy = 1 - Math.max(-0.05, Math.min(0.05, this.liftAccel * 0.0009)) + breath * idleNow.chest * (1 - eatK);
     const sx = 1 + (1 - sy) * 0.7;
     const hip = Character.HIP;
     this.torso.rotation.x = 0;
@@ -1730,19 +2121,25 @@ export class Character {
 
     // ---- the hips and the weight ----
     // The hips turn against the shoulders (which turn the other way already), and the body sways over the foot that takes the weight.
-    this.root.rotation.y = s * 0.05 * a * (1 - air);
+    this.root.rotation.y = s * g.hipYaw * a * (1 - air);
     this.headPivot.rotation.y -= this.root.rotation.y;
-    this.root.position.x = -c * 0.022 * a * (1 - air) + Math.sin(t * 0.47) * 0.012 * still;
+    this.root.position.x = -c * g.sway * a * (1 - air);
     // The head stays level against the lean and the roll, and nods a little with each foot that lands.
-    this.headPivot.rotation.x -= this.root.rotation.x * 0.5;
+    this.headPivot.rotation.x -= this.root.rotation.x * g.headStab;
     this.headPivot.rotation.x += Math.cos(this.gait * 2) * 0.025 * a;
     this.headPivot.rotation.z = -this.root.rotation.z * 0.8;
     // The head is never held dead level: it rolls a little against the sway of the shoulders, turns a hair with each stride, bobs up and down
     // with the steps, and leans into a turn before the body does.
-    this.root.rotation.z += c * 0.025 * a * (1 - air);
-    this.headPivot.rotation.z += Math.sin(this.gait - 0.7) * 0.045 * a - this.bank * 0.9 * (1 - air);
-    this.headPivot.rotation.y += Math.sin(this.gait + 0.5) * 0.05 * a;
-    this.headPivot.position.y += Math.cos(this.gait * 2) * 0.014 * a * (1 - air);
+    this.root.rotation.z += c * g.roll * a * (1 - air);
+    this.headPivot.rotation.z += Math.sin(this.gait - 0.7) * 0.045 * a * (1 - g.headStab * 0.7) - this.bank * 0.9 * (1 - air);
+    this.headPivot.rotation.y += Math.sin(this.gait + 0.5) * 0.05 * a * (1 - g.headStab * 0.7);
+    this.headPivot.position.y += Math.cos(this.gait * 2) * g.headBob * a * (1 - air);
+    // The arms in the pose of a fight, out from the sides (the class's own way; a blow is made from there).
+    {
+      const wz = mo.combatArms;
+      this.armL.rotation.z += (cp.armLz - this.armL.rotation.z) * wz * (1 - this.raise);
+      this.armR.rotation.z += (cp.armRz - this.armR.rotation.z) * wz * (1 - Math.min(1, this.sw.arm * 2));
+    }
 
     // ---- a blow, a stroke of mining, a placed block ----
     // The shoulders wind away and then drive through, the hips follow part of the way, the head stays on the target; the weight goes onto the
@@ -1762,14 +2159,15 @@ export class Character {
 
     // ---- the feet ----
     // The leg that swings forward is picked up; in a run both are splayed a little and the stride is higher.
-    const pick = (0.03 + 0.06 * run) * Math.min(1, a) * (1 - air);
-    const liftR = Math.max(0, c) * pick;
-    const liftL = Math.max(0, -c) * pick;
-    const splay = (0.015 + 0.045 * run) * a;
-    this.legR.position.y = Character.HIP + liftR;
-    this.legL.position.y = Character.HIP + liftL;
-    this.legR.rotation.z = splay;
-    this.legL.rotation.z = -splay;
+    // (The foot that swings is lifted by the gait, a long step in a run, a soft one in a walk; going sideways the legs step across.)
+    const flight = 1 - air;
+    const splay = g.spread * a;
+    const sideSwing = g.stride * 0.6 * this.amp;
+    // (The knee folds the leg up; the foot is lifted off the ground by a third of what it was before the knees bent.)
+    this.legR.position.y = Character.HIP + lg.liftR * flight * KNEE_LIFT;
+    this.legL.position.y = Character.HIP + lg.liftL * flight * KNEE_LIFT;
+    this.legR.rotation.z = splay + (Math.abs(this.mr) > 0.02 ? Math.asin(Math.min(0.9, Math.sin(sideSwing) * lg.xr * this.mr)) * flight : 0);
+    this.legL.rotation.z = -splay + (Math.abs(this.mr) > 0.02 ? Math.asin(Math.min(0.9, Math.sin(sideSwing) * lg.xl * this.mr)) * flight : 0);
     if (air > 0) {
       // The jump, in the style it was taken in (see `jumpShape`): the legs and the arms go to its pose as far as the air pose has come in.
       const p = this.jp;
@@ -1783,6 +2181,12 @@ export class Character {
       trail.position.y += air * p.trailLift * (1 - push);
       this.legL.rotation.z -= air * (0.05 + p.legSpread);
       this.legR.rotation.z += air * (0.05 + p.legSpread);
+      // Going to a side, the legs step out that way (the leg on that side reaches furthest, the other crosses under it) and the arms swing with them.
+      const sd = this.airS;
+      this.legR.rotation.z += air * sd * (sd > 0 ? 0.5 : 0.22);
+      this.legL.rotation.z += air * sd * (sd < 0 ? 0.5 : 0.22);
+      // The shoulders lead into a turn (the legs come round after them).
+      this.torso.rotation.y += air * Math.max(-0.35, Math.min(0.35, this.turnNow * 0.05));
       // The arms: the one opposite the leading leg goes with it (as in a stride), the other against it; a bent arm in hand is left to its weapon.
       const armLead = this.legDir > 0 ? this.armL : this.armR;
       const armTrail = this.legDir > 0 ? this.armR : this.armL;
@@ -1792,6 +2196,8 @@ export class Character {
       armTrail.rotation.x += (p.armTrail + 0.5 * push - armTrail.rotation.x) * wTrail;
       this.armL.rotation.z += (-p.spread - this.armL.rotation.z) * wL;
       this.armR.rotation.z += (p.spread - this.armR.rotation.z) * wR;
+      this.armL.rotation.z += sd * 0.25 * wL;
+      this.armR.rotation.z += sd * 0.25 * wR;
       // The shoulders turn against the leading leg.
       this.torso.rotation.y += this.legDir * p.twist * air;
       if (this.carry === 'hang') this.heldMount.rotation.x = -this.armR.rotation.x;
@@ -1802,28 +2208,41 @@ export class Character {
       this.legR.rotation.x += 0.35 * crouch * (1 - air);
     }
 
+    // ---- the knees ----
+    // The leg in the air folds up as it comes through and opens to land; the one on the ground gives as it takes the weight. (The foot is lifted by the fold,
+    // as a foot is: what is left of the lift of the gait is a hair, so the toe does not drag.)
+    {
+      const free = flight * (1 - this.swimW) * (1 - this.wingW);
+      let kR = lg.kneeR * flight;
+      let kL = lg.kneeL * flight;
+      if (air > 0) {
+        // In the air the knees bend with the pose of the jump: the leg that is tucked up, the leg that reaches.
+        const p = this.jp;
+        const lead = Math.min(1.5, p.leadLift * 6) * air;
+        const trail = Math.min(1.5, p.trailLift * 6) * air;
+        if (this.legDir > 0) { kR += lead; kL += trail; } else { kL += lead; kR += trail; }
+      }
+      this.legR.bend(kR * free);
+      this.legL.bend(kL * free);
+    }
+
     // ---- the arms, in a run ----
     // They are pumped higher (the elbows come forward) and held in toward the body.
-    if (run > 0 && air === 0) {
-      const pump = run * a * 0.3;
-      this.armL.rotation.x += pump * 0.5 + Math.max(0, this.armL.rotation.x) * run * 0.25;
-      this.armR.rotation.x += (this.heldId ? 0.2 : 1) * (pump * 0.5 + Math.max(0, this.armR.rotation.x) * run * 0.25);
+    if (air === 0) {
+      // (The class says how far forward the arms are carried when it moves: the sprint of a Ranger has them pumping, a Warrior's has them driving.)
+      const pump = g.armPump * a;
+      this.armL.rotation.x += pump + Math.max(0, this.armL.rotation.x) * run * 0.2;
+      this.armR.rotation.x += (this.heldId ? 0.2 : 1) * (pump + Math.max(0, this.armR.rotation.x) * run * 0.2);
       this.armL.rotation.z *= 1 - 0.5 * run;
       this.armR.rotation.z *= 1 - 0.5 * run;
     }
 
-    // ---- standing still ----
-    // The body is never quite still: the weight shifts, the shoulders and the head drift, the head looks about now and then.
-    if (still > 0.01) {
-      const idle = still * (1 - eatK);
-      this.root.rotation.z += Math.sin(t * 0.47) * 0.014 * idle;
-      this.torso.rotation.y += Math.sin(t * 0.31) * 0.025 * idle;
-      this.headPivot.rotation.y += (Math.sin(t * 0.37) + Math.sin(t * 0.91) * 0.5) * 0.09 * idle;
-      this.headPivot.rotation.x += Math.sin(t * 0.53 + 1) * 0.03 * idle;
-      this.armL.rotation.x += Math.sin(t * 0.7) * 0.025 * idle;
-      this.armR.rotation.x += Math.sin(t * 0.7 + 1.3) * 0.025 * idle * (this.heldId ? 0.3 : 1);
-    }
+    // ---- standing: the class's own way, in a fight or not ----
+    // The body is never quite still: it breathes, the weight shifts, the head looks about now and then and the hands move; and the class stands as it does
+    // (feet wide, knees soft, a hand ready to channel...). In a fight it stands to fight. See `ClassMotion`.
+    this.classLayer(eatK, run, air);
     if (this.idleW.sit + this.idleW.stretch + this.idleW.look > 0.002) this.idlePose();
+    this.plantFeet(air, crouch);
     if (slam > 0.002) this.slamPose();
     if (this.bashK.back + this.bashK.push > 0.002) this.bashPose();
     if (this.chargeW > 0.002) this.chargePose();
@@ -1835,6 +2254,177 @@ export class Character {
     this.aimPose(dt);
     this.looseArms(dt);
     this.aimHeld();
+    this.spineStep(dt, a, air);
+    this.elbows(a, air, eatK);
+    this.trail(dt, air);
+  }
+
+  /** How far the spine leans to a side (radians, a spring: the chest follows the hips a beat late and overshoots a little). */
+  private readonly spineRoll = { x: 0, v: 0 };
+
+  /**
+   * The spine and the shoulders in a stride. The chest, head and arms tip about the hip towards the foot that takes the weight, a beat behind the hips,
+   * so one shoulder is higher than the other and the body is seen to flow from the legs up instead of being carried on them; the head stays level against
+   * it; and each shoulder rises a little as its arm swings forward. Nothing here when the body is in the air, flying or swimming.
+   */
+  private spineStep(dt: number, a: number, air: number): void {
+    const g = this.motion.gait;
+    const live = a * (1 - air) * (1 - this.wingW) * (1 - this.swimW);
+    const drive = Math.cos(this.gait) * g.spineRoll * live;
+    if (dt > 0) this.spring(this.spineRoll, drive, dt, 13, 0.5);
+    else this.spineRoll.x = drive;
+    const rz = this.spineRoll.x;
+    if (Math.abs(rz) > 1e-4) {
+      const hip = Character.HIP;
+      this.upper.rotation.z = rz;
+      this.upper.position.set(hip * Math.sin(rz), hip * (1 - Math.cos(rz)), 0);
+      this.headPivot.rotation.z -= rz * g.headStab;
+    }
+    const lift = g.shrug * live * (1 - this.motion.combatArms);
+    if (lift > 1e-4) {
+      this.armL.position.y += Math.max(-1.2, Math.min(1.2, this.armL.rotation.x)) * lift;
+      this.armR.position.y += Math.max(-1.2, Math.min(1.2, this.armR.rotation.x)) * lift;
+    }
+  }
+
+  /** True while the right arm makes a blow, a stroke of mining, a placed block (set by `pose`): the elbow is left to the swing. */
+  private armStruck = false;
+
+  /**
+   * The elbows: an arm in a walk is a little bent and comes up as it swings forward; in a run the forearms are held up and pumped. An arm that is doing
+   * something else (a blow, a bow drawn, a shield raised, a staff, a bite, the pose of a fight) is left as that has it. What is in the hand keeps the way
+   * it points (the wrist turns against the elbow) and goes where the hand goes.
+   */
+  private elbows(a: number, air: number, eatK: number): void {
+    const g = this.motion.gait;
+    const loose = (1 - this.swimW) * (1 - this.wingW) * (1 - this.motion.combatArms * 0.9);
+    const rest = 0.09 * (1 - a);
+    const flexOf = (arm: Limb): number => {
+      const swing = Math.max(0, arm.rotation.x);
+      const walking = (g.elbow + g.elbowSwing * Math.min(1.4, swing)) * a * (1 - 0.5 * air);
+      return (walking + rest) * loose;
+    };
+    const keepsHand = this.carry === 'staff' || this.carry === 'wand' || this.carry === 'hang';
+    const aiming = this.aimKind !== null && this.aimDraw > 0.02;
+    const rightFree = this.armStruck || aiming || this.stabAge < STAB_TIME || keepsHand ? 0 : 1 - eatK;
+    const leftFree = this.shieldObj && this.shieldIsShield ? 0 : 1 - this.raise;
+    // (A blow swung with a blade or a tool folds the forearm for the wind-up and straightens it for the strike.)
+    const fR = flexOf(this.armR) * rightFree * (this.heldId ? 0.75 : 1) + (this.armStruck ? this.sw.elbow : 0);
+    const os = this.offSpec;
+    const carryW = os ? (1 - this.wingW) * (1 - this.swimW) * (1 - 0.5 * this.motion.combatArms) : 0;
+    const fL = flexOf(this.armL) * leftFree * (1 - 0.5 * carryW) + (os ? os.elbow * carryW : 0);
+    this.armR.bend(fR);
+    this.armL.bend(fL);
+    // The hand turns back as the forearm comes up: the weapon points as it did.
+    if (this.heldId) this.heldMount.rotation.x -= fR;
+    // (A thing carried is held as its kind asks: the turn of the forearm is taken back, so a torch stays upright however the arm swings.)
+    if (os) {
+      this.armL.rotation.z += os.inward * carryW;
+      this.offMount.rotation.z = os.roll * carryW;
+      this.offMount.rotation.x = -(this.armL.rotation.x + fL) * os.keep * carryW + os.lean * carryW;
+    } else this.offMount.rotation.x -= fL;
+  }
+
+  /** The length of a leg of the figure (its own units: the hip is where the leg begins). */
+  private static readonly LEG = 0.75;
+
+  /**
+   * The class's stance over the stride: what it does standing (see `ClassMotion.idle`), and the pose of a fight as far as the body is in it: the legs
+   * (only where the body is not striding: they are the stance of a standing fighter, and give way to the gait as it moves), the hips and shoulders turned
+   * to the enemy, the head on it, the hands where the fight has them. The arms themselves are brought to it in `pose`.
+   */
+  private classLayer(eatK: number, run: number, air: number): void {
+    const mo = this.motion;
+    const i = mo.idle;
+    const cp = mo.pose;
+    const calm = 1 - eatK;
+    this.root.position.x += i.rootX;
+    this.root.rotation.z += i.rootRoll;
+    this.legL.rotation.x += i.legLx;
+    this.legR.rotation.x += i.legRx;
+    this.legL.rotation.z += i.legLz;
+    this.legR.rotation.z += i.legRz;
+    this.headPivot.rotation.y += i.headY * calm;
+    this.headPivot.rotation.x += i.headX * calm;
+    this.headPivot.rotation.z += i.headZ * calm;
+    this.torso.rotation.y += i.torsoYaw;
+    this.shoulderTwist += i.torsoYaw;
+    this.armL.rotation.x += i.armLx * calm * (1 - this.raise);
+    this.armR.rotation.x += i.armRx * calm * (this.heldId ? 0.5 : 1);
+    this.armL.rotation.z += i.armLz * calm;
+    this.armR.rotation.z += i.armRz * calm;
+    // The fight: the legs (while they are not striding), the hips and shoulders turned, the head on the enemy.
+    const wL = mo.combatLegs;
+    if (wL > 0) {
+      this.legL.rotation.x += (cp.legLx - this.legL.rotation.x) * wL;
+      this.legR.rotation.x += (cp.legRx - this.legR.rotation.x) * wL;
+      this.legL.rotation.z += (cp.legLz - this.legL.rotation.z) * wL;
+      this.legR.rotation.z += (cp.legRz - this.legR.rotation.z) * wL;
+    }
+    const wB = mo.combat * (1 - 0.6 * run) * (1 - air) * (1 - this.idleW.stretch);
+    if (wB > 0) {
+      this.root.rotation.y += cp.hipYaw * wB;
+      this.headPivot.rotation.y -= cp.hipYaw * wB;
+      this.torso.rotation.y += cp.torsoYaw * wB;
+      this.shoulderTwist += cp.torsoYaw * wB;
+      this.headPivot.rotation.x += cp.headX * wB;
+      this.headPivot.rotation.z += cp.headZ * wB;
+    }
+  }
+
+  /**
+   * Feet on the floor: the hips are lowered by as much as the legs, as they stand (apart, one ahead of the other, in a stride), would otherwise hold
+   * the lowest foot above it. A stride takes only the share the class asks (a Warrior's steps land with weight; a Ranger's body stays level while a foot is
+   * a hair off the ground at the ends of a step). Standing, it takes all, so a wide stance is a lower one and the feet are never in the air.
+   */
+  private plantFeet(air: number, crouch: number): void {
+    const g = this.motion.gait;
+    const k = (1 - this.amp * (1 - g.plant)) * (1 - air) * (1 - this.idleW.sit) * (1 - Math.min(1, crouch * 3)) * (1 - this.chargeW * 0.5);
+    if (k <= 0.001) return;
+    const L = Character.LEG;
+    // (The foot is at the end of the thigh and then of the shin, which is turned back by the bend of the knee.)
+    const foot = (leg: Limb): number => leg.position.y - Character.HIP + L - (0.5 * L * (Math.cos(leg.rotation.x) + Math.cos(leg.rotation.x + leg.shin.rotation.x)) * Math.cos(leg.rotation.z));
+    const low = Math.min(foot(this.legL), foot(this.legR));
+    if (low > 0) this.root.position.y -= low * k * this.root.scale.y;
+  }
+
+  /**
+   * What trails the body, last, over everything: the legs of a robe (they follow the stride a beat late), a weapon in the hand (it tips as the body speeds up
+   * and rolls as it turns) and the shoulders (the arms go round with them, to the angle the stride, the stance and the stretch have turned them to).
+   */
+  private trail(dt: number, air: number): void {
+    const mo = this.motion;
+    const g = mo.gait;
+    const lag = g.legLag * (1 - air) * (1 - this.idleW.sit);
+    for (const [leg, sp] of [[this.legL, this.legSpringL], [this.legR, this.legSpringR]] as const) {
+      const target = leg.rotation.x;
+      if (lag < 0.01 || !(dt > 0)) {
+        sp.x = target;
+        sp.v = 0;
+      } else {
+        this.spring(sp, target, dt, 20, 0.6);
+        leg.rotation.x = target + (sp.x - target) * lag;
+      }
+    }
+    if (this.heldObj && !this.aimKind && this.carry !== 'hang') {
+      // (A staff or a wand sways with the body, a blade less, it being held in the fist: it is left alone in a blow.)
+      const k = (1 - Math.min(1, this.sw.arm * 2)) * (this.carry === 'hand' ? 0.6 : 1);
+      this.heldMount.rotation.x += mo.second.weaponX * k;
+      this.heldMount.rotation.z = mo.second.weaponZ * k;
+    } else this.heldMount.rotation.z = 0;
+    // The shoulders: the arms turn about the spine with the chest (the chest block has its own turn, `torso.rotation.y`).
+    const th = this.shoulderTwist;
+    if (Math.abs(th) > 1e-4 && !this.riding) {
+      const c = Math.cos(th);
+      const sn = Math.sin(th);
+      const q = Character.twistQ.setFromAxisAngle(Character.TWIST_AXIS, th);
+      for (const [arm, sx] of [[this.armL, -0.375], [this.armR, 0.375]] as const) {
+        const z0 = arm.position.z;
+        arm.position.x = sx * c + z0 * sn;
+        arm.position.z = -sx * sn + z0 * c;
+        arm.quaternion.premultiply(q);
+      }
+    }
   }
 
   /** Seconds each of the idle things takes (sitting goes on until something else happens). */
@@ -1880,6 +2470,7 @@ export class Character {
     const rgb: [number, number, number, number] = [0, 0, 0, 0];
     const v = new THREE.Vector3();
     this.root.updateMatrix();
+    this.upper.updateMatrix();
     const parts: { part: PartName; group: THREE.Group; y: number }[] = [
       { part: 'head', group: this.headPivot, y: 0.1 },
       { part: 'body', group: this.torso, y: 1.125 },
@@ -1933,7 +2524,9 @@ export class Character {
             mix(base[face], over[face], col, row, rgb);
             // The middle of the cube, in the part's own space, then out through the pivots.
             v.set(((ix + 0.5) / nx - 0.5) * (s.w / 16), y + ((iy + 0.5) / ny - 0.5) * (s.h / 16), ((iz + 0.5) / nz - 0.5) * (s.d / 16));
-            v.applyMatrix4(group.matrix).applyMatrix4(this.root.matrix);
+            v.applyMatrix4(group.matrix);
+            if (group !== this.legL && group !== this.legR) v.applyMatrix4(this.upper.matrix);
+            v.applyMatrix4(this.root.matrix);
             out.push({ x: v.x, y: v.y, z: v.z, r: rgb[0], g: rgb[1], b: rgb[2] });
           }
     }
@@ -1958,14 +2551,19 @@ export class Character {
       else {
         // Not the same one twice in a row.
         let kind = 1 + Math.floor(Math.random() * 3);
-        if (kind === this.idleLast) kind = (kind % 3) + 1;
+        // (A figure with a class of its own stretches more than it sits or looks about.)
+        if (this.motion.stretchSeconds > 0) {
+          const roll = Math.random();
+          kind = roll < 0.55 ? 2 : roll < 0.8 ? 3 : 1;
+          if (kind === this.idleLast) kind = kind === 2 ? 3 : 2;
+        } else if (kind === this.idleLast) kind = (kind % 3) + 1;
         this.idleKind = this.idleLast = kind;
         this.idleClock = 0;
       }
     }
     if (this.idleKind !== 0) {
       this.idleClock += dt;
-      const len = this.idleKind === 2 ? Character.STRETCH_TIME : this.idleKind === 3 ? Character.LOOK_TIME : Infinity;
+      const len = this.idleKind === 2 ? this.motion.stretchSeconds || Character.STRETCH_TIME : this.idleKind === 3 ? Character.LOOK_TIME : Infinity;
       if (this.idleClock >= len) {
         this.idleKind = 0;
         this.idleWait = 8 + 7 * Math.random();
@@ -1975,11 +2573,13 @@ export class Character {
     const u = this.idleClock / Character.STRETCH_TIME;
     const sm = (x: number): number => x * x * (3 - 2 * x);
     // A stretch comes up slowly, is held, and is let go.
-    const stretch = kind === 2 ? (u < 0.3 ? sm(clamp01(u / 0.3)) : u < 0.7 ? 1 : sm(clamp01((1 - u) / 0.3))) : 0;
+    const own = this.motion.stretchSeconds > 0;
+    const stretch = own ? (kind === 2 ? 1 : 0) : kind === 2 ? (u < 0.3 ? sm(clamp01(u / 0.3)) : u < 0.7 ? 1 : sm(clamp01((1 - u) / 0.3))) : 0;
     const w = this.idleW;
     const to = (v: number, target: number, rin: number, rout: number): number => v + (target - v) * (1 - Math.exp(-dt * (target > v ? rin : rout)));
     w.sit = to(w.sit, kind === 1 ? 1 : 0, 2.6, 6);
-    w.stretch = to(w.stretch, stretch, 14, 8);
+    // (A stretch of its own is made of keys that begin and end at rest: it comes in and goes out over the class's time, and at once when the body has to move.)
+    w.stretch = own ? to(w.stretch, stretch, 10, busy ? 14 : 3 / Math.max(0.15, this.motion.profileNow.transitions.fromStretch)) : to(w.stretch, stretch, 14, 8);
     w.look = to(w.look, kind === 3 ? 1 : 0, 5, 6);
     if (w.sit < 0.002) w.sit = 0;
     if (w.stretch < 0.002) w.stretch = 0;
@@ -2017,7 +2617,8 @@ export class Character {
       this.headPivot.rotation.x += (0.06 + Math.sin(t * 0.3) * 0.05) * k;
       this.root.rotation.z += Math.sin(t * 0.4) * 0.012 * k;
     }
-    if (w.stretch > 0) {
+    if (w.stretch > 0 && this.motion.stretchSeconds > 0) this.classStretch(w.stretch);
+    else if (w.stretch > 0) {
       const k = w.stretch;
       const shake = Math.sin(this.clock * 26) * 0.012 * k;
       mix(this.armL, 'x', 3.0 + shake, k);
@@ -2047,6 +2648,49 @@ export class Character {
       this.torso.rotation.y += yaw * 0.22 * k;
       this.root.rotation.y += yaw * 0.12 * k;
       this.headPivot.rotation.y -= yaw * 0.12 * k;
+    }
+  }
+
+  /**
+   * The stretch of the class over the standing body (see `STRETCHES`): the arms go to where the key puts them, the head, the shoulders and the back move
+   * with them, the weapon in the hand stays pointing up and forward and does not follow the arm into the body, and for a stretch of the knees the legs
+   * bend (they come forward and out and the feet are kept on the floor by `plantFeet`).
+   */
+  private classStretch(k: number): void {
+    const sk = this.sk;
+    const t = this.idleClock;
+    const mage = this.motion.classId === 'mage';
+    // Rolling the wrists: the hands turn over about the arms while they are held out in front.
+    let rollL = 0;
+    let rollR = 0;
+    if (mage && t > 2.9 && t < 4.0) {
+      const env = easeStep((t - 2.9) / 0.25) * easeStep((4.0 - t) / 0.25);
+      rollL = Math.sin(t * 11) * 0.6 * env;
+      rollR = -rollL;
+    }
+    this.armL.rotation.x += (sk.armLx - this.armL.rotation.x) * k;
+    this.armR.rotation.x += (sk.armRx - this.armR.rotation.x) * k;
+    this.armL.rotation.z += (sk.armLz - this.armL.rotation.z) * k;
+    this.armR.rotation.z += (sk.armRz - this.armR.rotation.z) * k;
+    this.armL.rotation.y += (sk.armLy + rollL - this.armL.rotation.y) * k;
+    this.armR.rotation.y += (sk.armRy + rollR - this.armR.rotation.y) * k;
+    if (this.heldId && this.carry !== 'hang') {
+      const staff = this.carry === 'staff' || this.carry === 'wand';
+      const want = (staff ? -STAFF_LEAN : 0.55) - sk.armRx;
+      this.heldMount.rotation.x += (want - this.heldMount.rotation.x) * k;
+    }
+    this.headPivot.rotation.x += sk.headX * k;
+    this.headPivot.rotation.y += sk.headY * k;
+    this.headPivot.rotation.z += sk.headZ * k;
+    this.torso.rotation.y += sk.torsoYaw * k;
+    this.shoulderTwist += sk.torsoYaw * k;
+    this.root.position.y += sk.rise * k;
+    if (sk.bend > 0.001) {
+      const b = sk.bend * k;
+      this.legL.rotation.x += 0.42 * b;
+      this.legR.rotation.x += 0.42 * b;
+      this.legL.rotation.z += -0.2 * b;
+      this.legR.rotation.z += 0.2 * b;
     }
   }
 
@@ -2407,6 +3051,7 @@ export class Character {
     for (const geo of this.classGeos) geo.dispose();
     for (const geo of this.hairGeos) geo.dispose();
     for (const geo of this.armorGeos) geo.dispose();
+    for (const geo of this.armorGlowGeos) geo.dispose();
     for (const m of this.mats) m.dispose();
     for (const t of this.textures) t.dispose();
     for (const g of this.geos) g.dispose();

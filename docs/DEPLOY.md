@@ -81,7 +81,7 @@ ADMIN_ACCOUNTS=<character id>              # (optional) or only these characters
 
 Restart the server after changing it (`systemctl restart solrift-server`). The wallet is the one that signed in (the signature is checked by the server), so nobody can claim it; guests can never
 be admins, and for anyone not listed the commands simply do not exist. Admin mode is off every time you connect. While it is on you have `/time /weather /gamemode /tp /xp /coins` even though the server
-runs with cheats off, plus `/players /kick /ban /unban /bans /mute /unmute /tpto /bring /give /announce` (`/admin help` lists them). Creative mode ends with `/admin off`. Every admin act, and every try by
+runs with cheats off, plus `/players /kick /ban /unban /bans /mute /unmute /tpto /bring /give /spawn /mobs /announce` (`/admin help` lists them). Creative mode ends with `/admin off`. Every admin act, and every try by
 someone who is not an admin, is written to the log: `journalctl -u solrift-server | grep ADMIN`. Bans (by wallet) are kept in the database.
 
 ## 5. Try it

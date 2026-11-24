@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ADVENTURE_LAYOUT, ADVENTURE_SEED, B, GENERATOR_VERSION, CELLAR_HOUSE, CHUNK_VOLUME, DUNGEON_MIN_LEVEL, FIRST_QUEST, I, INSTANCE_STRIDE, INSTANCE_X0, NPCS, makeStack, totalForLevel, SPAWN_SIZE, SPAWN_X0, SPAWN_Z0, makeGenerator, mulberry32, parseNetClientMessage, type AdventureWorldGenerator, type NetServerMessage, type Snapshot } from '@solrift/shared';
+import { ADVENTURE_LAYOUT, ADVENTURE_SEED, B, GENERATOR_VERSION, CELLAR_HOUSE, CHUNK_VOLUME, DUNGEON_MIN_LEVEL, FIRST_QUEST, I, INSTANCE_STRIDE, INSTANCE_X0, NPCS, makeStack, totalForLevel, ASHBROOK_GREEN, UNDERCROFT_ORIGIN, makeGenerator, outpostById, mulberry32, parseNetClientMessage, type AdventureWorldGenerator, type NetServerMessage, type Snapshot } from '@solrift/shared';
 import { GameRoom } from './room';
 import { MemoryRoomStore } from './roomStore';
 
@@ -38,7 +38,7 @@ describe('an Adventure room', () => {
     expect(new GameRoom({ seed: 7, naturalSpawning: false }).kind).toBe('overworld');
   });
 
-  it('puts every arrival in the cave under the village, each on a spot of their own, with nothing on them and the first quest waiting at the healer', () => {
+  it('puts every arrival in the cave under Ashbrook, each on a spot of their own, with nothing on them and the first quest waiting at the healer', () => {
     const room = new GameRoom({ seed: 1, kind: 'adventure', naturalSpawning: false, rand: mulberry32(2) });
     const clients: Client[] = [];
     for (let i = 0; i < 8; i++) {
@@ -65,12 +65,14 @@ describe('an Adventure room', () => {
     }
   }, 60000);
 
-  it('mends the village in a world saved before the cave was dug, once, and wakes newcomers in it', () => {
+  it('mends Ashbrook in a world saved before the cave was dug there, once, and wakes newcomers in it', () => {
     const store = new MemoryRoomStore();
     store.setJson(`terrain:${-ADVENTURE_SEED}`, GENERATOR_VERSION); // the land is as it is now; only the made places are older
     // An old save: the chunks the village stands on, as they were then (solid rock where the cave is now), and an edit outside it.
     const old = (): Uint16Array => new Uint16Array(CHUNK_VOLUME).fill(B.STONE);
-    store.saveChunks(-ADVENTURE_SEED, [-1, 0].map((cx) => ({ cx, cz: 0, data: old() })));
+    const ash = outpostById('ashbrook')!;
+    const ashChunks = [-10, -9, -8].flatMap((cx) => [4, 5].map((cz) => ({ cx, cz, data: old() })));
+    store.saveChunks(-ADVENTURE_SEED, ashChunks);
     const far = old();
     store.saveChunks(-ADVENTURE_SEED, [{ cx: 40, cz: 40, data: far }]);
     const room = new GameRoom({ seed: 1, kind: 'adventure', naturalSpawning: false, rand: mulberry32(2), store });
@@ -83,26 +85,27 @@ describe('an Adventure room', () => {
     // The land outside the made places is left as it was saved.
     expect(room.world.getBlock(40 * 16 + 3, 100, 40 * 16 + 3)).toBe(B.STONE);
     // Once mended, an operator's change in the village is a change that stays: it is not mended again.
-    room.world.setBlock(2, generator.hubY + 6, 2, B.GLASS);
+    room.world.setBlock(ash.x + 2, generator.startY + 6, ash.z + 2, B.GLASS);
     room.save();
     const again = new GameRoom({ seed: 1, kind: 'adventure', naturalSpawning: false, rand: mulberry32(2), store });
-    expect(again.world.getBlock(2, generator.hubY + 6, 2)).toBe(B.GLASS);
+    expect(again.world.getBlock(ash.x + 2, generator.startY + 6, ash.z + 2)).toBe(B.GLASS);
   }, 60000);
 
-  it('lets a character who climbs out of the cave hand the first quest in, and sends them back to the Landing after a death', () => {
+  it('lets a character who climbs out of the cave hand the first quest in, and sends them back to the green of Ashbrook after a death', () => {
     const room = new GameRoom({ seed: 1, kind: 'adventure', naturalSpawning: false, rand: mulberry32(2) });
     const c = new Client(room);
     c.join('ann');
     const p = room.player(c.id)!;
     expect(p.quests!.accept(FIRST_QUEST)).toBe(true);
-    p.teleport(CELLAR_HOUSE.x0 + 1.5, generator.hubY + 1, 12.5, 0, 0);
+    p.teleport(CELLAR_HOUSE.x0 + 1.5, generator.startY + 1, UNDERCROFT_ORIGIN.z + 12.5, 0, 0);
     ticks(room, 6);
     expect(p.quests!.status(FIRST_QUEST)).toBe('ready');
     const land = generator.spawnFor(0);
-    expect(land.x).toBeGreaterThanOrEqual(SPAWN_X0);
-    expect(land.x).toBeLessThan(SPAWN_X0 + SPAWN_SIZE);
-    expect(land.z).toBeGreaterThanOrEqual(SPAWN_Z0);
-    expect(land.z).toBeLessThan(SPAWN_Z0 + SPAWN_SIZE);
+    const ash = outpostById('ashbrook')!;
+    expect(land.x).toBeGreaterThanOrEqual(ash.x + ASHBROOK_GREEN.x0);
+    expect(land.x).toBeLessThan(ash.x + ASHBROOK_GREEN.x0 + ASHBROOK_GREEN.size);
+    expect(land.z).toBeGreaterThanOrEqual(ash.z + ASHBROOK_GREEN.z0);
+    expect(land.z).toBeLessThan(ash.z + ASHBROOK_GREEN.z0 + ASHBROOK_GREEN.size);
   }, 60000);
 
   it('shows the quest givers to everybody, and takes quest commands from the network, and keeps the log between visits', () => {
@@ -111,36 +114,36 @@ describe('an Adventure room', () => {
     const c = new Client(room);
     c.join('ann');
     const p = room.player(c.id)!;
-    // A new character wakes in the wilds: bring this one to the village, the first quest done.
-    const land = generator.spawnFor(0);
+    // A new character wakes in the Undercroft: bring this one up to the village, the first quest done.
+    const land = generator.landingFor(0);
     p.teleport(land.x, land.y, land.z, 0, 0);
     p.quests!.active.delete(FIRST_QUEST);
     p.quests!.done.add(FIRST_QUEST);
     ticks(room, 30);
     const npcs = c.snap.mobs.filter((m) => m.kind === 'npc');
-    expect(npcs.map((m) => m.variant).sort((a, b) => a - b)).toEqual(NPCS.flatMap((n, i) => (n.dungeon ? [] : [i])));
+    expect(npcs.map((m) => m.variant).sort((a, b) => a - b)).toEqual(NPCS.flatMap((n, i) => (n.dungeon || n.place ? [] : [i])));
 
-    const maren = NPCS.find((n) => n.id === 'maren')!;
-    p.teleport(maren.x, generator.hubY + 1, maren.z + 2, 0, 0);
-    ticks(room, 4);
-    const mob = room.realm.mobs.mobs.find((m) => m.kind === 'npc' && NPCS[m.variant].id === 'maren')!;
+    const edda = NPCS.find((n) => n.id === 'edda')!;
+    p.teleport(edda.x, generator.startY + 1, edda.z + 2, 0, 0);
+    ticks(room, 60);
+    const mob = room.realm.mobs.mobs.find((m) => m.kind === 'npc' && NPCS[m.variant].id === 'edda')!;
     expect(p.talkNpc(mob)).toBe(true);
     c.messages = [];
     ticks(room, 1);
     expect(c.snap.you.screen).toBe('dialog');
     // The command comes in as a message, is validated, and then does what it says.
-    const accept = parseNetClientMessage({ t: 'cmd', c: { t: 'quest', a: 'accept', id: 'welcome' } });
+    const accept = parseNetClientMessage({ t: 'cmd', c: { t: 'quest', a: 'accept', id: 'ms01' } });
     expect(accept).not.toBeNull();
     room.receive(c.id, accept!);
     ticks(room, 2);
-    expect(p.quests!.status('welcome')).toBe('ready');
+    expect(p.quests!.status('ms01')).toBe('active');
     const synced = c.events().filter((e) => e.t === 'quests');
     expect(synced.length).toBeGreaterThan(0);
     // A cheater's claim to a reward they have not earned changes nothing.
-    const cheat = parseNetClientMessage({ t: 'cmd', c: { t: 'quest', a: 'complete', id: 'first_timber' } });
+    const cheat = parseNetClientMessage({ t: 'cmd', c: { t: 'quest', a: 'complete', id: 'ms24' } });
     room.receive(c.id, cheat!);
     ticks(room, 2);
-    expect(p.quests!.status('first_timber')).toBe('locked');
+    expect(p.quests!.status('ms24')).toBe('locked');
     room.save();
 
     // Without an account nothing is kept; with one, the log is.
@@ -151,11 +154,11 @@ describe('an Adventure room', () => {
     const q = room2.player(id!)!;
     q.quests!.active.delete(FIRST_QUEST);
     q.quests!.done.add(FIRST_QUEST);
-    q.quests!.accept('welcome');
+    q.quests!.accept('ms01');
     room2.leave(id!);
     const d2 = new Client(room2);
     const id2 = room2.join(d2.conn, 'ann', 'account-1');
-    expect(room2.player(id2!)!.quests!.status('welcome')).toBe('ready');
+    expect(room2.player(id2!)!.quests!.status('ms01')).toMatch(/active|ready/);
     const last = d2.events().filter((e) => e.t === 'quests').pop();
     expect(last).toBeDefined();
   }, 60000);

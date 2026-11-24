@@ -3,6 +3,7 @@ import { MAX_LEVEL } from './experience';
 import type { GearStat } from './gear';
 import { cloneStack, type ItemStack } from './inventory';
 import { I, accessoryOfItem, getItem, type ItemDef } from './items';
+import { HK, isHollowKingItem } from './hollowKingData';
 
 /**
  * Glyphs (the enchantments of the game). A glyph is a rune of power that is inscribed on a piece of equipment at a Runic Altar:
@@ -214,7 +215,8 @@ function fits(item: ItemDef, g: Group): boolean {
     case 'digger':
       return !!item.tool && item.tool.kind !== 'sword';
     case 'bow':
-      return item.use === 'bow';
+      // (The Hollow King's crossbow, too: it shoots flaming bolts.)
+      return item.use === 'bow' || item.id === HK.CROSSBOW;
     case 'rod':
       return item.use === 'fishing_rod';
     case 'durable':
@@ -371,6 +373,8 @@ export function glyphStat(id: number, rank: number): [GearStat, number] | null {
 
 /** The element of the glyphs a piece carries that it has most of (by rank), or null for a piece with none: the colour it glows with. */
 export function dominantElement(s: ItemStack | null | undefined): Element | null {
+  // The relics of the Hollow King always burn, with or without a glyph.
+  if (s && isHollowKingItem(s.id)) return 'ember';
   if (!s?.ench || s.ench.length === 0) return null;
   const score = new Map<Element, number>();
   for (const [id, rank] of s.ench) {

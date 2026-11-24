@@ -90,7 +90,6 @@ const FERN = B.FERN;
 const FLOWERS_MEADOW = [B.DANDELION, B.OXEYE_DAISY, B.CORNFLOWER, B.AZURE_BLUET, B.ALLIUM, B.TULIP_WHITE, B.ROSE];
 const FLOWERS_ALL = [B.DANDELION, B.ROSE, B.OXEYE_DAISY, B.CORNFLOWER, B.AZURE_BLUET, B.ALLIUM, B.TULIP_RED, B.TULIP_ORANGE, B.TULIP_WHITE, B.TULIP_PINK, B.BLUE_ORCHID];
 const FLOWERS_WILD = [BB.heather, BB.lavender, B.CORNFLOWER, B.ALLIUM, B.AZURE_BLUET];
-const MUSH = [B.BROWN_MUSHROOM, B.RED_MUSHROOM];
 
 /** The flora of every key. Anything not listed grows nothing but the odd tuft of grass. */
 export const FLORA: Record<FloraKey, FloraDef> = {
@@ -481,11 +480,9 @@ const SPIRES: Record<SpireKind, { body: number; tip?: number; width: number }> =
 
 export class BeyondFlora {
   private readonly nClump: Simplex;
-  private readonly nPatch: Simplex;
 
   constructor(private readonly host: FloraHost) {
     this.nClump = new Simplex(host.seed * 17 + 5101);
-    this.nPatch = new Simplex(host.seed * 17 + 5102);
   }
 
   private floraAt(col: Column): FloraDef {

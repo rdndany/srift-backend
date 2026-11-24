@@ -19,6 +19,9 @@ const FEATURES: { title: string; text: string }[] = [
   { title: 'Quests and classes', text: 'Pick a class, learn its abilities, follow the quest log from the first village to the first boss.' },
   { title: 'Gear worth chasing', text: 'Rarities, jewels, enchanting and the forge: every piece you find or make can be made better.' },
   { title: 'Ride your mount', text: 'Call a mount when you stand still and ride across the land, over steps and fences, faster than on foot.' },
+  { title: 'Take to the air', text: 'Craft a pair of wings, hover over the ground, then double tap Space to fly. They unfold, beat and bank as you turn, in the manner of your class.' },
+  { title: 'Rifts and the Gilded Tide', text: 'Tears in the world open near you, and every half hour golden creatures hide all over the land. Find them for the Codex of Aurelion, and keep what it opens into.' },
+  { title: 'Achievements', text: 'Tiered achievements for dungeons, bosses and more, counted by the server and kept with your character.' },
   { title: 'It keeps growing', text: 'New bosses, instances and dungeons arrive as expansions, in the manner of an MMO.' },
 ];
 

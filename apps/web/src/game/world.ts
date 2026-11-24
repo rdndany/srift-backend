@@ -169,6 +169,13 @@ export class World implements WorldAccess {
     return this.chunks.has(chunkKey(cx, cz));
   }
 
+  /** The chunks that are loaded (the Gilded Tide hides its creatures over them). */
+  chunkCoords(): { cx: number; cz: number }[] {
+    const out: { cx: number; cz: number }[] = [];
+    for (const c of this.chunks.values()) out.push({ cx: c.cx, cz: c.cz });
+    return out;
+  }
+
   isChunkMeshed(cx: number, cz: number): boolean {
     return this.chunks.get(chunkKey(cx, cz))?.meshed ?? false;
   }

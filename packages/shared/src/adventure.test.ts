@@ -3,6 +3,7 @@ import {
   ADVENTURE_SEED,
   AdventureWorldGenerator,
   B,
+  CastleWorldGenerator,
   BLOCKS,
   CHUNK_SIZE,
   CELLAR_HOUSE,
@@ -27,6 +28,10 @@ import {
   SPAWN_X0,
   SPAWN_Z0,
   UNDERCROFT_DEPTH,
+  UNDERCROFT_ORIGIN,
+  ASHBROOK_GREEN,
+  ASHBROOK_ROAD_TURN_X,
+  outpostById,
   UNDERCROFT_SPAWNS,
   WORLD_KINDS,
   blockIndex,
@@ -47,6 +52,9 @@ const blockAt = (x: number, y: number, z: number): number => {
   return gen.generateChunk(cx, cz)[blockIndex(x - cx * CHUNK_SIZE, y, z - cz * CHUNK_SIZE)];
 };
 
+const UX = UNDERCROFT_ORIGIN.x;
+const UZ = UNDERCROFT_ORIGIN.z;
+
 describe('the adventure world', () => {
   it('is a kind of world, and the same every time', () => {
     expect(gen.kind).toBe('adventure');
@@ -62,7 +70,7 @@ describe('the adventure world', () => {
     expect(BLOCKS[B.WAYSTONE].hardness).toBe(Infinity);
   });
 
-  describe('the Undercroft, the cave under the village', () => {
+  describe('the Undercroft, the cave under Ashbrook', () => {
     const chunks = new Map<string, Uint16Array>();
     const at = (x: number, y: number, z: number): number => {
       const cx = Math.floor(x / CHUNK_SIZE);
@@ -75,7 +83,7 @@ describe('the adventure world', () => {
     const floorY = gen.undercroftY;
 
     it('lies well under the village, far below the sea of grass above it', () => {
-      expect(floorY).toBe(gen.hubY - UNDERCROFT_DEPTH);
+      expect(floorY).toBe(gen.startY - UNDERCROFT_DEPTH);
       expect(floorY).toBeGreaterThan(10);
     });
 
@@ -104,15 +112,15 @@ describe('the adventure world', () => {
         const [x, y, z] = queue[qi];
         expect(IS_LIQUID[at(x, y, z)], `no liquid at ${x},${y},${z}`).toBeFalsy();
         // Underground (below the village's ground) the air is either in the cave or in the stair.
-        if (y < gen.hubY) {
-          const inCave = x >= -17 && x <= 17 && z >= 4 && z <= 29;
-          const inStair = x >= stairX0 && x <= stairX0 + UNDERCROFT_DEPTH && z >= 11 && z <= 13;
+        if (y < gen.startY) {
+          const inCave = x >= UX - 17 && x <= UX + 17 && z >= UZ + 4 && z <= UZ + 29;
+          const inStair = x >= stairX0 && x <= stairX0 + UNDERCROFT_DEPTH && z >= UZ + 11 && z <= UZ + 13;
           expect(inCave || inStair, `air outside the cave at ${x},${y},${z}`).toBe(true);
         }
         for (const [dx, dy, dz] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) {
           const n: [number, number, number] = [x + dx, y + dy, z + dz];
           const key = n.join(',');
-          if (seen.has(key) || n[1] < 1 || n[1] > gen.hubY || IS_SOLID[at(...n)]) continue;
+          if (seen.has(key) || n[1] < 1 || n[1] > gen.startY || IS_SOLID[at(...n)]) continue;
           seen.add(key);
           queue.push(n);
         }
@@ -126,22 +134,22 @@ describe('the adventure world', () => {
       expect(IS_SOLID[at(Math.floor(mirel.x), floorY, Math.floor(mirel.z))]).toBe(1);
       expect(IS_SOLID[at(Math.floor(mirel.x), floorY + 1, Math.floor(mirel.z))]).toBe(0);
       expect(IS_SOLID[at(Math.floor(mirel.x), floorY + 2, Math.floor(mirel.z))]).toBe(0);
-      // The other people of the village still stand on its ground.
-      for (const st of gen.npcStations()) if (st.npc.id !== 'mirel' && !st.npc.dungeon) expect(st.y).toBe(gen.hubY + 1);
+      // The other people of the villages still stand on their ground.
+      for (const st of gen.npcStations()) if (st.npc.id !== 'mirel' && !st.npc.dungeon && !st.npc.place) expect(st.y).toBe(gen.hubY + 1);
     });
 
     it('is in a zone of its own, and the village begins at the top of the stair', () => {
       const s = UNDERCROFT_SPAWNS[0];
       expect(gen.zoneAt(s.x, floorY + 1, s.z)).toBe('undercroft');
-      expect(gen.zoneAt(0.5, gen.hubY + 1, 20.5)).toBe('dawnwatch');
-      expect(gen.zoneAt(CELLAR_HOUSE.x0 + 3.5, gen.hubY + 1, 12.5)).toBe('dawnwatch');
-      expect(gen.zoneAt(CELLAR_HOUSE.x0 + 8.5, gen.hubY - 4, 12.5)).toBe('undercroft');
+      expect(gen.zoneAt(UX + 0.5, gen.startY + 1, UZ + 20.5)).toBe('ashbrook');
+      expect(gen.zoneAt(CELLAR_HOUSE.x0 + 3.5, gen.startY + 1, UZ + 12.5)).toBe('ashbrook');
+      expect(gen.zoneAt(CELLAR_HOUSE.x0 + 8.5, gen.startY - 4, UZ + 12.5)).toBe('undercroft');
     });
 
     it('stays the village\'s: it cannot be dug into, and no monster is born in it', () => {
       const s = UNDERCROFT_SPAWNS[0];
       expect(gen.isProtected(s.x, floorY + 1, s.z)).toBe(true);
-      expect(gen.isProtected(CELLAR_HOUSE.x0 + 6, gen.hubY - 4, 12)).toBe(true);
+      expect(gen.isProtected(CELLAR_HOUSE.x0 + 6, gen.startY - 4, UZ + 12)).toBe(true);
       expect(gen.safeFromMonsters(s.x, s.z)).toBe(true);
     });
 
@@ -156,12 +164,12 @@ describe('the adventure world', () => {
       let found = false;
       for (let qi = 0; qi < queue.length && !found; qi++) {
         const c = queue[qi];
-        if (c.x === goal.x && c.z === goal.z && c.y === gen.hubY + 1) found = true;
+        if (c.x === goal.x && c.z === goal.z && c.y === gen.startY + 1) found = true;
         for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
           for (const dy of [0, 1, -1]) {
             const n = { x: c.x + dx, y: c.y + dy, z: c.z + dz };
             const key = `${n.x},${n.y},${n.z}`;
-            if (seen.has(key) || n.x < -45 || n.x > 25 || n.z < 0 || n.z > 35 || n.y < floorY || n.y > gen.hubY + 3) continue;
+            if (seen.has(key) || n.x < UX - 45 || n.x > UX + 25 || n.z < UZ || n.z > UZ + 35 || n.y < floorY || n.y > gen.startY + 3) continue;
             // Climbing a block needs the cell above the walker's head free too.
             if (dy === 1 && !passable(at(c.x, c.y + 2, c.z))) continue;
             if (!standable(n.x, n.y, n.z)) continue;
@@ -176,13 +184,13 @@ describe('the adventure world', () => {
     it('has a stair of stone-brick steps that rises a block for every block, with room to climb it', () => {
       const x0 = CELLAR_HOUSE.x0 + 2;
       for (let k = 0; k < UNDERCROFT_DEPTH; k++) {
-        for (const z of [11, 12, 13]) {
-          const info = stairInfo(at(x0 + k, gen.hubY - k, z));
+        for (const z of [UZ + 11, UZ + 12, UZ + 13]) {
+          const info = stairInfo(at(x0 + k, gen.startY - k, z));
           expect(info, `step ${k} at z ${z}`).not.toBeNull();
           expect(info!.dir).toBe(1);
         }
         // The middle of the stair is clear (a torch post stands now and then at its sides).
-        for (let dy = 1; dy <= 3; dy++) expect(IS_SOLID[at(x0 + k, gen.hubY - k + dy, 12)], `headroom over step ${k}`).toBe(0);
+        for (let dy = 1; dy <= 3; dy++) expect(IS_SOLID[at(x0 + k, gen.startY - k + dy, UZ + 12)], `headroom over step ${k}`).toBe(0);
       }
     });
   });
@@ -198,10 +206,22 @@ describe('the adventure world', () => {
   it('stands on dry land: the village, the road to the dungeon and the chapel', () => {
     expect(gen.hubY).toBeGreaterThan(SEA_LEVEL + 1);
     expect(gen.ruinY).toBeGreaterThan(SEA_LEVEL + 1);
+    // What is on top of the ground, as generated (the chapel's plot and the road level the land: a river crosses the road, east of the village).
+    const top = (x: number, z: number): number => {
+      const cx = Math.floor(x / CHUNK_SIZE);
+      const cz = Math.floor(z / CHUNK_SIZE);
+      const chunk = gen.generateChunk(cx, cz);
+      let y = 255;
+      while (y > 1 && chunk[blockIndex(x - cx * CHUNK_SIZE, y, z - cz * CHUNK_SIZE)] === B.AIR) y--;
+      return y;
+    };
     for (let x = -HUB_HALF; x < DUNGEON_X + 8; x += 7) {
       for (const z of [-30, -1, 0, 1, 30]) {
-        if (Math.abs(x) > HUB_HALF && Math.abs(z) > 1 && x < DUNGEON_X - 8) continue;
-        expect(gen.columnAt(x, z).height, `land at ${x},${z}`).toBeGreaterThan(SEA_LEVEL + 1);
+        if (Math.abs(x) > HUB_HALF && Math.abs(z) > 1) continue;
+        const y = top(x, z);
+        expect(y, `land at ${x},${z}`).toBeGreaterThan(SEA_LEVEL);
+        // (the village has a pond)
+        if (Math.abs(z) <= 1) expect(IS_LIQUID[blockAt(x, y, z)], `dry at ${x},${z}`).toBeFalsy();
       }
     }
     // The village's ground is level.
@@ -212,10 +232,32 @@ describe('the adventure world', () => {
     }
   });
 
-  it('puts everybody on the Landing, each on a block of their own, for the first 144 arrivals', () => {
+  it('puts everybody who comes back to life on the green of Ashbrook, each on a block of their own, for the first 144 arrivals', () => {
+    const ash = outpostById('ashbrook')!;
+    const g = gen.startY;
+    const seen = new Set<string>();
+    for (let slot = 0; slot < ASHBROOK_GREEN.size * ASHBROOK_GREEN.size; slot++) {
+      const s = gen.spawnFor(slot);
+      expect(s.x).toBeGreaterThanOrEqual(ash.x + ASHBROOK_GREEN.x0);
+      expect(s.x).toBeLessThan(ash.x + ASHBROOK_GREEN.x0 + ASHBROOK_GREEN.size);
+      expect(s.z).toBeGreaterThanOrEqual(ash.z + ASHBROOK_GREEN.z0);
+      expect(s.z).toBeLessThan(ash.z + ASHBROOK_GREEN.z0 + ASHBROOK_GREEN.size);
+      expect(s.y).toBe(g + 1);
+      seen.add(`${Math.floor(s.x)},${Math.floor(s.z)}`);
+      const bx = Math.floor(s.x);
+      const bz = Math.floor(s.z);
+      expect(IS_SOLID[blockAt(bx, g, bz)], `ground at ${bx},${bz}`).toBe(1);
+      for (let dy = 1; dy <= 3; dy++) expect(IS_SOLID[blockAt(bx, g + dy, bz)], `air at ${bx},${bz} +${dy}`).toBe(0);
+    }
+    expect(seen.size).toBe(ASHBROOK_GREEN.size * ASHBROOK_GREEN.size);
+    expect(gen.findSpawn()).toEqual(gen.spawnFor(0));
+    expect(gen.spawnFor(144)).toEqual(gen.spawnFor(0));
+  });
+
+  it('keeps the Landing of Dawnwatch, for travellers: each on a block of their own, for the first 144 arrivals', () => {
     const seen = new Set<string>();
     for (let slot = 0; slot < SPAWN_SIZE * SPAWN_SIZE; slot++) {
-      const s = gen.spawnFor(slot);
+      const s = gen.landingFor(slot);
       expect(s.x).toBeGreaterThanOrEqual(SPAWN_X0);
       expect(s.x).toBeLessThan(SPAWN_X0 + SPAWN_SIZE);
       expect(s.z).toBeGreaterThanOrEqual(SPAWN_Z0);
@@ -229,9 +271,8 @@ describe('the adventure world', () => {
       for (let dy = 1; dy <= 3; dy++) expect(blockAt(bx, gen.hubY + dy, bz)).toBe(B.AIR);
     }
     expect(seen.size).toBe(SPAWN_SIZE * SPAWN_SIZE);
-    expect(gen.findSpawn()).toEqual(gen.spawnFor(0));
     // And it goes round again.
-    expect(gen.spawnFor(144)).toEqual(gen.spawnFor(0));
+    expect(gen.landingFor(144)).toEqual(gen.landingFor(0));
   });
 
   it('stands each quest giver on open ground, with room for their head', () => {
@@ -250,61 +291,38 @@ describe('the adventure world', () => {
     }
   });
 
-  it('knows the village and the dungeon as named places', () => {
+  it('knows the villages and the dungeon as named places', () => {
     expect(gen.zoneAt(0.5, gen.hubY + 1, 0.5)).toBe('dawnwatch');
+    const ash = outpostById('ashbrook')!;
+    expect(gen.zoneAt(ash.x + 0.5, gen.startY + 1, ash.z + 0.5)).toBe('ashbrook');
     expect(gen.zoneAt(INSTANCE_X0 + 8.5, gen.cellarY + 1, gen.roomZ + 0.5)).toBe('hollow_cellar');
     expect(gen.zoneAt(INSTANCE_X0 + 8.5, gen.cellarY + 1, gen.roomZ + 5 * INSTANCE_STRIDE + 0.5)).toBe('hollow_cellar');
-    expect(gen.zoneAt(DUNGEON_X + 0.5, gen.ruinY + 1, DUNGEON_Z + 0.5)).toBeNull();
+    expect(gen.zoneAt(DUNGEON_X + 0.5, gen.ruinY + 1, DUNGEON_Z + 0.5)).toBe('chapel_ruin');
     expect(gen.zoneAt(400, 70, 400)).toBeNull();
     expect(makeGenerator(5).zoneAt(0, 70, 0)).toBeNull();
     expect(makeGenerator(5).npcStations()).toEqual([]);
   });
 
-  it('raises Greykeep north of Dawnwatch, with a gate, a long hall and a spire', () => {
-    const g = gen.hubY;
-    const { gate, yard, keep, nave, naveEnd, spire } = GREYKEEP;
-    // The arch is open well over head height, and the stone closes it above.
-    for (let dy = 1; dy <= 5; dy++) expect(blockAt(gate.x, g + dy, gate.z)).toBe(B.AIR);
-    expect(IS_SOLID[blockAt(gate.x, g + 6, gate.z)]).toBe(1);
-    // The curtain is stone, and the side passage is open ground with sky above it.
-    expect(IS_SOLID[blockAt(-6, g + 2, gate.z)]).toBe(1);
-    expect(IS_SOLID[blockAt(yard.x, g, yard.z)]).toBe(1);
-    expect(blockAt(yard.x, g + 1, yard.z)).toBe(B.AIR);
-    expect(blockAt(yard.x, g + 12, yard.z)).toBe(B.AIR);
-    // The gatehouse is solid in its face, up where the dark notch is.
-    expect(IS_SOLID[blockAt(keep.x, g + keep.dy, keep.z)]).toBe(1);
-    // The hall runs north from the gate, and the back wall closes it.
-    expect(blockAt(nave.x, g + 2, nave.z)).toBe(B.AIR);
-    expect(blockAt(nave.x, g + 2, -63)).toBe(B.AIR);
-    expect(IS_SOLID[blockAt(naveEnd.x, g + 2, naveEnd.z)]).toBe(1);
-    // The spire stands above the hall roof.
-    expect(IS_SOLID[blockAt(spire.x, g + spire.dy, spire.z)]).toBe(1);
-    expect(gen.zoneAt(yard.x + 0.5, g + 2, yard.z + 0.5)).toBe('greykeep');
-    expect(gen.isProtected(gate.x, g + 1, gate.z)).toBe(true);
-    expect(gen.safeFromMonsters(yard.x, yard.z)).toBe(true);
-    expect(gen.zoneAt(0.5, g + 1, 0.5)).toBe('dawnwatch');
+  it('has no castle: where Greykeep stood is open land, and not a protected place', () => {
+    const { gate, yard } = GREYKEEP;
+    expect(gen.zoneAt(yard.x + 0.5, gen.hubY + 2, yard.z + 0.5)).toBeNull();
+    expect(gen.isProtected(gate.x, gen.hubY + 1, gate.z)).toBe(false);
+    expect(gen.safeFromMonsters(yard.x, yard.z)).toBe(false);
+    // Nothing of the gatehouse's arch, wall or towers: the air over the old gate is open sky.
+    for (let dy = 8; dy <= 30; dy += 2) expect(blockAt(gate.x, gen.hubY + dy, gate.z), `height ${dy}`).toBe(B.AIR);
+    expect(blockAt(-27, gen.hubY + 20, -61)).toBe(B.AIR);
   });
 
-  it('can be climbed: ladders up the towers, stairs to the wall walk, and a clear way onto both', () => {
-    const g = gen.hubY;
-    // The south-west tower: a ladder against its front wall from the floor to the deck, and clear air above it.
-    for (let dy = 1; dy <= 15; dy++) expect(ladderInfo(blockAt(-27, g + dy, -61))?.facing, `ladder at height ${dy}`).toBe(2);
-    expect(blockAt(-27, g + 16, -61)).toBe(B.AIR);
-    expect(blockAt(-27, g + 17, -61)).toBe(B.AIR);
-    // Stairs run up the inside of the front wall, one block per step, and the rail leaves a gap where they arrive.
-    for (let i = 0; i < 10; i++) expect(stairInfo(blockAt(-8 - i, g + 1 + i, -65))?.dir, `step ${i}`).toBe(1);
-    for (let x = -17; x <= -15; x++) expect(blockAt(x, g + 11, -64), `gap at ${x}`).toBe(B.AIR);
-    // The walk itself is stone with two blocks of air above it, and runs into the tower.
-    for (let x = -20; x <= -6; x++) {
-      expect(IS_SOLID[blockAt(x, g + 10, -63)], `walk at ${x}`).toBe(1);
-      expect(blockAt(x, g + 11, -63)).toBe(B.AIR);
-      expect(blockAt(x, g + 12, -63)).toBe(B.AIR);
-    }
-    expect(blockAt(-21, g + 11, -63)).toBe(B.AIR);
-    expect(blockAt(-21, g + 12, -63)).toBe(B.AIR);
-    // The ground-floor door of the tower and the doors of the gatehouse hall.
-    for (let dy = 1; dy <= 3; dy++) expect(blockAt(-21, g + dy, -68), `tower door at ${dy}`).toBe(B.AIR);
-    for (const x of [-5, 5]) for (let dy = 11; dy <= 12; dy++) expect(blockAt(x, g + dy, -63), `hall door at ${x}, ${dy}`).toBe(B.AIR);
+  it('puts the land back where the castle stood, in a world that was saved with it (the castle world has the old chunk)', () => {
+    const castle = new CastleWorldGenerator(ADVENTURE_SEED);
+    // A chunk through the great hall, as the old Adventure world saved it.
+    const saved = castle.generateChunk(0, -6);
+    expect(gen.mendProtected(0, -6, saved)).toBe(true);
+    expect([...saved]).toEqual([...gen.generateChunk(0, -6)]);
+    // Mended, there is nothing more to mend; a chunk out of its reach is left alone.
+    expect(gen.mendProtected(0, -6, saved)).toBe(false);
+    const far = gen.generateChunk(20, 20);
+    expect(gen.mendProtected(20, 20, far)).toBe(false);
   });
 
   it('has a gravel road from the village to the chapel', () => {
@@ -327,9 +345,27 @@ describe('the adventure world', () => {
     for (let x = DUNGEON_X - 4; x < DUNGEON_X; x++) expect(IS_SOLID[blockAt(x, g + 1, DUNGEON_Z)], `walkway at ${x}`).toBe(0);
   });
 
-  it('can be walked from the Landing, through the village and along the road, to the portal in the chapel', () => {
+  it('lays the road from Ashbrook out: east along its street, north, and east again to the west gate of Dawnwatch', () => {
+    const ash = outpostById('ashbrook')!;
+    const top = (x: number, z: number): number => {
+      let y = 255;
+      while (y > 1 && (blockAt(x, y, z) === B.AIR || !IS_SOLID[blockAt(x, y, z)])) y--;
+      return blockAt(x, y, z);
+    };
+    const spots: [number, number][] = [[ash.x + ash.half + 10, ash.z], [-90, ash.z], [-60, ash.z], [ASHBROOK_ROAD_TURN_X, ash.z - 20], [ASHBROOK_ROAD_TURN_X, ash.z >> 1], [ASHBROOK_ROAD_TURN_X, 8], [-40, 0]];
+    for (const [x, z] of spots) expect([B.GRAVEL, B.COBBLE], `road at ${x},${z}`).toContain(top(x, z));
+  });
+
+  it('has a gravel road from Ashbrook to the west gate of Dawnwatch, and the way along it can be walked', () => {
+    const ash = outpostById('ashbrook')!;
     const world = new HeadlessWorld(gen);
     const start = gen.spawnFor(0);
+    expect(walk(world, { x: Math.floor(start.x), y: start.y, z: Math.floor(start.z) }, { x: -HUB_HALF + 2, y: gen.hubY + 1, z: 0 }, { x0: ash.x - ash.half - 4, x1: -HUB_HALF + 4, z0: -8, z1: ash.z + ash.half })).toBe(true);
+  }, 120000);
+
+  it('can be walked from the Landing, through the village and along the road, to the portal in the chapel', () => {
+    const world = new HeadlessWorld(gen);
+    const start = gen.landingFor(0);
     const exit = gen.instanceExit();
     expect(walk(world, { x: Math.floor(start.x), y: start.y, z: Math.floor(start.z) }, { x: DUNGEON_X - 1, y: gen.ruinY + 1, z: DUNGEON_Z }, { x0: -60, x1: DUNGEON_X + 5, z0: -60, z1: 60 })).toBe(true);
     // And the way out of the portal comes out in the open, in front of it.

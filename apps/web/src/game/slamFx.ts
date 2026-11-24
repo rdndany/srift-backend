@@ -1,6 +1,5 @@
-import * as THREE from 'three';
 import type { Fx } from '@solrift/shared';
-import { clamp01, easeOut, type FxEntry, type SpellKit } from './spellFx';
+import { easeOut, type FxEntry, type SpellKit } from './spellFx';
 import { Cubes, DUST, EARTH, FLASH, GRID, PALE, SPARKS, STONE, between, drawChunks, drawPuffs, makeChunks, makePuffs, pal, seeded, snap, steps, voxelMaterial, type Rng } from './voxelFx';
 
 /**

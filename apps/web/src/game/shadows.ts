@@ -270,7 +270,6 @@ export class SunShadows {
   private readonly stage = new THREE.Scene();
   private readonly list: THREE.Object3D[] = [];
   private readonly none: THREE.Object3D[] = [];
-  private readonly mid = new THREE.Vector3();
   private readonly frustum = new THREE.Frustum();
   private readonly viewProj = new THREE.Matrix4();
   private readonly ball = new THREE.Sphere();

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ELEMENTS, dominantElement, makeStack, parseGear, tooltipLines, type ClassId, type ItemStack, type TipColor, type TipLine } from '@solrift/shared';
+import { ELEMENTS, dominantElement, isHollowKingItem, makeStack, parseGear, tooltipLines, type ClassId, type ItemStack, type TipColor, type TipLine } from '@solrift/shared';
 import type { DropLike } from './clientSession';
 import type { ItemIcons } from './icons';
 import type { EntityLight } from './entityLight';
@@ -106,7 +106,7 @@ export class ItemEntities {
   /** The body of a new drop: the item's solid model (with materials of its own, to be lit by itself), or its flat picture when there is none. */
   private make(d: DropLike): Piece {
     const piece = this.body(d);
-    const el = d.stack.ench && d.stack.ench.length > 0 ? dominantElement(this.stackOf(d)) : null;
+    const el = (d.stack.ench && d.stack.ench.length > 0) || isHollowKingItem(d.stack.id) ? dominantElement(this.stackOf(d)) : null;
     if (el) {
       const color = ELEMENTS[el].color;
       addAura(piece.obj, color);

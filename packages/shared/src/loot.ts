@@ -201,6 +201,28 @@ export const LOOT_TABLES = {
       e(I.ENDER_PEARL, 3, 1, 2),
     ],
   },
+  /** The Hollow King's hoard (the chest he leaves behind): treasure, glyphs, jewels and a good piece of gear. One of his nine relics comes besides, see hollowKing.ts. */
+  hollow_king: {
+    rolls: [9, 13],
+    gear: { chance: 1, level: [9, 14], rarity: [0, 45, 55] },
+    entries: [
+      e(I.GOLD_INGOT, 8, 4, 10),
+      e(I.IRON_INGOT, 6, 4, 10),
+      e(I.DIAMOND, 7, 2, 5),
+      e(I.EMERALD, 6, 2, 6),
+      e(I.ENCHANTED_BOOK, 9),
+      e(I.EXPERIENCE_BOTTLE, 8, 3, 6),
+      e(I.JEWEL_DAWN, 5, 1, 2),
+      e(I.JEWEL_RIFT, 5, 1, 2),
+      e(I.JEWEL_BLOOM, 4, 1, 2),
+      e(I.WARDEN_SCROLL, 3, 1, 2),
+      e(I.HOLLOW_BONE, 3, 1, 3),
+      e(I.ENDER_PEARL, 3, 1, 3),
+      e(I.COAL, 5, 6, 16),
+      e(BB.obsidian_bricks, 3, 4, 10),
+      e(BB.cinnabar_ore, 3, 2, 6),
+    ],
+  },
 } as const satisfies Record<string, LootTable>;
 
 export type LootTableName = keyof typeof LOOT_TABLES;

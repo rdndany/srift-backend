@@ -1,10 +1,13 @@
 import * as THREE from 'three';
-import { BLOCKS, I, getItem, lanternInfo } from '@solrift/shared';
+import { BLOCKS, HK, I, getItem, lanternInfo } from '@solrift/shared';
 import { mageProp } from '../mageGear';
 import { FIGURE_AIM } from './aim';
 import type { HeldViews } from './kinds';
 import type { ItemModels } from './models';
 import { stripAura } from '../enchantFx';
+
+/** Where the handle of a sword picture sits relative to the origin of the sprite (the sprite moved by this has its grip at the figure's hand). */
+const SWORD_GRIP: [number, number] = [0.32, 0.26];
 
 /**
  * Items as they are seen outside the first-person hand: in the hand of a blocky figure, on its shield arm, and lying on the ground.
@@ -25,6 +28,7 @@ export class ItemFigures {
     if (id === 0) return null;
     // The Mage's staff, wand and orb are real little models of blocks in a figure's hand (the first-person hand keeps the pictures).
     if (id === I.STAFF) return mageProp('staff');
+    if (id === HK.STAFF) return mageProp('ember_staff');
     if (id === I.WAND) return mageProp('wand');
     if (id === I.ORB) return mageProp('orb');
     if (lanternInfo(id)) {
@@ -65,6 +69,8 @@ export class ItemFigures {
     }
     // Class weapons are centred for the figure's hand (only the first-person copy is held by the grip).
     if (view.swing && !item.tool) inner.children[0]?.position.set(0, 0, 0);
+    // A blade is held by its handle, as it is in a real hand: the crossguard just over the fist and the pommel just under it (the picture's origin is up at the base of the blade).
+    else if (view.swing && item.tool?.kind === 'sword') inner.children[0]?.position.set(SWORD_GRIP[0], SWORD_GRIP[1], 0);
     const cube = item.block !== null && BLOCKS[item.block].shape === 'cube';
     const wrap = new THREE.Group();
     wrap.add(inner);

@@ -19,7 +19,7 @@ import { hash2, Simplex } from './noise';
 
 export interface RealmFeatureHost {
   seed: number;
-  realms: RealmMap;
+  realms: Pick<RealmMap, 'at' | 'nearby'>;
   /** The height of a column's ground (after terrain, before dressing). */
   heightAt(wx: number, wz: number): number;
 }

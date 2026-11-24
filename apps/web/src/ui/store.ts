@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { QuestLog, type MobKind, type BountyView, type BossView, type RiftView, type DungeonView, type AttrKey, type AuctionCommand, type AuctionView, type StashCommand, type StashView, type ClassView, type Container, type CreativeAmount, type GearRoll, type GearSpec, type ClassId, type MountView, type InspectView, type SocialAction, type SocialView, type TradeAct, type TradeView, type Menu, type MenuKind, type PartyAction, type PartyMemberView, type QuestLogJSON, type RecipeBook } from '@solrift/shared';
+import type { LandClaimView, LandDetail, LandPreview, LandPublicConfig, Perms } from '@solrift/shared';
 import type { ItemIcons } from '../game/icons';
 import type { MapData } from '../game/mapData';
 
@@ -81,6 +82,8 @@ export interface UiApi {
   openPlayerMenu(name: string, x: number, y: number): void;
   /** Close it; `relock` (the default) goes back to the game when no other window holds the mouse. */
   closePlayerMenu(relock?: boolean): void;
+  /** Finish writing a sign: its lines are sent to the server, or null leaves it as it was. Either way the editor closes. */
+  signDone(lines: string[] | null): void;
   /** Use the ability on a button of the ability bar (0..3); the server decides whether it goes off. */
   ability(slot: number): void;
   /** Spend `n` stat points on Strength, Agility, Vitality or Energy, or take them all back. The server counts them. */
@@ -100,6 +103,82 @@ export interface UiApi {
   deleteWorld(): Promise<void>;
   /** Furnace progress for the open furnace menu (0..1), or null. */
   furnaceState(): { burn: number; cook: number } | null;
+}
+
+/** What the Land Surveyor and the land windows show (see game/landClient.ts, which owns it). */
+export interface LandUi {
+  /** The server's rules for land (null: this world has none, and nothing of it is shown). */
+  cfg: LandPublicConfig | null;
+  /** The claims round the player (the server sends the ones within sight). */
+  nearby: LandClaimView[];
+  /** The player's own claims, and the ones they may build in. */
+  mine: LandClaimView[];
+  /** The Surveyor is in the hand. */
+  holding: boolean;
+  /** Corners marked, whether the shape is closed, and what is wrong with it that can be seen at once. */
+  corners: number;
+  closed: boolean;
+  fault: string | null;
+  /** How straight the shape is, in words, and whether it is a perfect rectangle or square (see game/landMarkers.ts). */
+  straightText: string | null;
+  perfect: boolean;
+  /** What the server last said of the shape (its price and whether it can be bought). */
+  preview: LandPreview | null;
+  /** The claim being grown (the shape is the new outline of it), or null. */
+  expanding: string | null;
+  /** What the crosshair is on while the Surveyor is held. */
+  look: LandLook | null;
+  /** The confirmation of a purchase, the window of the player's lands, and the answer of the last thing asked. */
+  confirm: boolean;
+  manage: boolean;
+  busy: boolean;
+  result: { what: string; ok: boolean; text: string; stamp: number } | null;
+  /** The claim the window has open, as the server described it. */
+  detail: LandDetail | null;
+  /** The tutorial card (first times the Surveyor is held). */
+  tutorial: boolean;
+  /** Where the player stands (x, z), a couple of times a second, for 'how far is my land'. */
+  at: [number, number];
+  /** A line of context near the crosshair ("Available Land"), and when it was said (so it fades). */
+  hint: { text: string; tone: 'good' | 'warn' | 'bad' | 'info'; stamp: number } | null;
+}
+
+/** What the crosshair is on, with the Surveyor in the hand. Never carries an account, only names. */
+export interface LandLook {
+  kind: 'mine' | 'guild' | 'shared' | 'other' | 'wild' | 'protected';
+  name: string;
+  owner: string;
+  /** A line of its own (the server's territory says what it is). */
+  note?: string;
+  /** Others have rights here besides the owner. */
+  shared: boolean;
+  canBuild: boolean;
+  /** What the player may do here. */
+  can: Perms | null;
+  area: number;
+}
+
+/** What the land windows ask of the game. Implemented in game/landClient.ts. */
+export interface LandApi {
+  confirmOpen(): void;
+  confirmClose(): void;
+  buy(name: string): void;
+  /** Throw away the marked corners. */
+  cancel(): void;
+  openManage(): void;
+  closeManage(): void;
+  refresh(): void;
+  select(id: string | null): void;
+  rename(id: string, name: string): void;
+  grant(id: string, kind: 'player' | 'guild', who: string, role: string): void;
+  revoke(id: string, kind: 'player' | 'guild', who: string): void;
+  setPublic(id: string, perms: Partial<Perms>, guildRole?: 'builder' | 'visitor'): void;
+  release(id: string): void;
+  unrelease(id: string): void;
+  /** Put the claim's outline in the Surveyor, to be changed and bought as an expansion. */
+  expand(id: string): void;
+  recover(): void;
+  dismissTutorial(): void;
 }
 
 /** One line of the pickup feed. */
@@ -203,6 +282,8 @@ export interface UiState {
   mobTarget: MobTargetView | null;
   /** The menu of a player, and where it is drawn. */
   playerMenu: { name: string; x: number; y: number } | null;
+  /** The board of a sign being written (its block and the four lines it says now), or null. */
+  signEdit: { x: number; y: number; z: number; lines: string[] } | null;
   /** The trade you are in (the table), and who is asking you to trade. */
   trade: TradeView | null;
   tradeAsk: string | null;
@@ -219,6 +300,12 @@ export interface UiState {
   invTab: 'inventory' | 'attributes' | 'crafting' | 'spells';
   /** A window drawn for the loading screen only, so that its first real opening paints nothing new (see warmWindows in main.ts). */
   warmMenu: Menu | null;
+  /**
+   * The parts of the screen that only come up in a fight or a rift (the boss's frame and what it says, the rift and dungeon
+   * trackers) drawn for the loading screen only, nearly clear: the browser builds the painting of each the first time it is on
+   * the screen and stands still while it does (see warmWindows in main.ts).
+   */
+  warmHud: boolean;
   /** Your mount: the one ridden, the one in the mount slot (H summons it), and the cooldowns of its two skills. */
   mount: MountView;
   /** What a jewel just did to the piece in this slot of the window (shown floating above it; `n` restarts it). */
@@ -245,6 +332,9 @@ export interface UiState {
   /** The Codex of the World Beyond (key B): whether it is open, and what has been found (null outside that world). */
   codexOpen: boolean;
   codex: CodexView | null;
+  /** The land: the Surveyor, its shape and price, the confirmation and the window of the player's lands. */
+  land: LandUi;
+  landApi: LandApi | null;
   /** Notifications of a find or an achievement, shown a few seconds (the game removes them). */
   beyondNotes: { key: number; kind: 'discovery' | 'achievement'; title: string; text: string }[];
   api: UiApi | null;
@@ -290,6 +380,7 @@ export const useUi = create<UiState>()(() => ({
   target: null,
   mobTarget: null,
   playerMenu: null,
+  signEdit: null,
   trade: null,
   tradeAsk: null,
   cls: null,
@@ -299,6 +390,7 @@ export const useUi = create<UiState>()(() => ({
   bossLine: null,
   invTab: 'inventory',
   warmMenu: null,
+  warmHud: false,
   mount: { mount: 0, pick: 0, cd: [0, 0] },
   jewelFx: null,
   altarFail: null,
@@ -313,9 +405,18 @@ export const useUi = create<UiState>()(() => ({
   mapZoom: 2,
   codexOpen: false,
   codex: null,
+  land: freshLand(),
+  landApi: null,
   beyondNotes: [],
   api: null,
 }));
+
+/** The land state of a game that has not met any land yet. */
+export function freshLand(): LandUi {
+  return { cfg: null, nearby: [], mine: [], holding: false, corners: 0, closed: false, fault: null, straightText: null, perfect: false, preview: null, expanding: null, look: null, confirm: false, manage: false, busy: false, result: null, detail: null, tutorial: false, at: [0, 0], hint: null };
+}
+
+export const setLand = (patch: Partial<LandUi>): void => useUi.setState((s) => ({ land: { ...s.land, ...patch } }));
 
 /** The session sent the whole quest log. */
 export const setQuests = (log: QuestLogJSON): void =>

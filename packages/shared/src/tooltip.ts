@@ -8,6 +8,7 @@ import { CLASSES, offhandModifier, type ClassId } from './classes';
 import { formatEmberTime, EMBER_CAST, EMBER_COOLDOWN } from './emberstone';
 import { gearSuffix, glyphLine, optionStat, rarityDef, resourceNameOf, rolledStats, statLine } from './gear';
 import { forgeHint, jewelDef, jewelKind } from './jewels';
+import { HK_LORE, HK_NAMES, isHollowKingItem } from './hollowKingData';
 import { BOTTLE_XP_MAX, BOTTLE_XP_MIN, I, PEARL_TRIP_DAMAGE, bagSlotsOf, getItem, isUndroppable, companionOfItem, wingOfItem, accessoryOfItem, mountOfItem, outfitSetOfItem, skillBookAbility, type ItemKind } from './items';
 import { MOUNT_CAST, mountDef, mountSpeedText } from './mounts';
 import { abilityCost, castCost, scaled } from './tuning';
@@ -128,6 +129,7 @@ export function tooltipName(stack: ItemStack): string {
   const item = getItem(stack.id);
   const plus = stack.gear?.u ? ` +${stack.gear.u}` : '';
   if (stack.name) return stack.name + plus;
+  if (HK_NAMES[stack.id]) return HK_NAMES[stack.id] + plus;
   if (stack.gear) return `${title(item.name)} ${gearSuffix(stack.gear)}`.trim() + plus;
   const jewel = jewelKind(stack.id);
   if (jewel) return jewelDef(jewel).name;
@@ -168,9 +170,15 @@ export function tooltipLines(stack: ItemStack | null, viewerClass?: ClassId | nu
   const palOf = companionOfItem(stack.id);
   const wingsOf = wingOfItem(stack.id);
   const jewelryOf = accessoryOfItem(stack.id);
-  const nameColor: TipColor = jewelryOf ? (jewelryOf.material === 'diamond' ? 'epic' : jewelryOf.material === 'gold' ? 'rare' : jewelryOf.material === 'iron' ? 'good' : 'name') : wingsOf ? (wingsOf.tier === 2 ? 'epic' : 'superior') : palOf ? 'epic' : setOf ? (setOf.tier === 'epic' ? 'epic' : setOf.tier === 'rare' ? 'superior' : 'uncommon') : hornOf ? (hornOf.speed >= 2 ? 'epic' : hornOf.speed > 1.6 ? 'superior' : 'uncommon') : bagSlots > 0 ? bagTone(stack.id) : rolled ? rarityTone(rolled.r) : stack.gear || jewels ? 'jewel' : enchanted || item.storesEnchants ? 'rare' : 'name';
+  const nameColor: TipColor = isHollowKingItem(stack.id) ? 'epic' : jewelryOf ? (jewelryOf.material === 'diamond' ? 'epic' : jewelryOf.material === 'gold' ? 'rare' : jewelryOf.material === 'iron' ? 'good' : 'name') : wingsOf ? (wingsOf.tier === 2 ? 'epic' : 'superior') : palOf ? 'epic' : setOf ? (setOf.tier === 'epic' ? 'epic' : setOf.tier === 'rare' ? 'superior' : 'uncommon') : hornOf ? (hornOf.speed >= 2 ? 'epic' : hornOf.speed > 1.6 ? 'superior' : 'uncommon') : bagSlots > 0 ? bagTone(stack.id) : rolled ? rarityTone(rolled.r) : stack.gear || jewels ? 'jewel' : enchanted || item.storesEnchants ? 'rare' : 'name';
   const lines: TipLine[] = [{ text: tooltipName(stack), color: nameColor, ...(stack.name ? { italic: true } : {}) }];
-  lines.push({ text: rolled ? `${rarityDef(rolled.r).name} ${itemKind(stack.id)}` : itemKind(stack.id), color: rolled ? rarityTone(rolled.r) : 'kind' });
+  // (A relic of the Hollow King is Epic, always: the ring and the necklace have no roll to say so.)
+  lines.push(isHollowKingItem(stack.id) ? { text: `${rarityDef(3).name} ${itemKind(stack.id)}`, color: 'epic' } : { text: rolled ? `${rarityDef(rolled.r).name} ${itemKind(stack.id)}` : itemKind(stack.id), color: rolled ? rarityTone(rolled.r) : 'kind' });
+
+  if (isHollowKingItem(stack.id)) {
+    lines.push({ text: 'Relic of the Hollow King: burns with ember fire', color: 'ench' });
+    lines.push({ text: HK_LORE[stack.id], color: 'dim', italic: true });
+  }
 
   if (jewels) {
     lines.push({ text: jewelDef(jewels).blurb, color: 'stat' });
@@ -226,6 +234,13 @@ export function tooltipLines(stack: ItemStack | null, viewerClass?: ClassId | nu
   if (stack.id === I.COMPASS) {
     lines.push({ text: 'Always points north', color: 'good' });
     lines.push({ text: 'Hold it and turn around: the red needle shows where north is', color: 'dim' });
+  }
+
+  if (item.use === 'land_surveyor') {
+    lines.push({ text: 'Mark the boundaries of your future home. Claim the land, and shape it as you wish.', color: 'good' });
+    lines.push({ text: 'Left-click places a corner, right-click takes the last one back', color: 'dim' });
+    lines.push({ text: 'E closes the shape and shows the price; Esc cancels; B opens your land', color: 'dim' });
+    lines.push({ text: 'Reusable. In the hand you cannot attack, mine or build', color: 'dim' });
   }
 
   if (item.use === 'map') {

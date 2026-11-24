@@ -25,7 +25,6 @@ import {
   makeStack,
   Container,
   lookFromName,
-  parseLookCode,
   makeGenerator,
   parsePlayerSave,
   parseNetClientMessage,
@@ -40,6 +39,7 @@ import {
   type DropView,
   type XpOrbView,
   type BobberView,
+  type SignView,
   bobberMode,
   totalForLevel,
   MAX_LEVEL,
@@ -81,7 +81,6 @@ import {
   rankError,
   type GuildCard,
   type GuildData,
-  type ChatChannel,
   type SocialAction,
   Trade,
   TRADE_ASK_SECONDS,
@@ -90,11 +89,19 @@ import {
   type TradeSide,
   type TradeSideView,
   type TradeView,
+  MOBS,
+  type MobKind,
+  LandService,
+  MemoryLandStore,
+  landConfigWith,
+  MAX_COINS,
+  type LandConfigOverride,
+  type LandStore,
 } from '@solrift/shared';
 
 import { cleanQuery, type AuctionQuery, type AuctionView, type TokenMove } from '@solrift/shared';
 import type { RoomStore } from './roomStore';
-import { BANS_KEY, findItem, isAdminIdentity, itemMatches, parseBans, type AdminEvent, type AdminOptions, type Bans } from './admin';
+import { BANS_KEY, findItem, isAdminIdentity, itemMatches, norm, parseBans, type AdminEvent, type AdminOptions, type Bans } from './admin';
 import { entryOf, findMember, inspectView, socialView, splitTarget } from './social';
 import { GuildRegistry } from './guilds';
 
@@ -181,6 +188,10 @@ export interface RoomOptions {
 
   /** Where the world and signed-in players' progress are kept. Without it nothing survives a restart. */
   store?: RoomStore;
+  /** Where claims, the record of what was changed and the receipts of purchases are kept (in memory when left out: nothing survives a restart, like the rest of such a room). */
+  land?: LandStore;
+  /** The land rules to change from the defaults in landConfig.ts (prices, limits, timers). */
+  landConfig?: LandConfigOverride;
   /** Seconds between automatic saves. */
   autosaveSeconds?: number;
   /** Suspicion score at which a player is kicked (see `strike`). Default 50. */
@@ -270,10 +281,14 @@ interface Member {
   messages: number;
   /** The ability effects this player has been sent in full, and where (a client keeps what it was told: later snapshots only name them, see `snapshot`). */
   fxSent: Map<number, string>;
+  /** The signs this player has been sent: the sign revision and the 8-block square they were near (a snapshot carries the list again when either changes), and how many there were. */
+  signRev: number;
+  signCell: string;
+  signCount: number;
 }
 
 /** The commands of admin mode (`/admin` itself is handled with them). Anyone else who types one is told it does not exist. */
-const ADMIN_COMMANDS = new Set(['players', 'kick', 'ban', 'unban', 'bans', 'mute', 'unmute', 'tpto', 'bring', 'give', 'announce']);
+const ADMIN_COMMANDS = new Set(['players', 'kick', 'ban', 'unban', 'bans', 'mute', 'unmute', 'tpto', 'bring', 'give', 'announce', 'spawn', 'mobs', 'land']);
 /** What a muted player may not say. */
 const CHAT_COMMANDS = new Set(['w', 'whisper', 'tell', 'r', 'reply', 'g', 'p', 'me', 'emote']);
 
@@ -303,6 +318,8 @@ export const DEFAULT_MAX_PLAYERS = 120;
 const VIEW_PLAYERS = 160;
 const VIEW_MOBS = 96;
 const VIEW_DROPS = 64;
+/** How far from a player the writing on signs is sent (blocks): a little beyond where the client draws it. */
+const VIEW_SIGNS = 48;
 /**
  * In a crowd a client is sent the players nearest to it every snapshot (the ones the game draws as figures: `LOD.maxFull` in the client is
  * 20) and each of the others one snapshot in `FAR_PLAYER_EVERY`, the ids of the rest in `Snapshot.keep` so that the client does not drop them.
@@ -348,6 +365,10 @@ export class GameRoom {
   private nextId = 1;
   /** Every guild of the realm. */
   readonly guilds: GuildRegistry;
+  /** Claims and the memory of what was changed (see landService.ts). */
+  readonly land: LandService;
+  /** The generator was changed since the world was saved: the saved terrain edits were dropped, and the land re-applies the claimed ones. */
+  private generatorChanged = false;
   private timer: ReturnType<typeof setInterval> | null = null;
   private pendingBlocks: number[] = [];
   private readonly dirtyChunks = new Set<string>();
@@ -382,10 +403,76 @@ export class GameRoom {
       };
     }
     this.guilds = new GuildRegistry(opts.store ?? null);
+    this.land = this.makeLand(opts.land ?? new MemoryLandStore());
+    this.realm.land = this.land;
+    this.realm.landSave = (p) => {
+      for (const m of this.members.values()) if (m.player === p) return m.key ? [`player:${m.key}`, p.savePlayer()] : null;
+      return null;
+    };
+    this.land.load();
+    if (this.generatorChanged) {
+      this.land.onGeneratorChanged();
+      this.generatorChanged = false;
+    }
     this.world.onChange = (x, y, z, id) => {
       this.pendingBlocks.push(x, y, z, id);
       this.dirtyChunks.add(`${x >> 4},${z >> 4}`);
+      // The land is told every change, with the hand that made it (a player's edit goes through the guarded world: nobody's hand is the wild).
+      this.land.onBlockChange(x, y, z, id, this.land.actor, this.land.actor === null);
     };
+  }
+
+  /** The land of this room: claims, its memory of what was changed, and what it needs from the room (players, containers, guilds, Auren). */
+  private makeLand(store: LandStore): LandService {
+    const members = this.members;
+    return new LandService({
+      world: this.kind === 'adventure' ? 'adventure' : `${this.kind}:${this.seed}`,
+      cfg: landConfigWith(this.opts.landConfig),
+      store,
+      generator: this.world.generator,
+      getBlock: (x, y, z) => this.world.getBlock(x, y, z),
+      setBlock: (x, y, z, id) => this.world.setBlock(x, y, z, id),
+      now: this.opts.clock ?? Date.now,
+      rand: this.opts.rand,
+      players: () => {
+        const out: { x: number; y: number; z: number }[] = [];
+        for (const m of members.values()) out.push(m.player.body);
+        return out;
+      },
+      itemsIn: (x, y, z) => this.realm.blockEntities.itemsAt(this.world.getBlock(x, y, z), x, y, z),
+      emptyContainer: (x, y, z) => {
+        const stacks = this.realm.takeBlock(x, y, z, this.world.getBlock(x, y, z));
+        return stacks.length > 0 ? stacks : null;
+      },
+      guildOf: (account) => {
+        const g = this.guilds.of(account);
+        const mm = g?.members.find((x) => x.key === account);
+        return g && mm ? { id: g.id, name: g.name, rank: mm.rank } : null;
+      },
+      guildName: (id) => this.guilds.get(id)?.name ?? null,
+      payOut: (account, amount) => this.payOut(account, amount),
+      setSign: (x, y, z, lines) => this.realm.blockEntities.setSign(x, y, z, lines),
+      forgetSign: (x, y, z) => this.realm.blockEntities.forgetSign(x, y, z),
+    });
+  }
+
+  /** Auren to a character who may be away: into their purse if they are here, else into their saved record. False when there is nothing to pay into. */
+  private payOut(account: string, amount: number): boolean {
+    for (const m of this.members.values()) {
+      if (m.key !== account) continue;
+      m.player.addCoins(amount);
+      try {
+        this.savePlayer(m);
+      } catch (err) {
+        console.error(`[solrift] saving player ${m.name} failed`, err);
+      }
+      return true;
+    }
+    const store = this.opts.store;
+    const save = store?.getJson(`player:${account}`) as { coins?: number } | null | undefined;
+    if (!store || !save || typeof save !== 'object') return false;
+    store.setJson(`player:${account}`, { ...save, coins: Math.min(MAX_COINS, (typeof save.coins === 'number' ? save.coins : 0) + Math.floor(amount)) });
+    return true;
   }
 
   get playerCount(): number {
@@ -679,6 +766,7 @@ export class GameRoom {
     // and would show as seams and floating builds. They are dropped, once, before anything else is read.
     const terrainKey = `terrain:${this.storeSeed}`;
     if (store.getJson(terrainKey) !== GENERATOR_VERSION) {
+      this.generatorChanged = store.getJson(terrainKey) !== null;
       store.clearChunks(this.storeSeed);
       store.setJson(terrainKey, GENERATOR_VERSION);
     }
@@ -709,6 +797,8 @@ export class GameRoom {
         console.error(`[solrift] saving ${what} failed`, err);
       }
     };
+    // The land's record goes first: a restart that finds a change in the world and none in the ledger would keep it for ever; the other way round it is looked at again.
+    attempt('land', () => this.land.flush());
     attempt('chunks', () => {
       if (this.dirtyChunks.size === 0) return;
       const dirty = this.world.editedChunks().filter((c) => this.dirtyChunks.has(`${c.cx},${c.cz}`));
@@ -775,7 +865,7 @@ export class GameRoom {
     // A look nobody chose (an old client, a bot) is made from the name, so players still tell apart.
     // (The server alone passes an outfit: a guest's look came through `parseNetClientMessage`, which takes a plain look only.)
     const look = parseWornCode(wantedLook) !== null ? (wantedLook as number) : lookCode(lookFromName(name));
-    const m: Member = { id, name, look, key, admin, wallet, fightTick: -Infinity, adminOn: false, mutedUntil: 0, player, conn, queue: [], budget: 0, ack: 0, lastSeq: 0, invDirty: true, chatTokens: 5, socialTokens: SOCIAL_BURST, book: key && this.opts.store ? parseSocialBook(this.opts.store.getJson(`social:${key}`)) : new SocialBook(), replyTo: null, guildInvite: null, trade: null, tradeAsk: null, tradeTokens: TRADE_BURST, cmdTokens: CMD_BURST, score: 0, warned: false, messages: 0, fxSent: new Map() };
+    const m: Member = { id, name, look, key, admin, wallet, fightTick: -Infinity, adminOn: false, mutedUntil: 0, player, conn, queue: [], budget: 0, ack: 0, lastSeq: 0, invDirty: true, chatTokens: 5, socialTokens: SOCIAL_BURST, book: key && this.opts.store ? parseSocialBook(this.opts.store.getJson(`social:${key}`)) : new SocialBook(), replyTo: null, guildInvite: null, trade: null, tradeAsk: null, tradeTokens: TRADE_BURST, cmdTokens: CMD_BURST, score: 0, warned: false, messages: 0, fxSent: new Map(), signRev: -1, signCell: '', signCount: 0 };
     this.members.set(id, m);
 
     conn.send({ t: 'joined', id, name, look: lookOf(m), seed: this.seed, kind: this.kind, tickHz: this.tickHz, time: this.realm.time });
@@ -1438,7 +1528,7 @@ export class GameRoom {
       if (sub === 'help') {
         return this.tell(
           m,
-          'Admin: /admin on|off  /players  /kick <player> [reason]  /ban <player> [reason]  /unban <name>  /bans  /mute <player> [minutes]  /unmute <player>  /tpto <player>  /bring <player>  /give <item> [count]  /announce <text>  and /time /weather /gamemode /tp /xp /coins',
+          'Admin: /admin on|off  /players  /kick <player> [reason]  /ban <player> [reason]  /unban <name>  /bans  /mute <player> [minutes]  /unmute <player>  /tpto <player>  /bring <player>  /give <item> [count]  /spawn <mob id> [count]  /mobs [filter]  /announce <text>  /land help  and /time /weather /gamemode /tp /xp /coins /rift /invasion',
         );
       }
       if (sub === 'status') return this.tell(m, `Admin mode is ${m.adminOn ? 'on' : 'off'}.`);
@@ -1563,6 +1653,41 @@ export class GameRoom {
         this.tell(m, `Given ${total} ${item.name}.`);
         return;
       }
+      case 'mobs': {
+        // The ids /spawn takes, optionally only those that hold the words (the id or the display name).
+        const q = norm(rest);
+        const ids = (Object.keys(MOBS) as MobKind[]).filter((k) => !q || k.includes(q) || norm(MOBS[k].name).includes(q));
+        this.tell(m, ids.length === 0 ? `No mob matches "${rest}".` : `Mob ids (${ids.length}): ${ids.slice(0, 60).join(', ')}${ids.length > 60 ? ', ... (add a word to narrow it)' : ''}`);
+        return;
+      }
+      case 'spawn': {
+        // /spawn <id> [count]: puts that creature in front of the admin, facing them. The id is a key of MOBS (see /mobs).
+        const last = args[args.length - 1];
+        const hasCount = args.length > 1 && /^\d{1,2}$/.test(last);
+        const count = Math.max(1, Math.min(20, hasCount ? Number(last) : 1));
+        const query = norm((hasCount ? args.slice(0, -1) : args).join(' '));
+        const all = Object.keys(MOBS) as MobKind[];
+        const kind = all.find((k) => k === query) ?? all.find((k) => norm(MOBS[k].name) === query);
+        if (!kind) {
+          const near = all.filter((k) => query && (k.includes(query) || norm(MOBS[k].name).includes(query))).slice(0, 12);
+          return this.tell(m, query ? (near.length ? `Which one? ${near.join(', ')}` : `No mob with the id "${query}". /mobs lists them.`) : 'Usage: /spawn <mob id> [count]  (/mobs lists the ids)');
+        }
+        const b = p.body;
+        const fx = -Math.sin(p.yaw);
+        const fz = -Math.cos(p.yaw);
+        for (let i = 0; i < count; i++) {
+          // 3 blocks ahead (a bit further for a big one), several side by side.
+          const dist = 3 + MOBS[kind].width * 0.5;
+          const side = (i - (count - 1) / 2) * (MOBS[kind].width + 0.6);
+          p.spawnMob(kind, b.x + fx * dist - fz * side, b.y + 0.1, b.z + fz * dist + fx * side);
+        }
+        this.audit(m, 'spawn', `${kind} x${count}`);
+        this.tell(m, `Spawned ${count > 1 ? `${count} x ` : ''}${MOBS[kind].name} (${kind}).`);
+        return;
+      }
+      case 'land':
+        this.landAdmin(m, args);
+        return;
       case 'announce': {
         const text = rest.slice(0, 200).trim();
         if (!text) return this.tell(m, 'Usage: /announce <text>');
@@ -1572,6 +1697,143 @@ export class GameRoom {
       }
       default:
         this.tell(m, `Unknown command: /${cmd}`);
+    }
+  }
+
+  /**
+   * /land: the administrator's tools for the land (see landService.ts). Everything that changes something is written to the land's own log
+   * (and the server's), with who did it. Reached only through `adminCommand`, so only an admin with admin mode on.
+   */
+  private landAdmin(m: Member, args: string[]): void {
+    const land = this.land;
+    const p = m.player;
+    const sub = (args[0] ?? 'help').toLowerCase();
+    const who = m.key ?? m.name;
+    const say = (t: string): void => this.tell(m, t);
+    const num = (v: string | undefined, d: number, lo: number, hi: number): number => (v && /^\d{1,5}$/.test(v) ? Math.max(lo, Math.min(hi, Number(v))) : d);
+    const line = (c: ReturnType<LandService['allClaims']>[number]): string => `${c.id} "${c.name}" by ${c.ownerName} ${c.polygon.area} blocks ${c.status} at ${c.polygon.box.x0},${c.polygon.box.z0}`;
+    switch (sub) {
+      case 'help':
+        return say('/land here | list [owner] | info <id> | revoke <id> [refund] | invalid | reserve <name> [radius] | unreserve <id> | reserved | pause | resume | queue | stats | restore [radius] | rollback <radius> [player] | audit [player] | log | legacy ... | backups');
+      case 'here': {
+        const b = p.body;
+        const r = land.inspect(Math.floor(b.x), Math.floor(b.y), Math.floor(b.z));
+        if (!r.claim) return say(`No claim here.${r.entry ? ` The block under you was changed (${r.entry.cls}, by ${r.entry.by ?? 'nobody'}).` : ''}`);
+        return say(`${line(r.claim)}; paid ${r.claim.paid}, ${r.claim.grants.length} invited${r.entry ? `; this block: ${r.entry.cls}` : ''}`);
+      }
+      case 'list': {
+        const q = norm(args.slice(1).join(' '));
+        const all = land.allClaims().filter((c) => !q || norm(c.ownerName).includes(q) || norm(c.name).includes(q));
+        return say(`${all.length} claims: ${all.slice(0, 8).map(line).join(' | ')}${all.length > 8 ? ' | ... (add a name to narrow it)' : ''}`);
+      }
+      case 'info': {
+        const c = land.allClaims().find((x) => x.id === args[1]);
+        if (!c) return say('Usage: /land info <claim id>');
+        const d = land.detail(c.ownerType === 'player' ? c.ownerId : null, c.id);
+        return say(`${line(c)}; paid ${c.paid}; depth ${c.depth}, height ${c.height}; invited: ${c.grants.map((g) => `${g.name} (${g.role})`).join(', ') || 'nobody'}${d ? `; ${d.changes} changes held` : ''}`);
+      }
+      case 'revoke': {
+        if (!args[1]) return say('Usage: /land revoke <claim id> [refund]');
+        const r = land.revoke(args[1], who, args[2] === 'refund');
+        this.audit(m, 'land revoke', args.slice(1).join(' '));
+        return say(r.text);
+      }
+      case 'invalid': {
+        const bad = land.findInvalid();
+        return say(bad.length === 0 ? 'Every claim fits the rules.' : `${bad.length} claims do not: ${bad.slice(0, 6).map((b) => `${b.id} (${b.why})`).join(' | ')}`);
+      }
+      case 'reserve': {
+        const name = args[1];
+        if (!name) return say('Usage: /land reserve <name> [radius]');
+        const r = num(args[2], 24, 4, 256);
+        const b = p.body;
+        const res = land.reserve(who, name, { x0: Math.floor(b.x) - r, z0: Math.floor(b.z) - r, x1: Math.floor(b.x) + r, z1: Math.floor(b.z) + r });
+        this.audit(m, 'land reserve', `${name} r${r}`);
+        return say(res.text);
+      }
+      case 'unreserve': {
+        const res = land.unreserve(who, args[1] ?? '');
+        this.audit(m, 'land unreserve', args[1] ?? '');
+        return say(res.text);
+      }
+      case 'reserved':
+        return say(land.reserved().length === 0 ? 'No reserved regions.' : land.reserved().map((r) => `${r.id} ${r.name} ${r.x0},${r.z0}..${r.x1},${r.z1}`).join(' | '));
+      case 'pause':
+      case 'resume':
+        land.setPaused(sub === 'pause', who);
+        this.audit(m, `land ${sub}`);
+        return say(`Wilderness restoration is ${sub === 'pause' ? 'paused' : 'running'}.`);
+      case 'queue':
+      case 'stats': {
+        const s = land.stats();
+        return say(`Claims ${s.claims} (${s.area} blocks); restoration ${s.paused ? 'PAUSED' : 'running'}; ledger ${JSON.stringify(s.ledger)}; last step ${JSON.stringify(s.last)}; since start ${JSON.stringify(s.totals)}`);
+      }
+      case 'restore': {
+        const r = num(args[1], 32, 1, 256);
+        const b = p.body;
+        const n = land.rollback(who, { x0: Math.floor(b.x) - r, y0: 0, z0: Math.floor(b.z) - r, x1: Math.floor(b.x) + r, y1: 255, z1: Math.floor(b.z) + r }, { wildOnly: true });
+        this.audit(m, 'land restore', `r${r}: ${n} blocks`);
+        return say(`Put ${n} wilderness blocks back (claimed ones were left alone).`);
+      }
+      case 'rollback': {
+        const r = num(args[1], 0, 1, 256);
+        if (!r) return say('Usage: /land rollback <radius> [player]');
+        const name = args.slice(2).join(' ');
+        const target = name ? [...this.members.values()].find((x) => norm(x.name) === norm(name)) : null;
+        if (name && !target?.key) return say(`No signed-in player called "${name}" is online.`);
+        const b = p.body;
+        const n = land.rollback(who, { x0: Math.floor(b.x) - r, y0: 0, z0: Math.floor(b.z) - r, x1: Math.floor(b.x) + r, y1: 255, z1: Math.floor(b.z) + r }, target?.key ? { by: target.key } : {});
+        this.audit(m, 'land rollback', `r${r}${name ? ` ${name}` : ''}: ${n} blocks`);
+        return say(`Rolled back ${n} blocks (claimed ones included: this is the administrator's undo).`);
+      }
+      case 'audit': {
+        const name = args.slice(1).join(' ');
+        const target = name ? [...this.members.values()].find((x) => norm(x.name) === norm(name)) : null;
+        if (name && !target?.key) return say(`No signed-in player called "${name}" is online.`);
+        const rows = land.recentTxns(8, target?.key ?? undefined);
+        return say(rows.length === 0 ? 'No land transactions.' : rows.map((t) => `${t.kind} ${t.amount} Auren ${t.state} by ${t.playerKey} ${t.claimId ?? ''}`).join(' | '));
+      }
+      case 'log': {
+        const rows = land.adminLog(8);
+        return say(rows.length === 0 ? 'The land log is empty.' : rows.map((r) => `${new Date(r.at).toISOString().slice(0, 16)} ${r.action} ${r.detail}`).join(' | '));
+      }
+      case 'backups': {
+        const b = land.backups();
+        return say(b.length === 0 ? 'No copies of the claims yet (one is made before each adoption).' : b.map((x) => `${new Date(x.at).toISOString().slice(0, 16)} ${x.why} (${x.claims} claims)`).join(' | '));
+      }
+      case 'legacy': {
+        // Builds from before there was land: nobody's, and never put back, but anybody could buy the ground under them.
+        const what = (args[1] ?? 'help').toLowerCase();
+        const siteLine = (s: ReturnType<LandService['scanLegacy']>[number]): string => `#${s.id} ${s.box.x0},${s.box.z0}..${s.box.x1},${s.box.z1} (${s.blocks} blocks)`;
+        if (what === 'scan') {
+          const sites = land.scanLegacy(this.world.diffAgainstTerrain(), num(args[2], 40, 1, 5000));
+          return say(sites.length === 0 ? 'No old builds without an owner.' : `${sites.length} old builds: ${sites.slice(0, 8).map(siteLine).join(' | ')}${sites.length > 8 ? ' | ...' : ''}. (Grown trees and crops show here too.) /land legacy reserve keeps them free; /land legacy adopt <player> <#n> [name] gives one to its builder.`);
+        }
+        if (what === 'reserve') {
+          if (land.legacySites().length === 0) return say('Scan first: /land legacy scan');
+          const n = land.reserveLegacy(who);
+          this.audit(m, 'land legacy reserve', `${n} sites`);
+          return say(`${n} old builds are now kept free of claims until they are adopted.`);
+        }
+        if (what === 'adopt') {
+          const id = /^#?(\d{1,4})$/.exec(args[3] ?? '');
+          const site = id ? land.legacySites().find((s) => s.id === Number(id[1])) : undefined;
+          if (!args[2] || !site) return say('Usage: /land legacy adopt <player> <#n> [name]  (scan first: the number is the one from /land legacy scan)');
+          const target = [...this.members.values()].find((x) => norm(x.name) === norm(args[2]));
+          if (!target?.key) return say(`No signed-in player called "${args[2]}" is online.`);
+          const b = land.siteBox(site);
+          const res = land.adopt(who, { account: target.key, ownerName: target.name, name: args.slice(4).join(' '), vertices: [[b.x0, b.z0], [b.x1, b.z0], [b.x1, b.z1], [b.x0, b.z1]] });
+          this.audit(m, 'land legacy adopt', `#${site.id} -> ${target.name}: ${res.ok ? 'done' : res.text}`);
+          if (res.ok) {
+            this.tell(target, `An administrator has given you the land your old build stands on: ${res.claim?.name ?? 'your land'}. Press B to see it.`);
+            target.player.landForget(res.claim?.id ?? '');
+          }
+          return say(res.text);
+        }
+        return say('/land legacy scan [minBlocks] | reserve | adopt <player> <#n> [name]');
+      }
+      default:
+        return say('Unknown /land command. /land help lists them.');
     }
   }
 
@@ -1690,11 +1952,24 @@ export class GameRoom {
       this.realm.update(dt, players);
       for (const p of players) p.postRealm(dt);
     }
+    this.keepLand(all);
     this.realm.advanceClock(dt);
     this.keepAuctions(all);
     this.keepStashes(all);
     this.watchTrades(all);
     this.flush(all);
+  }
+
+  /** The land's clock (putting the wilderness back, letting go of released claims), and telling those who see a claim that it changed. */
+  private keepLand(all: Member[]): void {
+    try {
+      this.land.tick();
+    } catch (err) {
+      console.error('[solrift] the land tick failed', err);
+    }
+    if (this.land.changed.size === 0) return;
+    for (const id of this.land.changed) for (const m of all) m.player.landForget(id);
+    this.land.changed.clear();
   }
 
   /**
@@ -1831,6 +2106,7 @@ export class GameRoom {
   private delivered(m: Member, snap: Snapshot, result: unknown): void {
     if (result !== 'skipped') return;
     if (snap.inv) m.invDirty = true;
+    if (snap.signs) m.signRev = -1;
     m.fxSent.clear();
   }
 
@@ -2066,6 +2342,17 @@ export class GameRoom {
       const ids = new Set(live.map((f) => f.id));
       for (const id of m.fxSent.keys()) if (!ids.has(id)) m.fxSent.delete(id);
     }
+    // The signs near: the whole list, when one changed or the player has walked into another 8-block square (an empty list clears the last one).
+    let signs: SignView[] | undefined;
+    const signRev = this.realm.blockEntities.signRev;
+    const signCell = `${Math.floor(b.x / 8)},${Math.floor(b.z / 8)}`;
+    if (m.signRev !== signRev || m.signCell !== signCell) {
+      const list = this.realm.signsAround(b.x, b.z, VIEW_SIGNS);
+      if (list.length > 0 || m.signCount > 0) signs = list.map((s) => ({ x: s.x, y: s.y, z: s.z, l: s.lines }));
+      m.signRev = signRev;
+      m.signCell = signCell;
+      m.signCount = list.length;
+    }
     const w = this.realm.weather;
     const snap: Snapshot = {
       t: 'snap',
@@ -2080,6 +2367,7 @@ export class GameRoom {
       vehicles,
       drops,
       ...(fires.length > 0 ? { fires } : {}),
+      ...(signs ? { signs } : {}),
       ...(orbs.length > 0 ? { orbs } : {}),
       ...(bobbers.length > 0 ? { bobbers } : {}),
       ...(fx.length > 0 ? { fx } : {}),

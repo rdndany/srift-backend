@@ -35,7 +35,11 @@ export function CharacterPreview({ armor, shield = 0, shieldIcon = null, turntab
       scene.look(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height * 0.28));
     };
     window.addEventListener('mousemove', onMove);
+    // A picture that is given more (or less) room later, as a page lays itself out, is drawn again to fit it.
+    const fit = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => scene.resize());
+    fit?.observe(canvas);
     return () => {
+      fit?.disconnect();
       window.removeEventListener('mousemove', onMove);
       sceneRef.current = null;
       scene.dispose();

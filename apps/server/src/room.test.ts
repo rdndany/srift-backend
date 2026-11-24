@@ -532,6 +532,27 @@ describe('chat and commands', () => {
     expect(c.of('notice').pop()?.text).toContain('off on this server');
   });
 
+  it('starts the Gilded Tide with /invasion while the player is in creative mode', () => {
+    const yard = (room: ReturnType<typeof makeRoom>) => {
+      for (let x = CX - 100; x <= CX + 100; x++)
+        for (let z = CZ - 100; z <= CZ + 100; z++) {
+          for (let y = FLOOR + 1; y < FLOOR + 4; y++) room.world.setBlock(x, y, z, B.AIR);
+          room.world.setBlock(x, FLOOR, z, B.STONE);
+        }
+    };
+    const room = makeRoom({ cheats: true, invasions: true });
+    yard(room);
+    const a = joinAt(room, 'alex');
+    ticks(room, 3);
+    room.receive(a.id!, { t: 'chat', text: '/gamemode creative' });
+    expect(room.player(a.id!)!.mode).toBe('creative');
+    a.clear();
+    room.receive(a.id!, { t: 'chat', text: '/invasion' });
+    ticks(room, 2);
+    expect(room.realm.invasions?.current).not.toBeNull();
+    expect(a.of('notice').pop()?.text).toMatch(/Gilded Tide/);
+  });
+
   it('cheat commands work when enabled', () => {
     const room = makeRoom({ cheats: true });
     const a = joinAt(room, 'alex');

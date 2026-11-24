@@ -21,6 +21,7 @@ import {
   lookOfCode,
   makeGenerator,
   type WorldKind,
+  type MobKind,
   type ClassId,
   type Command,
   type InputFrame,
@@ -54,6 +55,7 @@ import {
 import { bumpUi, showZone, useUi, type CodexView } from '../ui/store';
 import { BeyondClient } from './beyondClient';
 import { CampfireFood } from './campfireFood';
+import { SignBoards } from './signBoards';
 import { Chat } from './chat';
 import { isPlayPath, markEntry, newUid, paramsFor, prettyAddress, realmPath, uidFromPath } from './route';
 import type { ClientSession } from './clientSession';
@@ -69,6 +71,7 @@ import { Input } from './input';
 import { ItemEntities } from './itemEntities';
 import { BookRenderer } from './bookRenderer';
 import { MobRenderer, disposeMobAssets } from './mobRenderer';
+import { disposeWingKits } from './wingRig';
 import { VehicleRenderer, disposeVehicleAssets } from './vehicleRenderer';
 import { NetClient } from './net';
 import { Particles } from './particles';
@@ -119,6 +122,7 @@ import { installDebugHooks } from './debugHooks';
 import { makeWindows } from './gameWindows';
 import { CompassNeedle } from './compassNeedle';
 import { makeEventHandler } from './gameEvents';
+import { makeLandClient } from './landClient';
 import { KeyActions } from './gameKeys';
 import { RecipeMemory } from './recipeMemory';
 import { makeUiApi } from './uiApi';
@@ -256,17 +260,17 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
       else if (!open && session.ready) input.lock();
     },
   );
-  const worldName = (kind: WorldKind): string => (kind === 'square' ? 'square platform' : kind === 'beyond' ? 'World Beyond' : kind === 'showcase' ? 'block showcase' : 'overworld');
+  const worldName = (kind: WorldKind): string => (kind === 'square' ? 'square platform' : kind === 'beyond' ? 'World Beyond' : kind === 'showcase' ? 'block showcase' : kind === 'castle' ? 'castle grounds' : 'overworld');
   /** Single-player has no one to talk to, but `/` still takes the few cheats (they need creative mode). */
   function localCommand(text: string): void {
     const [name, arg] = text.replace(/^\//, '').trim().toLowerCase().split(/\s+/);
     if (!text.startsWith('/')) return;
     if (name === 'help') {
-      chat.add('Commands: /help /world [overworld|beyond|square|showcase] /find <block> (in the showcase) /admin on|off (block details at the crosshair)', 'notice');
+      chat.add('Commands: /help /world [overworld|beyond|square|showcase|castle] /find <block> (in the showcase) /admin on|off (block details at the crosshair) /spawn <mob id> [count] /mobs [filter] /invasion (creative mode)', 'notice');
     } else if (name === 'world') {
       if (KIND === 'adventure') chat.add('Adventure is its own world: leave it from the pause menu and pick another from the title screen.', 'notice');
-      else if (!arg) chat.add(`You are in the ${worldName(KIND)}. Use /world overworld, /world beyond, /world square or /world showcase.`, 'notice');
-      else if (arg !== 'overworld' && arg !== 'square' && arg !== 'beyond' && arg !== 'showcase') chat.add('Worlds: overworld, beyond, square, showcase.', 'notice');
+      else if (!arg) chat.add(`You are in the ${worldName(KIND)}. Use /world overworld, /world beyond, /world square, /world showcase or /world castle.`, 'notice');
+      else if (arg !== 'overworld' && arg !== 'square' && arg !== 'beyond' && arg !== 'showcase' && arg !== 'castle') chat.add('Worlds: overworld, beyond, square, showcase, castle.', 'notice');
       else if (session.mode !== 'creative') chat.add('Switching worlds is a cheat: it needs creative mode (F4).', 'notice');
       else if (arg === KIND) chat.add(`You are already in the ${worldName(arg)}.`, 'notice');
       else switchWorld(arg);
@@ -284,6 +288,42 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
       else {
         local?.teleport(box.x + SHOWCASE_BOX / 2, SHOWCASE_FLOOR + SHOWCASE_HEIGHT + 3, box.z - 4, 0, -0.5);
         chat.add(`${box.name}: ten by ten blocks, four high.`, 'notice');
+      }
+    } else if (name === 'invasion') {
+      // Begin the Gilded Tide now (creative mode, or /admin on): shy golden creatures hide across the land.
+      if (!local || (session.mode !== 'creative' && !adminMode)) chat.add('/invasion is a cheat: it needs creative mode (F4) or /admin on.', 'notice');
+      else if (!local.realm.invasions) chat.add('Invasions are off in this world (?noinvasions or ?nomobs).', 'notice');
+      else if (local.realm.invasions.current) chat.add('The Gilded Tide is on already.', 'notice');
+      else if (local.realm.startInvasion()) chat.add('The Gilded Tide breaks over the land.', 'notice');
+      else chat.add('No place for the Gilded Tide here (explore more land, or move away from villages).', 'notice');
+    } else if (name === 'spawn' || name === 'mobs') {
+      // Your own world: any creature, by its id, in front of you (creative mode, or /admin on). /mobs lists the ids.
+      const words = text.replace(/^\//, '').trim().toLowerCase().split(/\s+/).slice(1);
+      const ids = Object.keys(MOBS) as MobKind[];
+      const norm = (s: string): string => s.trim().toLowerCase().replace(/[\s-]+/g, '_');
+      if (!local || (session.mode !== 'creative' && !adminMode)) chat.add(`/${name} is a cheat: it needs creative mode (F4) or /admin on.`, 'notice');
+      else if (name === 'mobs') {
+        const q = norm(words.join(' '));
+        const hit = ids.filter((k) => !q || k.includes(q) || norm(MOBS[k].name).includes(q));
+        chat.add(hit.length === 0 ? `No mob matches "${words.join(' ')}".` : `Mob ids (${hit.length}): ${hit.slice(0, 60).join(', ')}${hit.length > 60 ? ', ... (add a word to narrow it)' : ''}`, 'notice');
+      } else {
+        const hasCount = words.length > 1 && /^\d{1,2}$/.test(words[words.length - 1]);
+        const count = Math.max(1, Math.min(20, hasCount ? Number(words[words.length - 1]) : 1));
+        const q = norm((hasCount ? words.slice(0, -1) : words).join(' '));
+        const kind = ids.find((k) => k === q) ?? ids.find((k) => norm(MOBS[k].name) === q);
+        if (!kind) {
+          const near = ids.filter((k) => q && (k.includes(q) || norm(MOBS[k].name).includes(q))).slice(0, 12);
+          chat.add(q ? (near.length ? `Which one? ${near.join(', ')}` : `No mob with the id "${q}". /mobs lists them.`) : 'Usage: /spawn <mob id> [count]  (/mobs lists the ids)', 'notice');
+        } else {
+          const fx = -Math.sin(local.yaw);
+          const fz = -Math.cos(local.yaw);
+          const dist = 3 + MOBS[kind].width * 0.5;
+          for (let i = 0; i < count; i++) {
+            const side = (i - (count - 1) / 2) * (MOBS[kind].width + 0.6);
+            local.spawnMob(kind, local.body.x + fx * dist - fz * side, local.body.y + 0.1, local.body.z + fz * dist + fx * side);
+          }
+          chat.add(`Spawned ${count > 1 ? `${count} x ` : ''}${MOBS[kind].name} (${kind}).`, 'notice');
+        }
       }
     } else {
       chat.add(`Unknown command: /${name}. Try /help.`, 'notice');
@@ -406,6 +446,8 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
         naturalSpawning: !params.has('nomobs'),
         /** Rifts come with the monsters (and `?norifts` keeps them away). */
         rifts: !params.has('nomobs') && !params.has('norifts'),
+        /** The Gilded Tide every half hour (`?noinvasions` or `?nomobs` keeps it away). */
+        invasions: !params.has('nomobs') && !params.has('noinvasions'),
         /** ?villagers brings the villages' people back into a ?nomobs world. */
         villagers: !params.has('nomobs') || params.has('villagers'),
       });
@@ -475,6 +517,8 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   const drops = new ItemEntities(icons, (id) => hand.dropModel(id));  scene.add(drops.group);
   const campfireFood = new CampfireFood((id) => hand.dropModel(id), (x, y, z) => world.getBlock(x, y, z));
   scene.add(campfireFood.group);
+  const signBoards = new SignBoards((x, y, z) => world.getBlock(x, y, z));
+  scene.add(signBoards.group);
   const xpOrbs = new XpOrbRenderer();
   scene.add(xpOrbs.group);
   const bobbers = new BobberRenderer();
@@ -669,7 +713,14 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   function warmWindows(step: number): void {
     if (step < 0) {
       delete document.documentElement.dataset.uiWarm;
-      useUi.setState({ warmMenu: null, invTab: 'inventory', questLogOpen: false, codexOpen: false, socialOpen: false, partyOpen: false });
+      useUi.setState({ warmMenu: null, warmHud: false, invTab: 'inventory', questLogOpen: false, codexOpen: false, socialOpen: false, partyOpen: false });
+      return;
+    }
+    if (step === 5) {
+      // The boss's frame and what it says, the rift and dungeon trackers: only a fight brings them up, and the first sight of each
+      // would stand the game still while the browser builds how they are painted (150 ms for King Aurelion's frame).
+      document.documentElement.dataset.uiWarm = '1';
+      useUi.setState({ warmMenu: null, warmHud: true });
       return;
     }
     if (step === 4) {
@@ -700,6 +751,11 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
       }
     }
     for (const p of mapPartyPins) if (near(p.x, p.z, 3000)) pins.push({ kind: 'party', name: p.name, x: p.x, z: p.z });
+    // Your own land, so that home can be found from afar: the middle of each claim (the map keeps it at the edge when it is out of view).
+    for (const c of useUi.getState().land.mine) {
+      if (c.status === 'released' || c.status === 'revoked') continue;
+      pins.push({ kind: 'land', name: c.name, x: (c.box[0] + c.box[2] + 1) / 2, z: (c.box[1] + c.box[3] + 1) / 2 });
+    }
     return pins;
   }
   function setMapUp(up: boolean): void {
@@ -712,6 +768,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   players.isWater = (x, y, z) => isWaterBlock(world.getBlock(Math.floor(x), Math.floor(y), Math.floor(z)));
   drops.setEnvironment(entityLight);
   campfireFood.setEnvironment(entityLight);
+  signBoards.setEnvironment(entityLight);
   scene.add(mobRenderer.group);
   const vehicleRenderer = new VehicleRenderer();
   vehicleRenderer.setEnvironment(entityLight);
@@ -807,6 +864,8 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     hurtFlash: () => void (flash = 1),
     setPartyPins: (party) => void (mapPartyPins = party),
     breakSelf: () => breakSelf(),
+    landEvent: (e) => land.onEvent(e),
+    signEdit: (x, y, z, lines) => windows.openSignEdit(x, y, z, lines),
   });
 
   const link = local
@@ -831,7 +890,21 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
 
   // The windows over the game (quest log, party, social, trade, a player's menu) and who has the mouse: see gameWindows.ts.
   const windows = makeWindows({ session, remote, online, input, chat, overlay, sendCommand });
-  const { toggleQuestLog, togglePartyWindow, toggleSocialWindow, showTrade, openPlayerMenu, closePlayerMenu } = windows;
+  const { showTrade } = windows;
+
+  // The Land Surveyor: marking corners, the live price, the confirmation and the window of the player's lands (see landClient.ts).
+  const land = makeLandClient({
+    session, input, camera, scene, world, sendCommand,
+    toast: (text) => hud.toast(text),
+    mouse: (up) => {
+      if (up) {
+        if (document.pointerLockElement) document.exitPointerLock();
+      } else if (session.screen === 'none') windows.relockIfFree();
+    },
+    mote: (x, y, z, vx, vy, vz, fall, life, size, r, g, b) => particles.mote(x, y, z, vx, vy, vz, fall, life, size, r, g, b),
+    chime: () => audio.quest('done'),
+    hand: hand.surveyor,
+  });
 
   // The needle of the compass, and whether the map is carried : see compassNeedle.ts.
   const compassNeedle = new CompassNeedle(session, input, hand, KIND);
@@ -839,6 +912,16 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   const targets = remote ? new TargetPicker(remote, session, input, camera) : null;
   // ...and the same for a creature (an animal, a monster, a person), in any game: the frame shows its tier, level and health.
   const mobTargets = new MobTargetPicker(session, input, camera, (x, y, z) => BLOCKS[world.getBlock(x, y, z)]?.opaque === true);
+  /** A living monster within ten blocks: the figure stands to fight (see Character.engaged). */
+  const hostileNear = (x: number, y: number, z: number): boolean => {
+    for (const m of session.mobs.mobs) {
+      if (m.dead || !MOBS[m.kind]?.hostile) continue;
+      const dx = m.body.x - x;
+      const dz = m.body.z - z;
+      if (dx * dx + dz * dz < 100 && Math.abs(m.body.y - y) < 6) return true;
+    }
+    return false;
+  };
   /** The spellbook (key K): the third tab of the inventory window, which opens on it. */
   function openSpellbook(): void {
     if (!session.classView() || session.screen !== 'none' || session.mode === 'creative') return;
@@ -885,6 +968,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     inspect: null,
     target: null,
     playerMenu: null,
+    signEdit: null,
     trade: null,
     tradeAsk: null,
     invTab: 'inventory',
@@ -1054,7 +1138,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
 
   // Keys that start something (as opposed to held keys, which go in the frame): see gameKeys.ts.
   const keys = new KeyActions({
-    session, remote, online, input, world, hud, admin, chat, audio, selfView, chase, windows, sendCommand, openSpellbook,
+    session, remote, online, input, world, hud, admin, chat, audio, selfView, chase, windows, sendCommand, openSpellbook, land,
     quality: () => qualityLevel,
   });
 
@@ -1208,7 +1292,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     syncUi();
     hitches.lap('input');
     stabClock += dt;
-    if (session.ready && playing && input.leftDown) {
+    if (session.ready && playing && input.leftDown && !land.holding) {
       if (bowHeld()) {
         // A bow takes both hands and does not attack. A left click puts it away and brings out the dagger, which stabs (whether or not
         // anything is in reach); a moment after the last stab the bow comes back. The click is remembered until the dagger is out.
@@ -1286,6 +1370,8 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
       setCrackStage(crackTexture, Math.floor(Math.min(0.999, session.breakProgress) * CRACK_STAGES));
     }
     hud.setBreakProgress(session.hudProgress);
+    // The Land Surveyor: its click, its stakes and its walls of light (every frame, so that a click is never kept for later).
+    land.update(dt, playing && session.ready, input.consumeLeftClick(), rightClick);
 
     sky.time = session.time;
     sky.rain = weather.rain;
@@ -1440,6 +1526,8 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
       slam: session.classView()?.slam ?? 0,
       charging: !!classNow?.rush && !classNow.rush.roll,
       casting: session.emberProgress,
+      cls: classNow?.id ?? myClass,
+      engaged: hostileNear(view.x, view.y, view.z),
       sleeping: sleeping ? sleeping.dir + 1 : 0,
       mount: mountNow > 0 ? (MOUNTS[mountNow - 1]?.id ?? null) : null,
       dead: session.screen === 'dead' || performance.now() < debugDeadUntil,
@@ -1451,6 +1539,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     drops.sync(session.drops.drops, camera.position, session.classView()?.id ?? myClass);
     const foods = local ? local.blockEntities.foods() : (remote?.campfires ?? []);
     campfireFood.sync(foods.filter((c) => Math.abs(c.x + 0.5 - camera.position.x) <= 64 && Math.abs(c.z + 0.5 - camera.position.z) <= 64));
+    signBoards.sync(local ? local.blockEntities.signsNear(camera.position.x, camera.position.z, 48) : (remote?.signs ?? []), camera.position, 48);
     xpOrbs.sync(session.xpOrbs.orbs, camera, eye);
     rodLine.out = session.bobbers.bobbers.some((b) => b.own);
     bobbers.sync(session.bobbers.bobbers, dt, {
@@ -1477,6 +1566,8 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     emberFx.update(dt, performance.now() / 1000);
     mountFx.update(dt, performance.now() / 1000);
     books.update(dt, eye, (x, y, z) => world.getBlock(x, y, z));
+    // The creatures take notice of the player (heads turn, a shy animal freezes, a villager faces whoever visits).
+    mobRenderer.setFocus(session.screen === 'dead' || session.spectating ? null : view);
     mobRenderer.sync(session.mobs.mobs, session.mobs.arrows, dt, sky.brightness);
     fire.update(dt);
     vehicleRenderer.sync(session.vehicles, sky.brightness);
@@ -1782,7 +1873,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   let unlockedAt = -1e9;
   const windowOpen = (): boolean => {
     const s = useUi.getState();
-    return chat.isOpen || session.screen !== 'none' || s.codexOpen || s.questLogOpen || s.partyOpen || s.socialOpen || !!s.trade || !!s.playerMenu || !!s.inspect;
+    return chat.isOpen || session.screen !== 'none' || s.codexOpen || s.questLogOpen || s.partyOpen || s.socialOpen || !!s.trade || !!s.playerMenu || !!s.inspect || !!s.signEdit || s.land.confirm || s.land.manage;
   };
   window.addEventListener(
     'blur',
@@ -1806,8 +1897,13 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     'pointerlockchange',
     () => {
       if (!input.locked) unlockedAt = performance.now();
+      // Escape gives up the shape being marked with the Surveyor (a window, the inventory or the chat taking the mouse does not).
+      const gaveUp = !input.locked && document.hasFocus() && !document.hidden && land.onUnlock(windowOpen());
       const away = !document.hasFocus() || document.hidden;
-      overlay.style.display = input.locked || windowOpen() || (away && session.ready) ? 'none' : 'flex';
+      // (The Escape that gave up a shape is the Surveyor's: no pause screen. The mouse is asked for back at once, which some browsers allow;
+      // where it is refused the next click takes it, as after a window.)
+      overlay.style.display = input.locked || windowOpen() || gaveUp || (away && session.ready) ? 'none' : 'flex';
+      if (gaveUp) void input.lock();
       if (!input.locked) {
         void world.save();
         savePlayer();
@@ -1820,6 +1916,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     'keydown',
     (e) => {
       if (e.repeat) return;
+      if (land.handleKey(e)) return;
       if (windows.handleKey(e)) return;
       if (!session.menu && session.screen !== 'dialog') return;
       // E closes the screen, except while typing in the recipe search box.
@@ -1857,6 +1954,8 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
       postfx, fxWanted, applyPostfx, torchGlow, shadows, particles, players, hand, selfView, deathFx, chase, books, abilityFx, mapData,
       act, syncUi, sendCommand, setMapUp, switchWorld,
       deliver: (events) => handleEvents(events),
+      land,
+      signBoards,
       caveDark: () => caveDark,
       beyond,
       drawn: () => ({ calls: sceneCalls, triangles: sceneTris, fps }),
@@ -1896,6 +1995,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     hand.dispose();
     drops.dispose();
     campfireFood.dispose();
+    signBoards.dispose();
     xpOrbs.dispose();
     bobbers.dispose();
     eatFx.dispose();
@@ -1915,8 +2015,11 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     books.dispose();
     mobRenderer.dispose();
     disposeMobAssets();
+    disposeWingKits();
     vehicleRenderer.dispose();
     disposeVehicleAssets();
+    land.reset();
+    land.dispose();
     highlightGeo.dispose();
     (highlight.material as THREE.Material).dispose();
     crack.geometry.dispose();
@@ -1926,7 +2029,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     atlas.dispose();
     postfx.dispose();
     renderer.dispose();
-    useUi.setState({ api: null, screen: 'none', adventure: false, codex: null, codexOpen: false, beyondNotes: [], questLogOpen: false, partyOpen: false, socialOpen: false, social: null, inspect: null, target: null, mobTarget: null, playerMenu: null, trade: null, tradeAsk: null, invTab: 'inventory', mount: { mount: 0, pick: 0, cd: [0, 0] }, cls: null, party: [], partyInvite: null, dialogNpc: null, shopOpen: false, auction: null, stash: null, zone: null, questNotes: [], map: null, mapUp: false, poison: 0, foodSick: 0 });
+    useUi.setState({ api: null, screen: 'none', adventure: false, codex: null, codexOpen: false, beyondNotes: [], questLogOpen: false, partyOpen: false, socialOpen: false, social: null, inspect: null, target: null, mobTarget: null, playerMenu: null, signEdit: null, trade: null, tradeAsk: null, invTab: 'inventory', mount: { mount: 0, pick: 0, cd: [0, 0] }, cls: null, party: [], partyInvite: null, dialogNpc: null, shopOpen: false, auction: null, stash: null, zone: null, questNotes: [], map: null, mapUp: false, poison: 0, foodSick: 0 });
     mapData.dispose();
     mapSheet.dispose();
     useUi.getState().quests.loadJSON(null);

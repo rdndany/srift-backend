@@ -352,11 +352,13 @@ describe('buying skill books', () => {
 });
 
 describe('skill books from quests', () => {
-  it('are rewarded by the first four quests, each class getting the book of its own', () => {
-    const slots = ['welcome', 'first_timber', 'stone_age', 'night_watch'];
+  it('are rewarded by the first four quests of the class lines, each class getting the book of its own', () => {
+    const lines = { warrior: 'cl_w', mage: 'cl_m', ranger: 'cl_r' } as const;
     for (const c of ['warrior', 'mage', 'ranger'] as const) {
-      slots.forEach((qid, n) => {
+      [1, 2, 3, 4].forEach((k, n) => {
+        const qid = `${lines[c]}${k}`;
         const q = questById(qid)!;
+        expect(q.class, qid).toBe(c);
         const items = rewardItems(q.reward, c);
         const want = abilitiesOf(c)[n].id;
         expect(items.some((r) => r.id === skillBookId(want) && r.count === 1), `${c} ${qid}`).toBe(true);
@@ -380,11 +382,17 @@ describe('skill books from quests', () => {
   it('are handed over on completion', () => {
     for (const c of ['warrior', 'mage', 'ranger'] as const) {
       const s = make(c);
-      const q = questById('welcome')!;
+      const q = questById({ warrior: 'cl_w1', mage: 'cl_m1', ranger: 'cl_r1' }[c])!;
+      s.quests!.done.add('ms00');
+      s.quests!.done.add('ms01');
       s.clearInventory();
       talkTo(s, q.giver);
       s.apply({ t: 'quest', a: 'accept', id: q.id });
       s.closeMenu();
+      for (const o of q.objectives) {
+        if (o.kind === 'craft') s.questEvent({ t: 'craft', item: o.items[0], count: o.count });
+        if (o.kind === 'enter') s.questEvent({ t: 'enter', zone: o.zone });
+      }
       talkTo(s, q.turnIn);
       s.apply({ t: 'quest', a: 'complete', id: q.id });
       expect(s.quests!.status(q.id)).toBe('done');

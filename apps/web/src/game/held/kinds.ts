@@ -4,6 +4,7 @@ import { aimBuilders } from './aim';
 import { cubeView, orbView, plainView, rodView, shieldView, toolView, torchView } from './basic';
 import { CompassView } from './compass';
 import { lanternBuilder } from './lantern';
+import { SurveyorView } from './surveyor';
 import type { HeldBuilder, HeldKit, HeldView } from './view';
 import { weaponKind, weaponView } from './weapon';
 
@@ -21,6 +22,7 @@ function builderFor(item: ItemDef, own: { lantern: HeldBuilder; aim: Record<numb
   if (own.aim[item.id]) return own.aim[item.id];
   if (item.id === I.ORB) return orbView;
   if (item.id === I.COMPASS) return (i, kit) => new CompassView(i, kit);
+  if (item.id === I.LAND_SURVEYOR) return (i, kit) => new SurveyorView(i, kit);
   if (item.shield) return shieldView;
   if (item.block === B.TORCH) return torchView;
   return plainView;

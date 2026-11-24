@@ -6,6 +6,7 @@ import { makeStack, type ItemStack } from './inventory';
 import { I, ITEMS, type Drop } from './items';
 import { findPath, type PathNode } from './pathfinding';
 import { createBody, stepPlayer, type BlockReader, type Body, type MoveInput, type Solid } from './physics';
+import { MOB_SOLID_BOXES } from './mobSolidsData';
 import { raycast } from './raycast';
 import type { VillagerState } from './trading';
 import { TUNING } from './tuning';
@@ -68,11 +69,12 @@ export type MobKind =
   | 'ashen_knight'
   | 'hollow_priest'
   | 'shade'
-  /** The monsters of the Gilded Tide (see `GILDED_KINDS` and invasion.ts): they come in an invasion every half hour and leave nothing but the Codex of Aurelion. */
+  /** The monsters of the Gilded Tide (see `GILDED_KINDS` and invasion.ts): they are scattered over the land in an invasion every half hour, never attack, and leave nothing but the Codex of Aurelion. */
   | 'gilt_imp'
   | 'gilt_hound'
   | 'gilt_drake'
   | 'gilt_colossus'
+  /** Kept as a spawnable boss for cheats and tests; the Gilded Tide no longer brings him (see `GILDED_KINDS`). */
   | 'aurelion'
   /** A quest giver of the Adventure mode: it stands where it was put, cannot be hurt, and its variant says which person it is (see `NPCS`). */
   | 'npc'
@@ -90,11 +92,12 @@ export type HollowDeepKind = (typeof HOLLOW_DEEP_KINDS)[number];
 export const isHollowDeepKind = (kind: string): kind is HollowDeepKind => (HOLLOW_DEEP_KINDS as readonly string[]).includes(kind);
 
 /**
- * The five monsters of the Gilded Tide, the invasion that sweeps the world every half hour (see invasion.ts): imps, hounds, drakes and
- * colossi in a golden tide, led by the Hoard King Aurelion. They are never born by the spawner or kept in a save; the invasion director
- * puts them in the world. Each leaves nothing but the Codex of Aurelion (`MobManager.kill` skips coins, bags, jewels and gear for them).
+ * The monsters of the Gilded Tide, the invasion that sweeps the world every half hour (see invasion.ts): imps, hounds, drakes and
+ * colossi, golden and shy, one here and one there over the whole land. King Aurelion is still a monster of the game (an admin can call him), but the
+ * Tide never brings him. They are never born by the spawner or kept in a save; the invasion director puts them in the world. Each leaves nothing but
+ * the Codex of Aurelion (`MobManager.kill` skips coins, bags, jewels and gear for them).
  */
-export const GILDED_KINDS = ['gilt_imp', 'gilt_hound', 'gilt_drake', 'gilt_colossus', 'aurelion'] as const;
+export const GILDED_KINDS = ['gilt_imp', 'gilt_hound', 'gilt_drake', 'gilt_colossus'] as const;
 export type GildedKind = (typeof GILDED_KINDS)[number];
 export const isGildedKind = (kind: string): kind is GildedKind => (GILDED_KINDS as readonly string[]).includes(kind);
 
@@ -655,7 +658,7 @@ export const MOBS: Record<MobKind, MobDef> = {
     },
     xp: () => 10,
   },
-  // ---- the Gilded Tide (plain units; they hunt from far off, and leave only the Codex of Aurelion) ----
+  // ---- the Gilded Tide (plain units; they only wander and flee, never attack, and leave only the Codex of Aurelion) ----
   gilt_imp: {
     kind: 'gilt_imp',
     name: 'gilt imp',
@@ -664,11 +667,11 @@ export const MOBS: Record<MobKind, MobDef> = {
     health: 22,
     speed: 2.2,
     runSpeed: 5,
-    hostile: true,
+    hostile: false,
     burnsInDaylight: false,
-    detect: 64,
-    melee: { damage: 2, cooldown: 0.9, reach: 1.1 },
-    behaves: 'zombie',
+
+    detect: 0,
+    melee: null,
     jumpSpeed: 9,
     drops: (r) => (r() < 0.2 ? [{ id: I.AURELION_CODEX, count: 1 }] : []),
     xp: () => 6,
@@ -681,11 +684,11 @@ export const MOBS: Record<MobKind, MobDef> = {
     health: 32,
     speed: 2.6,
     runSpeed: 6.4,
-    hostile: true,
+    hostile: false,
     burnsInDaylight: false,
-    detect: 64,
-    melee: { damage: 2.5, cooldown: 1.1, reach: 1.3 },
-    behaves: 'zombie',
+
+    detect: 0,
+    melee: null,
     jumpSpeed: 9,
     drops: (r) => (r() < 0.28 ? [{ id: I.AURELION_CODEX, count: 1 }] : []),
     xp: () => 8,
@@ -698,11 +701,11 @@ export const MOBS: Record<MobKind, MobDef> = {
     health: 72,
     speed: 1.6,
     runSpeed: 3.6,
-    hostile: true,
+    hostile: false,
     burnsInDaylight: false,
-    detect: 64,
-    melee: { damage: 3.5, cooldown: 1.5, reach: 1.9 },
-    behaves: 'zombie',
+
+    detect: 0,
+    melee: null,
     jumpSpeed: 8.5,
     drops: (r) => (r() < 0.5 ? [{ id: I.AURELION_CODEX, count: 1 }] : []),
     xp: () => 20,
@@ -710,16 +713,16 @@ export const MOBS: Record<MobKind, MobDef> = {
   gilt_colossus: {
     kind: 'gilt_colossus',
     name: 'gilt colossus',
-    width: 1.7,
-    height: 3.9,
+    width: 1.85,
+    height: 4.4,
     health: 190,
     speed: 1.2,
     runSpeed: 2.5,
-    hostile: true,
+    hostile: false,
     burnsInDaylight: false,
-    detect: 64,
-    melee: { damage: 5.5, cooldown: 2, reach: 2.9 },
-    behaves: 'zombie',
+
+    detect: 0,
+    melee: null,
     jumpSpeed: 8,
     drops: (r) => [{ id: I.AURELION_CODEX, count: 1 + (r() < 0.5 ? 1 : 0) }],
     xp: () => 60,
@@ -727,15 +730,15 @@ export const MOBS: Record<MobKind, MobDef> = {
   aurelion: {
     kind: 'aurelion',
     name: 'King Aurelion',
-    width: 2.6,
-    height: 6.2,
+    width: 1.4,
+    height: 3.3,
     health: 650,
     speed: 1.8,
     runSpeed: 3.3,
     hostile: true,
     burnsInDaylight: false,
     detect: 96,
-    melee: { damage: 7, cooldown: 2, reach: 3.7 },
+    melee: { damage: 7, cooldown: 2, reach: 2.6 },
     behaves: 'zombie',
     boss: true,
     jumpSpeed: 9,
@@ -2004,8 +2007,12 @@ export class MobManager {
     const pz = b.z;
     // Players are solid: a monster stops at their edge instead of walking into them.
     cmd.solids = this.playerSolids(m, env);
+    // (And it stops where its own arms and head touch them: see `MoveInput.shape`.)
+    const shape = cmd.solids ? MOB_SOLID_BOXES[m.def.kind] : undefined;
+    cmd.shape = shape && shape.length > 0 ? { boxes: shape, yaw: m.yaw, scale: m.def.height > 0 ? m.height / m.def.height : 1 } : undefined;
     stepPlayer(env.world, b, cmd, dt);
     cmd.solids = undefined;
+    cmd.shape = undefined;
     // Chickens flap and drift down.
     if (m.def.glides && !b.onGround && b.vy < -1.6) b.vy = -1.6;
     const moved = Math.hypot(b.x - px, b.z - pz);

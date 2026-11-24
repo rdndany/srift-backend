@@ -1,4 +1,5 @@
 import { ICON_COLORS, OUTFIT_ICONS } from './outfitIcons';
+import { HOLLOW_KING_ICONS } from './hollowKingIcons';
 import { ACCESSORY_MATERIALS, ARMOR_MATERIALS, ARMOR_SLOTS, COMPANIONS, WINGS, OUTFITS, OUTFIT_CLASSES, BED_RED, COMPASS_FRAMES, DYE_NAMES, DYE_RGB, TILE_PX, TOOL_KINDS, TOOL_MATERIALS, type AccessoryMaterial, type ArmorMaterial, type ArmorSlot, type CompanionDef, type WingDef, type OutfitClass, type OutfitDef, type ToolKind, type ToolMaterial } from '@solrift/shared';
 
 /**
@@ -419,6 +420,46 @@ function paperGrid(): Cell[] {
       return shade([236, 236, 240], hashPx(x, y) * 8 - 6 - (x + y > 18 ? 12 : 0));
     },
   );
+  return outline(g);
+}
+
+/**
+ * The Auren Land Surveyor: a surveyor's stake with a golden diamond head that holds a green glow, a pennant on the right and a pointed iron
+ * foot, so it reads as "mark the ground" at 16 pixels.
+ */
+function landSurveyorGrid(): Cell[] {
+  const g = blank();
+  const gold: RGB = [232, 184, 66];
+  const wood: RGB = [132, 88, 46];
+  const iron: RGB = [150, 156, 170];
+  // The pole, a little lit on its left.
+  for (let y = 6; y <= 13; y++) {
+    g[y * N + 6] = shade(wood, 14 + Math.floor(hashPx(6, y) * 8) - 4);
+    g[y * N + 7] = shade(wood, -16 + Math.floor(hashPx(7, y) * 8) - 4);
+  }
+  // The foot: iron, down to a point.
+  for (const [x, y] of [[6, 14], [7, 14], [6, 15]] as const) g[y * N + x] = shade(iron, x === 6 ? 18 : -14);
+  g[15 * N + 7] = shade(iron, -30);
+  // The head: a gold diamond with a glowing heart.
+  const cx = 6.5;
+  const cy = 3.5;
+  fillShape(
+    g,
+    (x, y) => Math.abs(x - cx) + Math.abs(y - cy) <= 3.6,
+    (x, y) => {
+      const d = Math.abs(x - cx) + Math.abs(y - cy);
+      if (d < 1.6) return d < 0.9 ? [214, 255, 190] : [112, 232, 120];
+      return shade(gold, (x + y < 10 ? 22 : -26) + Math.floor(hashPx(x, y) * 8) - 4);
+    },
+  );
+  // A collar where the head meets the pole.
+  g[6 * N + 6] = shade(gold, 10);
+  g[6 * N + 7] = shade(gold, -24);
+  // The pennant: gold with a green edge, hanging from the head to the right.
+  for (let y = 2; y <= 5; y++) {
+    const len = 6 - Math.abs(y - 3) * 2;
+    for (let x = 0; x < len; x++) g[y * N + 10 + x] = x === len - 1 && len > 2 ? [80, 196, 96] : shade(gold, (y === 2 ? 18 : y === 5 ? -22 : 0) + Math.floor(hashPx(10 + x, y) * 8) - 4);
+  }
   return outline(g);
 }
 
@@ -3577,6 +3618,7 @@ const BUILDERS: Record<string, () => Cell[]> = {
   horn_fenrir_blue: () => hornGrid([44, 100, 204], [196, 232, 255], [96, 236, 255]),
   horn_fenrir_gold: () => hornGrid([238, 186, 50], [255, 246, 176], [255, 255, 190]),
   compass: () => compassGrid(0),
+  land_surveyor: landSurveyorGrid,
   jewel_dawn: () => jewelGrid('dawn'),
   jewel_rift: () => jewelGrid('rift'),
   jewel_bloom: () => jewelGrid('bloom'),
@@ -3636,6 +3678,118 @@ for (const m of TOOL_MATERIALS) for (const k of TOOL_KINDS) BUILDERS[`${m}_${k}`
 for (const m of ARMOR_MATERIALS) for (const s of ARMOR_SLOTS) BUILDERS[`${m}_${s}`] = () => armorGrid(s, m);
 for (const c of OUTFIT_CLASSES) ARMOR_SLOTS.forEach((s, i) => (BUILDERS[`outfit_${c}_${s}`] = () => outfitGrid(c, i)));
 for (const o of OUTFITS) BUILDERS[`outfit_set_${o.id}`] = () => outfitSetGrid(o);
+/** A picture from a character template (row by row, '.' is clear) and a palette. */
+function templateGrid(rows: string[], pal: Record<string, RGB>): Cell[] {
+  const g = blank();
+  rows.forEach((row, y) => {
+    for (let x = 0; x < row.length && x < 16; x++) {
+      const c = pal[row[x]];
+      if (c && y < 16) dot(g, x, y, c);
+    }
+  });
+  return outline(g);
+}
+
+/** A glowing ember: a hot core in a halo, in the colours of its country. */
+function emberGrid(core: RGB, halo: RGB, spark: RGB): Cell[] {
+  const g = blank();
+  for (let y = 0; y < 16; y++) {
+    for (let x = 0; x < 16; x++) {
+      const d = Math.hypot(x - 7.5, y - 8);
+      if (d < 2.4) dot(g, x, y, shade(spark, Math.floor(hashPx(x, y) * 10) - 5));
+      else if (d < 4.3) dot(g, x, y, shade(core, Math.floor(hashPx(x, y) * 14) - 7));
+      else if (d < 5.6 && hashPx(x + 3, y + 1) > 0.35) dot(g, x, y, shade(halo, Math.floor(hashPx(x, y) * 10) - 5));
+    }
+  }
+  return outline(g);
+}
+
+const QUEST_ART: Record<string, () => Cell[]> = {
+  // a scrap of cloth with a burnt edge
+  rift_singed_rag: () =>
+    templateGrid(
+      ['', '', '.....rrrr', '....rcccccr', '...rccccccccr', '...rcccmcccccr', '..rcccmmmccccr', '..rccccmcccccr', '...rcccccccrr', '...rrcccccrr', '.....rrrrr'],
+      { r: [196, 64, 40], c: [96, 70, 120], m: [226, 126, 60] },
+    ),
+  // a leather strap with a buckle, torn at one end
+  torn_satchel_scrap: () =>
+    templateGrid(
+      ['', '', '', '..tttttttttt', '.tbbbbbbbbbbtt', '.tbbyyyybbbbbt', '.tbbyggybbbbbt', '.tbbyyyybbbbbt', '..tbbbbbbbbbt', '...tt.tttttt'],
+      { t: [96, 62, 34], b: [150, 100, 56], y: [226, 190, 80], g: [90, 60, 30] },
+    ),
+  // a reed charm: a ring of woven reeds with a blue bead
+  drowned_reed_charm: () =>
+    templateGrid(
+      ['', '', '......gg', '....gggggg', '...gg....gg', '..gg..bb..gg', '..g..bbbb..g', '..g..bbbb..g', '..gg..bb..gg', '...gg....gg', '....gggggg', '.....g..g'],
+      { g: [110, 150, 70], b: [80, 170, 220] },
+    ),
+  // a notched tally stick
+  sun_scorched_tally: () =>
+    templateGrid(
+      ['', '', '..............ww', '.............wss', '............wsss', '...........wsns', '..........wsnss', '.........wsnss', '........wsnss', '.......wsnss', '......wsnss', '.....wsnss', '....wsss', '....sss'],
+      { w: [236, 220, 170], s: [200, 160, 90], n: [90, 60, 30] },
+    ),
+  // a leather tag on a cord
+  caravan_tally_tag: () =>
+    templateGrid(
+      ['', '.......cc', '......c..c', '......c..c', '.....tttttt', '....tbbbbbbt', '....tbddbbbt', '....tbbbdbbt', '....tbddbbbt', '....tbbbbbbt', '.....tttttt'],
+      { c: [210, 200, 170], t: [96, 62, 34], b: [176, 124, 70], d: [70, 44, 24] },
+    ),
+  // a small silver bell
+  frozen_ward_bell: () =>
+    templateGrid(
+      ['', '', '......hh', '.....h..h', '.....hhhh', '....wwwwww', '...wwiiiiww', '...wiiiiiiw', '...wiiiiiiw', '..wwiiiiiiww', '..wwwwwwwwww', '.......kk'],
+      { h: [180, 190, 210], w: [150, 170, 200], i: [220, 238, 250], k: [60, 90, 150] },
+    ),
+  // a page of writing with a seal
+  warden_ledger_page: () =>
+    templateGrid(
+      ['', '', '...pppppppp', '...pwwwwwwwp', '...pwkkkkkwp', '...pwwwwwwwp', '...pwkkkkwwp', '...pwwwwwwwp', '...pwkkkkkwp', '...pwwwrrwwp', '...pwwwrrwwp', '....pppppppp'],
+      { p: [160, 140, 100], w: [236, 224, 190], k: [70, 56, 44], r: [190, 50, 40] },
+    ),
+  // a dull grey medal on a ribbon
+  ashen_medal: () =>
+    templateGrid(
+      ['', '', '.....rr.rr', '.....rrrrr', '......rrr', '.....mmmmm', '....mggggmm', '...mgggssgmm', '...mggssggmm', '...mgggssgmm', '....mggggmm', '.....mmmmm'],
+      { r: [120, 50, 50], m: [110, 108, 112], g: [170, 168, 172], s: [220, 218, 222] },
+    ),
+  // a scorched fuse: a cord with a black end
+  scorched_fuse: () =>
+    templateGrid(
+      ['', '', '...........kk', '..........kkk', '.........ccc', '........ccc', '.......ccc', '...cc.ccc', '..cccccc', '..ccc', '...cc'],
+      { c: [190, 170, 120], k: [36, 32, 36] },
+    ),
+  // a small iron-bound coffer
+  sealed_coffer: () =>
+    templateGrid(
+      ['', '', '', '..iiiiiiiiii', '.iwwwwwwwwwwi', '.iwwwwwwwwwwi', '.iiiiiiyyiiii', '.iwwwwwyywwwi', '.iwwwwwwwwwwi', '.iwwwwwwwwwwi', '..iiiiiiiiii'],
+      { i: [86, 88, 96], w: [150, 104, 56], y: [236, 200, 80] },
+    ),
+  // a glass jar of green spores with a cork
+  spore_jar: () =>
+    templateGrid(
+      ['', '', '.....kkkk', '.....kkkk', '....gggggg', '...gsssssg', '...gsPsssg', '...gssPssg', '...gsPsPsg', '...gssssPg', '....gggggg'],
+      { k: [150, 110, 60], g: [200, 230, 240], s: [110, 170, 80], P: [210, 240, 140] },
+    ),
+  // a pale curved claw
+  bear_claw: () =>
+    templateGrid(
+      ['', '', '..bbbb', '..bwwbb', '...bwwwb', '....bwwwb', '.....bwwwb', '......bwwb', '.......bwb', '........bb', '.........b'],
+      { b: [120, 110, 100], w: [240, 234, 220] },
+    ),
+  // a gold scale
+  gilded_scale: () =>
+    templateGrid(
+      ['', '', '.....gggg', '....gyyyyg', '...gyyhhyyg', '..gyyhyyyyyg', '..gyyyyyyyyg', '...gyyyyyyg', '....gyyyyg', '.....gyyg', '......gg'],
+      { g: [170, 120, 30], y: [244, 200, 70], h: [255, 244, 170] },
+    ),
+  reed_ember: () => emberGrid([90, 200, 90], [40, 130, 70], [220, 255, 190]),
+  sand_ember: () => emberGrid([240, 170, 50], [190, 100, 30], [255, 240, 180]),
+  frost_ember: () => emberGrid([90, 190, 255], [50, 110, 200], [230, 250, 255]),
+  throne_ember: () => emberGrid([255, 90, 50], [170, 30, 40], [255, 230, 190]),
+};
+for (const [name, build] of Object.entries(QUEST_ART)) BUILDERS[name] = build;
+for (const [name, build] of Object.entries(HOLLOW_KING_ICONS)) BUILDERS[name] = build;
 BUILDERS.wing_frame = wingFrameGrid;
 BUILDERS.storm_feather = stormFeatherGrid;
 for (const w of WINGS) BUILDERS[`wings_${w.id}`] = () => wingsGrid(w);

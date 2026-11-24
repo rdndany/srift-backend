@@ -1,5 +1,6 @@
 'use client';
 
+import { toast } from 'sonner';
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useAuth } from '../auth/store';
 import { useCamp } from '../camp/store';
@@ -10,7 +11,7 @@ import { CampHero, HeroLine } from './CampHero';
 import { CampMarket } from './CampMarket';
 import { CampTrips, DailyCard } from './CampTrips';
 import { ClickSparks, useFrontMotion } from './fx';
-import { SCROLL_KEY, goMarket, goToken } from './frontNav';
+import { SCROLL_KEY, goMarket, goToken, goShop } from './frontNav';
 import { WalletLinks } from './WalletLinks';
 import './home.css';
 import './front.css';
@@ -39,21 +40,16 @@ const toFront = (id: string | null) => {
   location.assign('/');
 };
 
-/** What is said when a tap is done: a line at the bottom that goes away by itself. */
+/** What is said when a tap is done: a toast (see `SiteToaster`) that goes away by itself. */
 function Notice() {
   const notice = useCamp((s) => s.notice);
   const clear = useCamp((s) => s.clear);
   useEffect(() => {
     if (!notice) return;
-    const id = window.setTimeout(clear, 4500);
-    return () => window.clearTimeout(id);
+    (notice.ok ? toast.success : toast.error)(notice.text);
+    clear();
   }, [notice, clear]);
-  if (!notice) return null;
-  return (
-    <div className={`camp-notice${notice.ok ? '' : ' bad'}`} role="status" data-testid="camp-notice" key={notice.n} onClick={clear}>
-      {notice.text}
-    </div>
-  );
+  return null;
 }
 
 function SignIn() {
@@ -179,6 +175,7 @@ export function CampPage() {
             <button className="fp-link-market" onClick={goMarket}>
               Market
             </button>
+            <button className="fp-link-shop" onClick={goShop}>Shop</button>
             <button className="fp-link-token" onClick={goToken}>
               Token
             </button>

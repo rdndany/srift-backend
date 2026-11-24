@@ -439,7 +439,7 @@ export class GameAudio {
 
   /**
    * The Gilded Tide: a warning (a rising brass call over a low drum), the tide breaking (a rush, a heavy thump and a gold glitter),
-   * Aurelion rising (a deep roar and a long sinking horn), his fall (a bright run of bells and a glitter) or the tide fading (the notes fall).
+   * All golden creatures found (a bright run of bells and a glitter) or the tide fading (the notes fall). (`boss` is kept for old clients.)
    */
   invasion(what: 'omen' | 'open' | 'boss' | 'slain' | 'faded'): void {
     if (!this.ctx || !this.master) return;

@@ -1,5 +1,6 @@
 'use client';
 
+import { toast } from 'sonner';
 import { create } from 'zustand';
 import type { AchTier, ClassId } from '@solrift/shared';
 import { useAuth, type AccountInfo } from '../auth/store';
@@ -166,13 +167,14 @@ export const useToken = create<TokenState>()((set, get) => ({
     set({ busy: true, error: '', notice: '' });
     try {
       const res = await api<{ status: 'done' | 'pending'; amount: number; me: TokenMe }>('withdraw', { method: 'POST', body: JSON.stringify({ amount }) });
-      set({
-        me: res.me,
-        notice: res.status === 'done' ? `Sent ${res.amount.toLocaleString()} $SOLRIFT to your wallet.` : `Sending ${res.amount.toLocaleString()} $SOLRIFT. It is on its way and will show here when the network confirms it.`,
-      });
+      const notice = res.status === 'done' ? `Sent ${res.amount.toLocaleString()} $SOLRIFT to your wallet.` : `Sending ${res.amount.toLocaleString()} $SOLRIFT. It is on its way and will show here when the network confirms it.`;
+      set({ me: res.me, notice });
+      toast.success(notice);
       void get().loadInfo();
     } catch (err) {
-      set({ error: err instanceof Error ? err.message : String(err) });
+      const error = err instanceof Error ? err.message : String(err);
+      set({ error });
+      toast.error(error);
     } finally {
       set({ busy: false });
     }
@@ -183,18 +185,21 @@ export const useToken = create<TokenState>()((set, get) => ({
     set({ busy: true, error: '', notice: '' });
     try {
       const res = await api<{ sku: string; name: string; price: number; me: TokenMe; account: AccountInfo }>('buy', { method: 'POST', body: JSON.stringify({ sku }) });
-      set({ me: res.me, notice: sku.startsWith('outfit:') ? `${res.name.replace(/^Outfit: /, '')} is in your Stash: ${res.price.toLocaleString()} $SOLRIFT spent. Take it out in the world and right-click it to wear it.` : `Bought a ${res.name.toLowerCase()} for ${res.price.toLocaleString()} $SOLRIFT.` });
+      const notice = sku.startsWith('outfit:') ? `${res.name.replace(/^Outfit: /, '')} is in your Stash: ${res.price.toLocaleString()} $SOLRIFT spent. Take it out in the world and right-click it to wear it.` : `Bought a ${res.name.toLowerCase()} for ${res.price.toLocaleString()} $SOLRIFT.`;
+      set({ me: res.me, notice });
+      toast.success(notice);
       useAuth.getState().applyAccount(res.account);
       void get().loadInfo();
       return res.me.shop.find((i) => i.sku === sku) ?? ({ sku, name: res.name, blurb: '', owned: 0, max: 0, price: null } as ShopItem);
     } catch (err) {
-      set({ error: err instanceof Error ? err.message : String(err) });
+      const error = err instanceof Error ? err.message : String(err);
+      set({ error });
+      toast.error(error);
       return null;
     } finally {
       set({ busy: false });
     }
-  },
-}));
+  },}));
 
 /** Where to look at a transaction (null when the token is not set up). */
 export const txUrl = (info: TokenLiveInfo | null, signature: string): string | null => (info?.explorer ? `${info.explorer.tx}${signature}${info.explorer.suffix}` : null);

@@ -5,7 +5,8 @@ import { COMPANIONS, type CompanionDef } from './companions';
 import { WINGS, type WingDef } from './wings';
 import { ACCESSORY_KINDS, ACCESSORY_MATERIALS, accessoryDef, type AccessoryDef, type AccessoryKind, type AccessoryMaterial } from './accessories';
 import { OUTFITS, type OutfitDef } from './outfitData';
-import { ARMOR_MATERIALS, ARMOR_SLOTS, OUTFIT_CLASSES, armorDef, outfitDef, type ArmorDef, type ArmorMaterial, type OutfitClass } from './armor';
+import { ARMOR_MATERIALS, ARMOR_SLOTS, OUTFIT_CLASSES, armorDef, hollowKingArmorDef, outfitDef, type ArmorDef, type ArmorMaterial, type OutfitClass } from './armor';
+import { HK, HK_ARMOR, HK_BLADE_STATS, HK_CROSSBOW_STATS, HK_ITEM_NAMES, HK_NECKLACE_STATS, HK_RING_STATS, HK_STAFF_STATS } from './hollowKingData';
 import {
   B,
   BED_RED,
@@ -142,6 +143,8 @@ export const I = {
   COMPASS: 434,
   /** The only thing the monsters of the Gilded Tide leave (see invasion.ts). Right-click it and it opens into one piece of epic gear. */
   AURELION_CODEX: 435,
+  /** The Auren Land Surveyor: hold it and click to mark the corners of a claim (the selection is the client's; the server prices and sells it, see landService.ts). Reusable. */
+  LAND_SURVEYOR: 620,
   /** The mount horns (440 + the mount's place in `MOUNTS`): right-click one to put it in the mount slot, and summon it with the mount key. */
   MOUNT_BASE: 440,
   /** The clothes of the classes (460 + class * 4 + slot, see `outfitId`): worn in the armor slots, and taken off like armor. */
@@ -216,6 +219,24 @@ export const I = {
   WARDEN_SCROLL: 502,
   HOLLOW_BONE: 503,
   HOLLOW_SIGIL: 504,
+  /** The quest items of the Adventure story (600..616, see questDrops.ts): they drop only while their quest is active, and cannot be sold, traded, stored or dropped. */
+  RIFT_SINGED_RAG: 600,
+  TORN_SATCHEL_SCRAP: 601,
+  DROWNED_REED_CHARM: 602,
+  REED_EMBER: 603,
+  SUN_SCORCHED_TALLY: 604,
+  CARAVAN_TALLY_TAG: 605,
+  SAND_EMBER: 606,
+  FROZEN_WARD_BELL: 607,
+  FROST_EMBER: 608,
+  WARDEN_LEDGER_PAGE: 609,
+  ASHEN_MEDAL: 610,
+  THRONE_EMBER: 611,
+  SCORCHED_FUSE: 612,
+  SEALED_COFFER: 613,
+  SPORE_JAR: 614,
+  BEAR_CLAW: 615,
+  GILDED_SCALE: 616,
 } as const;
 
 /** The classes a skill book can be for (the same ids as `ClassId`, written out so that this file need not import classes). */
@@ -327,6 +348,9 @@ export const necklaceId = (material: AccessoryMaterial): number => accessoryItem
 
 /** The ring or necklace an item is (null for anything else). */
 export function accessoryOfItem(id: number): AccessoryDef | null {
+  // The Hollow King's ring and necklace: diamond to look at, with stats of their own.
+  if (id === HK.SIGNET) return { kind: 'ring', material: 'diamond', name: HK_ITEM_NAMES[id], stats: HK_RING_STATS };
+  if (id === HK.HEART) return { kind: 'necklace', material: 'diamond', name: HK_ITEM_NAMES[id], stats: HK_NECKLACE_STATS };
   for (const kind of ACCESSORY_KINDS) {
     const i = id - (kind === 'ring' ? I.RING_BASE : I.NECKLACE_BASE);
     if (Number.isInteger(i) && i >= 0 && i < ACCESSORY_MATERIALS.length) return accessoryDef(kind, ACCESSORY_MATERIALS[i]);
@@ -488,6 +512,7 @@ export type ItemUse =
   | 'companion' // goes in the companion slot
   | 'wings' // goes in the wing slot
   | 'accessory' // a ring or a necklace: goes in a ring slot or the necklace slot
+  | 'land_surveyor' // held: marks the corners of a claim; like the map, the hand that holds it does nothing else
   | 'map' // read: the hand that holds it does nothing else (it does not hit, dig, build or use), and the off hand takes it too
   // On the block the crosshair is on:
   | 'flint' // lights a fire
@@ -507,7 +532,7 @@ export interface HeldLight {
 }
 
 /** What the tooltip calls an item under its name (see `itemKind` in tooltip.ts). */
-export type ItemKind = 'Glyph Tome' | 'Skill Book' | 'Mount' | 'Outfit' | 'Companion' | 'Wings' | 'Ring' | 'Necklace' | 'Bag' | 'Special' | 'Jewel' | 'Equipment' | 'Food' | 'Item' | 'Nature' | 'Block' | 'Dye' | 'Material';
+export type ItemKind = 'Glyph Tome' | 'Skill Book' | 'Mount' | 'Outfit' | 'Companion' | 'Wings' | 'Ring' | 'Necklace' | 'Bag' | 'Special' | 'Jewel' | 'Equipment' | 'Food' | 'Item' | 'Nature' | 'Block' | 'Dye' | 'Material' | 'Utility Tool';
 
 export interface ItemDef {
   id: number;
@@ -750,6 +775,7 @@ add({ id: I.REDSTONE, name: 'redstone', tile: tileIndex('redstone'), block: wire
 add({ id: I.MINECART, name: 'minecart', tile: tileIndex('minecart'), maxStack: 1, use: 'vehicle', kind: 'Item' });
 add({ id: I.BOAT, name: 'boat', tile: tileIndex('boat'), maxStack: 1, fuel: 60, use: 'vehicle', kind: 'Item' });
 add({ id: I.MAP, name: 'map', tile: tileIndex('map'), maxStack: 1, use: 'map', undroppable: true, kind: 'Special' });
+add({ id: I.LAND_SURVEYOR, name: 'auren_land_surveyor', tile: tileIndex('land_surveyor'), maxStack: 1, use: 'land_surveyor', undroppable: false, kind: 'Utility Tool' });
 add({ id: I.ARMOR_STAND, name: 'armor_stand', tile: tileIndex('armor_stand'), maxStack: 16, use: 'armor_stand', kind: 'Item' });
 /** Uses of a fishing rod before it breaks (the original's). */
 export const FISHING_ROD_DURABILITY = 64;
@@ -772,6 +798,23 @@ add({ id: I.EMBERSTONE, name: 'emberstone', tile: tileIndex('emberstone'), maxSt
 add({ id: I.WARDEN_SCROLL, name: 'warden_scroll', tile: tileIndex('warden_scroll'), maxStack: 16, kind: 'Material' });
 add({ id: I.HOLLOW_BONE, name: 'hollow_bone', tile: tileIndex('hollow_bone'), maxStack: 16, kind: 'Material' });
 add({ id: I.HOLLOW_SIGIL, name: 'hollow_sigil', tile: tileIndex('hollow_sigil'), maxStack: 8, kind: 'Special' });
+add({ id: I.RIFT_SINGED_RAG, name: 'rift_singed_rag', tile: tileIndex('rift_singed_rag'), maxStack: 64, undroppable: true, kind: 'Special' });
+add({ id: I.TORN_SATCHEL_SCRAP, name: 'torn_satchel_scrap', tile: tileIndex('torn_satchel_scrap'), maxStack: 64, undroppable: true, kind: 'Special' });
+add({ id: I.DROWNED_REED_CHARM, name: 'drowned_reed_charm', tile: tileIndex('drowned_reed_charm'), maxStack: 64, undroppable: true, kind: 'Special' });
+add({ id: I.REED_EMBER, name: 'reed_ember', tile: tileIndex('reed_ember'), maxStack: 64, undroppable: true, kind: 'Special' });
+add({ id: I.SUN_SCORCHED_TALLY, name: 'sun_scorched_tally', tile: tileIndex('sun_scorched_tally'), maxStack: 64, undroppable: true, kind: 'Special' });
+add({ id: I.CARAVAN_TALLY_TAG, name: 'caravan_tally_tag', tile: tileIndex('caravan_tally_tag'), maxStack: 64, undroppable: true, kind: 'Special' });
+add({ id: I.SAND_EMBER, name: 'sand_ember', tile: tileIndex('sand_ember'), maxStack: 64, undroppable: true, kind: 'Special' });
+add({ id: I.FROZEN_WARD_BELL, name: 'frozen_ward_bell', tile: tileIndex('frozen_ward_bell'), maxStack: 64, undroppable: true, kind: 'Special' });
+add({ id: I.FROST_EMBER, name: 'frost_ember', tile: tileIndex('frost_ember'), maxStack: 64, undroppable: true, kind: 'Special' });
+add({ id: I.WARDEN_LEDGER_PAGE, name: 'warden_ledger_page', tile: tileIndex('warden_ledger_page'), maxStack: 64, undroppable: true, kind: 'Special' });
+add({ id: I.ASHEN_MEDAL, name: 'ashen_medal', tile: tileIndex('ashen_medal'), maxStack: 64, undroppable: true, kind: 'Special' });
+add({ id: I.THRONE_EMBER, name: 'throne_ember', tile: tileIndex('throne_ember'), maxStack: 64, undroppable: true, kind: 'Special' });
+add({ id: I.SCORCHED_FUSE, name: 'scorched_fuse', tile: tileIndex('scorched_fuse'), maxStack: 64, undroppable: true, kind: 'Special' });
+add({ id: I.SEALED_COFFER, name: 'sealed_coffer', tile: tileIndex('sealed_coffer'), maxStack: 64, undroppable: true, kind: 'Special' });
+add({ id: I.SPORE_JAR, name: 'spore_jar', tile: tileIndex('spore_jar'), maxStack: 64, undroppable: true, kind: 'Special' });
+add({ id: I.BEAR_CLAW, name: 'bear_claw', tile: tileIndex('bear_claw'), maxStack: 64, undroppable: true, kind: 'Special' });
+add({ id: I.GILDED_SCALE, name: 'gilded_scale', tile: tileIndex('gilded_scale'), maxStack: 64, undroppable: true, kind: 'Special' });
 add({ id: I.JEWEL_DAWN, name: 'jewel_of_dawn', tile: tileIndex('jewel_dawn'), maxStack: 64, kind: 'Jewel' });
 add({ id: I.JEWEL_RIFT, name: 'jewel_of_the_rift', tile: tileIndex('jewel_rift'), maxStack: 64, kind: 'Jewel' });
 add({ id: I.JEWEL_BLOOM, name: 'jewel_of_bloom', tile: tileIndex('jewel_bloom'), maxStack: 64, kind: 'Jewel' });
@@ -809,6 +852,13 @@ for (const kind of ACCESSORY_KINDS) {
     add({ id: accessoryItemId(kind, material), name: def.name, tile: tileIndex(def.name), maxStack: 1, use: 'accessory', kind: kind === 'ring' ? 'Ring' : 'Necklace' });
   });
 }
+// The relics of the Hollow King (see hollowKingData.ts): four pieces of armor, three weapons, a ring and a necklace.
+HK_ARMOR.forEach((id, slotIndex) => add({ id, name: HK_ITEM_NAMES[id], tile: tileIndex(HK_ITEM_NAMES[id]), maxStack: 1, armor: hollowKingArmorDef(slotIndex) }));
+add({ id: HK.BLADE, name: HK_ITEM_NAMES[HK.BLADE], tile: tileIndex(HK_ITEM_NAMES[HK.BLADE]), maxStack: 1, durability: 820, weapon: HK_BLADE_STATS });
+add({ id: HK.STAFF, name: HK_ITEM_NAMES[HK.STAFF], tile: tileIndex(HK_ITEM_NAMES[HK.STAFF]), maxStack: 1, durability: 640, carry: 'staff', weapon: HK_STAFF_STATS });
+add({ id: HK.CROSSBOW, name: HK_ITEM_NAMES[HK.CROSSBOW], tile: tileIndex(HK_ITEM_NAMES[HK.CROSSBOW]), maxStack: 1, durability: 720, use: 'crossbow', weapon: HK_CROSSBOW_STATS });
+add({ id: HK.SIGNET, name: HK_ITEM_NAMES[HK.SIGNET], tile: tileIndex(HK_ITEM_NAMES[HK.SIGNET]), maxStack: 1, use: 'accessory', kind: 'Ring' });
+add({ id: HK.HEART, name: HK_ITEM_NAMES[HK.HEART], tile: tileIndex(HK_ITEM_NAMES[HK.HEART]), maxStack: 1, use: 'accessory', kind: 'Necklace' });
 // Bags: worn in a bag slot of the inventory screen, never stacked.
 BAGS.forEach((b, i) => add({ id: I.BAG_BASE + i, name: b.name, tile: tileIndex(`bag_${i + 1}`), maxStack: 1, kind: 'Bag' }));
 

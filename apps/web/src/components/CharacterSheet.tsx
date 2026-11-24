@@ -368,7 +368,7 @@ function StashPanel({ stash, used, sorted, onSort, show, hide, viewer }: { stash
   return (
     <Section title="Shared Stash" note={`${used} of ${stash.slots.length || STASH_SLOTS} slots`} id="cs-stash">
       <div className="cs-stashbar">
-        <p className="cs-note">Shared by every character of your wallet, and by no one else. Move items in and out at {stashkeeper} in Dawnwatch.</p>
+        <p className="cs-note">Shared by every character of your wallet, and by no one else. Move items in and out at {stashkeeper} in Dawnwatch, or at the stashkeeper of any other village or town.</p>
         <button type="button" id="cs-sort" aria-pressed={sorted} onClick={() => onSort(!sorted)} title="Only how it is shown here: in the game the slots stay where you put them">
           A-Z
         </button>

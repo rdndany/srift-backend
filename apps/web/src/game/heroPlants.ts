@@ -279,14 +279,6 @@ function stalk(s: Sheet, headX: number, headY: number, w = 2.6, foot = 32): Pt[]
 }
 
 /** A pair of slim leaves low on the stalk, and a thorn or two when asked. */
-function basalLeaves(s: Sheet, x: number, count: number, len: number, wid: number, tones: readonly RGB[] = LEAF, spread = 1): void {
-  for (let i = 0; i < count; i++) {
-    const side = i % 2 === 0 ? -1 : 1;
-    const ang = side < 0 ? Math.PI + 0.55 + (i >> 1) * 0.35 * spread : -0.55 - (i >> 1) * 0.35 * spread;
-    leafAt(s, x, 63 - (i >> 1) * 4, ang, len - (i >> 1) * 3, wid, tones, 0.3);
-  }
-}
-
 const GOLD: RGB[] = [[200, 130, 10], [244, 180, 18], [255, 212, 34], [255, 236, 78], [255, 250, 160]];
 
 /** A head of ray petals round a middle: the dandelion, the daisy. */
