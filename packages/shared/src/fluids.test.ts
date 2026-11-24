@@ -242,6 +242,37 @@ describe('flowing lava', () => {
     expect(r.get(0, 1, 0)).toBe(B.STONE);
   });
 
+  it('melts the ice it sits on, and the lava becomes obsidian', () => {
+    const r = rig();
+    r.put(0, 1, 0, B.ICE);
+    r.put(0, 2, 0, B.LAVA);
+    r.sim.settle();
+    expect(r.get(0, 1, 0)).toBe(B.WATER);
+    expect(r.get(0, 2, 0)).toBe(B.OBSIDIAN);
+    expect(r.hisses()).toBeGreaterThan(0);
+  });
+
+  it('melts ice over water and the lava becomes obsidian', () => {
+    const r = rig();
+    r.put(0, 1, 0, B.WATER);
+    r.put(0, 2, 0, B.ICE);
+    r.put(0, 3, 0, B.LAVA);
+    r.sim.settle();
+    expect(r.get(0, 1, 0)).toBe(B.WATER);
+    expect(r.get(0, 2, 0)).toBe(B.WATER);
+    expect(r.get(0, 3, 0)).toBe(B.OBSIDIAN);
+    expect(r.hisses()).toBeGreaterThan(0);
+  });
+
+  it('leaves packed ice where it is', () => {
+    const r = rig();
+    r.put(0, 1, 0, B.PACKED_ICE);
+    r.put(0, 2, 0, B.LAVA);
+    r.sim.settle();
+    expect(r.get(0, 1, 0)).toBe(B.PACKED_ICE);
+    expect(r.get(0, 2, 0)).toBe(B.LAVA);
+  });
+
   it('water over a lava source: the lava becomes obsidian', () => {
     const r = rig();
     r.put(0, 1, 0, B.LAVA);

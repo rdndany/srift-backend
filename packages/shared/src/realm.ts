@@ -533,6 +533,8 @@ export class Realm {
           const left = p.inventory.collect(s);
           const taken = before - (left?.count ?? 0);
           if (taken > 0) {
+            const jewel = jewelKind(id);
+            if (jewel) p.emit({ t: 'jewelDrop', kind: jewel, vol: 1 });
             const key = `${id}|${name ?? ''}|${ench ? JSON.stringify(ench) : ''}|${gear ? JSON.stringify(gear) : ''}`;
             const seen = got.get(key);
             if (seen) seen.count += taken;

@@ -6,7 +6,7 @@ import { paletteOfCode, paletteOfLook } from '../game/lookPalette';
 import { useProfile } from '../profile/store';
 
 /** The character in the inventory screen, wearing `armor` (the clothes of a class too: they are items) (item ids: helmet, chestplate, leggings, boots) and holding a shield. `wings` and `companion` are the numbers the wire gives (0: none). `lookCode` draws that saved look instead of the one being edited. */
-export function CharacterPreview({ armor, shield = 0, shieldIcon = null, turntable = false, grounded = false, lookCode, wings = 0, companion = 0 }: { armor: number[]; shield?: number; shieldIcon?: string | null; turntable?: boolean; grounded?: boolean; lookCode?: number; wings?: number; companion?: number }) {
+export function CharacterPreview({ armor, shield = 0, held = 0, turntable = false, grounded = false, lookCode, wings = 0, companion = 0, stage = false }: { armor: number[]; shield?: number; held?: number; turntable?: boolean; grounded?: boolean; lookCode?: number; wings?: number; companion?: number; stage?: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<Scene | null>(null);
   const key = armor.join(',');
@@ -25,9 +25,11 @@ export function CharacterPreview({ armor, shield = 0, shieldIcon = null, turntab
     sceneRef.current = scene;
     scene.setLook(lookCode === undefined ? paletteOfLook(useProfile.getState().look, useProfile.getState().outfit) : paletteOfCode(lookCode));
     scene.setGrounded(grounded);
+    scene.setStage(stage);
     scene.setArmor(key ? key.split(',').map(Number) : []);
     scene.setTurntable(turntable);
-    scene.setShield(shield, shieldIcon);
+    scene.setHeld(held);
+    scene.setShield(shield);
     scene.setWings(wings);
     scene.setCompanion(companion);
     const onMove = (e: MouseEvent) => {
@@ -69,25 +71,41 @@ export function CharacterPreview({ armor, shield = 0, shieldIcon = null, turntab
   }, [turntable]);
 
   useEffect(() => {
-    sceneRef.current?.setShield(shield, shieldIcon);
-  }, [shield, shieldIcon]);
+    sceneRef.current?.setStage(stage);
+  }, [stage]);
+
+  useEffect(() => {
+    sceneRef.current?.setHeld(held);
+  }, [held]);
+
+  useEffect(() => {
+    sceneRef.current?.setShield(shield);
+  }, [shield]);
 
   // Drag the figure to turn it round.
   const drag = useRef<{ id: number; x: number } | null>(null);
-  const onDown = (e: ReactPointerEvent<HTMLCanvasElement>) => {
+  const onDown = (e: ReactPointerEvent<HTMLElement>) => {
     drag.current = { id: e.pointerId, x: e.clientX };
     e.currentTarget.setPointerCapture(e.pointerId);
   };
-  const onMove = (e: ReactPointerEvent<HTMLCanvasElement>) => {
+  const onMove = (e: ReactPointerEvent<HTMLElement>) => {
     const d = drag.current;
     if (!d || d.id !== e.pointerId) return;
     sceneRef.current?.dragBy(e.clientX - d.x);
     d.x = e.clientX;
   };
-  const onUp = (e: ReactPointerEvent<HTMLCanvasElement>) => {
+  const onUp = (e: ReactPointerEvent<HTMLElement>) => {
     if (drag.current?.id === e.pointerId) drag.current = null;
     sceneRef.current?.release();
   };
 
-  return <canvas ref={canvasRef} className="char-preview" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} />;
+  const canvas = <canvas ref={canvasRef} className="char-preview" onPointerDown={stage ? undefined : onDown} onPointerMove={stage ? undefined : onMove} onPointerUp={stage ? undefined : onUp} onPointerCancel={stage ? undefined : onUp} />;
+  // On the lobby stage the picture is wider than the body (wings, a companion). Dragging stays on the body, so the panels beside it keep their clicks.
+  if (!stage) return canvas;
+  return (
+    <div className="char-stage">
+      {canvas}
+      <div className="char-stage-hit" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} />
+    </div>
+  );
 }

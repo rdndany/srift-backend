@@ -551,6 +551,7 @@ describe('who spawns where', () => {
     const night = run(0, sea);
     expect(night.has('squid')).toBe(true);
     expect(night.has('drowned')).toBe(true);
+    for (const k of ['zombie', 'skeleton', 'creeper', 'spider', 'cow', 'pig', 'sheep'] as const) expect(night.has(k), k).toBe(false);
 
     const puddle: BlockReader = { getBlock: (x, y) => (y <= 10 ? B.STONE : y <= 11 ? B.WATER : B.AIR) };
     const dry = run(0, puddle);

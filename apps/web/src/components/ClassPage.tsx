@@ -9,7 +9,7 @@ import { CharacterPreview } from './CharacterPreview';
 import { ABILITY_GUIDE, ABILITY_KEY_LABELS, GUIDE, LEVEL_GAINS, abilityFacts, bookPrice, itemTitle, num, statRows, unlockSteps } from './classGuide';
 import { ClickSparks, Embers, Reveal, Spot, useFrontMotion } from './fx';
 import { lobbyUrl } from '../game/route';
-import { SCROLL_KEY, goMarket, goToken, goCamp, goShop } from './frontNav';
+import { SCROLL_KEY, goBeyond, goMarket, goToken, goFarm, goShop } from './frontNav';
 import { ART } from './homeAssets';
 import { ItemSprite } from './ItemSprite';
 import type { HomeMode } from './modes';
@@ -139,10 +139,10 @@ export function ClassPage({ id }: { id: ClassId }) {
             <button className="fp-link-play" onClick={() => setAsking(true)}>
               Play
             </button>
-            <button onClick={() => toFront('site-world')}>The World</button>
+            <button onClick={goBeyond}>The World</button>
             <button onClick={() => toFront('site-features')}>Classes</button>
             <button onClick={() => toFront('l-expansions')}>Expansions</button>
-            <button className="fp-link-camp" onClick={goCamp}>Camp</button>
+            <button className="fp-link-farm" onClick={goFarm}>Farm</button>
             <button className="fp-link-market" onClick={goMarket}>Market</button>
             <button className="fp-link-shop" onClick={goShop}>Shop</button>
             <button className="fp-link-token" onClick={goToken}>Token</button>

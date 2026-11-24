@@ -4,6 +4,8 @@ import { ATLAS_COLS, ATLAS_ROWS, TILE_PX } from '@solrift/shared';
 const MAX = 512;
 /** Chips of a broken or placed block. A separate pool, so smoke and sparks keep their own. */
 const CHIPS = 384;
+/** Rising bubbles and the blue specks that hang in the water. Their own pool, so a swim does not eat the break dust. */
+const BUBBLES = 96;
 /** A chip shows a 4×4 piece of the block's 16×16 tile, the way Minecraft's break dust does. */
 const CROP = 4;
 const WHITE = new THREE.Color(1, 1, 1);
@@ -13,6 +15,8 @@ export class Particles {
   readonly mesh: THREE.InstancedMesh;
   /** Flat chips of a block's texture. They face the camera. */
   readonly debris: THREE.InstancedMesh;
+  /** Minecraft's underwater bubbles and the blue specks that hang in the water. They face the camera. */
+  readonly bubbles: THREE.InstancedMesh;
   private px = new Float32Array(MAX);
   private py = new Float32Array(MAX);
   private pz = new Float32Array(MAX);
@@ -48,6 +52,25 @@ export class Particles {
   private uvRect: THREE.InstancedBufferAttribute;
   private fade: THREE.InstancedBufferAttribute;
   private debrisMat: THREE.ShaderMaterial;
+  private bpx = new Float32Array(BUBBLES);
+  private bpy = new Float32Array(BUBBLES);
+  private bpz = new Float32Array(BUBBLES);
+  /** Blocks per tick, the unit Minecraft's particles use. */
+  private bvx = new Float32Array(BUBBLES);
+  private bvy = new Float32Array(BUBBLES);
+  private bvz = new Float32Array(BUBBLES);
+  private blife = new Float32Array(BUBBLES);
+  private bmax = new Float32Array(BUBBLES);
+  private bsize = new Float32Array(BUBBLES);
+  /** 1: a bubble that rises and pops out of the water. 0: a speck that hangs. */
+  private brise = new Float32Array(BUBBLES);
+  private bnext = 0;
+  private bAcc = 0;
+  private sAcc = 0;
+  private bfade: THREE.InstancedBufferAttribute;
+  private bkind: THREE.InstancedBufferAttribute;
+  private bubbleMat: THREE.ShaderMaterial;
+  private waterAt: ((x: number, y: number, z: number) => boolean) | null = null;
 
   constructor(private readonly atlas: HTMLCanvasElement, texture: THREE.Texture) {
     this.material = new THREE.MeshBasicMaterial({ color: 0xffffff });
@@ -102,6 +125,60 @@ export class Particles {
     this.debris.frustumCulled = false;
     this.debris.count = CHIPS;
     for (let i = 0; i < CHIPS; i++) this.debris.setMatrixAt(i, zero);
+
+    const bgeo = new THREE.PlaneGeometry(1, 1);
+    this.bfade = new THREE.InstancedBufferAttribute(new Float32Array(BUBBLES), 1);
+    this.bkind = new THREE.InstancedBufferAttribute(new Float32Array(BUBBLES), 1);
+    bgeo.setAttribute('fade', this.bfade);
+    bgeo.setAttribute('kind', this.bkind);
+    this.bubbleMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      toneMapped: false,
+      vertexShader: /* glsl */ `
+        attribute float fade;
+        attribute float kind;
+        varying float vFade;
+        varying float vKind;
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          vFade = fade;
+          vKind = kind;
+          vec3 origin = instanceMatrix[3].xyz;
+          float s = length(instanceMatrix[0].xyz);
+          vec3 right = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
+          vec3 up = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
+          vec3 world = origin + (position.x * right + position.y * up) * s;
+          gl_Position = projectionMatrix * viewMatrix * vec4(world, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying float vFade;
+        varying float vKind;
+        varying vec2 vUv;
+        void main() {
+          vec2 p = vUv - 0.5;
+          float r = length(p) * 2.0;
+          if (r > 1.0) discard;
+          // A speck is a soft blue dot. A bubble is a bright ring with a glint, the way Minecraft draws one.
+          float dotA = smoothstep(1.0, 0.2, r);
+          float rim = smoothstep(1.0, 0.62, r) * smoothstep(0.38, 0.68, r);
+          float glint = smoothstep(0.32, 0.0, length(p - vec2(-0.14, 0.16)));
+          float speck = step(0.5, vKind);
+          float a = mix(clamp(rim * 0.95 + glint * 0.8, 0.0, 1.0), dotA * 0.55, speck) * vFade;
+          if (a < 0.02) discard;
+          vec3 col = mix(vec3(0.93, 0.97, 1.0), vec3(0.4, 0.4, 0.7), speck);
+          gl_FragColor = vec4(col, a);
+          #include <colorspace_fragment>
+        }
+      `,
+    });
+    this.bubbles = new THREE.InstancedMesh(bgeo, this.bubbleMat, BUBBLES);
+    this.bubbles.frustumCulled = false;
+    this.bubbles.count = BUBBLES;
+    this.bubbles.renderOrder = 3;
+    for (let i = 0; i < BUBBLES; i++) this.bubbles.setMatrixAt(i, zero);
   }
 
   private pixels(tile: number): Uint8ClampedArray {
@@ -302,6 +379,92 @@ export class Particles {
     }
     if (any) this.mesh.instanceMatrix.needsUpdate = true;
     this.updateChips(dt);
+    this.updateBubbles(dt);
+  }
+
+  /**
+   * What Minecraft shows once your eyes are in water. Still water occasionally leaves a blue speck
+   * (`UNDERWATER`, colour 0.4, 0.4, 0.7, no gravity). A bubble rises (a nudge of 0.002 a tick, then
+   * the speed is taken down to 85%) and pops the moment it leaves the water.
+   */
+  underwater(dt: number, x: number, y: number, z: number, active: boolean, isWater: (x: number, y: number, z: number) => boolean): void {
+    this.waterAt = isWater;
+    if (!active || !isWater(Math.floor(x), Math.floor(y), Math.floor(z))) return;
+    this.bAcc = Math.min(0.5, this.bAcc + dt);
+    this.sAcc = Math.min(0.5, this.sAcc + dt);
+    while (this.bAcc >= 0.16) {
+      this.bAcc -= 0.16;
+      this.spawnBubble(x, y, z, false);
+    }
+    while (this.sAcc >= 0.05) {
+      this.sAcc -= 0.05;
+      this.spawnBubble(x, y, z, true);
+    }
+  }
+
+  private spawnBubble(x: number, y: number, z: number, speck: boolean): void {
+    const water = this.waterAt;
+    if (!water) return;
+    const reach = speck ? 6 : 3.2;
+    for (let t = 0; t < 6; t++) {
+      const ox = (Math.random() - 0.5) * reach * 2;
+      const oy = (Math.random() - 0.5) * reach * 1.4;
+      const oz = (Math.random() - 0.5) * reach * 2;
+      const dist = Math.hypot(ox, oy, oz);
+      if (dist < 0.5 || dist > reach) continue;
+      const px = x + ox;
+      const py = y + oy;
+      const pz = z + oz;
+      if (!water(Math.floor(px), Math.floor(py), Math.floor(pz))) continue;
+      const i = this.bnext++ % BUBBLES;
+      this.bpx[i] = px;
+      this.bpy[i] = py;
+      this.bpz[i] = pz;
+      const jitter = (Math.random() * 2 - 1) * 0.02;
+      this.bvx[i] = speck ? jitter * 0.15 : jitter;
+      this.bvy[i] = speck ? 0 : jitter;
+      this.bvz[i] = speck ? (Math.random() * 2 - 1) * 0.003 : (Math.random() * 2 - 1) * 0.02;
+      const span = speck ? 16 : 8;
+      this.bmax[i] = this.blife[i] = span / (Math.random() * 0.8 + 0.2) / 20;
+      this.bsize[i] = speck ? 0.02 + Math.random() * 0.06 : 0.05 + Math.random() * 0.07;
+      this.brise[i] = speck ? 0 : 1;
+      this.bkind.setX(i, speck ? 1 : 0);
+      return;
+    }
+  }
+
+  private updateBubbles(dt: number): void {
+    this.q.identity();
+    const ticks = dt * 20;
+    const drag = Math.pow(0.85, ticks);
+    const water = this.waterAt;
+    let any = false;
+    for (let i = 0; i < BUBBLES; i++) {
+      if (this.blife[i] <= 0) continue;
+      any = true;
+      this.blife[i] -= dt;
+      if (this.brise[i] > 0) this.bvy[i] += 0.002 * ticks;
+      this.bpx[i] += this.bvx[i] * ticks;
+      this.bpy[i] += this.bvy[i] * ticks;
+      this.bpz[i] += this.bvz[i] * ticks;
+      if (this.brise[i] > 0) {
+        this.bvx[i] *= drag;
+        this.bvy[i] *= drag;
+        this.bvz[i] *= drag;
+        if (water && !water(Math.floor(this.bpx[i]), Math.floor(this.bpy[i]), Math.floor(this.bpz[i]))) this.blife[i] = 0;
+      }
+      const k = this.bmax[i] > 0 ? Math.max(0, this.blife[i] / this.bmax[i]) : 0;
+      this.bfade.setX(i, k > 0.25 ? 1 : k / 0.25);
+      const sz = this.blife[i] > 0 ? this.bsize[i] : 0;
+      this.p.set(this.bpx[i], this.bpy[i], this.bpz[i]);
+      this.s.set(sz, sz, sz);
+      this.m4.compose(this.p, this.q, this.s);
+      this.bubbles.setMatrixAt(i, this.m4);
+    }
+    if (!any) return;
+    this.bubbles.instanceMatrix.needsUpdate = true;
+    this.bfade.needsUpdate = true;
+    this.bkind.needsUpdate = true;
   }
 
   private updateChips(dt: number): void {
@@ -342,5 +505,8 @@ export class Particles {
     this.debris.geometry.dispose();
     this.debrisMat.dispose();
     this.debris.dispose();
+    this.bubbles.geometry.dispose();
+    this.bubbleMat.dispose();
+    this.bubbles.dispose();
   }
 }

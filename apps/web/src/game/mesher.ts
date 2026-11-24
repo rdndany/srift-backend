@@ -469,15 +469,23 @@ export function meshChunk(region: Uint16Array, tint?: Uint8Array): MeshResult {
           // A lowered cube does not sit on the cell face, so the neighbour's cell does not cover it.
           if (IS_OPAQUE[nid] && seat === 0 && !seatOf(nx, ny, nz)) continue;
           let drop = 0;
+          // A side between two heights of the same water starts where the lower one ends, so the shared part is one body.
+          let lift = 0;
           if (fluid !== 0) {
             const surf = surfaceOf(seen, x, y, z, id);
             if (FLUID_KIND[nid] === fluid) {
-              // The same fluid on top or underneath hides the face; beside it, only a step shows.
+              // The same fluid on top or underneath hides the face; beside it, only the step shows.
               if (face.kind !== 'side') continue;
-              if (surfaceOf(seen, nx, ny, nz, nid) >= surf) continue;
+              const nSurf = surfaceOf(seen, nx, ny, nz, nid);
+              if (nSurf >= surf) continue;
+              drop = 16 - surf;
+              lift = nSurf;
             } else if (fluid === FLUID_WATER && coversWater(nid)) continue;
-            drop = 16 - surf;
+            else drop = 16 - surf;
           } else if (nid === id && def.cullSame && seat === 0 && !seatOf(nx, ny, nz)) continue;
+          // Ice meets the water with no side of its own. A side that faces the air is the edge of the sheet, and stays.
+          else if ((id === B.ICE || id === B.PACKED_ICE) && face.kind === 'side' && FLUID_KIND[nid] === FLUID_WATER) continue;
+          if (face.kind === 'side' && lift + drop >= 16) continue;
 
           const translucent = def.render === 'translucent';
           const isWater = def.liquid;
@@ -579,9 +587,10 @@ export function meshChunk(region: Uint16Array, tint?: Uint8Array): MeshResult {
               (aoV[0] << (TILE_SHIFT + 5)) |
               (skyV[0] << (TILE_SHIFT + 7)) |
               (blkV[0] << (TILE_SHIFT + 13));
-            tmask[j * S + i] = tintIdx + extra * 256;
+            // The high nibble is how far a side is lifted, so two edges merge only when they sit at the same height.
+            tmask[j * S + i] = tintIdx + extra * 256 + lift * 4096;
           } else {
-            emitQuad(builder, face, n, i, j, 1, 1, S, T, tile + extra * TILE_EXTRA, drop, aoV, skyV, blkV, tintIdx, -seat);
+            emitQuad(builder, face, n, i, j, 1, 1, S, T, tile + extra * TILE_EXTRA, drop, aoV, skyV, blkV, tintIdx, -seat, lift);
           }
         }
       }
@@ -613,7 +622,7 @@ export function meshChunk(region: Uint16Array, tint?: Uint8Array): MeshResult {
           aoV[0] = aoV[1] = aoV[2] = aoV[3] = ao;
           skyV[0] = skyV[1] = skyV[2] = skyV[3] = sky;
           blkV[0] = blkV[1] = blkV[2] = blkV[3] = blk;
-          emitQuad(translucent ? translucentB : opaqueB, face, n, i, j, w, h, S, T, tile + (tk >> 8) * TILE_EXTRA, drop, aoV, skyV, blkV, tk & 255);
+          emitQuad(translucent ? translucentB : opaqueB, face, n, i, j, w, h, S, T, tile + ((tk >> 8) & 15) * TILE_EXTRA, drop, aoV, skyV, blkV, tk & 255, 0, tk >> 12);
           i += w;
         }
       }
@@ -1120,6 +1129,7 @@ function emitQuad(
   blk: number[],
   tint = 0,
   yBias = 0,
+  lift = 0,
 ): void {
   origin[f.nAxis] = n + (f.nSign > 0 ? 1 : 0);
   origin[f.sAxis] = f.sSign > 0 ? i0 : S - i0;
@@ -1139,6 +1149,8 @@ function emitQuad(
       // Fluid surfaces sit below the block top: all top-face vertices, and the upper two of side faces.
       if (f.kind === 'top' || (f.kind === 'side' && c >= 2)) py -= drop / 16;
     }
+    // The lower two corners of a side rise, so the face is only the edge above the water and not the wall under it.
+    if (lift > 0 && f.kind === 'side' && c < 2) py += lift / 16;
     b.positions.push3(pos[0], py + yBias, pos[2]);
     b.uvs.push2(ds, dt);
     b.tiles.push1(tile);

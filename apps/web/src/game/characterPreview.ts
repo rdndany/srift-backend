@@ -1,7 +1,8 @@
 import * as THREE from 'three';
-import { I, OUTFIT_CLASSES, armorId, getItem, outfitItems } from '@solrift/shared';
+import { CLASSES, I, OUTFIT_CLASSES, armorId, outfitItems } from '@solrift/shared';
 import { Character, type Palette } from './character';
 import { CompanionFollowers } from './companionRenderer';
+import { lobbyFigure } from './lobbyFigures';
 import { ShaderKeeper } from './shaderKeep';
 
 /** A soft round shadow for the figure to stand on. */
@@ -138,6 +139,8 @@ export class CharacterPreview {
   private pet = 0; // 1 + the place of the companion in COMPANIONS (0: none)
   private winged = false; // wings are as wide as the figure is tall: the camera is pulled back so they show
   private grounded = false;
+  /** The lobby stage: the picture is taller than the body, so a tall helm stays in frame and can pass under the chat. */
+  private stage = false;
 
   /** Stand the figure on the bottom edge of the picture, as large as the picture is tall (a character-select screen), instead of floating in the middle. */
   setGrounded(on: boolean): void {
@@ -145,12 +148,19 @@ export class CharacterPreview {
     this.frame();
   }
 
+  setStage(on: boolean): void {
+    this.stage = on;
+    this.frame();
+  }
+
   private frame(): void {
-    // The figure is the same size with a set or a hat on as without (they may reach out of the picture, which is fine): the camera is placed for the hero.
+    // The body stays the same size with a set, a hat, wings or a companion. On the lobby stage the picture continues above the head,
+    // so a tall helm is not cut off and can sit behind the chat.
     if (this.grounded) {
-      const span = 3.1 * (this.winged ? 1.25 : 1) * (this.pet ? 1.12 : 1); // world units from the soles up, to a little above the head or hat
+      const body = 3.1; // world units from the soles up, to a little above an ordinary head
+      const span = this.stage ? body * (82 / 62) : body;
       const dist = span / 2 / Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
-      const y = -1.0 + span / 2 - 0.07; // (the boots reach out a little toward the camera: lower on screen than the soles' centre)
+      const y = -1.07 + span / 2; // the feet stay on the bottom edge; the extra span is sky above the head
       this.camera.position.set(0, y, dist);
       this.camera.lookAt(0, y, 0);
       return;
@@ -166,34 +176,14 @@ export class CharacterPreview {
     this.turntable = on;
   }
 
-  private shieldAssets: { geo: THREE.BufferGeometry; mat: THREE.Material; tex: THREE.Texture }[] = [];
+  /** Hold an item in the main hand (id 0 = none). The model is the one a figure carries in the world. */
+  setHeld(id: number): void {
+    this.character.setHeld(id, lobbyFigure);
+  }
 
-  /** Carry a shield (item id, 0 = none); `iconUrl` is its inventory picture, drawn on a thin plate. */
-  setShield(id: number, iconUrl: string | null): void {
-    this.character.setShield(0, () => null);
-    for (const a of this.shieldAssets) {
-      a.geo.dispose();
-      a.mat.dispose();
-      a.tex.dispose();
-    }
-    this.shieldAssets = [];
-    if (id && iconUrl) {
-      this.character.setShield(id, () => {
-        const tex = new THREE.TextureLoader().load(iconUrl);
-        tex.magFilter = THREE.NearestFilter;
-        tex.minFilter = THREE.NearestFilter;
-        tex.generateMipmaps = false;
-        tex.colorSpace = THREE.SRGBColorSpace;
-        const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.5, side: THREE.DoubleSide });
-        // A shield hangs on the arm as a big plate; an orb or a dagger is held small in the hand.
-        const isShield = getItem(id).shield;
-        const geo = new THREE.PlaneGeometry(isShield ? 0.78 : 0.5, isShield ? 0.78 : 0.5);
-        this.shieldAssets.push({ geo, mat, tex });
-        const plate = new THREE.Mesh(geo, mat);
-        if (!isShield) plate.position.set(0, 0.1, -0.1);
-        return plate;
-      });
-    }
+  /** Carry what the off hand holds (id 0 = none): a shield on the arm, anything else in the hand, as in the world. */
+  setShield(id: number): void {
+    this.character.setShield(id, lobbyFigure);
   }
 
   /** Wear another skin (64x64, or the old 64x32): see `Character.setSkin`. */
@@ -272,7 +262,8 @@ export class CharacterPreview {
   dispose(): void {
     this.disposed = true;
     cancelAnimationFrame(this.raf);
-    this.setShield(0, null);
+    this.setShield(0);
+    this.setHeld(0);
     this.character.dispose();
     this.companions?.dispose();
     (this.shadow.material as THREE.MeshBasicMaterial).map?.dispose();
@@ -283,14 +274,13 @@ export class CharacterPreview {
 
 /**
  * Build every shader the figure in a menu needs, once, while the game loads: a figure in plate armor, in the clothes of every class,
- * with a shield. After this opening the inventory builds nothing (see Shared).
+ * with a weapon and a shield. After this opening the inventory builds nothing (see Shared).
  */
 export function warmPreview(): void {
-  const none = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
   const sets = [
-    { armor: [0, 1, 2, 3].map((slot) => armorId(slot, 'iron')), shield: I.SHIELD },
-    { armor: [outfitItems('mage')[0], outfitItems('warrior')[1], outfitItems('ranger')[2], outfitItems('warrior')[3]], shield: I.SHIELD },
-    { armor: OUTFIT_CLASSES.map((c) => outfitItems(c)[0]), shield: 0 },
+    { armor: [0, 1, 2, 3].map((slot) => armorId(slot, 'iron')), held: CLASSES.warrior.startingWeapon, shield: I.SHIELD },
+    { armor: [outfitItems('mage')[0], outfitItems('warrior')[1], outfitItems('ranger')[2], outfitItems('warrior')[3]], held: CLASSES.mage.startingWeapon, shield: CLASSES.mage.startingOffhand },
+    { armor: OUTFIT_CLASSES.map((c) => outfitItems(c)[0]), held: CLASSES.ranger.startingWeapon, shield: CLASSES.ranger.startingOffhand },
   ];
   for (const set of sets) {
     const canvas = document.createElement('canvas');
@@ -301,7 +291,8 @@ export function warmPreview(): void {
     document.body.appendChild(host);
     const p = new CharacterPreview(canvas);
     p.setArmor(set.armor);
-    p.setShield(set.shield, set.shield ? none : null);
+    p.setHeld(set.held);
+    p.setShield(set.shield);
     p.showAll();
     p.render();
     p.dispose();

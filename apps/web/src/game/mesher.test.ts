@@ -324,8 +324,116 @@ describe('mesher', () => {
     const alone = quads(meshChunk(p).translucent);
     p[regionIndex(6, 10, 5)] = B.ICE;
     const withIce = meshChunk(p);
-    // The water gives up its face towards the ice (the ice keeps its own six, seen through the water).
-    expect(quads(withIce.translucent)).toBe(alone - 1 + 6);
+    // The water gives up its face towards the ice, and the ice gives up the side that meets the water.
+    expect(quads(withIce.translucent)).toBe(alone - 1 + 5);
+  });
+
+  it('closes the edge of a body of water, and hides the sides between its cells', () => {
+    const p = emptyRegion();
+    p[regionIndex(5, 9, 5)] = B.WATER;
+    p[regionIndex(5, 10, 5)] = B.WATER;
+    p[regionIndex(6, 10, 5)] = B.WATER;
+    const r = meshChunk(p);
+    // The face between the two surface cells is gone. The outer edge of the surface is still there, so the shore is not a hole.
+    let between = 0;
+    let edge = 0;
+    eachQuad(r.translucent!, (verts) => {
+      const xs = verts.map((v) => r.translucent!.positions[v * 3]!);
+      const ys = verts.map((v) => r.translucent!.positions[v * 3 + 1]!);
+      if (Math.min(...ys) < 10 - 0.01 || Math.max(...ys) - Math.min(...ys) < 0.01) return;
+      const x0 = Math.min(...xs);
+      const x1 = Math.max(...xs);
+      if (x0 > 5.9 && x1 < 6.1) between++;
+      else edge++;
+    });
+    expect(between).toBe(0);
+    expect(edge).toBeGreaterThan(0);
+  });
+
+  it('draws ice on water as a sheet, with no sides hanging in the water', () => {
+    const p = emptyRegion();
+    p[regionIndex(5, 9, 5)] = B.WATER;
+    p[regionIndex(5, 10, 5)] = B.ICE;
+    const r = meshChunk(p);
+    let iceSides = 0;
+    let waterSides = 0;
+    eachQuad(r.translucent!, (verts) => {
+      const ys = verts.map((v) => r.translucent!.positions[v * 3 + 1]!);
+      if (Math.max(...ys) - Math.min(...ys) < 0.01) return;
+      // The ice sits on the water. Its outer sides are the edge of the sheet. Nothing of it hangs down into the water.
+      if (Math.min(...ys) >= 10 - 0.01) iceSides++;
+      else waterSides++;
+    });
+    expect(iceSides).toBe(4);
+    expect(waterSides).toBe(4);
+  });
+
+  it('draws the full side of water that sits in a cave', () => {
+    const p = emptyRegion();
+    for (let x = 4; x <= 7; x++) {
+      for (let z = 4; z <= 7; z++) {
+        p[regionIndex(x, 9, z)] = B.STONE;
+        p[regionIndex(x, 13, z)] = B.STONE;
+      }
+    }
+    for (let y = 10; y <= 12; y++) {
+      for (let x = 4; x <= 7; x++) {
+        p[regionIndex(x, y, 4)] = B.STONE;
+        p[regionIndex(x, y, 7)] = B.STONE;
+      }
+      for (let z = 5; z <= 6; z++) {
+        p[regionIndex(4, y, z)] = B.STONE;
+        p[regionIndex(7, y, z)] = B.STONE;
+      }
+    }
+    p[regionIndex(5, 10, 5)] = B.WATER;
+    const r = meshChunk(p);
+    let side = 0;
+    eachQuad(r.translucent!, (verts) => {
+      const xs = verts.map((v) => r.translucent!.positions[v * 3]!);
+      const ys = verts.map((v) => r.translucent!.positions[v * 3 + 1]!);
+      if (Math.max(...ys) - Math.min(...ys) < 0.01) return;
+      if (Math.abs(Math.min(...xs) - 6) > 0.01 || Math.abs(Math.max(...xs) - 6) > 0.01) return;
+      side++;
+      expect(Math.min(...ys)).toBeCloseTo(10, 5);
+      expect(Math.max(...ys)).toBeCloseTo(10 + 14 / 16, 5);
+    });
+    expect(side).toBe(1);
+  });
+
+  it('draws every exposed side of a water block, down to the floor of the cell', () => {
+    const shore = emptyRegion();
+    shore[regionIndex(5, 10, 5)] = B.WATER;
+    const water = meshChunk(shore);
+    let sides = 0;
+    eachQuad(water.translucent!, (verts) => {
+      const ys = verts.map((v) => water.translucent!.positions[v * 3 + 1]!);
+      if (Math.max(...ys) - Math.min(...ys) < 0.01) return;
+      sides++;
+      // A source sits at 14/16, and the side is the whole face up to that, in the open and in a cave.
+      expect(Math.max(...ys)).toBeCloseTo(10 + 14 / 16, 5);
+      expect(Math.min(...ys)).toBeCloseTo(10, 5);
+    });
+    expect(sides).toBe(4);
+
+    const deep = emptyRegion();
+    deep[regionIndex(5, 9, 5)] = B.STONE;
+    deep[regionIndex(6, 9, 5)] = B.WATER;
+    deep[regionIndex(6, 10, 5)] = B.WATER;
+    const buried = meshChunk(deep).opaque!;
+    let facing = 0;
+    eachQuad(buried, (verts) => {
+      const xs = verts.map((v) => buried.positions[v * 3]!);
+      const ys = verts.map((v) => buried.positions[v * 3 + 1]!);
+      if (Math.max(...ys) - Math.min(...ys) < 0.01) return;
+      if (Math.max(...xs) - Math.min(...xs) > 0.01) return;
+      if (Math.abs(xs[0]! - 6) > 0.01) return;
+      facing++;
+      // The stone under the water keeps its full side, so the seabed is not a hole.
+      expect(Math.min(...ys)).toBeCloseTo(9, 5);
+      expect(Math.max(...ys)).toBeCloseTo(10, 5);
+    });
+    expect(facing).toBe(1);
   });
 
   it('keeps lava out of the translucent mesh and lowers it too', () => {

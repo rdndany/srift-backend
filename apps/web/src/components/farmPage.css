@@ -1,0 +1,101 @@
+/*
+ * The Farm (/farm): the daily check-in and the offline farm. It rides on the class pages' styles (classPage.css: the hero,
+ * the steps), which ride on the front page's. The check-in card and the trips keep the camp styles (campPage.css). Everything
+ * here starts with `.fm`. `--c` is the page's colour (gold).
+ */
+
+/* The camp page paints a grid on the whole screen. This page's art is the hero, and the grid belongs under the sections. */
+#home .fp.fm {
+  background-image: none;
+}
+
+/* ---------- the top ---------- */
+#home .fp.fm .fm-hero {
+  min-height: 0;
+  padding: 150px 24px 72px;
+}
+#home .fp.fm .fm-hero-in {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  width: min(1160px, 100%);
+  margin: 0 auto;
+  animation: fp-rise 0.8s 0.1s both cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+#home .fp.fm .fm-title {
+  font-size: clamp(48px, 8vw, 104px);
+}
+#home .fp.fm .fm-title em {
+  font-style: normal;
+  color: #fff;
+  text-shadow:
+    0 5px 0 rgba(0, 0, 0, 0.6),
+    0 0 46px color-mix(in srgb, var(--c) 80%, transparent);
+}
+#home .fp.fm .cp-lead {
+  max-width: 620px;
+}
+
+/* ---------- the work ---------- */
+#home .fp.fm .fm-sec {
+  padding-top: 72px;
+}
+/* The camp styles size every heading on this page for a phone card. These two are the same large headings as on Market and Shop. */
+#home .fp.fm .fp-head h2,
+#home .fp.fm .fp-end h2 {
+  margin: 12px 0 0;
+  font-size: clamp(30px, 4.6vw, 54px);
+  line-height: 1.12;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  color: #fff;
+  text-shadow: 0 3px 0 rgba(0, 0, 0, 0.5);
+}
+#home .fp.fm .fp-end h2 {
+  margin: 0;
+  font-size: clamp(36px, 6.4vw, 76px);
+}
+#home .fp.fm .fp-head h2 em,
+#home .fp.fm .fp-end h2 em {
+  font-style: normal;
+  background: linear-gradient(90deg, #ffd27a, #ff7a3a 55%, #ff4f86);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: none;
+}
+#home .fp.fm .fp-end p {
+  max-width: 480px;
+  margin: 18px auto 34px;
+  font-family: var(--body);
+  font-size: 16px;
+  line-height: 1.65;
+  color: var(--soft);
+}
+#home .fp.fm .fm-work {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+#home .fp.fm .fm-work .camp-heroes {
+  margin: 0;
+}
+#home .fp.fm .fm-fine {
+  margin: 8px 0 0;
+}
+#home .fp.fm .camp-signin h2 {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 520px) {
+  #home .fp.fm .fm-hero {
+    padding: 124px 16px 48px;
+  }
+  #home .fp.fm .cp-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

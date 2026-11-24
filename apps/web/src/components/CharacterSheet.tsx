@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { ACHIEVEMENTS, ACH_CATEGORIES, ACH_TIERS, CLASSES, MAX_LEVEL, STASH_SLOTS, STASHKEEPER, NPCS, briefOfSheet, getItem, tooltipLines, type AchCategory, type CharacterSheet as Sheet, type CharacterBrief, type ItemStack, type StashView, type TipLine } from '@solrift/shared';
+import { ACHIEVEMENTS, ACH_CATEGORIES, ACH_TIERS, CLASSES, HOTBAR_SLOTS, MAX_LEVEL, STASH_SLOTS, STASHKEEPER, NPCS, bagRoom, briefOfSheet, getItem, tooltipLines, type AchCategory, type CharacterSheet as Sheet, type CharacterBrief, type ItemStack, type StashView, type TipLine, type WornPlace } from '@solrift/shared';
 import { lobbyIcons } from '../game/lobbyIcons';
 import { useToken } from '../token/store';
 import { Tip } from './ItemView';
@@ -31,12 +31,44 @@ const nameOf = (id: number): string => getItem(id).name.replace(/_/g, ' ');
 /** Does a stack answer the words typed in the search box? */
 const matches = (s: ItemStack, find: string): boolean => nameOf(s.id).toLowerCase().includes(find) || (s.name ?? '').toLowerCase().includes(find);
 
-/** One item slot: the sprite, the rarity ring, the count and the wear bar. Hovering shows the same tooltip the game does. */
-function Cell({ stack, label, show, hide, viewer }: { stack: ItemStack | null; label?: string; show: Show; hide: () => void; viewer: Viewer }) {
+/** What the lobby can do with a slot: drag it, or open the right-click menu. Absent on a sheet that is only looked at. */
+type Hand = {
+  menu: (p: { kind: 'bag'; slot: number; stack: ItemStack } | { kind: 'stash'; slot: number; stack: ItemStack }, x: number, y: number) => void;
+  move: (from: number, to: number) => void;
+  wear: (from: number) => void;
+  takeOff: (where: WornPlace) => void;
+  take: (stashSlot: number) => void;
+  /** A right-click menu is open, so hovering another item must not raise a tooltip. */
+  quiet?: boolean;
+};
+
+/** What is being dragged. Kept beside the dataTransfer payload, which some browsers only hand back on drop and sometimes not at all. */
+let held = '';
+/** Tooltips stay down while a menu is open or an item is lifted, including in the moment before the next render. */
+let muteTips = false;
+
+/** One item slot. With a hand it can be dragged, or picked up with a click and set down with the next click. A right click opens what is not a move. */
+function Cell({ stack, label, show, hide, viewer, drag, onDrop, onMenu, onTap, onDragBegin, picked, armed }: { stack: ItemStack | null; label?: string; show: Show; hide: () => void; viewer: Viewer; drag?: string; onDrop?: (from: string) => void; onMenu?: (e: ReactMouseEvent) => void; onTap?: (x: number, y: number) => void; onDragBegin?: () => void; picked?: boolean; armed?: boolean }) {
   const item = stack ? getItem(stack.id) : null;
   const left = stack && item && item.durability > 0 ? 1 - stack.damage / item.durability : 1;
+  const [hot, setHot] = useState(false);
   return (
-    <div className={`cs-slot ${stack ? 'full' : ''}${viewer.find && stack ? (matches(stack, viewer.find) ? ' hit' : ' dim') : ''}`} data-item={stack?.id ?? ''} aria-label={stack ? `${item!.name.replace(/_/g, ' ')}${stack.count > 1 ? ` x${stack.count}` : ''}` : label ? `${label}: empty` : 'Empty slot'} onMouseEnter={(e) => stack && show(e, tooltipLines(stack, viewer.cls?.id ?? null, viewer.cls?.level ?? 0))} onMouseMove={(e) => stack && show(e, tooltipLines(stack, viewer.cls?.id ?? null, viewer.cls?.level ?? 0))} onMouseLeave={hide}>
+    <div
+      className={`cs-slot ${stack ? 'full' : ''}${viewer.find && stack ? (matches(stack, viewer.find) ? ' hit' : ' dim') : ''}${drag ? ' act' : ''}${picked ? ' pick' : ''}${armed && onDrop ? ' sink' : ''}${hot ? ' hot' : ''}`}
+      data-item={stack?.id ?? ''}
+      aria-label={stack ? `${item!.name.replace(/_/g, ' ')}${stack.count > 1 ? ` x${stack.count}` : ''}` : label ? `${label}: empty` : 'Empty slot'}
+      draggable={!!drag}
+      onDragStart={drag ? (e) => { onDragBegin?.(); held = drag; muteTips = true; e.dataTransfer.setData('text/plain', drag); e.dataTransfer.effectAllowed = 'move'; hide(); } : undefined}
+      onDragEnd={() => { held = ''; muteTips = false; setHot(false); }}
+      onDragOver={onDrop ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setHot(true); } : undefined}
+      onDragLeave={onDrop ? (e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setHot(false); } : undefined}
+      onDrop={onDrop ? (e) => { e.preventDefault(); setHot(false); const from = e.dataTransfer.getData('text/plain') || held; held = ''; muteTips = false; if (from) onDrop(from); } : undefined}
+      onClick={onTap ? (e) => { if (e.button !== 0) return; onTap(e.clientX, e.clientY); } : undefined}
+      onContextMenu={onMenu ? (e) => { e.preventDefault(); muteTips = true; hide(); onMenu(e); } : undefined}
+      onMouseEnter={(e) => stack && !muteTips && !held && show(e, tooltipLines(stack, viewer.cls?.id ?? null, viewer.cls?.level ?? 0))}
+      onMouseMove={(e) => stack && !muteTips && !held && show(e, tooltipLines(stack, viewer.cls?.id ?? null, viewer.cls?.level ?? 0))}
+      onMouseLeave={hide}
+    >
       {stack ? (
         <>
           <ItemPicture id={stack.id} />
@@ -148,11 +180,11 @@ function Section({ title, note, id, children }: { title: string; note?: string; 
 /**
  * The lobby's character sheet: level, experience, health and food, then two tabs for what the character owns. "Carried" is what is
  * worn, the backpack with its hotbar and the bags, from the character's saved record. "Stash" is the wallet's Stash in Dawnwatch,
- * which every character of the wallet shares (read only here: it is moved at the Stashkeeper). `sheet` is undefined while it is
- * being read, null when there is none. `stash` is undefined while it is being read, null when it cannot be (not shown without
+ * which every character of the wallet shares. With `hand`, a drag moves a stack or wears it, and a right click stores it or sells it. Without a hand the sheet is only looked at.
+ * `sheet` is undefined while it is being read, null when there is none. `stash` is undefined while it is being read, null when it cannot be (not shown without
  * `showStash`: single player has no Stash).
  */
-export function CharacterSheet({ sheet, source, empty, stash, showStash, briefs = [], characters = [], selfId = null }: { sheet: Sheet | null | undefined; source: string; empty: string; stash?: StashView | null; showStash?: boolean; briefs?: CharacterBrief[]; characters?: { id: string; displayName: string }[]; selfId?: string | null }) {
+export function CharacterSheet({ sheet, source, empty, stash, showStash, briefs = [], characters = [], selfId = null, hand = null }: { sheet: Sheet | null | undefined; source: string; empty: string; stash?: StashView | null; showStash?: boolean; briefs?: CharacterBrief[]; characters?: { id: string; displayName: string }[]; selfId?: string | null; hand?: Hand | null }) {
   const [query, setQuery] = useState('');
   const [sorted, setSorted] = useState(false);
   const find = query.trim().toLowerCase();
@@ -171,8 +203,71 @@ export function CharacterSheet({ sheet, source, empty, stash, showStash, briefs 
   }, []);
   const [tip, setTip] = useState<{ x: number; y: number; lines: TipLine[] } | null>(null);
   const [tab, setTab] = useState<Tab>('carried');
-  const show: Show = (e, lines) => setTip({ x: e.clientX, y: e.clientY, lines });
+  const show: Show = (e, lines) => { if (!muteTips && !held) setTip({ x: e.clientX, y: e.clientY, lines }); };
   const hide = () => setTip(null);
+  /** An item lifted with a click. The next click sets it down; Escape puts it back. */
+  const [carry, setCarry] = useState<{ token: string; id: number } | null>(null);
+  muteTips = !!carry || !!hand?.quiet || held !== '';
+  useEffect(() => {
+    if (carry || hand?.quiet) setTip(null);
+  }, [carry, hand?.quiet]);
+  const [ghost, setGhost] = useState<{ x: number; y: number } | null>(null);
+  useEffect(() => {
+    if (!hand) setCarry(null);
+  }, [hand]);
+  useEffect(() => {
+    if (!carry) return;
+    const move = (e: PointerEvent) => setGhost({ x: e.clientX, y: e.clientY });
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') setCarry(null); };
+    const away = (e: PointerEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest('.cs-slot') || t?.closest('.cs-menu')) return;
+      setCarry(null);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('keydown', key);
+    window.addEventListener('pointerdown', away);
+    return () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('keydown', key);
+      window.removeEventListener('pointerdown', away);
+      setGhost(null);
+    };
+  }, [carry]);
+  const place = (token: string | undefined, id: number | undefined, drop?: (from: string) => void) => {
+    if (!hand) return;
+    if (!carry) {
+      if (token && id !== undefined) {
+        muteTips = true;
+        setTip(null);
+        setCarry({ token, id });
+      }
+      return;
+    }
+    if (token === carry.token) {
+      setCarry(null);
+      return;
+    }
+    if (drop) {
+      drop(carry.token);
+      setCarry(null);
+      return;
+    }
+    if (token && id !== undefined) setCarry({ token, id });
+  };
+  const lift = () => setCarry(null);
+  const floater = carry && ghost && createPortal(<div className="cs-ghost" style={{ left: ghost.x, top: ghost.y }}><ItemPicture id={carry.id} /></div>, document.body);
+  const bagDrag = (slot: number, stack: ItemStack | null): string | undefined => (hand && stack ? `b:${slot}` : undefined);
+  const bagDrop = hand
+    ? (slot: number) => (from: string) => {
+        if (from.startsWith('b:')) hand.move(Number(from.slice(2)), slot);
+        else if (from.startsWith('w:')) hand.takeOff(from.slice(2) as WornPlace);
+        else if (from.startsWith('s:')) hand.take(Number(from.slice(2)));
+      }
+    : null;
+  const wornDrop = hand ? (from: string) => { if (from.startsWith('b:')) hand.wear(Number(from.slice(2))); } : undefined;
+  const wornDrag = (where: WornPlace, stack: ItemStack | null): string | undefined => (hand && stack ? `w:${where}` : undefined);
+  const bagMenu = (slot: number, stack: ItemStack | null) => (hand && stack ? (e: ReactMouseEvent) => hand.menu({ kind: 'bag', slot, stack }, e.clientX, e.clientY) : undefined);
   const stashUsed = useMemo(() => (stash ? filled(stash.slots) : 0), [stash]);
   const tabs: Tab[] = showStash ? ['carried', 'ach', 'stash'] : ['carried', 'ach'];
   const current: Tab = tabs.includes(tab) ? tab : 'carried';
@@ -188,8 +283,9 @@ export function CharacterSheet({ sheet, source, empty, stash, showStash, briefs 
     return (
       <div className="cs" id="char-sheet" data-state="empty">
         <p className="cs-note">{empty}</p>
-        {showStash && <StashPanel stash={stash} used={stashUsed} sorted={sorted} onSort={setSorted} show={show} hide={hide} viewer={{ cls: null, find }} />}
+        {showStash && <StashPanel stash={stash} used={stashUsed} sorted={sorted} onSort={setSorted} show={show} hide={hide} viewer={{ cls: null, find }} hand={hand} carry={carry?.token ?? null} place={place} lift={lift} aim={(x, y) => setGhost({ x, y })} />}
         {tip && tip.lines.length > 0 && createPortal(<div className="tooltip" style={tipAt(tip)}><Tip lines={tip.lines} /></div>, document.body)}
+        {floater}
       </div>
     );
   }
@@ -200,6 +296,12 @@ export function CharacterSheet({ sheet, source, empty, stash, showStash, briefs 
   const worn = filled(sheet.armor) + (sheet.offhand ? 1 : 0) + (sheet.mount ? 1 : 0) + (sheet.outfit ? 1 : 0) + (sheet.companion ? 1 : 0) + (sheet.wings ? 1 : 0) + filled(sheet.rings) + (sheet.necklace ? 1 : 0);
   const packSlots = sheet.hotbar.length + sheet.backpack.length;
   const packUsed = filled(sheet.hotbar) + filled(sheet.backpack);
+  const wornCell = (key: string | number, where: WornPlace, s: ItemStack | null, label: string) => (
+    <Cell key={key} stack={s} label={label} show={show} hide={hide} viewer={viewer} drag={wornDrag(where, s)} onDrop={wornDrop} onTap={hand ? (x, y) => { setGhost({ x, y }); place(wornDrag(where, s), s?.id, wornDrop); } : undefined} onDragBegin={lift} picked={carry?.token === `w:${where}`} armed={!!carry} />
+  );
+  const bagCell = (key: string | number, slot: number, s: ItemStack | null) => (
+    <Cell key={key} stack={s} show={show} hide={hide} viewer={viewer} drag={bagDrag(slot, s)} onDrop={bagDrop?.(slot)} onMenu={hand && s ? (e) => { lift(); bagMenu(slot, s)?.(e); } : undefined} onTap={hand ? (x, y) => { setGhost({ x, y }); place(bagDrag(slot, s), s?.id, bagDrop?.(slot)); } : undefined} onDragBegin={lift} picked={carry?.token === `b:${slot}`} armed={!!carry} />
+  );
 
   const finder = (
     <div className="cs-find" title={source}>
@@ -292,53 +394,43 @@ export function CharacterSheet({ sheet, source, empty, stash, showStash, briefs 
         <div className="cs-tab" role="tabpanel" id="cs-carried">
           <Section title="Worn" note={`${worn} of ${sheet.armor.length + 5 + sheet.rings.length + 1}`} id="cs-equipment">
             <div className="cs-row">
-              {sheet.armor.map((s, i) => (
-                <Cell key={i} stack={s} label={ARMOR_LABELS[i]} show={show} hide={hide} viewer={viewer} />
-              ))}
+              {sheet.armor.map((s, i) => wornCell(i, (['helmet', 'chestplate', 'leggings', 'boots'] as const)[i], s, ARMOR_LABELS[i]))}
               <span className="cs-gap" aria-hidden="true" />
-              <Cell stack={sheet.offhand} label="Off hand" show={show} hide={hide} viewer={viewer} />
-              <Cell stack={sheet.mount} label="Mount" show={show} hide={hide} viewer={viewer} />
-              <Cell stack={sheet.outfit} label="Outfit" show={show} hide={hide} viewer={viewer} />
-              <Cell stack={sheet.companion} label="Companion" show={show} hide={hide} viewer={viewer} />
-              <Cell stack={sheet.wings} label="Wings" show={show} hide={hide} viewer={viewer} />
+              {wornCell('off', 'offhand', sheet.offhand, 'Off hand')}
+              {wornCell('mount', 'mount', sheet.mount, 'Mount')}
+              {wornCell('outfit', 'outfit', sheet.outfit, 'Outfit')}
+              {wornCell('pet', 'companion', sheet.companion, 'Companion')}
+              {wornCell('wings', 'wings', sheet.wings, 'Wings')}
             </div>
             <div className="cs-row">
-              {sheet.rings.map((s, i) => (
-                <Cell key={i} stack={s} label="Ring" show={show} hide={hide} viewer={viewer} />
-              ))}
+              {sheet.rings.map((s, i) => wornCell(i, i === 0 ? 'ring1' : 'ring2', s, 'Ring'))}
               <span className="cs-gap" aria-hidden="true" />
-              <Cell stack={sheet.necklace} label="Necklace" show={show} hide={hide} viewer={viewer} />
+              {wornCell('neck', 'necklace', sheet.necklace, 'Necklace')}
             </div>
           </Section>
 
           <Section title="Backpack" note={`${packUsed} of ${packSlots} slots`} id="cs-pack">
             <div className="cs-grid" id="cs-backpack">
-              {sheet.backpack.map((s, i) => (
-                <Cell key={i} stack={s} show={show} hide={hide} viewer={viewer} />
-              ))}
+              {sheet.backpack.map((s, i) => bagCell(i, HOTBAR_SLOTS + i, s))}
             </div>
             <div className="cs-hotbar-tag" aria-hidden="true">
               <span>Hotbar</span>
             </div>
             <div className="cs-grid" id="cs-hotbar">
-              {sheet.hotbar.map((s, i) => (
-                <Cell key={i} stack={s} show={show} hide={hide} viewer={viewer} />
-              ))}
+              {sheet.hotbar.map((s, i) => bagCell(i, i, s))}
             </div>
           </Section>
 
           {bagItems.length > 0 && (
             <Section title="Bags" note={`${bagItems.length}`}>
-              {bagItems.map((b, i) => (
-                <div className="cs-bag" key={i} data-bag={i}>
+              {sheet.bags.map((b, bagIndex) => b.bag ? (
+                <div className="cs-bag" key={bagIndex} data-bag={bagIndex}>
                   <Cell stack={b.bag} show={show} hide={hide} viewer={viewer} />
                   <div className="cs-grid">
-                    {b.items.map((s, k) => (
-                      <Cell key={k} stack={s} show={show} hide={hide} viewer={viewer} />
-                    ))}
+                    {b.items.map((s, k) => bagCell(k, bagRoom(bagIndex) + k, s))}
                   </div>
                 </div>
-              ))}
+              ) : null)}
             </Section>
           )}
 
@@ -350,11 +442,12 @@ export function CharacterSheet({ sheet, source, empty, stash, showStash, briefs 
         <AchievementsTab ach={sheet.ach} />
       ) : (
         <div className="cs-tab" role="tabpanel" id="cs-stashtab">
-          <StashPanel stash={stash} used={stashUsed} sorted={sorted} onSort={setSorted} show={show} hide={hide} viewer={viewer} />
+          <StashPanel stash={stash} used={stashUsed} sorted={sorted} onSort={setSorted} show={show} hide={hide} viewer={viewer} hand={hand} carry={carry?.token ?? null} place={place} lift={lift} aim={(x, y) => setGhost({ x, y })} />
         </div>
       )}
 
       {tip && tip.lines.length > 0 && createPortal(<div className="tooltip" style={tipAt(tip)}><Tip lines={tip.lines} /></div>, document.body)}
+      {floater}
     </div>
   );
 }
@@ -362,20 +455,21 @@ export function CharacterSheet({ sheet, source, empty, stash, showStash, briefs 
 const tipAt = (tip: { x: number; y: number }): CSSProperties => ({ left: Math.min(tip.x + 16, window.innerWidth - 360), top: Math.min(tip.y + 16, window.innerHeight - 40) });
 
 /** The wallet's Stash as a grid of its slots, and who it is shared with. */
-function StashPanel({ stash, used, sorted, onSort, show, hide, viewer }: { stash: StashView | null | undefined; used: number; sorted: boolean; onSort: (on: boolean) => void; show: Show; hide: () => void; viewer: Viewer }) {
+function StashPanel({ stash, used, sorted, onSort, show, hide, viewer, hand, carry, place, lift, aim }: { stash: StashView | null | undefined; used: number; sorted: boolean; onSort: (on: boolean) => void; show: Show; hide: () => void; viewer: Viewer; hand?: Hand | null; carry: string | null; place: (token: string | undefined, id: number | undefined, drop?: (from: string) => void) => void; lift: () => void; aim: (x: number, y: number) => void }) {
   if (stash === undefined) return <p className="cs-note">Reading the Stash...</p>;
   if (stash === null) return <p className="cs-note">The Stash could not be read just now.</p>;
+  const rows = sorted ? sortedSlots(stash.slots) : stash.slots.map((s, i) => ({ s, i }));
   return (
     <Section title="Shared Stash" note={`${used} of ${stash.slots.length || STASH_SLOTS} slots`} id="cs-stash">
       <div className="cs-stashbar">
-        <p className="cs-note">Shared by every character of your wallet, and by no one else. Move items in and out at {stashkeeper} in Dawnwatch, or at the stashkeeper of any other village or town.</p>
+        <p className="cs-note">{hand ? 'Click an item to pick it up, then click a bag to take it. Dragging does the same. Right-click to store what you carry, or to sell it.' : `Shared by every character of your wallet, and by no one else. Move items in and out at ${stashkeeper} in Dawnwatch, or at the stashkeeper of any other village or town.`}</p>
         <button type="button" id="cs-sort" aria-pressed={sorted} onClick={() => onSort(!sorted)} title="Only how it is shown here: in the game the slots stay where you put them">
           A-Z
         </button>
       </div>
       <div className="cs-grid" id="cs-stash-grid">
-        {(sorted ? sortedSlots(stash.slots) : stash.slots).map((s, i) => (
-          <Cell key={i} stack={s} show={show} hide={hide} viewer={viewer} />
+        {rows.map(({ s, i }) => (
+          <Cell key={i} stack={s} show={show} hide={hide} viewer={viewer} drag={hand && s ? `s:${i}` : undefined} onMenu={hand && s ? (e) => { lift(); hand.menu({ kind: 'stash', slot: i, stack: s }, e.clientX, e.clientY); } : undefined} onTap={hand && s ? (x, y) => { aim(x, y); place(`s:${i}`, s.id); } : undefined} onDragBegin={lift} picked={carry === `s:${i}`} />
         ))}
       </div>
       {used === 0 && <p className="cs-note cs-empty">Nothing stored yet.</p>}
@@ -383,10 +477,11 @@ function StashPanel({ stash, used, sorted, onSort, show, hide, viewer }: { stash
   );
 }
 
-/** The slots with the things first, by name, then the empty ones: how the Stash reads when it is sorted (the stored order is not touched). */
-function sortedSlots(slots: (ItemStack | null)[]): (ItemStack | null)[] {
-  const things = slots.filter((s): s is ItemStack => s !== null).sort((a, b) => nameOf(a.id).localeCompare(nameOf(b.id)) || b.count - a.count);
-  return [...things, ...slots.filter((s) => s === null)];
+/** The slots with the things first, by name, then the empty ones. The stored index stays with each slot, so a click still means that slot. */
+function sortedSlots(slots: (ItemStack | null)[]): { s: ItemStack | null; i: number }[] {
+  const rows = slots.map((s, i) => ({ s, i }));
+  const things = rows.filter((r): r is { s: ItemStack; i: number } => r.s !== null).sort((a, b) => nameOf(a.s.id).localeCompare(nameOf(b.s.id)) || b.s.count - a.s.count);
+  return [...things, ...rows.filter((r) => r.s === null)];
 }
 
 /** Where what was typed in the search box is: carried here, in the Stash, or carried by another character of the wallet. */

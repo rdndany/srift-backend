@@ -448,6 +448,7 @@ describe('using one in the inventory screen', () => {
     expect(s.menu!.cursor?.count).toBe(1);
     const events = s.drainEvents();
     expect(events).toContainEqual({ t: 'jewel', ok: true, kind: 'dawn', slot: 10, label: '+1', detail: 'Upgraded' });
+    expect(events).toContainEqual({ t: 'jewelDrop', kind: 'dawn', vol: 1 });
     expect(events.some((e) => e.t === 'toast' && e.text.includes('+1'))).toBe(true);
     expect(events).toContainEqual({ t: 'inv' });
   });
@@ -834,6 +835,20 @@ describe('where they are found and sold', () => {
     }
     expect(s).toBeDefined();
     expect(found).toBeGreaterThan(0);
+  });
+
+  it('picking a jewel up off the ground has the same sound, and other items do not', () => {
+    const s = make('warrior');
+    const p = s.body;
+    s.realm.drops.spawn(makeStack(I.JEWEL_DAWN, 1), p.x, p.y, p.z, 0, 0, 0, 0);
+    s.drainEvents();
+    s.realm.update(0.05, [s]);
+    const heard = s.drainEvents().filter((e) => e.t === 'jewelDrop');
+    expect(heard).toEqual([{ t: 'jewelDrop', kind: 'dawn', vol: 1 }]);
+    s.realm.drops.spawn(makeStack(I.APPLE, 1), p.x, p.y, p.z, 0, 0, 0, 0);
+    s.drainEvents();
+    s.realm.update(0.05, [s]);
+    expect(s.drainEvents().some((e) => e.t === 'jewelDrop')).toBe(false);
   });
 
   it('a jewel the player drops on the ground (from the hand or from the open screen) has the drop sound, other items do not', () => {

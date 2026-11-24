@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { B, CLASSES, GameSession, HeadlessWorld, MAX_LEVEL, WorldGenerator, briefOfSheet, mulberry32, newCharacterSheet, sheetOfSave } from './index';
+import { B, CLASSES, Container, GameSession, HeadlessWorld, I, MAX_LEVEL, WorldGenerator, armorId, briefOfSheet, lobbyStats, makeStack, mulberry32, newCharacterSheet, sheetOfSave, wornDefense } from './index';
 
 function mage() {
   const generator = new WorldGenerator(1337);
@@ -64,6 +64,21 @@ describe('newCharacterSheet', () => {
     expect(fresh.cls).toEqual(real.cls);
     expect(fresh.level).toBe(real.level);
     expect(fresh.maxHealth).toBe(real.maxHealth);
+  });
+
+  it('the numbers follow the off hand and the armor', () => {
+    const base = { v: 1, x: 0, y: 0, z: 0, yaw: 0, pitch: 0, mode: 'survival' as const, selected: 0, inv: [], vitals: null, mobs: [], cls: { v: 1, id: 'mage' as const, lvl: 1, xp: 0, unlocked: [] }, of: true };
+    const plain = sheetOfSave(base, 'mage');
+    const off = new Container(1);
+    off.set(0, makeStack(I.ORB, 1));
+    const withOrb = sheetOfSave({ ...base, offhand: off.toJSON() }, 'mage');
+    expect(lobbyStats(withOrb)!.maxResource).toBe(lobbyStats(plain)!.maxResource + 20);
+    expect(lobbyStats(withOrb)!.damage.spell).toBeGreaterThan(lobbyStats(plain)!.damage.spell);
+    expect(withOrb.maxHealth).toBe(plain.maxHealth);
+    const armor = new Container(4);
+    armor.set(1, makeStack(armorId(1, 'iron'), 1));
+    const plated = sheetOfSave({ ...base, armor: armor.toJSON() }, 'mage');
+    expect(wornDefense(plated.armor)).toBeGreaterThan(wornDefense(plain.armor));
   });
 
   it('has the clothes and a weapon for every class', () => {

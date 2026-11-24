@@ -9,7 +9,7 @@ import { Blocks } from './BlockCube';
 import { CharacterPreview } from './CharacterPreview';
 import { ClickSparks, Embers, Reveal, useFrontMotion } from './fx';
 import { lobbyUrl } from '../game/route';
-import { SCROLL_KEY, goCamp, goMarket, goToken } from './frontNav';
+import { SCROLL_KEY, goBeyond, goFarm, goMarket, goToken } from './frontNav';
 import { ART } from './homeAssets';
 import { TokenIcon } from './TokenPurse';
 import { useTokenBalance } from './TokenWallet';
@@ -131,11 +131,11 @@ export function ShopPage() {
             <button className="fp-link-play" onClick={play}>
               Play
             </button>
-            <button onClick={() => toFront('site-world')}>The World</button>
+            <button onClick={goBeyond}>The World</button>
             <button onClick={() => toFront('site-features')}>Classes</button>
             <button onClick={() => toFront('l-expansions')}>Expansions</button>
-            <button className="fp-link-camp" onClick={goCamp}>
-              Camp
+            <button className="fp-link-farm" onClick={goFarm}>
+              Farm
             </button>
             <button className="fp-link-market" onClick={goMarket}>
               Market

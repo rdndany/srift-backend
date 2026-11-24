@@ -8,16 +8,23 @@
   min-height: 0;
   padding: 150px 24px 80px;
 }
+#home .fp.tk .cp-hero-copy {
+  container-type: inline-size;
+}
 #home .fp.tk .tk-title {
-  font-size: clamp(54px, 9.5vw, 120px);
+  /* The word is about 5.8em wide in Monocraft. Size it from the column so the last letter stays on the line. */
+  font-size: clamp(42px, 14.5cqi, 104px);
   letter-spacing: 0.02em;
+  line-height: 1.05;
   text-transform: none;
+  white-space: nowrap;
 }
 #home .fp.tk .tk-title em {
   display: inline-block;
-  padding: 0.12em 0.04em;
+  padding: 0.08em 0;
   font-style: normal;
   text-shadow: none;
+  white-space: nowrap;
   background: linear-gradient(#fffbe3 0%, #ffe39a 30%, #ffae3d 66%, #ff8a2a 100%);
   -webkit-background-clip: text;
   background-clip: text;

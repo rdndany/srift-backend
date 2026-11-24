@@ -18,7 +18,9 @@
 #underwater {
   position: fixed;
   inset: 0;
-  background: radial-gradient(ellipse at center, rgba(40, 100, 220, 0.3), rgba(14, 40, 150, 0.55));
+  /* A blue veil, the colour of the surface. Stronger with depth (see Hud.setUnderwater). */
+  background: radial-gradient(ellipse at 50% 12%, rgba(70, 160, 230, 0.42) 0%, rgba(12, 78, 168, 0.78) 74%);
+  opacity: 0;
   pointer-events: none;
   display: none;
 }

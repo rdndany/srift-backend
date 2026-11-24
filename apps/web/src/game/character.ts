@@ -419,21 +419,40 @@ const wrapPi = (a: number): number => a - Math.PI * 2 * Math.round(a / (Math.PI 
 const SWIM_HEIGHT = 0.62;
 
 /**
- * The swimming pose (the front crawl, as the player swims in Minecraft) at a point of the stroke: the body lies face down along the water
- * (`pitch` of the whole body about its middle, tipped up a little when rising and down when sinking by `tilt`), rolling a little with each
- * stroke, with where the root has to be (`y`, `z`) for it to turn about its middle. The arms go right round in turn, one reaching ahead
- * while the other pulls back under the water (`armL`, `armR`), the legs kick in quick alternation (`legL`, `legR`). Angles are the figure's own.
+ * One arm of a stroke. It reaches forward and pulls back under the body, then comes forward again out to the side: it never goes on over the back.
+ * `x` is the swing (forward is positive), `out` how far it is held away from the body, `elbow` how far the forearm is folded.
  */
-export function swimShape(phase: number, tilt: number): { pitch: number; roll: number; y: number; z: number; armL: number; armR: number; legL: number; legR: number } {
+function swimArm(phase: number): { x: number; out: number; elbow: number } {
+  const along = Math.cos(phase);
+  // About 70° ahead of the shoulder, back to about 30° behind it. The way back is the same arc, not the rest of a circle.
+  const x = 0.35 + 0.9 * along;
+  // The hand clears the torso while it is coming forward (sin is negative on that half).
+  const lift = Math.max(0, -Math.sin(phase));
+  return { x, out: 0.08 + 0.65 * lift, elbow: 0.16 + 0.8 * lift };
+}
+
+/**
+ * The swimming pose (a front crawl) at a point of the stroke: the body lies face down along the water (`pitch` of the whole body about its
+ * middle, tipped up a little when rising and down when sinking by `tilt`), rolling a little with each stroke, with where the root has to be
+ * (`y`, `z`) for it to turn about its middle. The arms take turns (`armL`, `armR`), one reaching while the other pulls, and come back out to
+ * the side (`outL`, `outR`, `elbowL`, `elbowR`). The legs kick in quick alternation (`legL`, `legR`). Angles are the figure's own.
+ */
+export function swimShape(phase: number, tilt: number): { pitch: number; roll: number; y: number; z: number; armL: number; armR: number; outL: number; outR: number; elbowL: number; elbowR: number; legL: number; legR: number } {
   const pitch = -Math.PI / 2 + tilt;
   const middle = 0.9 * BODY_SCALE;
+  const left = swimArm(phase);
+  const right = swimArm(phase + Math.PI);
   return {
     pitch,
     roll: Math.sin(phase) * 0.2,
     y: SWIM_HEIGHT - middle * Math.cos(pitch),
     z: -middle * Math.sin(pitch),
-    armL: -phase + 0.2,
-    armR: -phase + Math.PI + 0.2,
+    armL: left.x,
+    armR: right.x,
+    outL: left.out,
+    outR: right.out,
+    elbowL: left.elbow,
+    elbowR: right.elbow,
     legL: 0.12 + 0.45 * Math.sin(phase * 2),
     legR: 0.12 - 0.45 * Math.sin(phase * 2),
   };
@@ -1833,9 +1852,9 @@ export class Character {
   }
 
   /**
-   * In the water with the feet off the bottom (set by the caller before `animate`). Moving, the figure swims as a player does in Minecraft:
-   * the body lies out flat along the water face down, the arms go round in turn (the front crawl) and the legs kick; keeping still it treads
-   * water upright, the legs pedalling and the arms sculling. On the bottom, or wading, it walks as it does on land.
+   * In the water with the feet off the bottom (set by the caller before `animate`). Moving, the figure swims face down: the arms reach and pull
+   * in turn and come back out to the side, and the legs kick. Keeping still, it treads water upright, the legs pedalling and the arms sculling.
+   * On the bottom, or wading, it walks as it does on land.
    */
   afloat = false;
   /** 0 not in the water, 1 swimming, 2 treading water (kept with a little hysteresis, so the pose does not flicker at the edge of the speed). */
@@ -1881,10 +1900,10 @@ export class Character {
       this.headPivot.rotation.x = mix(this.headPivot.rotation.x, Math.max(0.35, Math.min(2.1, this.headPivot.rotation.x * 0.6 - pose.pitch)), sw);
       this.headPivot.rotation.y = mix(this.headPivot.rotation.y, this.headPivot.rotation.y * 0.5, sw);
       this.headPivot.rotation.z = mix(this.headPivot.rotation.z, 0, sw);
-      for (const [arm, side, ang] of [[this.armL, -1, pose.armL], [this.armR, 1, pose.armR]] as const) {
+      for (const [arm, side, ang, out] of [[this.armL, -1, pose.armL, pose.outL], [this.armR, 1, pose.armR, pose.outR]] as const) {
         arm.position.set(mix(arm.position.x, side * 0.375, sw), mix(arm.position.y, 1.5, sw), mix(arm.position.z, 0, sw));
         arm.rotation.x += wrapPi(ang - arm.rotation.x) * sw;
-        arm.rotation.z = mix(arm.rotation.z, side * 0.1, sw);
+        arm.rotation.z = mix(arm.rotation.z, side * out, sw);
         arm.rotation.y = mix(arm.rotation.y, 0, sw);
       }
       for (const [leg, side, ang] of [[this.legL, -1, pose.legL], [this.legR, 1, pose.legR]] as const) {
@@ -2291,9 +2310,9 @@ export class Character {
   private armStruck = false;
 
   /**
-   * The elbows: an arm in a walk is a little bent and comes up as it swings forward; in a run the forearms are held up and pumped. An arm that is doing
-   * something else (a blow, a bow drawn, a shield raised, a staff, a bite, the pose of a fight) is left as that has it. What is in the hand keeps the way
-   * it points (the wrist turns against the elbow) and goes where the hand goes.
+   * The elbows: an arm in a walk is a little bent and comes up as it swings forward; in a run the forearms are held up and pumped. Swimming folds the
+   * forearm as that arm comes back out to the side. An arm that is doing something else (a blow, a bow drawn, a shield raised, a staff, a bite, the pose
+   * of a fight) is left as that has it. What is in the hand keeps the way it points (the wrist turns against the elbow) and goes where the hand goes.
    */
   private elbows(a: number, air: number, eatK: number): void {
     const g = this.motion.gait;
@@ -2309,10 +2328,11 @@ export class Character {
     const rightFree = this.armStruck || aiming || this.stabAge < STAB_TIME || keepsHand ? 0 : 1 - eatK;
     const leftFree = this.shieldObj && this.shieldIsShield ? 0 : 1 - this.raise;
     // (A blow swung with a blade or a tool folds the forearm for the wind-up and straightens it for the strike.)
-    const fR = flexOf(this.armR) * rightFree * (this.heldId ? 0.75 : 1) + (this.armStruck ? this.sw.elbow : 0);
+    const swim = this.swimW > 0 ? swimShape(this.swimPhase, 0) : null;
+    const fR = flexOf(this.armR) * rightFree * (this.heldId ? 0.75 : 1) + (this.armStruck ? this.sw.elbow : 0) + (swim ? swim.elbowR * this.swimW : 0);
     const os = this.offSpec;
     const carryW = os ? (1 - this.wingW) * (1 - this.swimW) * (1 - 0.5 * this.motion.combatArms) : 0;
-    const fL = flexOf(this.armL) * leftFree * (1 - 0.5 * carryW) + (os ? os.elbow * carryW : 0);
+    const fL = flexOf(this.armL) * leftFree * (1 - 0.5 * carryW) + (os ? os.elbow * carryW : 0) + (swim ? swim.elbowL * this.swimW : 0);
     this.armR.bend(fR);
     this.armL.bend(fL);
     // The hand turns back as the forearm comes up: the weapon points as it did.

@@ -1146,14 +1146,25 @@ export class MobRenderer {
   /** The views made in this frame so far (see `NEW_VIEWS_PER_FRAME`). */
   private newViews = 0;
 
-  sync(mobs: readonly MobLike[], arrows: readonly ArrowLike[], dt: number, brightness: number): void {
+  sync(mobs: readonly MobLike[], arrows: readonly ArrowLike[], dt: number, brightness: number, ex = 0, ey = 0, ez = 0, reach = Infinity): void {
     this.time += dt;
     this.newViews = 0;
     const seen = new Set<number>();
     const light = 0.55 + 0.45 * brightness;
+    // The land is gone into the fog by `reach`. A mob drawn past that is a bright dot in an empty sky, and building
+    // its model (the expensive part) can wait until it is close enough to see.
+    const reach2 = reach * reach;
 
     for (const m of mobs) {
       seen.add(m.id);
+      const dx = m.body.x - ex;
+      const dy = m.body.y - ey;
+      const dz = m.body.z - ez;
+      if (dx * dx + dy * dy + dz * dz > reach2) {
+        const far = this.views.get(m.id);
+        if (far) far.group.visible = false;
+        continue;
+      }
       let v = this.views.get(m.id);
       const key = m.variant + (m.sheared ? SHORN : 0);
       const worn = m.kind === 'armor_stand' ? (m.gear ?? []) : [];
@@ -1182,6 +1193,7 @@ export class MobRenderer {
         this.group.add(v.group);
       }
       const g = v.group;
+      g.visible = true;
       const def = MOBS[m.kind];
       const big = (m.kind === 'slime' ? m.size : 1) * (m.baby ? 0.5 : 1);
       // How it moves (creatureMotion.ts): what it did on the screen, and what it means to do, make the pose of the body, the head and the limbs.
@@ -1343,6 +1355,16 @@ export class MobRenderer {
     // arrows
     const liveArrows = new Set(arrows);
     for (const a of arrows) {
+      const adx = a.x - ex;
+      const ady = a.y - ey;
+      const adz = a.z - ez;
+      if (adx * adx + ady * ady + adz * adz > reach2) {
+        const hidden = this.arrowMeshes.get(a);
+        if (hidden) hidden.visible = false;
+        const spell = this.spells.get(a);
+        if (spell) spell.view.group.visible = false;
+        continue;
+      }
       // 0 = arrow, 1 = bottle o' enchanting, 2 = ender pearl, 3 = fireball, 4 = arcane bolt, 5 = a wand's bolt (of cubes), 6 = a staff's.
       const spell = a.spell ?? a.s ?? 0;
       const kind = a.bottle || a.b ? 1 : a.pearl || a.p ? 2 : spell === 1 ? 3 : spell === 3 && this.kit ? 5 : spell === 4 && this.kit ? 6 : spell > 1 ? 4 : 0;
@@ -1360,6 +1382,7 @@ export class MobRenderer {
           this.spells.set(a, sv);
           this.group.add(sv.view.group);
         }
+        sv.view.group.visible = true;
         sv.view.update(a, this.time, dt);
         const plain = this.arrowMeshes.get(a);
         if (plain) {
@@ -1391,6 +1414,7 @@ export class MobRenderer {
         this.arrowMeshes.set(a, mesh);
         this.group.add(mesh);
       }
+      mesh.visible = true;
       mesh.position.set(a.x, a.y, a.z);
       if (kind >= 3) mesh.scale.setScalar(0.9 + 0.2 * Math.sin(this.time * 24));
       if (kind === 1) {

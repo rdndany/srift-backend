@@ -1,13 +1,14 @@
 import { abilitiesOf, parseClassSave } from './abilities';
 import { AchievementBook, type AchievementView } from './achievements';
 import { BAG_SLOTS, bagInventory, bagOf } from './bags';
-import { CLASSES, CLASS_LEVELS, computeStats, isClassId, type ClassId } from './classes';
+import { CLASSES, CLASS_LEVELS, computeStats, offhandModifier, isClassId, type ClassId, type ClassStats, type StatModifier } from './classes';
 import { Experience, xpToNext } from './experience';
 import { ARMOR_SLOTS } from './armor';
 import { ACCESSORY_SLOT_COUNT, NECKLACE_SLOT } from './accessories';
-import { NO_POINTS, pointModifier } from './statPoints';
+import { accessoryModifiers, gearModifiers, glyphModifiers } from './gear';
+import { NO_POINTS, pointModifier, type AttrSpend } from './statPoints';
 import { Container, HOTBAR_SLOTS, PLAYER_SLOTS, makeStack, type ItemStack } from './inventory';
-import { I, outfitItems } from './items';
+import { I, getItem, outfitItems } from './items';
 import { QUESTS } from './quests';
 import type { PlayerSave } from './save';
 import { MAX_HEALTH, MAX_HUNGER } from './survival';
@@ -36,6 +37,13 @@ export interface CharacterSheet {
   savedAt: number | null;
   /** Hotbar (9 slots), then the backpack (27), as in the game: null is an empty slot. */
   hotbar: (ItemStack | null)[];
+  /** Which hotbar slot is in the main hand (0 to 8). */
+  selected: number;
+  /**
+   * Points spent on Strength, Agility, Vitality and Energy. Left out by a server that does not send them yet:
+   * the health on the sheet then already includes them, and the gear does not.
+   */
+  pts?: AttrSpend;
   backpack: (ItemStack | null)[];
   /** The bags worn (4 slots) and what each carries (only the slots a bag really has). */
   bags: { bag: ItemStack | null; items: (ItemStack | null)[] }[];
@@ -61,6 +69,41 @@ export interface CharacterSheet {
 }
 
 const clone = (s: ItemStack | null): ItemStack | null => (s ? { ...s } : null);
+
+/**
+ * The stats of a class with what it wears and holds, in the same order the game applies them: the gear, then the off hand, then the points.
+ */
+export function wearStats(id: ClassId, level: number, pts: AttrSpend, held: ItemStack | null, offhand: ItemStack | null, armor: readonly (ItemStack | null)[], jewelry: readonly (ItemStack | null)[]): ClassStats {
+  const who = { id, level };
+  const worn = [held, offhand, ...armor];
+  const gear: StatModifier[] = [...gearModifiers(worn, who), ...accessoryModifiers(jewelry, who), ...glyphModifiers(worn, who), ...glyphModifiers(jewelry, who)];
+  const off = offhandModifier(offhand?.id ?? 0);
+  const spent = pointModifier(pts);
+  return computeStats(id, level, [...gear, ...(off ? [off] : []), ...(spent ? [spent] : [])]);
+}
+
+/** Defense points of the armor worn (0 to 20), the same sum the game uses. */
+export function wornDefense(armor: readonly (ItemStack | null)[]): number {
+  let n = 0;
+  for (const s of armor) if (s) n += getItem(s.id).armor?.defense ?? 0;
+  return n;
+}
+
+/**
+ * The numbers the lobby shows for a saved character. A sheet that does not carry `pts` already folded the points into
+ * `maxHealth` and left the gear out, so the gear's health is added on top of that.
+ */
+export function lobbyStats(sheet: CharacterSheet): ClassStats | null {
+  const cls = sheet.cls;
+  if (!cls) return null;
+  const held = sheet.hotbar[Math.max(0, Math.min(sheet.hotbar.length - 1, sheet.selected ?? 0))] ?? null;
+  const jewelry = [...sheet.rings, sheet.necklace];
+  const stats = wearStats(cls.id, cls.level, sheet.pts ?? NO_POINTS, held, sheet.offhand, sheet.armor, jewelry);
+  if (sheet.pts) return stats;
+  const plain = computeStats(cls.id, cls.level);
+  const gearHp = wearStats(cls.id, cls.level, NO_POINTS, held, sheet.offhand, sheet.armor, jewelry).maxHealth - plain.maxHealth;
+  return { ...stats, maxHealth: Math.max(1, Math.min(200, Math.round((sheet.maxHealth + gearHp) * 100) / 100)) };
+}
 
 /** Read a saved character into a sheet. `classId` is the class the account knows (the save's own record is the fallback). */
 export function sheetOfSave(save: PlayerSave, classId: ClassId | null = null): CharacterSheet {
@@ -101,8 +144,11 @@ export function sheetOfSave(save: PlayerSave, classId: ClassId | null = null): C
     return { bag, items };
   });
 
-  const spent = pointModifier(cs?.pts ?? NO_POINTS);
-  const stats = id && cs ? computeStats(id, cs.lvl, spent ? [spent] : []) : null;
+  const pts = cs?.pts ?? NO_POINTS;
+  const heldAt = Math.max(0, Math.min(HOTBAR_SLOTS - 1, Math.floor(save.selected)));
+  const held = inv.isUsable(heldAt) ? inv.get(heldAt) : null;
+  const wornJewelry = [jewelry.get(0), jewelry.get(1), jewelry.get(NECKLACE_SLOT)];
+  const stats = id && cs ? wearStats(id, cs.lvl, pts, held, offhand.get(0), armor.slots, wornJewelry) : null;
   const vit = (save.vitals ?? {}) as { h?: unknown; f?: unknown };
   const maxHealth = stats ? Math.round(stats.maxHealth) : MAX_HEALTH;
   const num = (v: unknown, fallback: number): number => (typeof v === 'number' && Number.isFinite(v) ? v : fallback);
@@ -138,6 +184,8 @@ export function sheetOfSave(save: PlayerSave, classId: ClassId | null = null): C
     position: { x: Math.floor(save.x), y: Math.floor(save.y), z: Math.floor(save.z) },
     savedAt: typeof save.savedAt === 'number' ? save.savedAt : null,
     hotbar: slots(0, HOTBAR_SLOTS),
+    selected: Math.max(0, Math.min(HOTBAR_SLOTS - 1, Math.floor(save.selected))),
+    pts: id && cs ? pts : undefined,
     backpack: slots(HOTBAR_SLOTS, PLAYER_SLOTS),
     bags,
     armor: armor.slots.map(clone),

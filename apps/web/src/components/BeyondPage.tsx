@@ -8,7 +8,7 @@ import { COPY, COUNTS, DEEDS, FAMILIES, PLACES, RARITY_LABEL, REALMS, CAVES, bio
 import { SHOTS, shotUrl, type Shot } from './beyondShots';
 import { ClickSparks, Embers, Reveal, Spot, useFrontMotion } from './fx';
 import { lobbyUrl } from '../game/route';
-import { SCROLL_KEY, goMarket, goToken, goCamp, goShop } from './frontNav';
+import { SCROLL_KEY, goMarket, goToken, goFarm, goShop } from './frontNav';
 import { ART } from './homeAssets';
 import './home.css';
 import './front.css';
@@ -198,10 +198,10 @@ export function BeyondPage() {
             <button className="fp-link-play" onClick={play}>
               Play
             </button>
-            <button onClick={() => toFront('site-world')}>The World</button>
+            <button aria-current="page" onClick={() => document.getElementById('home-layer')?.scrollTo({ top: 0, behavior: 'smooth' })}>The World</button>
             <button onClick={() => toFront('site-features')}>Classes</button>
             <button onClick={() => toFront('l-expansions')}>Expansions</button>
-            <button className="fp-link-camp" onClick={goCamp}>Camp</button>
+            <button className="fp-link-farm" onClick={goFarm}>Farm</button>
             <button className="fp-link-market" onClick={goMarket}>Market</button>
             <button className="fp-link-shop" onClick={goShop}>Shop</button>
             <button className="fp-link-token" onClick={goToken}>Token</button>
@@ -230,7 +230,7 @@ export function BeyondPage() {
                 href="/"
                 onClick={(e) => {
                   e.preventDefault();
-                  toFront('site-world');
+                  document.getElementById('home-layer')?.scrollTo({ top: 0, behavior: 'smooth' });
                 }}
               >
                 The World

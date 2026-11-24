@@ -41,6 +41,9 @@ const config: NextConfig = {
       // The website's pages live on the website's host...
       { source: '/game', has: PLAY, destination: '/', permanent: false },
       { source: '/market', has: PLAY, destination: `${SITE_ORIGIN}/market`, permanent: false },
+      { source: '/farm', has: PLAY, destination: `${SITE_ORIGIN}/farm`, permanent: false },
+      { source: '/camp', has: PLAY, destination: `${SITE_ORIGIN}/farm`, permanent: false },
+      { source: '/camp', destination: '/farm', permanent: false },
       { source: '/beyond', has: PLAY, destination: `${SITE_ORIGIN}/beyond`, permanent: false },
       { source: '/token', has: PLAY, destination: `${SITE_ORIGIN}/token`, permanent: false },
       { source: '/shop', has: PLAY, destination: `${SITE_ORIGIN}/shop`, permanent: false },

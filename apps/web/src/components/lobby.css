@@ -38,8 +38,8 @@
     z-index: 2;
     display: grid;
     flex: 1;
-    grid-template-columns: minmax(250px, 330px) minmax(0, 1fr) minmax(320px, 450px);
-    gap: 24px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 28px;
     width: min(1500px, calc(100% - 64px));
     min-height: 0;
     margin: 0 auto;
@@ -50,6 +50,11 @@
     pointer-events: auto;
   }
   .gp-main > .gp-spacer {
+    display: flex;
+    flex-direction: column;
+    align-self: stretch;
+    min-width: 0;
+    min-height: 0;
     pointer-events: none;
   }
   .gp-roster {
@@ -76,10 +81,10 @@
     align-self: start;
     max-height: 100%;
     min-height: 0;
-    margin: 0 -24px;
-    padding: 18px 24px 18px;
+    margin: 0;
+    padding: 18px 20px 18px;
     background: rgba(5, 4, 12, 0.8);
-    box-shadow: 0 0 22px 20px rgba(5, 4, 12, 0.8);
+    box-shadow: 0 0 18px rgba(5, 4, 12, 0.45);
     overflow-y: auto;
     scrollbar-width: thin;
     scrollbar-color: #6b4a2a transparent;
@@ -107,33 +112,243 @@
   .gp-center {
     position: absolute;
     inset: 84px 0 0;
-    z-index: 1;
+    z-index: 1; /* under the panels (the HUD), over the painted background */
     display: flex;
-    justify-content: center;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
     pointer-events: none;
   }
   .gp-figure {
     position: relative;
     flex: none;
-    width: min(520px, 42vw);
-    height: 100%;
+    /* Full width, so a wide pair of wings and a companion fit beside the body. Taller than the body, so a tall helm is in the picture and passes behind the chat. */
+    width: 100%;
+    height: 82%;
+    pointer-events: none;
+  }
+  .char-stage {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+  .char-stage-hit {
+    position: absolute;
+    left: 50%;
+    top: 8%;
+    bottom: 4%;
+    z-index: 1;
+    width: min(340px, 30vw);
+    transform: translateX(-50%);
     pointer-events: auto;
+    cursor: grab;
+  }
+  .char-stage-hit:active {
+    cursor: grabbing;
   }
   .gp-figure::after {
     content: '';
     position: absolute;
     left: 50%;
     bottom: -14px;
-    width: 80%;
+    width: min(440px, 36vw);
     height: 44px;
     transform: translateX(-50%);
+    pointer-events: none;
     background: radial-gradient(ellipse, rgba(255, 190, 100, 0.6), rgba(138, 92, 245, 0.28) 48%, transparent 72%);
     filter: blur(3px);
   }
   .gp-figure canvas {
     position: relative;
     z-index: 1;
+    pointer-events: none;
     filter: drop-shadow(0 12px 22px rgba(0, 0, 0, 0.6));
+  }
+
+  /* The realm's chat is the middle column. Closed, it is a faint bar; a click opens it above the figure. */
+  .gp-chat {
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    width: 100%;
+    height: auto;
+    max-height: 100%;
+    min-width: 0;
+    pointer-events: auto;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(8, 5, 16, 0.6);
+    backdrop-filter: blur(4px);
+    opacity: 0.7;
+    transition: opacity 0.35s ease;
+  }
+  .gp-chat:hover,
+  .gp-chat:focus-within,
+  .gp-chat.open {
+    opacity: 1;
+  }
+  .gp-chat-fold {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .gp-chat.open .gp-chat-fold {
+    grid-template-rows: 1fr;
+  }
+  .gp-chat-body {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    transform: translateY(-8px);
+    transition:
+      opacity 0.4s ease,
+      transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .gp-chat.open .gp-chat-body {
+    height: max(180px, calc(38vh - 140px));
+    opacity: 1;
+    transform: translateY(0);
+  }
+  .gp-chat-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+    padding: 8px 12px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .gp-chat.open .gp-chat-head {
+    padding: 10px 14px 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  }
+  .gp-chat-head b {
+    font-size: 12px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: #f0b020;
+  }
+  .gp-chat-head span {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    font-family: var(--body);
+    font-size: 12px;
+    letter-spacing: 0;
+    text-transform: none;
+    color: #bdb2d2;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .gp-chat-cue {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 6px;
+    font-style: normal;
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #f0b020;
+  }
+  .gp-chat-cue i {
+    width: 0;
+    height: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid currentColor;
+    transform: rotate(0deg);
+    transition: transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .gp-chat.open .gp-chat-cue i {
+    transform: rotate(180deg);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .gp-chat-fold,
+    .gp-chat-body,
+    .gp-chat-cue i {
+      transition: none;
+    }
+  }
+  .gp-chat-lines {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    justify-content: flex-end;
+    gap: 4px;
+    min-height: 0;
+    margin: 0;
+    padding: 10px 14px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    list-style: none;
+    font-family: var(--body);
+    font-size: 14px;
+    line-height: 1.45;
+    color: #efe9f7;
+    overflow-wrap: anywhere;
+  }
+  .gp-chat-lines::before {
+    content: '';
+    flex: 1 0 0;
+  }
+  .gp-chat-lines li b {
+    color: #f0b020;
+  }
+  .gp-chat-lines li.me b {
+    color: #9fe8ff;
+  }
+  .gp-chat-lines li.note {
+    font-style: italic;
+    color: #bdb2d2;
+  }
+  .gp-chat-say {
+    display: flex;
+    gap: 8px;
+    padding: 8px 10px 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+  }
+  .gp-chat-say input {
+    flex: 1;
+    min-width: 0;
+    min-height: 36px;
+    padding: 0 10px;
+    border: 0;
+    background: rgba(255, 255, 255, 0.08);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+    font: inherit;
+    font-family: var(--body);
+    font-size: 14px;
+    color: #fff;
+  }
+  .gp-chat-say button {
+    padding: 0 12px;
+    border: 0;
+    background: #f0b020;
+    color: #1a1000;
+    font: inherit;
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+  .gp-chat-say button:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+  .gp-chat-note {
+    margin: 0;
+    padding: 0 12px 8px;
+    font-family: var(--body);
+    font-size: 12px;
+    color: #ffb4a2;
   }
   .gp-empty {
     position: absolute;
@@ -1045,8 +1260,8 @@
     position: absolute;
     left: 50%;
     bottom: 0;
-    width: min(820px, 64vw);
-    height: 92%;
+    width: min(560px, 46vw);
+    height: 68%;
     transform: translateX(-50%);
     pointer-events: none;
     background:
@@ -1308,6 +1523,7 @@
   .gp-fx {
     position: absolute;
     inset: 0;
+    pointer-events: none;
   }
   .gp-fx {
     pointer-events: none;
@@ -1316,7 +1532,7 @@
     position: absolute;
     left: 50%;
     bottom: 0;
-    width: 46%;
+    width: min(280px, 24vw);
     height: 100%;
     transform: translateX(-50%);
     background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--c) 70%, #fff) 50%, transparent);
@@ -1329,9 +1545,9 @@
     position: absolute;
     left: 50%;
     bottom: -8px;
-    width: 70%;
+    width: min(380px, 34vw);
     height: 38px;
-    margin-left: -35%;
+    transform: translateX(-50%);
     border: 3px solid color-mix(in srgb, var(--c) 60%, #fff);
     border-radius: 50%;
     box-shadow: 0 0 22px var(--c), inset 0 0 18px var(--c);
@@ -1435,7 +1651,7 @@
   .gp-tools {
     position: absolute;
     left: 50%;
-    top: 22px;
+    bottom: 16px;
     z-index: 2;
     display: flex;
     align-items: center;
@@ -2050,10 +2266,20 @@
       height: 460px;
     }
     .gp-figure {
-      width: min(420px, 90vw);
+      width: 100%;
+      height: 82%;
     }
     .gp-spacer {
-      display: none;
+      display: flex;
+      order: -1;
+      min-height: 0;
+    }
+    .gp-chat {
+      width: 100%;
+      max-height: none;
+    }
+    .gp-chat.open .gp-chat-body {
+      height: 180px;
     }
     .gp-main {
       display: flex;
@@ -2225,11 +2451,11 @@
 @keyframes gp-ring {
   0% {
     opacity: 0.95;
-    transform: scale(0.15);
+    transform: translateX(-50%) scale(0.15);
   }
   100% {
     opacity: 0;
-    transform: scale(1.35);
+    transform: translateX(-50%) scale(1.35);
   }
 }
 

@@ -2766,6 +2766,8 @@ export class Player implements EffectOwner {
       cursor.count -= 1;
       if (cursor.count <= 0) m.cursor = null;
       this.emit({ t: 'jewel', ok: result.ok, kind, slot: i, label: result.label, detail: result.detail });
+      // The same chime as a jewel hitting the ground: it was taken up and put into the piece.
+      if (result.ok) this.emit({ t: 'jewelDrop', kind, vol: 1 });
     }
     return true;
   }
@@ -4526,6 +4528,8 @@ export class Player implements EffectOwner {
 
   private soundUnderfoot() {
     const b = this.body;
+    // A foot in the water displaces water. The sand or stone under it is not what you hear.
+    if (b.inWater && !b.inLava) return 'water' as const;
     return BLOCKS[this.world.getBlock(Math.floor(b.x), Math.floor(b.y - 0.2), Math.floor(b.z))].sound;
   }
 

@@ -5,8 +5,9 @@ const RADIUS = 14;
 const STREAK = 0.9;
 
 /**
- * Rain streaks around the camera. Every drop remembers the height of the first roof above its
- * column, so rain stops at ceilings: it falls outdoors but not inside a house or cave.
+ * Rain streaks around the camera. Every drop stops at the first roof or water in its column,
+ * so it falls outdoors, stops on the sea, and never falls through a house, a cave, or the water.
+ * While the camera is under the water the streaks are hidden, the way Minecraft does it.
  */
 export class Rain {
   readonly object: THREE.LineSegments;
@@ -42,10 +43,10 @@ export class Rain {
     this.speed[i] = 17 + Math.random() * 6;
   }
 
-  /** `amount` is the 0..1 rain intensity. Skipped entirely (hidden) when it is dry. */
-  update(dt: number, amount: number, cam: THREE.Vector3, snow = false): void {
-    this.object.visible = amount > 0.02;
-    if (!this.object.visible) return;
+  /** `amount` is the 0..1 rain intensity. Hidden when it is dry, and while the camera is under water. */
+  update(dt: number, amount: number, cam: THREE.Vector3, snow = false, underwater = false): void {
+    this.object.visible = amount > 0.02 && !underwater;
+    if (amount <= 0.02) return;
     this.flake += ((snow ? 1 : 0) - this.flake) * Math.min(1, dt * 1.5);
     this.mat.color.setRGB(0.71 + 0.29 * this.flake, 0.8 + 0.2 * this.flake, 1);
     this.mat.opacity = (0.18 + 0.4 * amount) * (1 + 0.35 * this.flake);

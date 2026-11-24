@@ -32,6 +32,7 @@ const VOICES: Record<Exclude<SoundKind, 'none'>, Voice> = {
   glass: { filter: 'highpass', freq: 3600, q: 0.8, dur: 0.28, noise: 0.45, tone: { type: 'sine', freq: 2400, gain: 0.25 } },
   leaves: { filter: 'highpass', freq: 2600, q: 0.5, dur: 0.12, noise: 0.35 },
   snow: { filter: 'bandpass', freq: 3600, q: 0.5, dur: 0.11, noise: 0.55 },
+  water: { filter: 'lowpass', freq: 480, q: 0.6, dur: 0.28, noise: 0.7 },
 };
 
 const ACTION_GAIN: Record<Action, number> = { break: 0.55, place: 0.42, step: 0.16, hit: 0.2, land: 0.5, jump: 0.2 };
@@ -77,6 +78,11 @@ export class GameAudio {
   private lastGrunt = -9;
   private rainGain: GainNode | null = null;
   private rainFilter: BiquadFilterNode | null = null;
+  /** Low-pass over the whole mix while the eyes are under water, and the quiet current that plays with them. */
+  private waterFilter: BiquadFilterNode | null = null;
+  private waterGain: GainNode | null = null;
+  private submerged = false;
+  private bubbleIn = 0.8;
   /** The bed of a place (wind, sea, a storm...): one looping noise through a filter, with a slow swell on its level. */
   private bed: { filter: BiquadFilterNode; gain: GainNode; lfo: OscillatorNode; lfoDepth: GainNode } | null = null;
   /** The knob for everything that is heard (see `resume`), and the one for the weather and the places. */
@@ -130,7 +136,13 @@ export class GameAudio {
       // The player's three volumes: `main` is the knob for everything, `master` the one for the effects (the name stayed, as
       // nearly everything that makes a sound is an effect), `ambBus` the one for the weather and the places.
       this.main = this.ctx.createGain();
-      this.main.connect(this.ctx.destination);
+      // Everything the world makes passes through here, so going under the water can muffle it in one place.
+      this.waterFilter = this.ctx.createBiquadFilter();
+      this.waterFilter.type = 'lowpass';
+      this.waterFilter.frequency.value = 20000;
+      this.waterFilter.Q.value = 0.6;
+      this.main.connect(this.waterFilter);
+      this.waterFilter.connect(this.ctx.destination);
       this.master = this.ctx.createGain();
       this.master.connect(this.main);
       this.ambBus = this.ctx.createGain();
@@ -255,19 +267,41 @@ export class GameAudio {
     if (!this.ctx || !this.master || !this.noise) return;
     const ctx = this.ctx;
     const t = ctx.currentTime;
-    const out = ctx.createGain();
-    out.gain.setValueAtTime(0.0001, t);
-    out.gain.exponentialRampToValueAtTime(0.5 * volume, t + 0.02);
-    out.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
-    out.connect(this.dest());
+    const bus = this.dest();
+    // The body of the splash: water shoved aside, low and short.
+    const body = ctx.createGain();
+    body.gain.setValueAtTime(0.0001, t);
+    body.gain.exponentialRampToValueAtTime(0.42 * volume, t + 0.012);
+    body.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+    body.connect(bus);
     const src = ctx.createBufferSource();
     src.buffer = this.noise;
-    const f = ctx.createBiquadFilter();
-    f.type = 'lowpass';
-    f.frequency.setValueAtTime(1800, t);
-    f.frequency.exponentialRampToValueAtTime(400, t + 0.45);
-    src.connect(f).connect(out);
-    src.start(t, Math.random() * 0.4, 0.5);
+    const low = ctx.createBiquadFilter();
+    low.type = 'lowpass';
+    low.frequency.setValueAtTime(380, t);
+    low.frequency.exponentialRampToValueAtTime(140, t + 0.2);
+    src.connect(low).connect(body);
+    src.start(t, Math.random() * 0.4, 0.25);
+    // Drops thrown up, each a small bright tick a moment apart.
+    const drops = 3 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < drops; i++) {
+      const at = t + 0.03 + Math.random() * 0.16;
+      const dur = 0.03 + Math.random() * 0.04;
+      const drop = ctx.createGain();
+      drop.gain.setValueAtTime(0.0001, at);
+      drop.gain.exponentialRampToValueAtTime((0.08 + Math.random() * 0.1) * volume, at + 0.004);
+      drop.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+      drop.connect(bus);
+      const n = ctx.createBufferSource();
+      n.buffer = this.noise;
+      n.playbackRate.value = 0.8 + Math.random() * 0.6;
+      const hi = ctx.createBiquadFilter();
+      hi.type = 'bandpass';
+      hi.frequency.value = 1800 + Math.random() * 2200;
+      hi.Q.value = 4;
+      n.connect(hi).connect(drop);
+      n.start(at, Math.random(), dur + 0.02);
+    }
   }
 
   /** Short filtered-noise blip shared by the small effects below. */
@@ -1123,6 +1157,78 @@ export class GameAudio {
   }
 
   private pendingMusic = 0.5;
+
+  /**
+   * The ears under the water. `on` is the eyes in water (not lava). `swim` is 0..1 how fast the body is moving, `depth` is
+   * blocks below the surface. The whole mix goes dull, a low current takes over, and bubbles tick past — closer together while swimming.
+   */
+  setUnderwater(on: boolean, dt: number, swim = 0, depth = 0): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.waterFilter) return;
+    const t = ctx.currentTime;
+    const sunk = Math.max(0, Math.min(1, depth / 20));
+    this.waterFilter.frequency.setTargetAtTime(on ? 980 - 620 * sunk : 20000, t, on ? 0.1 : 0.18);
+    if (on && !this.waterGain && this.noise && this.ambBus) {
+      const src = ctx.createBufferSource();
+      src.buffer = this.noise;
+      src.loop = true;
+      src.playbackRate.value = 0.28;
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 220;
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      src.connect(filter).connect(gain).connect(this.ambBus);
+      src.start();
+      this.waterGain = gain;
+    }
+    this.waterGain?.gain.setTargetAtTime(on ? 0.04 + 0.028 * sunk : 0, t, 0.3);
+    if (on && !this.submerged) this.blip(160, 0.5, 0.5, 0.28, 'lowpass', 0.3);
+    if (!on && this.submerged) this.splash(0.22);
+    this.submerged = on;
+    if (!on) {
+      this.bubbleIn = 0.5;
+      return;
+    }
+    this.bubbleIn -= dt;
+    if (this.bubbleIn > 0) return;
+    this.bubble(sunk > 0.45);
+    this.bubbleIn = swim > 0.25 ? 0.16 + Math.random() * 0.28 : 0.85 + Math.random() * 1.7;
+  }
+
+  /** One dull pop, the kind you hear with your head under the water. */
+  private bubble(deep: boolean): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.noise || !this.ambBus) return;
+    const t = ctx.currentTime;
+    const dur = 0.07 + Math.random() * 0.09;
+    const out = ctx.createGain();
+    const peak = deep ? 0.1 : 0.18;
+    out.gain.setValueAtTime(0.0001, t);
+    out.gain.exponentialRampToValueAtTime(peak, t + 0.008);
+    out.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    out.connect(this.ambBus);
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise;
+    src.playbackRate.value = 0.5 + Math.random();
+    const f = ctx.createBiquadFilter();
+    f.type = 'bandpass';
+    f.Q.value = 3.5;
+    const freq = (deep ? 240 : 420) + Math.random() * 280;
+    f.frequency.value = freq;
+    src.connect(f).connect(out);
+    src.start(t, Math.random(), dur + 0.02);
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, t);
+    osc.frequency.exponentialRampToValueAtTime(90, t + dur);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(peak * 0.7, t);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(og).connect(out);
+    osc.start(t);
+    osc.stop(t + dur + 0.02);
+  }
 
   /** Music, birds and cave drones. Call every frame. */
   ambient(dt: number, env: AmbientEnv): void {

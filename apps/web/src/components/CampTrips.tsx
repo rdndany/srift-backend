@@ -108,7 +108,7 @@ export function CampTrips({ view }: { view: DeskView }) {
         </section>
       )}
 
-      <h3 className="camp-h3">Where to</h3>
+      <h3 className="camp-h3">Offline farm</h3>
       <ul className="camp-list">
         {EXPEDITIONS.map((e) => {
           const low = view.hero.level < e.level;
@@ -130,7 +130,7 @@ export function CampTrips({ view }: { view: DeskView }) {
         })}
       </ul>
       <p className="camp-hint">
-        Wings make a trip {Math.round(WINGS_TIME_BONUS * 100)}% shorter{wings ? ' (yours are on)' : ''}. A companion finds {Math.round(COMPANION_LOOT_BONUS * 100)}% more{pet ? ' (yours is on)' : ''}. Wear them on the Hero tab before you send the hero out. Trips give Auren and supplies only: no experience, no $SOLRIFT.
+        Wings make a trip {Math.round(WINGS_TIME_BONUS * 100)}% shorter{wings ? ' (yours are on)' : ''}. A companion finds {Math.round(COMPANION_LOOT_BONUS * 100)}% more{pet ? ' (yours is on)' : ''}. Wear them on the Play page before you send the hero out. The farm pays Auren and supplies only: no experience, no $SOLRIFT.
       </p>
     </div>
   );

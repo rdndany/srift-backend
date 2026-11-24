@@ -477,7 +477,7 @@ export const ITEM_TILES = [
 /** All atlas tiles: block textures first (stable indices), then item sprites. */
 export const TILE_NAMES: readonly string[] = [...BLOCK_TILES, ...ITEM_TILES];
 
-export type SoundKind = 'none' | 'stone' | 'dirt' | 'grass' | 'sand' | 'gravel' | 'wood' | 'glass' | 'leaves' | 'snow';
+export type SoundKind = 'none' | 'stone' | 'dirt' | 'grass' | 'sand' | 'gravel' | 'wood' | 'glass' | 'leaves' | 'snow' | 'water';
 
 /**
  * Texture atlas layout (tiles are square). 16 by 64 is 1024 tiles, twice the old 512.

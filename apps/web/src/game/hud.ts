@@ -14,6 +14,7 @@ export class Hud {
   private crossEl = document.getElementById('crosshair');
   private nameTimer = 0;
   private lastFlash = -1;
+  private lastVeil = -1;
   debugVisible = false;
 
   /** Show a message above the hotbar for a couple of seconds. */
@@ -28,9 +29,22 @@ export class Hud {
     this.breakFill.style.width = `${Math.round(p * 100)}%`;
   }
 
-  setUnderwater(v: boolean, lava = false): void {
+  /** `shade` is the daylight left at this depth: 1 just under the surface, near 0 in the deep. */
+  setUnderwater(v: boolean, lava = false, shade = 1): void {
     this.underwater.style.display = v ? 'block' : 'none';
-    this.underwater.style.background = lava ? 'rgba(220, 80, 10, 0.55)' : '';
+    if (!v) return;
+    if (lava) {
+      this.underwater.style.background = 'rgba(220, 80, 10, 0.55)';
+      this.underwater.style.opacity = '1';
+      this.lastVeil = -1;
+      return;
+    }
+    this.underwater.style.background = '';
+    // Always a blue wash, the same blue as the surface, and a deeper one the further down you are.
+    const veil = Math.round((0.34 + Math.min(0.32, (1 - shade) * 0.4)) * 40) / 40;
+    if (veil === this.lastVeil) return;
+    this.lastVeil = veil;
+    this.underwater.style.opacity = String(veil);
   }
 
   /** 0..1 red screen flash after taking damage. */

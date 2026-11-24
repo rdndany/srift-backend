@@ -19,9 +19,12 @@ import {
   companionIndex,
   companionOfItem,
   wingNumberOf,
+  MAX_DEFENSE,
   computeStats,
   formatCoins,
   getItem,
+  lobbyStats,
+  wornDefense,
   lookCode,
   lookOfCode,
   newCharacterSheet,
@@ -45,10 +48,12 @@ import { TokenShop } from './TokenWallet';
 import { BlockCube } from './BlockCube';
 import { CharacterPreview } from './CharacterPreview';
 import { CharacterSheet } from './CharacterSheet';
+import { LobbyDesk } from './CampHero';
+import { RealmChat } from './CampChat';
 import { ClassSkills } from './ClassSkills';
 import { statLines } from './ClassPicker';
 import { ClickSparks, Embers, useFrontMotion } from './fx';
-import { FRONT_MENU, SCROLL_KEY, frontUrl, goMarket, goToken, goCamp, goShop } from './frontNav';
+import { FRONT_MENU, SCROLL_KEY, frontUrl, goBeyond, goMarket, goToken, goFarm, goShop } from './frontNav';
 import { HANDOFF_KEYS, siteUrl, whereAmI } from '../game/route';
 import { ART } from './homeAssets';
 import { ItemSprite } from './ItemSprite';
@@ -58,6 +63,7 @@ import { serverUrl, useRealmStatus } from './realmStatus';
 import type { Way } from './WayDialog';
 import './front.css';
 import './lobby.css';
+import './campPage.css';
 import './responsive.css';
 
 /** What the lobby hands to the game: a world of your own, or the shared realm. */
@@ -189,10 +195,21 @@ function Choice({
   );
 }
 
-/** What a class is good at, as a few bars that grow and shrink when another class is picked (the numbers are the class sheet's own). */
-function HeroStats({ id }: { id: ClassId }) {
+/** The health bar uses the same total as the stats, so a piece that adds health moves it. A full bar stays full. */
+function withWornHealth(sheet: SheetData): SheetData {
+  const stats = lobbyStats(sheet);
+  if (!stats) return sheet;
+  const maxHealth = Math.round(stats.maxHealth);
+  if (maxHealth === sheet.maxHealth) return sheet;
+  const full = sheet.health >= sheet.maxHealth;
+  return { ...sheet, maxHealth, health: full ? maxHealth : Math.min(sheet.health, maxHealth) };
+}
+
+/** What a class is good at. For a saved character the bars follow the level, the points and everything worn and held; while a class is being chosen they are the class on its own. */
+function HeroStats({ id, sheet }: { id: ClassId; sheet?: SheetData | null }) {
   const def = CLASSES[id];
-  const stats = computeStats(id, 1);
+  const own = sheet?.cls?.id === id ? sheet : null;
+  const stats = own ? lobbyStats(own)! : computeStats(id, 1);
   const lines = statLines(stats, def.resource.name);
   const fill = (k: string): number => lines.find((l) => l.key === k)?.fill ?? 0;
   const kinds = (['melee', 'ranged', 'spell'] as const).map((k) => ({ k, fill: fill(k), value: stats.damage[k] })).sort((a, b) => b.fill - a.fill);
@@ -204,6 +221,10 @@ function HeroStats({ id }: { id: ClassId }) {
     { key: 'speed', label: 'Speed', fill: fill('speed'), value: `x${stats.moveSpeed.toFixed(2).replace(/0$/, '')}` },
     { key: 'resource', label: def.resource.name, fill: fill('resource'), value: `${Math.round(stats.maxResource)}` },
   ];
+  if (own) {
+    const armor = wornDefense(own.armor);
+    rows.splice(3, 0, { key: 'armor', label: 'Armor', fill: armor / MAX_DEFENSE, value: `${armor}/${MAX_DEFENSE}` });
+  }
   return (
     <div className="gp-stats" id="hero-stats">
       {rows.map((r) => (
@@ -471,9 +492,13 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
   const [realmStash, setRealmStash] = useState<StashView | null | undefined>(undefined);
   /** Every character of the wallet in short (level, coins, what it carries): kept while another one is being read, so the slots do not blink. */
   const [briefs, setBriefs] = useState<CharacterBrief[]>([]);
+  /** Bumped after a bag or Stash change, so the sheet is read again. */
+  const [sheetGen, setSheetGen] = useState(0);
   useEffect(() => {
     setRealmSheet(undefined);
     setRealmStash(undefined);
+  }, [hasCharacter, characterId, way]);
+  useEffect(() => {
     if (!hasCharacter || way !== 'multi') return;
     let live = true;
     fetch('/api/auth/sheet', { credentials: 'same-origin' })
@@ -494,7 +519,7 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
     return () => {
       live = false;
     };
-  }, [hasCharacter, characterId, way]);
+  }, [hasCharacter, characterId, way, sheetGen]);
   const sheetWorld = clash ?? latest;
   const accountClass = account?.class ?? null;
   const localSheet = useMemo(() => (sheetWorld ? sheetOfSave(sheetWorld.player, accountClass) : null), [sheetWorld, accountClass]);
@@ -503,7 +528,9 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
   /** A character that has never been played carries what its class starts a survival world with: shown, so that the bags are seen before PLAY. */
   const starterClass: ClassId | null = account?.class ?? (who === 'guest' ? pick : null);
   const starter = !creating && savedSheet === null && starterClass !== null && mode !== 'creative';
-  const sheet: SheetData | null | undefined = starter ? newCharacterSheet(starterClass) : savedSheet;
+  const rawSheet: SheetData | null | undefined = starter ? newCharacterSheet(starterClass) : savedSheet;
+  /** Health follows the gear, so a piece that adds health moves the bar as well as the stats. */
+  const sheet: SheetData | null | undefined = rawSheet ? withWornHealth(rawSheet) : rawSheet;
   const sheetSource = starter ? 'Starting kit' : way === 'multi' ? 'Dawnwatch realm' : sheetWorld ? `${modeInfo(modeOfSave(sheetWorld.player)).name} world ${sheetWorld.seed}` : '';
 
   /** What keeps PLAY from working yet, in words. */
@@ -645,6 +672,13 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
     return def ? companionIndex(def.id) + 1 : 0;
   })();
   const figureArmor = creating ? [] : (wornIds ?? (viewClass ? outfitItems(viewClass) : []));
+  /** What each hand carries: the hotbar slot that is selected, and the off hand. A shield is worn on the arm whichever hand it is in. */
+  const figureHands = (() => {
+    const starter = viewClass ? { held: CLASSES[viewClass].startingWeapon, off: CLASSES[viewClass].startingOffhand } : { held: 0, off: 0 };
+    const raw = creating || !sheet ? starter : { held: sheet.hotbar[Math.max(0, Math.min(sheet.hotbar.length - 1, sheet.selected ?? 0))]?.id ?? 0, off: sheet.offhand?.id ?? 0 };
+    if (raw.held && getItem(raw.held).shield) return { held: raw.off && !getItem(raw.off).shield ? raw.off : 0, off: raw.held };
+    return raw;
+  })();
   const weaponName = shownDef ? getItem(shownDef.startingWeapon).name.replace(/_/g, ' ') : '';
   const iconOf = (c: ClassId | null | undefined): number => (c ? CLASSES[c].startingWeapon : toolId('sword', 'diamond'));
 
@@ -676,12 +710,13 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
             <button className="fp-link-play" aria-current="page">
               Play
             </button>
+            <button onClick={goBeyond}>The World</button>
             {FRONT_MENU.map((m) => (
               <button key={m.id} onClick={() => toFront(m.id)}>
                 {m.label}
               </button>
             ))}
-            <button className="fp-link-camp" onClick={goCamp}>Camp</button>
+            <button className="fp-link-farm" onClick={goFarm}>Farm</button>
             <button className="fp-link-market" onClick={goMarket}>Market</button>
             <button className="fp-link-shop" onClick={goShop}>Shop</button>
             <button className="fp-link-token" onClick={goToken}>Token</button>
@@ -706,7 +741,7 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
                 <i className="ring" />
               </div>
               <div className="gp-build">
-                <CharacterPreview armor={figureArmor} grounded turntable={spin} wings={figureWings} companion={figurePet} />
+                <CharacterPreview armor={figureArmor} held={figureHands.held} shield={figureHands.off} grounded stage turntable={spin} wings={figureWings} companion={figurePet} />
               </div>
             </div>
           ) : (
@@ -975,7 +1010,7 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
           </p>
         </section>
 
-        <div className="gp-spacer" aria-hidden="true" />
+        <div className="gp-spacer">{way === 'multi' && signedIn && account && <RealmChat hero={account.id} />}</div>
 
         {/* ---------------------------------------------------- about the character (right) */}
         <aside className="gp-hero" id="gp-hero" ref={heroRef} style={{ '--c': viewDef?.color ?? '#8a5cf5' } as CSSProperties}>
@@ -1004,16 +1039,21 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
                       </span>
                     )}
                   </p>
-                  <CharacterSheet
-                    sheet={sheet}
-                    stash={realmStash}
-                    showStash={way === 'multi' && who === 'wallet'}
-                    briefs={briefs}
-                    characters={account?.characters}
-                    selfId={account?.id}
-                    source={sheetSource}
-                    empty={way === 'multi' ? 'This character has not entered the realm yet. It starts at level 1, in a cave under the village of Ashbrook.' : `No saved ${info.name} world for this character yet. Press Play to start one at level 1.`}
-                  />
+                  <LobbyDesk active={way === 'multi' && who === 'wallet' && signedIn && !creating} heroId={account?.id ?? null} reload={() => setSheetGen((n) => n + 1)}>
+                    {(hand) => (
+                      <CharacterSheet
+                        sheet={sheet}
+                        stash={realmStash}
+                        showStash={way === 'multi' && who === 'wallet'}
+                        briefs={briefs}
+                        characters={account?.characters}
+                        selfId={account?.id}
+                        source={sheetSource}
+                        empty={way === 'multi' ? 'This character has not entered the realm yet. It starts at level 1, in a cave under the village of Ashbrook.' : `No saved ${info.name} world for this character yet. Press Play to start one at level 1.`}
+                        hand={hand}
+                      />
+                    )}
+                  </LobbyDesk>
                 </>
               )}
 
@@ -1093,7 +1133,7 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
               {viewClass && (
                 <div className="gp-block">
                   <h3>Strengths</h3>
-                  <HeroStats id={viewClass} />
+                  <HeroStats id={viewClass} sheet={creating ? null : sheet} />
                 </div>
               )}
 

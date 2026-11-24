@@ -17,18 +17,36 @@ describe('the swimming pose', () => {
     expect(Math.abs(swimShape(0, 0.45).pitch)).toBeGreaterThan(1);
   });
 
-  it('works the arms in turn, half a stroke apart, and kicks the legs against each other', () => {
+  it('works the arms in turn, one reaching while the other pulls, and kicks the legs against each other', () => {
     for (const phase of [0, 0.7, 1.9, 3.3, 5.1]) {
       const p = swimShape(phase, 0);
-      expect(p.armR - p.armL).toBeCloseTo(Math.PI, 5);
+      expect(p.armL + p.armR).toBeCloseTo(0.7, 5);
       expect(p.legL - 0.12).toBeCloseTo(-(p.legR - 0.12), 5);
     }
   });
 
-  it('goes right round with the arms (a full stroke is a full circle) and kicks twice a stroke', () => {
+  it('keeps each arm inside one short stroke, brings it back out to the side, and kicks twice a stroke', () => {
+    let min = Infinity;
+    let max = -Infinity;
+    for (let i = 0; i <= 24; i++) {
+      const phase = (i / 24) * Math.PI * 2;
+      const p = swimShape(phase, 0);
+      min = Math.min(min, p.armL);
+      max = Math.max(max, p.armL);
+      if (Math.sin(phase) < -0.4) {
+        expect(p.outL).toBeGreaterThan(p.outR);
+        expect(p.elbowL).toBeGreaterThan(p.elbowR);
+      }
+      if (Math.sin(phase) > 0.4) {
+        expect(p.outR).toBeGreaterThan(p.outL);
+        expect(p.elbowR).toBeGreaterThan(p.elbowL);
+      }
+    }
+    expect(max - min).toBeLessThan(Math.PI);
+    expect(max).toBeGreaterThan(1);
+    expect(min).toBeLessThan(0);
     const a = swimShape(0.4, 0);
-    const b = swimShape(0.4 + Math.PI * 2, 0);
-    expect(Math.cos(a.armL)).toBeCloseTo(Math.cos(b.armL), 5);
+    expect(a.armL).toBeCloseTo(swimShape(0.4 + Math.PI * 2, 0).armL, 5);
     expect(a.legL).toBeCloseTo(swimShape(0.4 + Math.PI, 0).legL, 5);
   });
 });

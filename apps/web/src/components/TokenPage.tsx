@@ -9,7 +9,7 @@ import { TokenEconomy } from './TokenEconomy';
 import { useToken, type TokenLiveInfo } from '../token/store';
 import { ClickSparks, Embers, Reveal, useFrontMotion } from './fx';
 import { lobbyUrl } from '../game/route';
-import { SCROLL_KEY, goMarket, goCamp, goShop } from './frontNav';
+import { SCROLL_KEY, goBeyond, goMarket, goFarm, goShop } from './frontNav';
 import { ART } from './homeAssets';
 import { CASHOUT, FAIR_PLAY, STAGE_LABEL, TOKEN, earningsFor, roadmapFor, utilitiesFor } from './tokenInfo';
 import './home.css';
@@ -110,10 +110,10 @@ export function TokenPage() {
             <button className="fp-link-play" onClick={play}>
               Play
             </button>
-            <button onClick={() => toFront('site-world')}>The World</button>
+            <button onClick={goBeyond}>The World</button>
             <button onClick={() => toFront('site-features')}>Classes</button>
             <button onClick={() => toFront('l-expansions')}>Expansions</button>
-            <button className="fp-link-camp" onClick={goCamp}>Camp</button>
+            <button className="fp-link-farm" onClick={goFarm}>Farm</button>
             <button className="fp-link-market" onClick={goMarket}>
               Market
             </button>

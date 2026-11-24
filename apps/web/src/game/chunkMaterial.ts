@@ -517,7 +517,8 @@ ${HERO_TILES.map((n) => {
     deep *= mix(0.7, 1.0, smoothstep(0.0, 0.6, edgeD));
     // Under rock (little sky): the water is clearer and teal instead of a deep navy, which in the dark was one flat blue square.
     float cave = 1.0 - smoothstep(0.15, 0.75, vLight.g);
-    tex.rgb *= mix(vec3(0.46, 0.64, 0.68), mix(vec3(0.15, 0.24, 0.4), vec3(0.3, 0.52, 0.62), cave), deep);
+    vec3 body = mix(vec3(0.46, 0.64, 0.68), mix(vec3(0.15, 0.24, 0.4), vec3(0.3, 0.52, 0.62), cave), deep);
+    tex.rgb *= body;
     // A slow drifting dapple through the whole body (in 3D, so the sides and the top of a pool all have it and no face is a plain tile).
     if (cave > 0.0) {
       float dap = wnoise3(vWorld * vec3(1.6, 2.2, 1.6) + vec3(tm * 0.25, -tm * 0.18, tm * 0.2)) * 0.6 + wnoise3(vWorld * 3.7 + vec3(-tm * 0.3, tm * 0.2, 4.0)) * 0.4;
@@ -535,12 +536,9 @@ ${HERO_TILES.map((n) => {
     vec3 mirror = mix(uSkyReflect, skyAtSoft(normalize(R)), 0.75);
     // (No sky to mirror under rock.)
     tex.rgb = mix(tex.rgb, mirror * 0.8, fres * 0.7 * (1.0 - 0.85 * cave));
-    // Nearly solid: the bottom only hints through, more where it is shallow.
-    // (Not less near the shore: the sand under the shallows would show through as pale grains and streaks along the edge.)
-    alpha = mix(0.99, 0.998, deep);
-    // Under rock it is see-through: the floor and walls of the pool show inside it.
-    alpha = mix(alpha, mix(0.62, 0.78, deep), cave);
-    alpha = mix(alpha, 1.0, fres * (1.0 - 0.6 * cave));
+    // See-through everywhere, sea and cave the same: a side is a face of water, and the cave shows through it.
+    alpha = mix(0.45, 0.62, deep);
+    alpha = mix(alpha, 0.82, fres);
 
     // (No foam line along the shore: any bright band there flickers and shows the edges of the blocks. The shore is only a lighter, greener shallow, see edgeD above.)
 
@@ -548,14 +546,26 @@ ${HERO_TILES.map((n) => {
     float sp = max(dot(R, uLightDir), 0.0);
     tex.rgb += uSun * (pow(sp, 40.0) * 1.0 + pow(sp, 14.0) * 0.1) * uGlint * top * (1.0 - cave);
 
-    // From underneath, the surface is a mirror of the bottom except in a round window straight up that shows the sky.
+    // From underneath, the surface is the bright ceiling of the sea: ripples, and the sun breaking through them.
     if (cameraPosition.y < vWorld.y && top > 0.5) {
       float up = clamp(-V.y, 0.0, 1.0);
-      vec2 dxz = -V.xz * 1.33;
-      float w = smoothstep(0.6, 0.72, up);
-      vec3 win = uSkyReflect * (0.85 + 0.08 * wh) + uSun * pow(max(dot(normalize(vec3(dxz.x, sqrt(max(1.0 - dot(dxz, dxz), 0.0)), dxz.y)), uLightDir), 0.0), 40.0) * uGlint;
-      tex.rgb = mix(uFogColor * 0.9, win, w);
-      alpha = 0.97;
+      vec3 sunW = normalize(uLightDir);
+      float sunUp = clamp(sunW.y, 0.0, 1.0);
+      float broad = pow(max(dot(nw, sunW), 0.0), 3.0);
+      float hit = pow(max(dot(nw, sunW), 0.0), 16.0);
+      float gaze = pow(max(dot(normalize(-V), sunW), 0.0), 26.0);
+      vec3 deepCol = vec3(0.04, 0.16, 0.32);
+      vec3 litCol = vec3(0.62, 0.86, 1.0);
+      vec3 col = mix(deepCol, litCol, 0.28 + 0.72 * up);
+      col *= 0.78 + 0.4 * wh;
+      vec3 sunCol = max(uSun, vec3(0.75, 0.88, 1.0));
+      col += sunCol * broad * 0.55 * sunUp * uGlint;
+      col += vec3(1.0, 0.96, 0.82) * (hit * 1.5 + gaze * 1.15) * sunUp * uGlint;
+      tex.rgb = col;
+      // Close under the surface, and looking up, the sky shows through. Deeper, the ceiling closes over.
+      float below = max(vWorld.y - cameraPosition.y, 0.0);
+      float close = exp(-max(below - 0.4, 0.0) / 7.0);
+      alpha = mix(0.94, 0.38, close * up);
     }
     // (The material's own opacity is for glass and ice: the water's is what is set above.)
     alpha = min(alpha / max(uOpacity, 0.01), 1.0);
@@ -610,9 +620,14 @@ ${HERO_TILES.map((n) => {
   // The bottom of a lake or the sea: sunlight through the ripples lays a moving net of bright lines on it, fading with depth
   // (vExtra is 1 + the depth class of the water over this face, see the mesher).
   if (!water && vExtra > 0.5 && vExtra < 4.5) {
-    // What is under water is darker and bluer than it looks on land, more so the deeper it lies: the water above it is dark,
-    // so a bright bottom must not shine through it and draw the blocks of the sea floor.
-    rgb *= mix(vec3(0.62, 0.78, 0.9), vec3(0.2, 0.32, 0.5), clamp((vExtra - 1.0) / 2.0 + 0.35, 0.0, 1.0));
+    // The light under the surface is the blue of the water itself. The block keeps its own colour, only seen through that blue,
+    // and the blue deepens as more water sits over it.
+    float dep = clamp((vExtra - 1.0) / 3.0, 0.0, 1.0);
+    rgb *= mix(vec3(0.72, 0.86, 1.14), vec3(0.42, 0.62, 1.02), dep);
+    // Sunlight through the ripples: a moving net of bright lines, gone once the water overhead has swallowed the sun.
+    float cau = caustic(vWorld.xz * 0.16, uTime * 0.4);
+    float sunHere = clamp(uGlint, 0.0, 1.0) * clamp(max(uSun.r, max(uSun.g, uSun.b)) * 2.0, 0.0, 1.0);
+    rgb += vec3(0.62, 0.84, 1.08) * cau * sunHere * (1.0 - dep * 0.85) * max(n.y, 0.18) * 0.9;
   }
   // Glass stays clear face-on and picks up a cool reflection where you look along it.
   if (aux.b > 0.5) {

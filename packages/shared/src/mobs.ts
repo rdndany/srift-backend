@@ -2443,6 +2443,17 @@ export class MobManager {
     return false;
   }
 
+  /** True when the next step off dry ground is water, so a land mob turns back at the shore. */
+  private waterAhead(m: Mob, env: MobEnv, yaw: number): boolean {
+    const b = m.body;
+    if (b.inWater) return false;
+    const under = env.world.getBlock(Math.floor(b.x), Math.floor(b.y - 0.2), Math.floor(b.z));
+    if (IS_LIQUID[under] === 1 || !IS_SOLID[under]) return false;
+    const ax = b.x - Math.sin(yaw) * (m.width / 2 + 0.6);
+    const az = b.z - Math.cos(yaw) * (m.width / 2 + 0.6);
+    return IS_LIQUID[env.world.getBlock(Math.floor(ax), Math.floor(b.y + 0.1), Math.floor(az))] === 1;
+  }
+
   /** True when there is no ground (within 2 blocks) in front of the mob. */
   private cliffAhead(m: Mob, env: MobEnv, yaw: number): boolean {
     const b = m.body;
@@ -2474,7 +2485,8 @@ export class MobManager {
       }
     }
     if (!m.wandering) return;
-    if (this.cliffAhead(m, env, m.wanderYaw)) {
+    // On dry ground, the shore is a wall: a land mob turns back instead of walking in. One already in the water still swims for the bank.
+    if (this.cliffAhead(m, env, m.wanderYaw) || (!m.body.inWater && !m.def.aquatic && !m.def.flying && this.waterAhead(m, env, m.wanderYaw))) {
       m.wanderYaw += Math.PI * (0.6 + env.rand() * 0.8);
       return;
     }
@@ -3726,6 +3738,8 @@ export class MobSpawner {
       }
     }
     if (found < 0) return [];
+    // Land mobs are born on dry ground. A cell of water is for fish and the drowned, which have their own spawn.
+    if (IS_LIQUID[world.getBlock(x, found, z)] === 1 || IS_LIQUID[world.getBlock(x, found + 1, z)] === 1) return [];
     const below = world.getBlock(x, found - 1, z);
     // Light, not shade: a forest floor under thin leaves is still in daylight.
     const exposed = isOpenToSky(world, x, found, z);

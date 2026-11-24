@@ -4,7 +4,7 @@ import { MarketPage } from '@/components/MarketPage';
 /** `/market`: the game's Auction House on the website: what is up for sale in the realm, live. */
 export const metadata: Metadata = {
   title: 'The Market: the Auction House of the realm, live | SolRift',
-  description: 'Browse everything players have put up for sale in SolRift: weapons, armor, materials and treasures, with the bids and buyouts as they stand now. Bid and sell in the game, at the Auctioneer of Dawnwatch.',
+  description: 'The Auction House of SolRift: bid, buy out, sell from your bags and collect your mail. The same house the Auctioneer keeps in Dawnwatch.',
 };
 
 export default function MarketRoute() {

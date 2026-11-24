@@ -640,10 +640,10 @@ export class GameRoom {
   withSavedHero(hero: { id: string; wallet: string; name: string; cls: ClassId | null }, fn: (p: Player) => DeskResult): DeskResult {
     const store = this.opts.store;
     if (!store) return { ok: false, error: 'This server does not keep heroes.' };
-    if (this.hasAccount(hero.id) || this.hasWallet(hero.wallet)) return { ok: false, error: 'A hero of yours is in the game right now. Leave the game first (the Camp cannot change what the game is holding).' };
+    if (this.hasAccount(hero.id) || this.hasWallet(hero.wallet)) return { ok: false, error: 'A hero of yours is in the game right now. Leave the game first.' };
     const save = parsePlayerSave(store.getJson(`player:${hero.id}`));
     if (!save) return { ok: false, error: 'Play this hero once in the game first.' };
-    if (save.mode === 'creative') return { ok: false, error: 'Heroes in creative mode have no Camp.' };
+    if (save.mode === 'creative') return { ok: false, error: 'Heroes in creative mode cannot check in or farm from here.' };
     const p = new Player(this.realm, { mode: 'survival', name: hero.name, classId: hero.cls, account: hero.id, wallet: hero.wallet });
     try {
       this.realm.stashes.load(hero.wallet, store.getJson(`stash:${hero.wallet}`));

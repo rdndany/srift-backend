@@ -89,6 +89,16 @@ const SURFACES: Record<Surface, Params> = {
     toe: { gain: 0.65, delay: 0.09, bright: 1.1 },
     grains: { count: 10, lo: 3500, hi: 7500, span: 0.16, gain: 0.2, tau: 0.01 },
   },
+  // A foot in water: a dull push of the water, then a few drops. No dry crunch under it.
+  water: {
+    level: 0.08,
+    heel: { lo: 140, hi: 520, tau: 0.08, gain: 1 },
+    weight: { fc: 70, tau: 0.14, gain: 1.3 },
+    toe: { gain: 0.3, delay: 0.055, bright: 1.6 },
+    grains: { count: 6, lo: 2200, hi: 5600, span: 0.2, gain: 0.26, tau: 0.01 },
+    attack: 0.01,
+    length: 0.4,
+  },
 };
 
 export const STEP_VARIANTS = 6;

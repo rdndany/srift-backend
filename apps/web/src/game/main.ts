@@ -31,6 +31,7 @@ import {
   I,
   MOUNTS,
   IS_LIQUID,
+  IS_SOLID,
   isWaterBlock,
   roofGap,
   createBody,
@@ -131,6 +132,25 @@ import { TargetPicker } from './targeting';
 import { MobTargetPicker } from './mobTargeting';
 import { ViewFeel, type FeelFrame } from './viewFeel';
 
+
+/** How much water is over the eyes: the first block above them that is not water, and whether that opens to the sky. */
+function waterColumn(world: { getBlock(x: number, y: number, z: number): number }, x: number, y: number, z: number): { depth: number; surface: number; open: boolean } {
+  const ix = Math.floor(x);
+  const iz = Math.floor(z);
+  let iy = Math.floor(y);
+  for (let i = 0; i < 80; i++) {
+    const id = world.getBlock(ix, iy, iz);
+    if (!isWaterBlock(id)) return { depth: Math.max(0, iy - y), surface: iy, open: IS_SOLID[id] !== 1 };
+    iy++;
+  }
+  return { depth: Math.max(0, iy - y), surface: iy, open: true };
+}
+
+const SEA_SHALLOW = new THREE.Color(0x1a6ec2);
+const SEA_MID = new THREE.Color(0x0c4e96);
+const SEA_ABYSS = new THREE.Color(0x010308);
+const SEA_UP = new THREE.Color(0xe4f6ff);
+const seaLight = new THREE.Color();
 
 const BIOME_NAMES = ['ocean', 'beach', 'plains', 'forest', 'desert', 'snow', 'mountain'];
 
@@ -474,6 +494,12 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   let placeWait = 0;
   const caveFog = new THREE.Color();
   const beyondTint = new THREE.Color();
+  const seaFog = new THREE.Color();
+  const seaZenith = new THREE.Color();
+  /** The water's surface, how much daylight is left at this depth, and how strong the sun shafts are. */
+  let seaSurface = 0;
+  let seaShafts = 0;
+  let seaShade = 1;
   scene.add(sky.group);
   const postfx = new PostFx(renderer, scene, camera, sky.sunMesh);
   const fxWanted: FxFlags = ((): FxFlags => {
@@ -497,7 +523,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     world.materials.setMultisampled(!postfx.on && cardMultisamples);
   };
   applyPostfx();
-  const rain = new Rain((x, z) => world.surfaceY(x, z));
+  const rain = new Rain((x, z) => world.precipY(x, z));
   scene.add(rain.object);
   const startWeather = params.get('weather');
   scene.background = sky.color;
@@ -509,6 +535,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   const particles = new Particles(atlas.canvas, atlas.texture);
   scene.add(particles.mesh);
   scene.add(particles.debris);
+  scene.add(particles.bubbles);
   const torchGlow = new TorchGlow();
   let campfireSmoke = 0;
   scene.add(torchGlow.group);
@@ -1381,15 +1408,56 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     sky.update(camera);
     const fogFar = world.renderDistance * 16;
     const fogScale = (1 - 0.35 * weather.rain) * (beyond ? 1 - 0.8 * beyond.feel.fog : 1);
+    /** How far the land is still drawn. Mobs stop at the same line, so they do not hang in the sky past it. */
+    let drawnFar = fogFar;
     const light = sky.lighting;
     if (body.eyeInWater) {
       const lava = body.eyeInLava === true;
-      const water = lava ? new THREE.Color(0xc2480a) : new THREE.Color(0x1b3a8a).multiplyScalar(sky.brightness);
-      world.setFog(water, 0.1, lava ? 4 : 22);
-      scene.background = water;
-      sky.setView(water, 0, true);
-      light.glow.setScalar(0);
+      if (lava) {
+        seaShafts = 0;
+        seaShade = 0;
+        const water = new THREE.Color(0xc2480a);
+        world.setFog(water, 0.1, 4);
+        drawnFar = 4;
+        scene.background = water;
+        sky.setView(water, 0, true);
+        light.glow.setScalar(0);
+      } else {
+        // Light is swallowed as you go down, the way it is in the sea: bright in the first blocks, then blue, then close to black.
+        const col = waterColumn(world, camera.position.x, camera.position.y, camera.position.z);
+        const sunk = Math.max(0, col.depth);
+        const fall = Math.exp(-Math.max(0, sunk - 1.5) / 14);
+        const lit = Math.max(sky.day, sky.brightness * 0.4);
+        const shade = fall * (col.open ? 1 : 0.35) * (0.22 + 0.78 * lit);
+        seaSurface = col.surface;
+        seaShafts = col.open ? (0.2 + 0.8 * sky.day) * (1 - weather.rain * 0.4) * fall * fall : 0;
+        seaFog.copy(SEA_SHALLOW).lerp(SEA_MID, Math.min(1, sunk / 10)).lerp(SEA_ABYSS, Math.min(1, Math.max(0, sunk - 6) / 28));
+        seaFog.multiplyScalar(0.35 + 0.65 * shade);
+        const up = Math.exp(-Math.max(0, sunk - 1.5) / 26);
+        seaZenith.copy(seaFog).lerp(SEA_UP, up * (0.25 + 0.75 * lit) * (col.open ? 0.9 : 0.08));
+        // How far a block still reads as itself. Depth shortens the view. Night does not: the dark is the light, not a wall a few blocks out.
+        // The far end follows the player's render distance, the same one used on land.
+        const depthReach = Math.exp(-Math.max(0, sunk - 6) / 24);
+        const reach = Math.max(col.open ? 0.45 : 0.22, depthReach * (col.open ? 1 : 0.55));
+        const near = fogFar * 0.32 * reach;
+        const far = Math.max(near + 24, fogFar * 0.9 * reach);
+        world.setFog(seaFog, near, far, seaZenith);
+        drawnFar = far;
+        scene.background = seaFog;
+        // The sky stays. The horizon takes the colour of the water; the sun, the moon and the clouds are still there above it.
+        sky.setView(seaFog, 0, false);
+        light.ambient.multiplyScalar(shade);
+        light.sun.multiplyScalar(shade);
+        light.glow.multiplyScalar(col.open ? shade * Math.max(sky.day, 0.12) : 0);
+        // Daylight under the surface is the blue of the water, the same blue the surface shows from above.
+        seaLight.copy(SEA_SHALLOW).multiplyScalar(0.55 + 0.45 * shade);
+        light.ambient.lerp(seaLight, 0.72);
+        light.sun.lerp(seaLight, 0.55);
+        seaShade = shade;
+      }
     } else {
+      seaShafts = 0;
+      seaShade = 1;
       const sy = world.surfaceY(Math.floor(camera.position.x), Math.floor(camera.position.z));
       const under = sy >= 0 && camera.position.y < sy - 2 ? 1 : 0;
       caveDark += (under - caveDark) * Math.min(1, dt * 1.5);
@@ -1401,7 +1469,8 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
         caveFog.lerp(beyondTint, beyond.feel.fogMix * (1 - caveDark));
       }
       sky.setView(caveFog, caveDark, false);
-      world.setFog(caveFog, fogFar * 0.55 * fogScale * (1 - 0.45 * caveDark), fogFar * 0.98 * fogScale * (1 - 0.35 * caveDark), sky.domeZenith);
+      drawnFar = fogFar * 0.98 * fogScale * (1 - 0.35 * caveDark);
+      world.setFog(caveFog, fogFar * 0.55 * fogScale * (1 - 0.45 * caveDark), drawnFar, sky.domeZenith);
       scene.background = caveFog;
       light.glow.multiplyScalar(1 - caveDark);
       // Walking into lush, dripstone or deep dark country shows its name, as walking into a village does.
@@ -1418,7 +1487,9 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
         }
       }
     }
-    hud.setUnderwater(body.eyeInWater, body.eyeInLava === true);
+    hud.setUnderwater(body.eyeInWater, body.eyeInLava === true, seaShade);
+    const underEars = body.eyeInWater && body.eyeInLava !== true;
+    audio.setUnderwater(underEars, dt, Math.min(1, Math.hypot(body.vx, body.vy, body.vz) / 3.5), underEars ? Math.max(0, seaSurface - camera.position.y) : 0);
     world.setDay(sky.brightness);
     world.setTime(performance.now() / 1000);
     world.materials.setLighting(light);
@@ -1471,6 +1542,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
       }
     }
     entityLight.update(sky);
+    particles.underwater(dt, camera.position.x, camera.position.y, camera.position.z, body.eyeInWater && body.eyeInLava !== true, (x, y, z) => isWaterBlock(world.getBlock(x, y, z)));
     particles.update(dt);
     deathFx.update(dt);
     particles.setBrightness(sky.brightness);
@@ -1568,7 +1640,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     books.update(dt, eye, (x, y, z) => world.getBlock(x, y, z));
     // The creatures take notice of the player (heads turn, a shy animal freezes, a villager faces whoever visits).
     mobRenderer.setFocus(session.screen === 'dead' || session.spectating ? null : view);
-    mobRenderer.sync(session.mobs.mobs, session.mobs.arrows, dt, sky.brightness);
+    mobRenderer.sync(session.mobs.mobs, session.mobs.arrows, dt, sky.brightness, camera.position.x, camera.position.y, camera.position.z, drawnFar);
     fire.update(dt);
     vehicleRenderer.sync(session.vehicles, sky.brightness);
 
@@ -1618,6 +1690,9 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
         underground: caveDark,
         rain: weather.rain,
         underwater: body.eyeInWater,
+        surfaceY: seaSurface,
+        shafts: seaShafts,
+        sunDir: sky.lightDir,
         menu: session.screen !== 'none' || !!figureWarm?.world,
         warm: !!figureWarm?.world,
       });
@@ -1730,12 +1805,13 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     const roof = world.surfaceY(Math.floor(body.x), Math.floor(body.z));
     const covered = roof >= 0 && camera.position.y < roof + 1;
     shelter += ((covered ? 1 : 0) - shelter) * Math.min(1, dt * 3);
-    rain.update(dt, beyond ? beyond.feel.precip : weather.rain, camera.position, beyond?.feel.snow ?? false);
+    const underRain = body.eyeInWater;
+    rain.update(dt, beyond ? beyond.feel.precip : weather.rain, camera.position, beyond?.feel.snow ?? false, underRain);
     beyond?.update(dt, camera.position.x, camera.position.y, camera.position.z, caveDark > 0.5, weather, sky.brightness, particles, body.eyeInWater);
     weatherTimer -= dt;
     if (weatherTimer > 0) return;
     weatherTimer = 0.1;
-    audio.setRain(beyond ? (beyond.feel.snow ? 0 : beyond.feel.precip) : weather.rain, shelter);
+    audio.setRain(underRain ? 0 : beyond ? (beyond.feel.snow ? 0 : beyond.feel.precip) : weather.rain, shelter);
     if (beyond) audio.setBed(caveDark > 0.6 ? 'cave' : beyond.feel.bed, 1, shelter);
     audio.setCave(caveDark);
     const inDungeon = KIND === 'adventure' && instanceFootprint(body.x, body.z) !== null;

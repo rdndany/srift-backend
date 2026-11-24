@@ -205,6 +205,64 @@
 .cs-slot.full:hover {
   border-color: #fff;
 }
+.cs-slot.act {
+  cursor: grab;
+}
+.cs-slot.act:active {
+  cursor: grabbing;
+}
+.cs-slot.hot,
+.cs-slot.pick {
+  outline: 2px solid #f0b020;
+  outline-offset: -2px;
+}
+.cs-slot.pick {
+  opacity: 0.45;
+}
+.cs-slot.sink {
+  cursor: pointer;
+}
+.cs-ghost {
+  position: fixed;
+  z-index: 90;
+  width: 40px;
+  height: 40px;
+  margin: 10px 0 0 14px;
+  pointer-events: none;
+  filter: drop-shadow(2px 3px 0 rgba(0, 0, 0, 0.65));
+}
+.cs-ghost canvas {
+  width: 40px;
+  height: 40px;
+}
+.cs-menu {
+  position: fixed;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  min-width: 196px;
+  padding: 4px;
+  background: #120e18;
+  border: 2px solid rgba(255, 255, 255, 0.22);
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.55);
+}
+.cs-menu button {
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  color: #f4efe4;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.cs-menu button:hover:not(:disabled) {
+  background: rgba(240, 176, 32, 0.18);
+}
+.cs-menu button:disabled {
+  color: #8a8296;
+  cursor: default;
+}
 .cs-slot .cs-icon {
   position: absolute;
   inset: 0;

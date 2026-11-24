@@ -3,6 +3,7 @@ import {
   BlendFunction,
   BloomEffect,
   Effect,
+  EffectAttribute,
   EffectComposer,
   EffectPass,
   GodRaysEffect,
@@ -51,6 +52,12 @@ export interface FxFrame {
   /** 0..1, how overcast. */
   rain: number;
   underwater: boolean;
+  /** World Y of the water's surface while the eyes are under it. */
+  surfaceY: number;
+  /** 0..1, how strong the sun shafts through the water are this frame (0 above water, in lava, under rock). */
+  shafts: number;
+  /** The direction the light comes from (the sun by day, the moon at night). */
+  sunDir: THREE.Vector3;
   /** A menu is open. */
   menu: boolean;
   /** While the game loads: every part is switched on for these frames so that its shaders are built then, not when the sun first comes into view. */
@@ -120,6 +127,91 @@ class SunRays extends GodRaysEffect {
   }
 }
 
+/**
+ * Columns of sunlight through the water. They are marched in the water in front of the camera, tilted with the sun,
+ * so they show while looking at the seabed. The screen-space shafts from the sun's disc cannot: the disc is hidden
+ * once the eyes are under, and those shafts are zeroed then.
+ */
+const SHAFT_FRAGMENT = /* glsl */ `
+uniform float uAmount;
+uniform float uSurface;
+uniform vec3 uSunDir;
+uniform mat4 uProj;
+uniform mat4 uProjInv;
+uniform mat4 uCamWorld;
+uniform vec3 uCamPos;
+
+vec3 shaftView(vec2 uv, float depth) {
+  float viewZ = getViewZ(depth);
+  vec4 clip = vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+  float clipW = uProj[2][3] * viewZ + uProj[3][3];
+  clip *= clipW;
+  return (uProjInv * clip).xyz;
+}
+
+void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth, out vec4 outputColor) {
+  if (uAmount < 0.001) {
+    outputColor = vec4(0.0);
+    return;
+  }
+  vec3 farW = (uCamWorld * vec4(shaftView(uv, depth), 1.0)).xyz;
+  vec3 dir = farW - uCamPos;
+  float len = length(dir);
+  float reach = min(len, 42.0);
+  dir /= max(len, 0.0001);
+  vec3 sun = normalize(uSunDir);
+  vec2 tilt = sun.xz / max(sun.y, 0.12);
+  float acc = 0.0;
+  const int N = 8;
+  for (int i = 0; i < N; i++) {
+    float t = (float(i) + 0.5) / float(N);
+    vec3 p = uCamPos + dir * reach * t;
+    float below = uSurface - p.y;
+    if (below < 0.0) continue;
+    vec2 q = p.xz - tilt * below;
+    float n = sin(q.x * 0.42 + time * 0.15) * 0.5 + sin(q.y * 0.37 - time * 0.12) * 0.35 + sin((q.x * 0.7 + q.y) * 0.28 + time * 0.08) * 0.25;
+    float beam = smoothstep(-0.02, 0.72, n);
+    acc += beam * exp(-below * 0.065);
+  }
+  acc /= float(N);
+  float up = clamp(-dir.y, 0.0, 1.0);
+  acc *= 0.6 + 0.85 * up;
+  vec3 col = vec3(0.5, 0.76, 1.0) * acc * uAmount;
+  col += vec3(1.0, 0.92, 0.68) * pow(clamp(acc, 0.0, 1.0), 2.2) * uAmount * 0.45;
+  outputColor = vec4(col, 1.0);
+}
+`;
+
+class WaterShafts extends Effect {
+  constructor() {
+    super('WaterShafts', SHAFT_FRAGMENT, {
+      blendFunction: BlendFunction.ADD,
+      attributes: EffectAttribute.DEPTH,
+      uniforms: new Map<string, THREE.Uniform>([
+        ['uAmount', new THREE.Uniform(0)],
+        ['uSurface', new THREE.Uniform(0)],
+        ['uSunDir', new THREE.Uniform(new THREE.Vector3(0, 1, 0))],
+        ['uProj', new THREE.Uniform(new THREE.Matrix4())],
+        ['uProjInv', new THREE.Uniform(new THREE.Matrix4())],
+        ['uCamWorld', new THREE.Uniform(new THREE.Matrix4())],
+        ['uCamPos', new THREE.Uniform(new THREE.Vector3())],
+      ]),
+    });
+  }
+
+  set(camera: THREE.PerspectiveCamera, amount: number, surfaceY: number, sunDir: THREE.Vector3): void {
+    this.uniforms.get('uAmount')!.value = amount;
+    this.uniforms.get('uSurface')!.value = surfaceY;
+    (this.uniforms.get('uSunDir') as THREE.Uniform<THREE.Vector3>).value.copy(sunDir);
+    if (amount < 0.001) return;
+    camera.updateMatrixWorld();
+    (this.uniforms.get('uProj') as THREE.Uniform<THREE.Matrix4>).value.copy(camera.projectionMatrix);
+    (this.uniforms.get('uProjInv') as THREE.Uniform<THREE.Matrix4>).value.copy(camera.projectionMatrixInverse);
+    (this.uniforms.get('uCamWorld') as THREE.Uniform<THREE.Matrix4>).value.copy(camera.matrixWorld);
+    (this.uniforms.get('uCamPos') as THREE.Uniform<THREE.Vector3>).value.setFromMatrixPosition(camera.matrixWorld);
+  }
+}
+
 /** The glow, which does none of its blurring while it is switched off. */
 class Glow extends BloomEffect {
   paused = false;
@@ -160,6 +252,7 @@ export class PostFx {
   /** The sun's shafts, the glow and the colour grade are one pass over the picture, not three: each is a full screen of work less. */
   private fxPass: EffectPass | null = null;
   private rays: SunRays | null = null;
+  private shafts: WaterShafts | null = null;
   private bloom: Glow | null = null;
   private grade: GradeEffect | null = null;
   private vignette: VignetteEffect | null = null;
@@ -233,9 +326,10 @@ export class PostFx {
     const bloom = new Glow({ luminanceThreshold: 0.95, luminanceSmoothing: 0.3, intensity: 0.6, radius: 0.75, mipmapBlur: true, levels: 6 });
     const grade = new GradeEffect();
     const vignette = new VignetteEffect({ offset: 0.45, darkness: 0.42 });
+    const shafts = new WaterShafts();
     // All in one pass, in this order. Each stays in it when it is switched off (it is only made to add nothing, see `apply`): taking one out
-    // would mean building the pass's shader again, which stops the game for a moment.
-    const fxPass = new EffectPass(camera, rays, bloom, grade, vignette);
+    // would mean building the pass's shader again, which stops the game for a moment. The water shafts stay in too, and add nothing above water.
+    const fxPass = new EffectPass(camera, rays, shafts, bloom, grade, vignette);
     composer.addPass(fxPass);
 
     const blurPass = new KawaseBlurPass({ kernelSize: KernelSize.LARGE, resolutionScale: 0.5 });
@@ -246,6 +340,7 @@ export class PostFx {
     this.ao = ao;
     this.fxPass = fxPass;
     this.rays = rays;
+    this.shafts = shafts;
     this.bloom = bloom;
     this.grade = grade;
     this.vignette = vignette;
@@ -301,6 +396,10 @@ export class PostFx {
       this.rays!.godRaysMaterial.exposure = 0.9 * strength;
     }
 
+    const shaftAmt = frame.underwater ? frame.shafts : 0;
+    this.shafts!.set(this.camera, shaftAmt, frame.surfaceY, frame.sunDir);
+    if (shaftAmt > 0.001) this.fxPass!.enabled = true;
+
     if (f.glow) {
       // Light things stand out more the darker it is; underwater and in the open they are tamer.
       const dark = 1 - frame.day * open;
@@ -337,6 +436,7 @@ export class PostFx {
     this.ao = null;
     this.fxPass = null;
     this.rays = null;
+    this.shafts = null;
     this.bloom = null;
     this.grade = null;
     this.vignette = null;

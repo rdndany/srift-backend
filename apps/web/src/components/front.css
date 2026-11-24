@@ -415,7 +415,7 @@
 }
 #home .fp .fp-logo img {
   display: block;
-  width: clamp(280px, 56vw, 680px);
+  width: clamp(180px, 32vw, 400px);
   height: auto;
   user-select: none;
 }
@@ -799,6 +799,14 @@
   display: grid;
   grid-template-columns: 1fr 1.3fr;
   gap: 22px;
+}
+#home .fp .fp-events {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 22px;
+}
+#home .fp .fp-events .fp-tile.fp-world-tile {
+  min-height: 420px;
 }
 #home .fp .fp-worlds-cell {
   display: flex;
@@ -1766,8 +1774,12 @@
 /* ---------- smaller screens ---------- */
 
 @media (max-width: 960px) {
-  #home .fp .fp-worlds {
+  #home .fp .fp-worlds,
+  #home .fp .fp-events {
     grid-template-columns: 1fr;
+  }
+  #home .fp .fp-events .fp-tile.fp-world-tile {
+    min-height: 380px;
   }
   #home .fp .fp-reel ul {
     grid-template-columns: repeat(3, 1fr);
@@ -1794,7 +1806,7 @@
   #home .fp .fp-stats li:nth-child(3) {
     border-left: none;
   }
-  #home .fp .fp-links button:nth-child(n + 3):not(.fp-link-market):not(.fp-link-camp) {
+  #home .fp .fp-links button:nth-child(n + 3):not(.fp-link-market):not(.fp-link-farm) {
     display: none;
   }
 }

@@ -902,6 +902,11 @@
     justify-content: space-between;
   }
 }
+/* The farm page has no tab bar, so the extra room at the foot is only the safe area. */
+#home .fp.farm .camp-main {
+  padding-bottom: calc(40px + env(safe-area-inset-bottom));
+}
+
 @media (prefers-reduced-motion: reduce) {
   .camp-sheet,
   .camp-sheet-wrap,

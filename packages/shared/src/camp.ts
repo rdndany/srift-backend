@@ -8,7 +8,7 @@ import { mulberry32 } from './noise';
 import type { StashView } from './stash';
 
 /**
- * The Camp: what a hero can do from a phone or a tablet, without being in the game (the website's /camp page).
+ * What a hero can do from a phone or a tablet, without being in the game (the website's /farm page: the daily check-in and the offline farm).
  * Pure rules and data. The server keeps the state, checks everything, and applies the results to the saved hero.
  *
  * Two small things live here that only the Camp has:

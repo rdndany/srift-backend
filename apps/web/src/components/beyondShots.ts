@@ -3,11 +3,11 @@ import { BEYOND_BIOMES, type BiomeRarity, type CaveEco } from '@solrift/shared';
 /**
  * The captures on the page about the World Beyond (/beyond): pictures of the game itself, taken by scripts/beyondshots.mjs
  * (and scripts/beyondcodex.mjs for the Codex) in a World Beyond of seed 1 (a few of the rarest biomes are of other seeds),
- * with no interface on screen. They are in /public/beyond, as WebP or JPEG.
+ * with no interface on screen. They are in /public/beyond, as WebP.
  */
 
 export interface Shot {
-  /** The file in /public/beyond, without its extension (see WEBP_FILES). */
+  /** The file in /public/beyond, without its extension. */
   file: string;
   title: string;
   note?: string;
@@ -18,14 +18,9 @@ export interface Shot {
 }
 
 /** Bumped when the pictures are taken again, so that a browser does not keep the old ones. */
-const VERSION = 3;
+const VERSION = 4;
 
-/** The pictures that are full-size WebP captures (the rest are 1600x900 JPEGs). */
-export const WEBP_FILES: ReadonlySet<string> = new Set([
-  'air-aurora', 'air-blizzard', 'air-dusk-swamp', 'air-night-luminous', 'air-snowfall', 'air-thunder', 'biome-ancient_forest', 'biome-ancient_grasslands', 'biome-aurora_highlands', 'biome-autumn_forest', 'biome-badlands', 'biome-bamboo_forest', 'biome-bone_desert', 'biome-cherry_blossom_forest', 'biome-crystal_forest', 'biome-crystal_lakes', 'biome-crystal_mountains', 'biome-dead_forest', 'biome-dreaming_woods', 'biome-enchanted_forest', 'biome-fairy_glades', 'biome-flower_fields', 'biome-frozen_forest', 'biome-giant_lakes', 'biome-giant_mushroom_forest', 'biome-glacier_fields', 'biome-glass_desert', 'biome-golden_grasslands', 'biome-green_plains', 'biome-ice_spikes', 'biome-jagged_peaks', 'biome-kelp_forest', 'biome-luminous_forest', 'biome-moonlit_gardens', 'biome-orchid_jungle', 'biome-ordinary_swamp', 'biome-petrified_forest', 'biome-red_desert', 'biome-snowy_taiga', 'biome-spore_fields', 'biome-sunken_archipelago', 'biome-sunken_forest', 'biome-toxic_marsh', 'biome-tropical_jungle', 'biome-volcanic_mountains', 'biome-waterfall_valleys', 'cave-ancient', 'cave-bone-0', 'cave-crystal-2', 'cave-flooded-1', 'cave-glow', 'codex-biomes', 'extra-sunken-a', 'extra-sunken-b', 'place-desert_temple', 'place-fishing_village', 'place-harbor', 'place-jungle_temple', 'place-lighthouse', 'place-monolith', 'place-mountain_hold', 'place-ruined_fortress', 'place-ruined_monastery', 'place-sky_temple', 'place-volcanic_fortress', 'place-witch_hut', 'realm-ashen_kingdom-3', 'realm-ashen_kingdom-5', 'realm-crystal_expanse-1', 'realm-crystal_expanse-4', 'realm-emerald_hollow-4', 'realm-emerald_hollow-6', 'realm-eternal_night-2', 'realm-eternal_night-3', 'realm-pale_wastes-3',
-]);
-
-export const shotExt = (file: string): 'webp' | 'jpg' => (WEBP_FILES.has(file) ? 'webp' : 'jpg');
+export const shotExt = (_file: string): 'webp' => 'webp';
 export const shotUrl = (s: Shot): string => `/beyond/${s.file}.${shotExt(s.file)}?v=${VERSION}`;
 
 const biomeByKey = (key: string) => BEYOND_BIOMES.find((b) => b?.key === key);

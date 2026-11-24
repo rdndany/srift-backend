@@ -179,6 +179,14 @@ export class FluidSim {
       }
     }
 
+    // Lava on ice melts it. The meltwater touches the lava, so a source becomes obsidian and a flow becomes cobblestone.
+    if (kind === FLUID_LAVA && this.meltIce(x, y - 1, z) && isWaterId(host.getBlock(x, y - 1, z))) {
+      host.setBlock(x, y, z, level === 0 ? B.OBSIDIAN : B.COBBLE);
+      host.hiss(x, y, z);
+      this.notify(x, y, z);
+      return;
+    }
+
     // Fall first; only fluid that has landed (or is held up by fluid) spreads sideways.
     if (this.canFlowInto(x, y - 1, z, kind, FALL, x, y, z)) {
       this.flowInto(x, y - 1, z, kind, FALL);
@@ -192,6 +200,19 @@ export class FluidSim {
     for (const [dx, dz] of HORIZONTAL) {
       if (this.canFlowInto(x + dx, y, z + dz, kind, next, x, y, z)) this.flowInto(x + dx, y, z + dz, kind, next);
     }
+  }
+
+  /**
+   * The ice under a lava cell. It becomes water (the sea under it stays, and ice on solid ground melts into water).
+   * Ice over open air is simply gone. Returns whether a block of ice was melted.
+   */
+  private meltIce(x: number, y: number, z: number): boolean {
+    const host = this.host;
+    if (host.getBlock(x, y, z) !== B.ICE) return false;
+    const below = host.getBlock(x, y - 1, z);
+    host.setBlock(x, y, z, below !== B.AIR ? B.WATER : B.AIR);
+    this.notify(x, y, z);
+    return true;
   }
 
   private touchesWater(x: number, y: number, z: number): boolean {

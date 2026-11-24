@@ -20,7 +20,9 @@ import {
   type ItemStack,
   type WornPlace,
 } from '@solrift/shared';
-import { useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import { toast } from 'sonner';
 import { useCamp } from '../camp/store';
 import { CampSlot, ItemCard, Sheet, Stepper, itemName } from './CampParts';
 import { CoinIcon } from './ShopUI';
@@ -45,6 +47,9 @@ const WORN_ORDER: WornPlace[] = ['helmet', 'chestplate', 'leggings', 'boots', 'o
 const wearable = (s: ItemStack): boolean => !!getItem(s.id).armor || holdsInOffhand(s.id) || mountOfItem(s.id) !== null || !!companionOfItem(s.id) || !!wingOfItem(s.id) || !!accessoryOfItem(s.id);
 
 type Target = { kind: 'bag'; slot: number; stack: ItemStack } | { kind: 'worn'; where: WornPlace; stack: ItemStack } | { kind: 'stash'; slot: number; stack: ItemStack };
+
+/** A slot the lobby sheet can hand to the desk: a bag slot (empty while an item is being moved), something worn, or a stash slot. */
+export type DeskPick = { kind: 'bag'; slot: number; stack: ItemStack | null } | { kind: 'worn'; where: WornPlace; stack: ItemStack } | { kind: 'stash'; slot: number; stack: ItemStack };
 
 /** The Camp's first tab: the hero, what it wears, its bags and the Stash. A tap on an item opens what can be done with it. */
 export function CampHero({ view }: { view: DeskView }) {
@@ -125,7 +130,7 @@ export function CampHero({ view }: { view: DeskView }) {
           {locked ? (
             <p className="camp-hint">Leave the game to change this hero.</p>
           ) : (
-            <Actions
+            <DeskActions
               target={target}
               coins={view.hero.coins}
               busy={busy}
@@ -142,10 +147,10 @@ export function CampHero({ view }: { view: DeskView }) {
   );
 }
 
-function Actions({ target, coins, busy, run, onMove }: { target: Target; coins: number; busy: boolean; run: (a: DeskAct) => void; onMove: (slot: number) => void }) {
+export function DeskActions({ target, coins, busy, run, onMove, sellOnly = false, onClose }: { target: Target; coins: number; busy: boolean; run: (a: DeskAct) => void; onMove: (slot: number) => void; sellOnly?: boolean; onClose?: () => void }) {
   const { stack } = target;
   const [count, setCount] = useState(stack.count);
-  const [selling, setSelling] = useState(false);
+  const [selling, setSelling] = useState(sellOnly);
 
   if (target.kind === 'worn') {
     return (
@@ -168,7 +173,7 @@ function Actions({ target, coins, busy, run, onMove }: { target: Target; coins: 
     );
   }
 
-  if (selling) return <SellForm slot={target.slot} stack={stack} coins={coins} busy={busy} run={run} back={() => setSelling(false)} />;
+  if (selling && target.kind === 'bag') return <SellForm slot={target.slot} stack={stack} coins={coins} busy={busy} run={run} back={() => (sellOnly ? onClose?.() : setSelling(false))} />;
 
   const stashWhy = stashBlocker(stack);
   const sellWhy = sellBlocker(stack);
@@ -250,5 +255,130 @@ export function HeroLine({ view }: { view: DeskView }) {
         {view.hero.coins.toLocaleString('en-US')} <CoinIcon size={16} />
       </span>
     </p>
+  );
+}
+
+/**
+ * The lobby's link to the same desk the Camp uses. A drag moves a stack, or wears it when it is dropped on what the hero has on.
+ * A right click stores it or sells it.
+ * `active` is a signed-in character on the realm. `reload` is called after a change so the sheet draws what the server kept.
+ */
+export type SheetHand = {
+  menu: (p: { kind: 'bag'; slot: number; stack: ItemStack } | { kind: 'stash'; slot: number; stack: ItemStack }, x: number, y: number) => void;
+  move: (from: number, to: number) => void;
+  wear: (from: number) => void;
+  takeOff: (where: WornPlace) => void;
+  take: (stashSlot: number) => void;
+  quiet: boolean;
+};
+
+export function LobbyDesk({ active, heroId, reload, children }: { active: boolean; heroId: string | null; reload: () => void; children: (hand: SheetHand | undefined) => ReactNode }) {
+  const view = useCamp((s) => s.view);
+  const load = useCamp((s) => s.load);
+  const act = useCamp((s) => s.act);
+  const busy = useCamp((s) => s.busy);
+  const notice = useCamp((s) => s.notice);
+  const clear = useCamp((s) => s.clear);
+  const [menu, setMenu] = useState<{ x: number; y: number; pick: Target & { kind: 'bag' | 'stash' } } | null>(null);
+  const [sell, setSell] = useState<(Target & { kind: 'bag' }) | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!active) return;
+    setMenu(null);
+    setSell(null);
+    void load();
+  }, [active, heroId, load]);
+
+  useEffect(() => {
+    if (!notice) return;
+    (notice.ok ? toast.success : toast.error)(notice.text);
+    clear();
+  }, [notice, clear]);
+
+  useEffect(() => {
+    if (!menu) return;
+    const close = (e: PointerEvent) => {
+      if (menuRef.current?.contains(e.target as Node)) return;
+      setMenu(null);
+    };
+    const key = (e: KeyboardEvent) => e.key === 'Escape' && setMenu(null);
+    window.addEventListener('pointerdown', close);
+    window.addEventListener('keydown', key);
+    return () => {
+      window.removeEventListener('pointerdown', close);
+      window.removeEventListener('keydown', key);
+    };
+  }, [menu]);
+
+  const ready = active && view !== null && view.hero.id === heroId;
+  const locked = !!view?.inGame;
+  const done = (p: Promise<boolean>) => {
+    void p.then((ok) => {
+      if (!ok) return;
+      setMenu(null);
+      setSell(null);
+      reload();
+    });
+  };
+  const hand: SheetHand | undefined = ready && !locked && view
+    ? {
+        menu: (p, x, y) => setMenu({ pick: p, x, y }),
+        move: (from, to) => from !== to && done(act({ a: 'swap', from, to })),
+        wear: (from) => done(act({ a: 'equip', slot: from })),
+        takeOff: (where) => done(act({ a: 'unequip', where })),
+        take: (stashSlot) => {
+          const stack = view.stash.slots[stashSlot];
+          if (stack) done(act({ a: 'stash', c: { a: 'take', slot: stashSlot, count: stack.count } }));
+        },
+        quiet: menu !== null,
+      }
+    : undefined;
+  const pick = menu?.pick ?? null;
+  const stashWhy = pick?.kind === 'bag' ? stashBlocker(pick.stack) : null;
+  const sellWhy = pick?.kind === 'bag' ? sellBlocker(pick.stack) : null;
+
+  return (
+    <>
+      {ready && locked && (
+        <p className="cs-warn" role="status">
+          This character is in the game right now, so the bags cannot be changed from here.
+        </p>
+      )}
+      {children(hand)}
+      {menu && pick && view && createPortal(
+        <div className="cs-menu" ref={menuRef} role="menu" style={{ left: Math.min(menu.x, window.innerWidth - 220), top: Math.min(menu.y, window.innerHeight - 120) }}>
+          {pick.kind === 'bag' ? (
+            <>
+              <button type="button" role="menuitem" disabled={busy || !!stashWhy} title={stashWhy ?? undefined} onClick={() => done(act({ a: 'stash', c: { a: 'put', slot: pick.slot, count: pick.stack.count } }))}>
+                {stashWhy ?? 'Put in the Stash'}
+              </button>
+              <button type="button" role="menuitem" disabled={!!sellWhy} title={sellWhy ?? undefined} onClick={() => (setSell(pick), setMenu(null))}>
+                Sell at the Auction House
+              </button>
+            </>
+          ) : (
+            <button type="button" role="menuitem" disabled={busy} onClick={() => done(act({ a: 'stash', c: { a: 'take', slot: pick.slot, count: pick.stack.count } }))}>
+              Take to the bags
+            </button>
+          )}
+        </div>,
+        document.body,
+      )}
+      {sell && view && (
+        <Sheet title={itemName(sell.stack)} onClose={() => setSell(null)}>
+          <ItemCard stack={sell.stack} />
+          <DeskActions
+            sellOnly
+            target={sell}
+            coins={view.hero.coins}
+            busy={busy}
+            onMove={() => undefined}
+            onClose={() => setSell(null)}
+            run={(a) => done(act(a))}
+          />
+        </Sheet>
+      )}
+    </>
   );
 }

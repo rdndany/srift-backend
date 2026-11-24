@@ -8,7 +8,7 @@ import { COUNTS } from './beyondGuide';
 import { Blocks } from './BlockCube';
 import { BlurWords, ClickSparks, CountUp, Embers, Marquee, Reveal, Spot, useFrontMotion } from './fx';
 import { ItemSprite } from './ItemSprite';
-import { SCROLL_KEY, goMarket, goToken, goCamp, goShop } from './frontNav';
+import { SCROLL_KEY, goBeyond, goMarket, goToken, goFarm, goShop } from './frontNav';
 import { ART, SHOT } from './homeAssets';
 import { MODES, type HomeMode } from './modes';
 import { WayDialog, type Way } from './WayDialog';
@@ -30,14 +30,14 @@ const FEATURES: { title: string; text: string; shot: string; span: number }[] = 
   { title: 'Embark on quests', text: 'Dawnwatch has nine people to talk to, a quest log, and a coin of its own called Auren.', shot: SHOT.quests, span: 4 },
   { title: 'Three ways to fight', text: 'Warrior, Mage or Ranger. Each has a resource bar and four abilities, learned from skill books.', shot: SHOT.spellbook, span: 2 },
   { title: 'Forge your gear', text: 'Mine, smelt, craft and enchant. The recipe book shows what your bags can make.', shot: SHOT.recipes, span: 2 },
-  { title: 'A world that changes', text: 'The sun sets, rain rolls in, and torches hold the dark. Rifts tear open, and every half hour a golden tide sweeps the land.', shot: SHOT.dusk, span: 4 },
+  { title: 'A world that changes', text: 'The sun sets, rain rolls in, and torches hold the dark.', shot: SHOT.dusk, span: 4 },
   { title: 'Bring your friends', text: 'One shared realm, a party of four, and the Hollow Cellar to walk into together.', shot: SHOT.party, span: 3 },
   { title: 'Never lose the way', text: 'A map you can hold and unfold, a compass, and quest markers on the map.', shot: SHOT.hud, span: 3 },
 ];
 
 const ROMAN = ['', 'I', 'II', 'III', 'IV'] as const;
 
-const STRIP = ['Mine', 'Craft', 'Build', 'Quest', 'Fish', 'Trade', 'Raid dungeons', 'Slay bosses', 'Seal rifts', 'Take to the air', 'Play with friends'] as const;
+const STRIP = ['Mine', 'Craft', 'Build', 'Quest', 'Fish', 'Trade', 'Raid dungeons', 'Slay bosses', 'Seal rifts', 'The Gilded Tide', 'Take to the air', 'Play with friends'] as const;
 
 /** The little picture on each mode's badge. */
 const MODE_ICON: Record<HomeMode, number> = {
@@ -116,10 +116,10 @@ export function Landing({ onEnter }: { onEnter: (way: Way, mode: HomeMode | null
             <button className="fp-link-play" onClick={onPlay}>
               Play
             </button>
-            <button onClick={() => scrollTo('site-world')}>The World</button>
+            <button onClick={goBeyond}>The World</button>
             <button onClick={() => scrollTo('site-features')}>Classes</button>
             <button onClick={() => scrollTo('l-expansions')}>Expansions</button>
-            <button className="fp-link-camp" onClick={goCamp}>Camp</button>
+            <button className="fp-link-farm" onClick={goFarm}>Farm</button>
             <button className="fp-link-market" onClick={goMarket}>Market</button>
             <button className="fp-link-shop" onClick={goShop}>Shop</button>
             <button className="fp-link-token" onClick={goToken}>Token</button>
@@ -161,10 +161,10 @@ export function Landing({ onEnter }: { onEnter: (way: Way, mode: HomeMode | null
             </p>
           )}
           <p className="fp-tag">
-            <BlurWords text="Mine. Craft. Conquer the rift." delay={0.55} />
+            <BlurWords text="Mine. Craft. Seal the Rifts." delay={0.55} />
           </p>
           <p className="fp-lead">
-            An open-world voxel MMORPG. Build and mine, take quests in the village of Dawnwatch, and battle monsters with your friends. Free in your browser, no download.
+            An open-world voxel MMORPG. Build and mine, take quests in the village of Dawnwatch, and battle monsters with your friends. Rifts tear open for everyone nearby to close, and every half hour the Gilded Tide hides golden creatures across the land. Free in your browser, no download.
           </p>
           <div className="fp-actions">
             <span className="fp-glow">
@@ -293,8 +293,38 @@ export function Landing({ onEnter }: { onEnter: (way: Way, mode: HomeMode | null
             </a>
           </Reveal>
         </section>
+        <section className="fp-sec" id="site-events">
+          <Head n="02" label="World events" blocks={[B.OBSIDIAN, B.GOLD_ORE, B.GLOWSTONE]}>
+            Rifts and the <em>Tide</em>
+          </Head>
+          <div className="fp-events">
+            <Reveal className="fp-worlds-cell">
+              <Spot className="fp-tile fp-world-tile fp-px">
+                <i className="fp-tile-art" style={{ '--art': `url(${SHOT.rift})` } as CSSProperties} />
+                <div className="fp-tile-copy">
+                  <small className="fp-world-kicker">A tear in the world</small>
+                  <h3>Rifts</h3>
+                  <p>A beam of light marks where a Rift has opened. Waves of monsters come out of it, and the last wave brings a warden.</p>
+                  <p>Everyone who helps close it is paid. Leave it alone and it collapses, and the treasure with it.</p>
+                </div>
+              </Spot>
+            </Reveal>
+            <Reveal className="fp-worlds-cell" delay={0.1}>
+              <Spot className="fp-tile fp-world-tile fp-px" style={{ '--ember': '#ffd24a' } as CSSProperties}>
+                <i className="fp-tile-art" style={{ '--art': `url(${SHOT.gilded})` } as CSSProperties} />
+                <div className="fp-tile-copy">
+                  <small className="fp-world-kicker">Every half hour</small>
+                  <h3>The Gilded Tide</h3>
+                  <p>On the hour and at half past, golden creatures hide all over the land: shy imps, hounds, drakes and a rare colossus. They never come in a pack, and never near you.</p>
+                  <p>Find them. Each one leaves a Codex of Aurelion, and a codex opens into one piece of Epic gear.</p>
+                </div>
+              </Spot>
+            </Reveal>
+          </div>
+        </section>
+
         <section className="fp-sec" id="site-features">
-          <Head n="02" label="Classes" blocks={[B.IRON_ORE, B.GOLD_ORE, B.DIAMOND_ORE]}>
+          <Head n="03" label="Classes" blocks={[B.IRON_ORE, B.GOLD_ORE, B.DIAMOND_ORE]}>
             Choose your <em>class</em>
           </Head>
           <ul className="fp-classes">
@@ -321,7 +351,7 @@ export function Landing({ onEnter }: { onEnter: (way: Way, mode: HomeMode | null
         </section>
 
         <section className="fp-sec">
-          <Head n="03" label="Adventure" blocks={[B.FURNACE, B.BOOKSHELF, B.STONE_BRICKS]}>
+          <Head n="04" label="Adventure" blocks={[B.FURNACE, B.BOOKSHELF, B.STONE_BRICKS]}>
             What you <em>do</em>
           </Head>
           <ul className="fp-features">
@@ -345,7 +375,7 @@ export function Landing({ onEnter }: { onEnter: (way: Way, mode: HomeMode | null
               <Reveal className="fp-head">
                 <div>
                   <small>
-                    <b>04</b>Expansions
+                    <b>05</b>Expansions
                   </small>
                   <h2>
                     The first <em>expansion</em>
@@ -414,10 +444,12 @@ function KingFeature({ e, onPlay }: { e: Expansion; onPlay: () => void }) {
   const count = (kind: ContentKind) => e.content.filter((c) => c.kind === kind).length;
   const live = e.status === 'live';
   const of = (...kinds: ContentKind[]) => e.content.filter((c) => kinds.includes(c.kind));
+  const events = new Set(['Rifts', 'The Gilded Tide']);
   const groups: { label: string; kind: string; items: ExpansionContent[]; blurbs?: boolean }[] = [
     { label: 'Dungeons', kind: 'dungeon', items: of('dungeon', 'instance', 'raid') },
     { label: 'Bosses', kind: 'boss', items: of('boss'), blurbs: true },
-    { label: 'Also included', kind: 'more', items: of('zone', 'feature') },
+    { label: 'World events', kind: 'more', items: of('feature').filter((c) => events.has(c.name)), blurbs: true },
+    { label: 'Also included', kind: 'more', items: of('zone', 'feature').filter((c) => !events.has(c.name)) },
   ].filter((g) => g.items.length > 0);
   const facts: [number, string][] = [
     [count('dungeon'), 'Dungeons'],

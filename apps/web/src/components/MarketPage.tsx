@@ -8,25 +8,34 @@ import {
   DEFAULT_AUCTION_QUERY,
   GAME_VERSION,
   HOUSE_NAME,
+  MAX_COINS,
+  depositFor,
+  sellBlocker,
+  stackSellPrice,
   timeLeftLabel,
   tooltipLines,
+  type AuctionHours,
   type AuctionQuery,
   type AuctionRow,
   type AuctionSort,
   type AuctionView,
+  type DeskView,
+  type ItemStack,
   type MailKind,
   type MailRow,
   type TipLine,
 } from '@solrift/shared';
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { toast } from 'sonner';
 import { useAuth } from '../auth/store';
+import { useCamp } from '../camp/store';
 import { AccountPanel } from './AccountPanel';
 import { Blocks } from './BlockCube';
 import { ItemPicture } from './CharacterSheet';
 import { ClickSparks, Embers, Reveal, useFrontMotion } from './fx';
 import { lobbyUrl } from '../game/route';
-import { SCROLL_KEY, goToken, goCamp, goShop } from './frontNav';
+import { SCROLL_KEY, goBeyond, goToken, goFarm, goShop } from './frontNav';
 import { ART } from './homeAssets';
 import { Tip } from './ItemView';
 import { CoinIcon } from './ShopUI';
@@ -41,7 +50,7 @@ import './responsive.css';
 /** How often the board asks the server again (ms), so that what others bid and buy shows up without a click. */
 const REFRESH_MS = 5000;
 
-type Tab = 'browse' | 'auctions' | 'bids' | 'mail';
+type Tab = 'browse' | 'sell' | 'auctions' | 'bids' | 'mail';
 
 interface MarketReply {
   view: AuctionView;
@@ -61,10 +70,11 @@ const toFront = (id: string | null) => {
   location.assign('/');
 };
 
-/** Asks the server for the board, again every few seconds (not while the tab is hidden), and again whenever the query or the account changes. */
+/** Asks the server for the board, again every few seconds (not while the tab is hidden), and again whenever the query, the account or a trade changes. */
 function useMarket(query: AuctionQuery, account: string | null) {
   const [reply, setReply] = useState<MarketReply | null>(null);
   const [error, setError] = useState('');
+  const [tick, setTick] = useState(0);
   useEffect(() => {
     let live = true;
     let ctl: AbortController | null = null;
@@ -93,8 +103,8 @@ function useMarket(query: AuctionQuery, account: string | null) {
       ctl?.abort();
       window.clearInterval(id);
     };
-  }, [query.q, query.cat, query.sort, query.desc, query.page, account]);
-  return { reply, error };
+  }, [query.q, query.cat, query.sort, query.desc, query.page, account, tick]);
+  return { reply, error, reload: () => setTick((n) => n + 1) };
 }
 
 /** The time left, as the game tells it plus the hours and minutes: "Long (7h 20m)". */
@@ -126,11 +136,28 @@ function Slot({ row }: { row: { item: AuctionRow['item'] } }) {
   );
 }
 
-function Row({ r, show, hide }: { r: AuctionRow; show: Show; hide: () => void }) {
+function Row({ r, on, show, hide, open }: { r: AuctionRow; on: boolean; show: Show; hide: () => void; open: (r: AuctionRow) => void }) {
   const lines = tooltipLines(r.item, null, 0);
   const label = timeLeftLabel(r.left);
   return (
-    <li className={`mk-row${r.yours ? ' mine' : ''}${r.leading ? ' lead' : ''}`} data-testid={`market-row-${r.id}`} data-name={r.name}>
+    <li
+      className={`mk-row${r.yours ? ' mine' : ''}${r.leading ? ' lead' : ''}${on ? ' on' : ''}`}
+      data-testid={`market-row-${r.id}`}
+      data-name={r.name}
+      role="button"
+      tabIndex={0}
+      onClick={() => {
+        hide();
+        open(r);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          hide();
+          open(r);
+        }
+      }}
+    >
       <span className="mk-cell mk-item" onMouseEnter={(e) => show(e, lines)} onMouseMove={(e) => show(e, lines)} onMouseLeave={hide}>
         <Slot row={r} />
         <span className="mk-name">{r.name}</span>
@@ -155,7 +182,7 @@ function Row({ r, show, hide }: { r: AuctionRow; show: Show; hide: () => void })
 
 const MAIL_NAME: Record<MailKind, string> = { sold: 'Sold', won: 'Won', outbid: 'Outbid', expired: 'Expired', cancelled: 'Cancelled' };
 
-function Letter({ m, show, hide }: { m: MailRow; show: Show; hide: () => void }) {
+function Letter({ m, show, hide, take, busy }: { m: MailRow; show: Show; hide: () => void; take: (() => void) | null; busy: boolean }) {
   const lines = m.item ? tooltipLines(m.item, null, 0) : [];
   return (
     <li className={`mk-letter k-${m.kind}`}>
@@ -164,7 +191,14 @@ function Letter({ m, show, hide }: { m: MailRow; show: Show; hide: () => void })
         <span className="mk-name">{m.subject}</span>
       </span>
       <span className="mk-cell mk-kind">{MAIL_NAME[m.kind]}</span>
-      <span className="mk-cell mk-num">{m.coins > 0 ? <Price n={m.coins} title="Coins to collect" /> : <small>the item</small>}</span>
+      <span className="mk-cell mk-num">
+        {m.coins > 0 ? <Price n={m.coins} title="Coins to collect" /> : <small>the item</small>}
+        {take && (
+          <button type="button" className="mk-go" disabled={busy} onClick={take}>
+            Collect
+          </button>
+        )}
+      </span>
     </li>
   );
 }
@@ -176,16 +210,24 @@ const SORTS: { sort: AuctionSort; label: string; cls: string }[] = [
   { sort: 'buyout', label: 'Buyout', cls: 'mk-num' },
 ];
 
-/** `/market`: the Auction House of the game on the website. The list is live; bidding and selling are done in the game, at the Auctioneer. */
+/** `/market`: the Auction House of the realm. Bid, buy out, sell from your bags and collect the mail here. */
 export function MarketPage() {
   const root = useRef<HTMLDivElement>(null);
   useFrontMotion(root);
   const account = useAuth((s) => s.account?.id ?? null);
+  const desk = useCamp((s) => s.view);
+  const deskStatus = useCamp((s) => s.status);
+  const loadDesk = useCamp((s) => s.load);
+  const act = useCamp((s) => s.act);
+  const busy = useCamp((s) => s.busy);
+  const notice = useCamp((s) => s.notice);
+  const clearNotice = useCamp((s) => s.clear);
   const [query, setQuery] = useState<AuctionQuery>({ ...DEFAULT_AUCTION_QUERY });
   const [text, setText] = useState('');
   const [tab, setTab] = useState<Tab>('browse');
+  const [open, setOpen] = useState<AuctionRow | null>(null);
   const [tip, setTip] = useState<{ x: number; y: number; lines: TipLine[] } | null>(null);
-  const { reply, error } = useMarket(query, account);
+  const { reply, error, reload } = useMarket(query, account);
   const view = reply?.view ?? null;
   const show: Show = useCallback((e, lines) => setTip({ x: e.clientX, y: e.clientY, lines }), []);
   const hide = useCallback(() => setTip(null), []);
@@ -197,6 +239,32 @@ export function MarketPage() {
     document.getElementById('home-layer')?.scrollTo({ top: 0, behavior: 'instant' });
   }, []);
 
+  // The purse, the bags and whether the hero is in the game: the same record the Camp asks for.
+  useEffect(() => {
+    if (account) void loadDesk();
+  }, [account, loadDesk]);
+
+  useEffect(() => {
+    if (!notice) return;
+    (notice.ok ? toast.success : toast.error)(notice.text);
+    clearNotice();
+  }, [notice, clearNotice]);
+
+  // A bid or a sale changes the row that is open: keep it in step with the board when that row is still on it.
+  useEffect(() => {
+    if (!open || !view) return;
+    const fresh = [...view.rows, ...view.mine, ...view.bids].find((r) => r.id === open.id);
+    if (fresh && (fresh.next !== open.next || fresh.top !== open.top || fresh.pay !== open.pay || fresh.left !== open.left)) setOpen(fresh);
+  }, [view, open]);
+
+  const trade = async (c: Record<string, unknown>, close: boolean): Promise<boolean> => {
+    const ok = await act({ a: 'auction', c });
+    if (!ok) return false;
+    reload();
+    if (close) setOpen(null);
+    return true;
+  };
+
   /** Into the lobby as a multiplayer player: the house is the realm's, so that is where it is used. */
   const play = () => {
     void import('./GameLobby').then(({ saveLobbyChoice }) => {
@@ -205,13 +273,16 @@ export function MarketPage() {
     });
   };
 
-  const counts: Record<Tab, number> = { browse: view?.total ?? 0, auctions: view?.mine.length ?? 0, bids: view?.bids.length ?? 0, mail: view?.mail.length ?? 0 };
+  const counts: Record<Tab, number> = { browse: view?.total ?? 0, sell: 0, auctions: view?.mine.length ?? 0, bids: view?.bids.length ?? 0, mail: view?.mail.length ?? 0 };
   const TABS: { id: Tab; name: string }[] = [
     { id: 'browse', name: 'Browse' },
+    { id: 'sell', name: 'Sell' },
     { id: 'auctions', name: 'My auctions' },
     { id: 'bids', name: 'My bids' },
     { id: 'mail', name: 'Mail' },
   ];
+  const locked = !!desk?.inGame;
+  const coins = desk?.hero.coins ?? null;
 
   const head = (
     <div className="mk-head" role="row">
@@ -249,7 +320,7 @@ export function MarketPage() {
         <ul className="mk-list">
           {rows.length === 0 && <li className="mk-empty">{empty}</li>}
           {rows.map((r) => (
-            <Row key={r.id} r={r} show={show} hide={hide} />
+            <Row key={r.id} r={r} on={open?.id === r.id} show={show} hide={hide} open={setOpen} />
           ))}
         </ul>
       </>
@@ -268,10 +339,10 @@ export function MarketPage() {
             <button className="fp-link-play" onClick={play}>
               Play
             </button>
-            <button onClick={() => toFront('site-world')}>The World</button>
+            <button onClick={goBeyond}>The World</button>
             <button onClick={() => toFront('site-features')}>Classes</button>
             <button onClick={() => toFront('l-expansions')}>Expansions</button>
-            <button className="fp-link-camp" onClick={goCamp}>Camp</button>
+            <button className="fp-link-farm" onClick={goFarm}>Farm</button>
             <button className="fp-link-market" aria-current="page" onClick={() => scrollTo('mk-top')}>
               Market
             </button>
@@ -315,7 +386,7 @@ export function MarketPage() {
           </h1>
           <p className="cp-tagline">The Auction House of Dawnwatch, live</p>
           <p className="cp-lead">
-            Everything players have put up for sale in the realm, as it stands right now. Look for gear, materials and treasures here, then bid or buy it out in the game, at the Auctioneer.
+            Everything players have put up for sale in the realm, as it stands right now. Bid, buy it out, sell from your bags and collect your mail here.
           </p>
           <ul className="cp-badges mk-stats" aria-label="The market now">
             <li data-testid="market-count">{view ? `${view.total} ${view.total === 1 ? 'auction' : 'auctions'} up` : 'Reading the ledgers...'}</li>
@@ -326,7 +397,7 @@ export function MarketPage() {
             <button className="fp-play fp-px" id="market-play" onClick={play}>
               <span>
                 <i aria-hidden="true" />
-                Trade in the game
+                Enter the realm
               </span>
             </button>
             <button className="fp-ghost fp-px" onClick={() => scrollTo('mk-board')}>
@@ -415,9 +486,9 @@ export function MarketPage() {
                   {head}
                   <ul className="mk-list" data-testid="market-list">
                     {!view && !error && <li className="mk-empty">Reading the ledgers...</li>}
-                    {view && view.rows.length === 0 && <li className="mk-empty">{query.q || query.cat !== 'all' ? 'Nothing for sale matches that.' : 'Nothing is up for sale right now. Be the first: put something up in the game.'}</li>}
+                    {view && view.rows.length === 0 && <li className="mk-empty">{query.q || query.cat !== 'all' ? 'Nothing for sale matches that.' : 'Nothing is up for sale right now.'}</li>}
                     {view?.rows.map((r) => (
-                      <Row key={r.id} r={r} show={show} hide={hide} />
+                      <Row key={r.id} r={r} on={open?.id === r.id} show={show} hide={hide} open={setOpen} />
                     ))}
                   </ul>
                   <div className="mk-pager">
@@ -435,7 +506,8 @@ export function MarketPage() {
               </div>
             )}
 
-            {tab === 'auctions' && list(view?.mine ?? [], 'You have nothing up. Put something up at the Auctioneer.', 'the auctions you have up')}
+            {tab === 'sell' && <SellBoard account={account} desk={desk} status={deskStatus} busy={busy} locked={locked} onPost={(c) => trade(c, false)} />}
+            {tab === 'auctions' && list(view?.mine ?? [], 'You have nothing up. Sell something from your bags.', 'the auctions you have up')}
             {tab === 'bids' && list(view?.bids ?? [], 'You hold no bids right now.', 'the auctions you have bid on')}
             {tab === 'mail' &&
               (!view?.member ? (
@@ -444,13 +516,20 @@ export function MarketPage() {
                 <ul className="mk-list mk-mail" data-testid="market-mail">
                   {view.mail.length === 0 && <li className="mk-empty">Nothing is waiting for you.</li>}
                   {view.mail.map((m) => (
-                    <Letter key={m.id} m={m} show={show} hide={hide} />
+                    <Letter key={m.id} m={m} show={show} hide={hide} busy={busy || locked} take={account ? () => void trade({ a: 'take', id: m.id }, false) : null} />
                   ))}
-                  {view.mail.length > 0 && <li className="mk-note">Collect your mail at the Auctioneer in the game: items and coins are kept for you until you do.</li>}
+                  {view.mail.length > 1 && (
+                    <li className="mk-note">
+                      <button type="button" className="mk-go" disabled={busy || locked} onClick={() => void trade({ a: 'take', id: 0 }, false)}>
+                        Collect it all
+                      </button>
+                    </li>
+                  )}
+                  {locked && view.mail.length > 0 && <li className="mk-note">Leave the game to collect your mail.</li>}
                 </ul>
               ))}
           </div>
-          <p className="mk-fine">Prices are in Auren. This is the one house of the realm: what you see here is what players see at the Auctioneer.</p>
+          <p className="mk-fine">Prices are in Auren. This is the one house of the realm: a bid here is a bid at the Auctioneer.</p>
         </section>
 
         {/* ---------------------------------------------------------------- the rules */}
@@ -473,7 +552,7 @@ export function MarketPage() {
               ['Bid', `A new bid has to beat the last one by at least ${Math.round(AUCTION_RULES.raise * 100)}%. Whoever is outbid gets their coins back by mail.`],
               ['Buy out', 'A buyout ends the auction at once, and the item is mailed to the buyer.'],
               ['Sell', `The seller is paid the price less the house's ${Math.round(AUCTION_RULES.cut * 100)}% cut. Up to ${AUCTION_RULES.maxListings} auctions at a time.`],
-              ['Mail', 'Everything owed (items and coins) waits in your mail until you collect it at the Auctioneer, so nothing is lost when a bag is full or you are away.'],
+              ['Mail', 'Everything owed (items and coins) waits in your mail until you collect it here, so nothing is lost when a bag is full or you are away.'],
             ].map(([t, text], i) => (
               <Reveal as="li" key={t} delay={i * 0.05}>
                 <h3>{t}</h3>
@@ -498,9 +577,9 @@ export function MarketPage() {
           </Reveal>
           <ol className="cp-steps">
             {[
-              ['Sign in', 'Auctions belong to an account: sign in with your Solana wallet and play multiplayer. Guests can look, but cannot sell or bid.'],
-              ['Find the Auctioneer', 'He keeps his counter in Dawnwatch. Talk to him to open the Auction House: the same list as this page.'],
-              ['Bid or sell', 'Bid, buy out or put your own finds up. Come back here any time to watch your auctions and mail.'],
+              ['Sign in', 'Auctions belong to an account: sign in with your Solana wallet. Guests can look, but cannot sell or bid.'],
+              ['Open a listing', 'Click anything on the board to bid or buy it out. Your own listings can be taken down while nobody has bid.'],
+              ['Sell and collect', 'Put a bag item up from the Sell tab. When something sells, or you are outbid, collect it from Mail.'],
             ].map(([t, text], i) => (
               <Reveal as="li" key={t} delay={i * 0.08}>
                 <span className="n">{i + 1}</span>
@@ -519,12 +598,12 @@ export function MarketPage() {
             <h2>
               Make your <em>fortune</em>
             </h2>
-            <p>Free in your browser. Sign in with a wallet, find the Auctioneer and name your price.</p>
+            <p>Free in your browser. Sign in with a wallet and name your price.</p>
             <span className="fp-glow">
               <button className="fp-play fp-px" onClick={play}>
                 <span>
                   <i aria-hidden="true" />
-                  Trade in the game
+                  Enter the realm
                 </span>
               </button>
             </span>
@@ -536,7 +615,191 @@ export function MarketPage() {
           <span>A voxel world in your browser, powered by Solana. Version {GAME_VERSION}.</span>
         </footer>
       </main>
+      {open && <Deal r={open} signed={!!account} coins={coins} waiting={!!account && !desk && deskStatus !== 'error' && deskStatus !== 'out'} locked={locked} busy={busy} trade={(c, close) => void trade(c, close)} onClose={() => setOpen(null)} />}
     </div>
+  );
+}
+
+/** A dialog over the page: the market list stays where it is. */
+function MarketDialog({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  const host = typeof document === 'undefined' ? null : document.querySelector('#home .fp');
+  if (!host) return null;
+  return createPortal(
+    <div className="fp-dlg-back" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="fp-dlg-glow mk-dlg-glow">
+        <div className="fp-dlg fp-px mk-dlg" role="dialog" aria-modal="true" aria-label={title}>
+          <button type="button" className="fp-dlg-x" onClick={onClose} aria-label="Close">
+            &times;
+          </button>
+          {children}
+        </div>
+      </div>
+    </div>,
+    host,
+  );
+}
+
+/** Bid, buy out, or take down the listing that was opened. */
+function Deal({ r, signed, coins, waiting, locked, busy, trade, onClose }: { r: AuctionRow; signed: boolean; coins: number | null; waiting: boolean; locked: boolean; busy: boolean; trade: (c: Record<string, unknown>, close: boolean) => void; onClose: () => void }) {
+  const [amount, setAmount] = useState(String(r.next));
+  useEffect(() => setAmount(String(r.next)), [r.id, r.next]);
+  const n = Math.max(0, Math.min(MAX_COINS, Math.floor(Number(amount) || 0)));
+  const why = !signed ? 'Sign in with your wallet to bid or buy.' : waiting ? 'Reading your character...' : locked ? 'Leave the game to trade. The game is holding this character.' : r.token ? 'This one is priced in $SOLRIFT. Bid on it in the game.' : null;
+  return (
+    <MarketDialog title={r.name} onClose={onClose}>
+      <div className="mk-deal" data-testid="market-deal">
+        <div className="mk-deal-top">
+          <Slot row={r} />
+          <h2>{r.name}</h2>
+        </div>
+        <p className="mk-deal-meta">
+          {r.yours ? 'You put this one up.' : `Sold by ${r.seller}.`}
+          <span>
+            {timeLeftLabel(r.left)} · {leftText(r.left)} left
+          </span>
+        </p>
+        {coins !== null && !r.token && <p className="mk-deal-purse">You have {coins.toLocaleString('en-US')} Auren.</p>}
+        {why && <p className="mk-warn">{why}</p>}
+        {r.yours ? (
+          <div className="mk-actions">
+            {r.top > 0 && <span>It has a bid on it, so it stays up.</span>}
+            <div className="mk-action-row">
+              <button type="button" className="mk-go" disabled={busy || !!why || r.top > 0} onClick={() => trade({ a: 'cancel', id: r.id }, true)}>
+                Cancel the auction
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="mk-actions">
+            <label>
+              Your bid, at least {r.next.toLocaleString('en-US')}
+              <input className="mk-numin" inputMode="numeric" aria-label="Your bid" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^\d]/g, ''))} />
+            </label>
+            <div className="mk-action-row">
+              {r.buyout > 0 && (
+                <button type="button" className="mk-go ghost" disabled={busy || !!why} onClick={() => trade({ a: 'buyout', id: r.id }, true)}>
+                  Buy out for {r.pay.toLocaleString('en-US')}
+                </button>
+              )}
+              <button type="button" className="mk-go" disabled={busy || !!why || n < r.next} onClick={() => trade({ a: 'bid', id: r.id, amount: n }, false)}>
+                Bid {n.toLocaleString('en-US')}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </MarketDialog>
+  );
+}
+
+/** Put something from the bags up for sale. */
+function SellBoard({ account, desk, status, busy, locked, onPost }: { account: string | null; desk: DeskView | null; status: string; busy: boolean; locked: boolean; onPost: (c: Record<string, unknown>) => Promise<boolean> }) {
+  const [slot, setSlot] = useState<number | null>(null);
+  const piles = (desk?.slots ?? []).filter((s): s is { slot: number; item: ItemStack } => !!s.item && !sellBlocker(s.item));
+  const held = piles.find((s) => s.slot === slot) ?? null;
+  if (!account) return <p className="mk-empty">Sign in with your wallet to sell from your bags.</p>;
+  if (!desk && status !== 'error' && status !== 'out') return <p className="mk-empty">Reading your bags...</p>;
+  if (!desk) return <p className="mk-empty">Play this hero once in the game before selling from here.</p>;
+  return (
+    <div className="mk-selling" data-testid="market-sell">
+      {locked && <p className="mk-warn">Leave the game to sell. The game is holding this character.</p>}
+      {piles.length === 0 ? (
+        <p className="mk-empty">Your bags have nothing that can be sold.</p>
+      ) : (
+        <ul className="mk-sell">
+          {piles.map((s) => (
+            <li key={s.slot}>
+              <button type="button" className={slot === s.slot ? 'on' : ''} onClick={() => setSlot(s.slot)}>
+                <Slot row={{ item: s.item }} />
+                <span>{tooltipLines(s.item, null, 0)[0]?.text ?? 'Item'}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {held && (
+        <MarketDialog title={tooltipLines(held.item, null, 0)[0]?.text ?? 'Sell'} onClose={() => setSlot(null)}>
+          <SellForm
+            stack={held.item}
+            slot={held.slot}
+            coins={desk.hero.coins}
+            busy={busy || locked}
+            onPost={async (c) => {
+              if (await onPost(c)) setSlot(null);
+            }}
+          />
+        </MarketDialog>
+      )}
+    </div>
+  );
+}
+
+function SellForm({ stack, slot, coins, busy, onPost }: { stack: ItemStack; slot: number; coins: number; busy: boolean; onPost: (c: Record<string, unknown>) => Promise<void> | void }) {
+  const [count, setCount] = useState(stack.count);
+  const unit = Math.max(1, stackSellPrice(stack));
+  const [bid, setBid] = useState(unit * stack.count);
+  const [buyout, setBuyout] = useState(0);
+  const [hours, setHours] = useState<AuctionHours>(24);
+  useEffect(() => {
+    setCount(stack.count);
+    setBid(Math.max(1, stackSellPrice(stack)) * stack.count);
+    setBuyout(0);
+  }, [stack, slot]);
+  const deposit = depositFor({ ...stack, count }, hours);
+  const price = buyout > 0 ? buyout : bid;
+  const bad = bid < 1 ? 'Name a starting bid.' : buyout > 0 && buyout < bid ? 'The buyout cannot be below the bid.' : deposit > coins ? `The deposit is ${deposit.toLocaleString('en-US')} Auren. You have ${coins.toLocaleString('en-US')}.` : null;
+  const num = (v: string): number => Math.max(0, Math.min(MAX_COINS, Math.floor(Number(v.replace(/[^\d]/g, '')) || 0)));
+  return (
+    <form
+      className="mk-form"
+      data-testid="market-sell-form"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!bad) void onPost({ a: 'post', slot, count, bid, buyout, hours });
+      }}
+    >
+      {stack.count > 1 && (
+        <label>
+          Amount
+          <input className="mk-numin" inputMode="numeric" aria-label="Amount" value={String(count)} onChange={(e) => {
+            const n = Math.max(1, Math.min(stack.count, num(e.target.value) || 1));
+            setCount(n);
+            setBid(unit * n);
+          }} />
+        </label>
+      )}
+      <label>
+        Starting bid
+        <input className="mk-numin" inputMode="numeric" aria-label="Starting bid" value={String(bid)} onChange={(e) => setBid(num(e.target.value))} />
+      </label>
+      <label>
+        Buyout, 0 for none
+        <input className="mk-numin" inputMode="numeric" aria-label="Buyout" value={String(buyout)} onChange={(e) => setBuyout(num(e.target.value))} />
+      </label>
+      <div className="mk-hours" role="group" aria-label="How long">
+        {AUCTION_HOURS.map((h) => (
+          <button key={h} type="button" className={hours === h ? 'on' : ''} onClick={() => setHours(h)}>
+            {h} h
+          </button>
+        ))}
+      </div>
+      <p>
+        Deposit {deposit.toLocaleString('en-US')} Auren, back when it sells. The house keeps {Math.round(AUCTION_RULES.cut * 100)}%: you would get {Math.floor(price * (1 - AUCTION_RULES.cut)).toLocaleString('en-US')}.
+      </p>
+      {bad && <p className="mk-warn">{bad}</p>}
+      <div className="mk-action-row">
+        <button type="submit" className="mk-go" disabled={busy || !!bad}>
+          Put it up
+        </button>
+      </div>
+    </form>
   );
 }
 

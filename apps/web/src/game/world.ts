@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { B, CHUNK_SIZE, IS_LEAVES, IS_SOLID, LIGHT_EMIT, WORLD_HEIGHT, blockIndex, chunkKey, growPlants, type BlockReader, type SaveStore, type WorldAccess, type WorldKind } from '@solrift/shared';
+import { B, CHUNK_SIZE, IS_LEAVES, IS_LIQUID, IS_SOLID, LIGHT_EMIT, WORLD_HEIGHT, blockIndex, chunkKey, growPlants, type BlockReader, type SaveStore, type WorldAccess, type WorldKind } from '@solrift/shared';
 import type { Atlas } from './atlas';
 import { createChunkMaterials, type ChunkMaterials } from './chunkMaterial';
 import type { MeshData, MeshResult } from './mesher';
@@ -235,6 +235,21 @@ export class World implements WorldAccess {
     for (let y = WORLD_HEIGHT - 1; y >= 0; y--) {
       const id = c.data[blockIndex(x & 15, y, z & 15)];
       if (IS_SOLID[id] && !IS_LEAVES[id]) return y;
+    }
+    return 0;
+  }
+
+  /**
+   * Where rain and snow stop in this column: the sea, a pool, lava, or a roof.
+   * The first liquid or solid from the sky, or -1 if the column isn't loaded.
+   * Leaves let the weather through, the same as `surfaceY`.
+   */
+  precipY(x: number, z: number): number {
+    const c = this.chunks.get(chunkKey(x >> 4, z >> 4));
+    if (!c) return -1;
+    for (let y = WORLD_HEIGHT - 1; y >= 0; y--) {
+      const id = c.data[blockIndex(x & 15, y, z & 15)];
+      if (IS_LIQUID[id] || (IS_SOLID[id] && !IS_LEAVES[id])) return y;
     }
     return 0;
   }

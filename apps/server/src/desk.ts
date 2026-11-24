@@ -37,7 +37,7 @@ import type { DeskResult, GameRoom } from './room';
 import type { RoomStore } from './roomStore';
 
 /**
- * The Camp's server side (the website's /camp page, see camp.ts): what a hero can do from a phone, with no game running. Everything the page
+ * The desk's server side (the website's /farm page and the Play page, see camp.ts): what a hero can do from a phone, with no game running. Everything the page
  * asks is validated here and done to the saved hero by `GameRoom.withSavedHero`; the page only draws what it is sent.
  */
 

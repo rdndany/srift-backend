@@ -488,7 +488,6 @@ export function MenuScreen() {
                   shield={menu.offhand?.get(0)?.id ?? 0}
                   wings={wingNumberOf(menu.wings?.get(0)?.id ?? 0)}
                   companion={petNumber(menu.companion?.get(0)?.id ?? 0)}
-                  shieldIcon={menu.offhand?.get(0) ? api.icons.url(menu.offhand.get(0)!.id) : null}
                 />
                 {cls && (
                   <div className="char-class" data-testid="char-class">

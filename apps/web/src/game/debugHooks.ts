@@ -361,6 +361,8 @@ export function installDebugHooks(parts: DebugParts): void {
     // ---- rift hooks ----
     /** Open a rift now near the player (a grade, or a random one). Returns whether one opened. */
     startRift: (grade?: 'uncommon' | 'rare' | 'epic') => act(() => L().realm.startRift(grade)),
+    /** Begin the Gilded Tide now. Returns whether it started. */
+    startInvasion: () => act(() => L().realm.startInvasion()),
     /** What the rift is doing (its phase, wave, the monsters left, where), or null. */
     riftState: () => L().riftView(),
     /** Let the rift's clock run on by this many seconds (the world is not stepped: monsters stay as they are). */
