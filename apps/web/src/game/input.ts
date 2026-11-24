@@ -1,3 +1,5 @@
+import { blockBrowserKey, fullscreenNow, isTypingTarget, keyboardLockApi, wantKeyboardLock } from './keyGuard';
+
 export class Input {
   readonly keys = new Set<string>();
   yaw = 0;
@@ -18,6 +20,10 @@ export class Input {
   private leftClicks = 0;
   /** Middle-button presses (mouse 3) not yet read by `consumeMiddleClick`. */
   private middleClicks = 0;
+  /** The last decision about Keyboard Lock, so a lock that finishes late cannot grab the keys after the player has left. */
+  private wantLock = false;
+  /** When Escape was pressed. A later unlock is the pause screen; one the browser caused on its own is not. */
+  private escapeAt = -1e9;
 
   /** All listeners are removed when `signal` aborts. */
   constructor(
@@ -30,6 +36,7 @@ export class Input {
     on('pointerlockchange', () => {
       this.locked = document.pointerLockElement === this.target;
       if (!this.locked) this.releaseAll();
+      this.syncKeyboard();
     });
     on('mousemove', (e) => {
       if (!this.locked) return;
@@ -40,11 +47,22 @@ export class Input {
     });
     on('keydown', (e) => {
       if (!this.locked) return;
-      if (/^F\d+$/.test(e.code) || e.code === 'Tab') e.preventDefault();
+      const typing = this.typing(e);
+      if (blockBrowserKey(true, e.code, e.cancelable, typing)) e.preventDefault();
+      if (typing) return;
+      // With the keyboard locked, the browser no longer lets Escape go of the mouse. The pause screen is that release.
+      if (e.code === 'Escape' && !e.repeat) {
+        this.escapeAt = performance.now();
+        if (document.pointerLockElement) document.exitPointerLock();
+      }
+      // A key held down repeats. The hold is one key; the press is counted once.
       if (!e.repeat) this.pressed.add(e.code);
       this.keys.add(e.code);
     });
-    on('keyup', (e) => this.keys.delete(e.code));
+    on('keyup', (e) => {
+      if (this.locked && blockBrowserKey(true, e.code, e.cancelable, this.typing(e))) e.preventDefault();
+      this.keys.delete(e.code);
+    });
     on('mousedown', (e) => {
       if (!this.locked) return;
       if (e.button === 0) {
@@ -64,26 +82,109 @@ export class Input {
       if (e.button === 0) this.leftDown = false;
       if (e.button === 2) this.rightDown = false;
     });
-    on('wheel', (e) => {
-      if (this.locked) this.wheel += Math.sign(e.deltaY);
-    });
+    document.addEventListener(
+      'wheel',
+      (e) => {
+        if (!this.locked) return;
+        if (e.cancelable) e.preventDefault();
+        this.wheel += Math.sign(e.deltaY);
+      },
+      { signal, passive: false },
+    );
     on('contextmenu', (e) => e.preventDefault());
-    window.addEventListener('blur', () => this.releaseAll(), { signal });
+    on('visibilitychange', () => {
+      if (document.hidden) this.releaseAll();
+      this.syncKeyboard();
+    });
+    on('fullscreenchange', () => this.onFullscreen());
+    document.addEventListener('webkitfullscreenchange', () => this.onFullscreen(), { signal });
+    window.addEventListener(
+      'blur',
+      () => {
+        this.releaseAll();
+        this.syncKeyboard();
+      },
+      { signal },
+    );
+    window.addEventListener('focus', () => this.syncKeyboard(), { signal });
+  }
+
+  private typing(e: KeyboardEvent): boolean {
+    const el = e.target instanceof HTMLElement ? e.target : null;
+    return isTypingTarget(el?.tagName ?? '', el?.isContentEditable === true);
+  }
+
+  /** Fullscreen ended: drop every held key, because the browser may have swallowed the matching key-up. */
+  private onFullscreen(): void {
+    if (!fullscreenNow(document)) this.releaseAll();
+    this.syncKeyboard();
+  }
+
+  /**
+   * Ask Chrome and Edge to keep the keyboard while the game is fullscreen. Anywhere else, or in Safari, this does
+   * nothing and the key guard above is the whole protection. A refusal is ignored: play goes on.
+   */
+  private syncKeyboard(): void {
+    const kb = keyboardLockApi(navigator);
+    if (!kb) return;
+    const want = wantKeyboardLock(this.locked, fullscreenNow(document), document.hasFocus(), document.hidden);
+    this.wantLock = want;
+    if (!want) {
+      try {
+        kb.unlock();
+      } catch {
+        // Already free.
+      }
+      return;
+    }
+    void kb.lock().then(
+      () => {
+        if (this.wantLock) return;
+        try {
+          kb.unlock();
+        } catch {
+          // Already free.
+        }
+      },
+      () => undefined,
+    );
   }
 
   private releaseAll(): void {
     this.keys.clear();
+    this.pressed.clear();
     this.leftDown = false;
     this.rightDown = false;
+    this.leftClicks = 0;
+    this.rightClicks = 0;
+    this.middleClicks = 0;
+    this.wheel = 0;
+  }
+
+  /** Either side of Shift, Ctrl or Alt. */
+  mod(which: 'shift' | 'ctrl' | 'alt'): boolean {
+    if (which === 'shift') return this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
+    if (which === 'ctrl') return this.keys.has('ControlLeft') || this.keys.has('ControlRight');
+    return this.keys.has('AltLeft') || this.keys.has('AltRight');
+  }
+
+  /** True when Escape was pressed a moment ago, so this loss of the mouse is the pause screen. */
+  escapeJustNow(): boolean {
+    return performance.now() - this.escapeAt < 500;
   }
 
   /** Ask for the mouse. Resolves true when it was given: a browser refuses without a recent click or key press. */
   lock(): Promise<boolean> {
-    // Older browsers return undefined; newer ones a promise that rejects if the lock is refused.
-    return Promise.resolve(this.target.requestPointerLock() as unknown).then(
-      () => true,
-      () => false,
-    );
+    const granted = (): boolean => this.locked || document.pointerLockElement === this.target;
+    try {
+      const asked = this.target.requestPointerLock() as unknown;
+      // A promise means the browser reports the real result. A second ask while one is waiting rejects, even if the first one got the mouse.
+      if (asked && typeof (asked as Promise<unknown>).then === 'function') return (asked as Promise<unknown>).then(granted, granted);
+    } catch {
+      return Promise.resolve(granted());
+    }
+    // Older browsers return nothing and grant the mouse on the lock event.
+    return Promise.resolve(true);
   }
 
   isDown(code: string): boolean {

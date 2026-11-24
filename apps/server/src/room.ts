@@ -344,9 +344,9 @@ const SOCIAL_BURST = 8;
 /** Clicks at a trade table: filling it takes a few quick ones. */
 const TRADE_RATE = 6;
 const TRADE_BURST = 20;
-/** Microphone frames a player may send. One frame is 40 ms, so a steady talk is about 25 a second. */
+/** Microphone frames a player may send. One frame is 40 ms, so a steady talk is about 25 a second. A hitch may deliver a short pile; those still go through, and the steady rate stays the same. */
 const VOICE_RATE = 40;
-const VOICE_BURST = 20;
+const VOICE_BURST = 40;
 /** How far apart two players may be for the server to pass their voice setup along. The sound itself never comes here. */
 const VOICE_REACH = 48;
 const MAX_STEPS_PER_TICK = 15;

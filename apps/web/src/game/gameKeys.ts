@@ -153,7 +153,7 @@ export class KeyActions {
       sendCommand({ t: 'inventory' });
       return;
     }
-    if (input.wasPressed('KeyQ')) sendCommand({ t: 'drop', all: input.isDown('ControlLeft') });
+    if (input.wasPressed('KeyQ')) sendCommand({ t: 'drop', all: input.mod('ctrl') });
     // The ability bar (Z X C G: V, R, F, Q and E are taken). A character without a class has none.
     if (session.classView()) {
       ABILITY_KEYS.forEach((code, slot) => {

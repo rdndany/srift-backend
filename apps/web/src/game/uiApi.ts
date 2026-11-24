@@ -29,6 +29,8 @@ export interface UiApiParts {
   voice: VoiceChat | null;
   sendCommand(c: Command): void;
   openSpellbook(): void;
+  /** The page was made fullscreen for this visit: put the window back before going somewhere else. */
+  onLeave?(): Promise<void> | void;
 }
 
 /** What the page's windows and buttons can ask of the game: nearly all of it is a command sent the same way a key press is. */
@@ -38,6 +40,14 @@ export function makeUiApi(parts: UiApiParts): UiApi {
   const recipeBook = parts.recipes.book;
   /** The latest microphone request. An older one (the key was let go while the browser was still asking) does not write over it. */
   let voiceReq = 0;
+  /** Fullscreen off first (a same-site move would otherwise keep it), then the save, then the next page. */
+  const go = (href: string, save: boolean): void => {
+    void Promise.resolve(parts.onLeave?.())
+      .catch(() => undefined)
+      .then(() => (save ? saveBridge.flush?.() : undefined))
+      .catch(() => undefined)
+      .finally(() => location.assign(href));
+  };
 
   return {
     inventory: session.inventory,
@@ -122,10 +132,10 @@ export function makeUiApi(parts: UiApiParts): UiApi {
     wake: () => sendCommand({ t: 'wake' }),
     deathMessage: () => session.deathMessage(),
     quitToTitle() {
-      void saveBridge.flush?.().finally(() => location.assign(titleAddress(location.pathname)));
+      go(titleAddress(location.pathname), true);
     },
     quitToCharacters() {
-      void saveBridge.flush?.().finally(() => location.assign(gamePath()));
+      go(gamePath(), true);
     },
     async deleteWorld() {
       saveBridge.freeze?.(); // nothing may write the world back while it is being removed
@@ -134,7 +144,7 @@ export function makeUiApi(parts: UiApiParts): UiApi {
       } catch (err) {
         console.warn('delete failed', err);
       }
-      location.assign(titleAddress(location.pathname));
+      go(titleAddress(location.pathname), false);
     },
     furnaceState: () => session.furnaceState(),
   };

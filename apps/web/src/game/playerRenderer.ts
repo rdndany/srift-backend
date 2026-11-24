@@ -92,7 +92,23 @@ export interface PlayerRenderStats {
 }
 
 /** What their name tag shows besides the name: when it changes, the tag is drawn again. */
-const tagKey = (p: OtherPlayer): string => `${p.cls ?? ''}:${p.clv ?? 0}:${p.gt ?? ''}`;
+const tagKey = (p: OtherPlayer, talking: boolean): string => `${p.cls ?? ''}:${p.clv ?? 0}:${p.gt ?? ''}:${talking ? 1 : 0}`;
+
+/** A speaker, in pixels, drawn after the name while that player is talking. */
+const SPEAKER_W = 16;
+const SPEAKER_GAP = 4;
+
+function drawSpeaker(g: CanvasRenderingContext2D, x: number, y: number): void {
+  g.fillStyle = '#ffe08a';
+  g.fillRect(x, y + 5, 3, 6);
+  g.fillRect(x + 3, y + 3, 2, 10);
+  g.fillRect(x + 5, y + 1, 2, 14);
+  g.fillStyle = '#fff6d0';
+  g.fillRect(x + 9, y + 4, 2, 2);
+  g.fillRect(x + 9, y + 10, 2, 2);
+  g.fillRect(x + 12, y + 2, 2, 2);
+  g.fillRect(x + 12, y + 12, 2, 2);
+}
 
 /** Draws the other players of an online game, with the armor they wear. */
 export class PlayerRenderer {
@@ -126,7 +142,7 @@ export class PlayerRenderer {
     return { group, character: null, rider: null, rig: null, block, blockColor, label: null, labelTex: null, labelKey: '', name: p.name, look: p.look, bodyYaw: p.yaw, turn: 0, turnToAim: false, headYaw: 0, lastY: p.y, vy: 0, lastX: p.x, lastZ: p.z, vx: 0, vz: 0, air: false, full: false, blockLit: false, dead: !!p.dead };
   }
 
-  private makeLabel(f: Figure, p: OtherPlayer): void {
+  private makeLabel(f: Figure, p: OtherPlayer, talking: boolean): void {
     const canvas = document.createElement('canvas');
     canvas.width = 256;
     canvas.height = 48;
@@ -139,14 +155,14 @@ export class PlayerRenderer {
     f.group.add(label);
     f.label = label;
     f.labelTex = labelTex;
-    this.paintLabel(f, p);
+    this.paintLabel(f, p, talking);
   }
 
-  /** The tag: the level in the colour of the class, then the name. */
-  private paintLabel(f: Figure, p: OtherPlayer): void {
+  /** The tag: the level in the colour of the class, then the name, then a speaker while they are talking. */
+  private paintLabel(f: Figure, p: OtherPlayer, talking: boolean): void {
     const tex = f.labelTex;
     if (!tex) return;
-    f.labelKey = tagKey(p);
+    f.labelKey = tagKey(p, talking);
     const canvas = tex.image as HTMLCanvasElement;
     const g2 = canvas.getContext('2d')!;
     g2.clearRect(0, 0, canvas.width, canvas.height);
@@ -155,10 +171,11 @@ export class PlayerRenderer {
     g2.textAlign = 'left';
     const level = p.cls && p.clv ? `${p.clv} ` : '';
     const guild = p.gt ? ` <${p.gt}>` : '';
+    const mark = talking ? SPEAKER_GAP + SPEAKER_W : 0;
     const lw = g2.measureText(level).width;
     const gw = g2.measureText(guild).width;
-    const nw = Math.min(g2.measureText(f.name).width, 240 - lw - gw);
-    const total = Math.min(240, lw + nw + gw);
+    const nw = Math.min(g2.measureText(f.name).width, Math.max(0, 240 - lw - gw - mark));
+    const total = Math.min(240, lw + nw + gw + mark);
     const x0 = 128 - total / 2;
     g2.fillStyle = 'rgba(0,0,0,0.45)';
     g2.fillRect(x0 - 8, 4, total + 16, 40);
@@ -168,9 +185,10 @@ export class PlayerRenderer {
     }
     g2.fillStyle = '#fff';
     g2.fillText(f.name, x0 + lw, 25, nw);
+    if (talking) drawSpeaker(g2, x0 + lw + nw + SPEAKER_GAP, 17);
     if (guild) {
       g2.fillStyle = '#6bff8a';
-      g2.fillText(guild, x0 + lw + nw, 25);
+      g2.fillText(guild, x0 + lw + nw + mark, 25);
     }
     tex.needsUpdate = true;
   }
@@ -204,6 +222,8 @@ export class PlayerRenderer {
     this.env = env;
   }
 
+  /** True while that player is talking into the microphone. The name tag draws a speaker after the name. */
+  speaking: ((id: number) => boolean) | null = null;
   /** Tells whether the cell at a point is water: a player with water at the feet and under them is swimming, not walking. */
   isWater: ((x: number, y: number, z: number) => boolean) | null = null;
   /** The room over a figure's head (blocks, see `roofGap`): one with wings floats no higher than there is room. */
@@ -314,8 +334,9 @@ export class PlayerRenderer {
         continue;
       }
       const showLabel = dist < LOD.labelRange;
-      if (showLabel && !f.label) this.makeLabel(f, p);
-      else if (showLabel && f.labelKey !== tagKey(p)) this.paintLabel(f, p);
+      const talking = this.speaking?.(p.id) ?? false;
+      if (showLabel && !f.label) this.makeLabel(f, p, talking);
+      else if (showLabel && f.labelKey !== tagKey(p, talking)) this.paintLabel(f, p, talking);
       if (f.label) f.label.visible = showLabel;
 
       if (p.dead) {

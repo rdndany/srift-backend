@@ -35,6 +35,46 @@ const DROP = 46;
 /** What is sent: 16 kHz, one channel, 40 ms at a time. Short enough to talk over, small enough for the socket. */
 const RATE = 16_000;
 const FRAME = 640;
+/** How long the speaker mark stays after the last frame that was actually a voice. */
+const TALK_HOLD = 450;
+/** A quiet open microphone sits under this. A normal speaking voice is over it. */
+const TALK_POWER = 0.02 * 0.02;
+/** Steady frames a second. A little over the 25 a real mic produces, and under what the server will carry. */
+const SEND_RATE = 30;
+/** A short pile may leave at once (a hitch). After that, frames keep going at SEND_RATE instead of waiting out the second. */
+const SEND_BURST = 40;
+
+/**
+ * One send from a bucket that refills over time. A pile can leave at once, and the next frames are not locked out for the rest of the second.
+ */
+export function takeSend(tokens: number, elapsedSec: number): { tokens: number; send: boolean } {
+  const t = Math.min(SEND_BURST, tokens + Math.max(0, elapsedSec) * SEND_RATE);
+  if (t < 1) return { tokens: t, send: false };
+  return { tokens: t - 1, send: true };
+}
+
+/**
+ * When to play the next frame. A frame that arrives before the last one has finished plays straight after it.
+ * One that arrives late starts again just ahead of now. A pile from a hitch is dropped once the queue is already a fifth of a second ahead, so the talk does not fall behind and then jump.
+ */
+export function placeVoice(nextAt: number, now: number, frameSec: number): { at: number; next: number } | null {
+  let at = nextAt;
+  if (at < now + 0.02) at = now + 0.05;
+  else if (at > now + 0.2) return null;
+  return { at, next: at + frameSec };
+}
+
+/** True when this frame is a person talking, not a microphone left open in a quiet room. */
+export function frameHasVoice(samples: Int16Array): boolean {
+  let acc = 0;
+  let n = 0;
+  for (let i = 0; i < samples.length; i += 4) {
+    const s = samples[i] / 32768;
+    acc += s * s;
+    n++;
+  }
+  return n > 0 && acc / n > TALK_POWER;
+}
 
 export interface VoiceNear {
   id: number;
@@ -61,10 +101,6 @@ export class VoiceChat {
   private src: MediaStreamAudioSourceNode | null = null;
   private shape: BiquadFilterNode | null = null;
   private node: AudioNode | null = null;
-  /** How loud the quiet room is. The gate opens above this, and follows it while nobody is talking. */
-  private floor = 0.003;
-  /** Frames still sent after the voice stops, so the end of a word is not cut off. */
-  private hang = 0;
   private worklet = false;
   private readonly speakers = new Map<number, Speaker>();
   /** Samples waiting to fill the next frame. */
@@ -72,10 +108,12 @@ export class VoiceChat {
   private cursor = 0;
   /** True while the microphone is on and sending. */
   on = false;
+  /** When each nearby player last sent a frame that was a voice. */
+  private readonly said = new Map<number, number>();
   private ticket = 0;
-  /** Frames already handed to the socket in this second, so a fast audio callback cannot get the connection closed. */
-  private sentAt = 0;
-  private sentN = 0;
+  /** Sends still allowed before the bucket has to refill. */
+  private tokens = SEND_BURST;
+  private tokenAt = 0;
   private readonly wake = (): void => {
     const ctx = this.out();
     if (ctx && ctx.state === 'suspended') void ctx.resume();
@@ -97,8 +135,14 @@ export class VoiceChat {
       return null;
     }
     if (!navigator.mediaDevices?.getUserMedia) return 'This browser has no microphone.';
-    // voiceIsolation is Chrome's stronger cut of the room around the voice. A browser that does not know it ignores it.
-    const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true, voiceIsolation: true } as MediaTrackConstraints;
+    // The browser's voice processing is left off. Its echo remover sounds fine for a few seconds, then cuts the voice
+    // once it has "learned" the room. A steady "A" is what its noise remover deletes. The game sends the microphone as it is.
+    const audio: MediaTrackConstraints & { voiceIsolation?: boolean } = {
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+      voiceIsolation: false,
+    };
     if (deviceId) audio.deviceId = { ideal: deviceId };
     try {
       const next = await navigator.mediaDevices.getUserMedia({ audio });
@@ -117,6 +161,18 @@ export class VoiceChat {
         next.getTracks().forEach((t) => t.stop());
         return null;
       }
+      const track = next.getAudioTracks()[0];
+      if (track) {
+        try {
+          await track.applyConstraints(audio);
+        } catch {
+          // The stream already opened with these.
+        }
+      }
+      if (mine !== this.ticket) {
+        next.getTracks().forEach((t) => t.stop());
+        return null;
+      }
       this.mic = next;
       this.on = true;
       await this.arm(ctx, next);
@@ -128,10 +184,17 @@ export class VoiceChat {
     }
   }
 
+  /** True for a short while after this player sent a voice, so the mark above their name can stay up between words. */
+  speaking(id: number): boolean {
+    const at = this.said.get(id);
+    return at !== undefined && performance.now() - at < TALK_HOLD;
+  }
+
   /** One frame of somebody's voice, already checked to be near you by the server. */
   hear(from: number, name: string, pcm: string): void {
     const samples = decodePcm(pcm);
     if (!samples) return;
+    if (frameHasVoice(samples)) this.said.set(from, performance.now());
     const ctx = this.out();
     if (!ctx) return;
     if (ctx.state === 'suspended') void ctx.resume();
@@ -142,16 +205,26 @@ export class VoiceChat {
     const src = ctx.createBufferSource();
     src.buffer = buffer;
     src.connect(speaker.gain);
-    const now = ctx.currentTime;
-    let at = speaker.nextAt;
-    if (at < now + 0.02 || at > now + 0.25) at = now + 0.06;
-    if (at < now) at = now;
-    src.start(at);
-    speaker.nextAt = at + samples.length / RATE;
+    const placed = placeVoice(speaker.nextAt, ctx.currentTime, samples.length / RATE);
+    if (!placed) {
+      src.disconnect();
+      return;
+    }
+    src.onended = () => {
+      try {
+        src.disconnect();
+      } catch {
+        // Already disconnected.
+      }
+    };
+    src.start(placed.at);
+    speaker.nextAt = placed.next;
   }
 
   /** Quiet the ones you have muted, and fade whoever is walking away. `hear` is how loud they are, 0..1. */
   step(self: { x: number; y: number; z: number }, others: Iterable<VoiceNear>, muted: ReadonlySet<string>, hear = 1): void {
+    const now = performance.now();
+    for (const [id, at] of this.said) if (now - at >= TALK_HOLD) this.said.delete(id);
     const loud = Math.max(0, Math.min(1, hear));
     const seen = new Set<number>();
     for (const o of others) {
@@ -201,8 +274,6 @@ export class VoiceChat {
     this.src = src;
     this.pending = [];
     this.cursor = 0;
-    this.floor = 0.003;
-    this.hang = 0;
     const from = this.cleaned(ctx, src);
     try {
       if (!ctx.audioWorklet) throw new Error('no worklet');
@@ -234,7 +305,7 @@ export class VoiceChat {
     }
   }
 
-  /** Cut rumble below the voice. The browser's own suppressor runs first, on the microphone track. */
+  /** Cut rumble below the voice. The browser is not asked to strip noise: that is what opened gaps in a steady voice. */
   private cleaned(ctx: AudioContext, src: AudioNode): BiquadFilterNode {
     const high = ctx.createBiquadFilter();
     high.type = 'highpass';
@@ -275,36 +346,22 @@ export class VoiceChat {
     this.cursor = p - input.length;
     while (wait.length >= FRAME) {
       const frame = wait.splice(0, FRAME);
-      const mute = this.closed(frame);
       const pcm = new Int16Array(FRAME);
       for (let i = 0; i < FRAME; i++) {
-        const x = mute ? 0 : Math.max(-1, Math.min(1, frame[i]));
+        const x = Math.max(-1, Math.min(1, frame[i]));
         pcm[i] = x < 0 ? x * 0x8000 : x * 0x7fff;
       }
       this.emit(encodePcm(pcm));
     }
   }
 
-  /** A frame of room tone, not a voice. Stays open briefly after speech so the last syllable is kept. */
-  private closed(frame: number[]): boolean {
-    let sum = 0;
-    for (let i = 0; i < FRAME; i++) sum += frame[i] * frame[i];
-    const rms = Math.sqrt(sum / FRAME);
-    const loud = rms > Math.max(0.014, this.floor * 4);
-    if (!loud) this.floor = Math.min(0.012, this.floor * 0.92 + rms * 0.08);
-    if (loud) this.hang = 8;
-    else if (this.hang > 0) this.hang--;
-    return !loud && this.hang === 0;
-  }
-
   private emit(pcm: string): void {
     const now = performance.now();
-    if (now - this.sentAt > 1000) {
-      this.sentAt = now;
-      this.sentN = 0;
-    }
-    if (this.sentN >= 30) return;
-    this.sentN++;
+    const elapsed = this.tokenAt === 0 ? 0 : (now - this.tokenAt) / 1000;
+    this.tokenAt = now;
+    const step = takeSend(this.tokens, elapsed);
+    this.tokens = step.tokens;
+    if (!step.send) return;
     this.send(pcm);
   }
 
@@ -319,8 +376,6 @@ export class VoiceChat {
     this.shape = null;
     this.node = null;
     this.pending = [];
-    this.floor = 0.003;
-    this.hang = 0;
   }
 }
 

@@ -69,6 +69,7 @@ import { ItemIcons } from './icons';
 import { MapData, blockColors, type MapPin } from './mapData';
 import { MapSheet } from './heldMap';
 import { Input } from './input';
+import { exitPageFullscreen, fullscreenNow, requestPageFullscreen, shouldEnterFullscreen, shouldRestoreWindow } from './keyGuard';
 import { ItemEntities } from './itemEntities';
 import { BookRenderer } from './bookRenderer';
 import { MobRenderer, disposeMobAssets } from './mobRenderer';
@@ -695,6 +696,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   scene.add(books.group);
   const figureOf = (id: number): THREE.Object3D | null => (getItem(id).shield ? hand.figureShield(id) : hand.figureModel(id));
   const players = new PlayerRenderer(figureOf);
+  players.speaking = (id) => voice?.speaking(id) ?? false;
   scene.add(players.group);
   const companions = new CompanionFollowers();
   scene.add(companions.group);
@@ -1029,7 +1031,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     shopOpen: false,
     auction: null,
     stash: null,
-    api: makeUiApi({ session, remote, input, chat, icons, store, guest, recipes, windows, voice, sendCommand, openSpellbook }),
+    api: makeUiApi({ session, remote, input, chat, icons, store, guest, recipes, windows, voice, sendCommand, openSpellbook, onLeave: restorePage }),
     mode: session.mode,
     hardcore: session.hardcore,
     spectating: session.spectating,
@@ -1170,6 +1172,116 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   }
 
   let entered = false;
+  /** Whether the page was already fullscreen before this visit. Null until the player comes in. */
+  let priorFull: boolean | null = null;
+  /** Fullscreen took for this visit, so a later click does not force it back on. */
+  let screenSecured = false;
+  /** True while fullscreen is taking over, so the mouse slipping free for that moment is not the pause screen. */
+  let screenHandoff = false;
+  /** A newer entry cancels the one still waiting, so the old one cannot open the menu after the new one has the mouse. */
+  let playGen = 0;
+  /** Asks for the mouse during this entry. Fullscreen throws the first ones away. */
+  let handoffTries = 0;
+  /** Until this time, a lost mouse is the browser finishing fullscreen, unless the player pressed Escape. */
+  let entryGrace = 0;
+  /** How many times this entry has taken the mouse back after the browser dropped it. */
+  let entryRelocks = 0;
+  /** The click or key that enters play. A long load is no longer a gesture, so the "Enter the world" press asks again. True when a request was started. */
+  function enterPageFullscreen(): boolean {
+    if (params.has('debug')) return false;
+    // A finished load is not a click. Asking then only prints a refusal; the next press asks for real.
+    const activation = (navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation;
+    if (activation && !activation.isActive) return false;
+    if (priorFull === null) priorFull = fullscreenNow(document);
+    if (!shouldEnterFullscreen(priorFull, fullscreenNow(document), screenSecured)) {
+      if (priorFull === true || fullscreenNow(document)) screenSecured = true;
+      return false;
+    }
+    void requestPageFullscreen(document).then(
+      () => {
+        if (fullscreenNow(document)) screenSecured = true;
+      },
+      () => undefined,
+    );
+    return true;
+  }
+  /**
+   * Go in. Fullscreen and the mouse are both asked for on this click. The page going fullscreen drops the mouse, and
+   * that drop is not Escape: keep the menu closed and take the mouse back once the page has finished changing size.
+   */
+  function beginPlay(onLock?: (ok: boolean) => void): void {
+    audio.resume();
+    overlay.style.display = 'none';
+    const gen = ++playGen;
+    screenHandoff = true;
+    entryGrace = 0;
+    entryRelocks = 0;
+    handoffTries = 0;
+    let finished = false;
+    const alive = (): boolean => gen === playGen && !finished;
+    const done = (ok: boolean): void => {
+      if (!alive()) return;
+      finished = true;
+      screenHandoff = false;
+      // The browser can still throw the mouse away just after the page reports fullscreen.
+      entryGrace = performance.now() + 700;
+      onLock?.(ok || input.locked);
+    };
+    const settle = (): void => {
+      window.setTimeout(() => {
+        if (!alive()) return;
+        if (input.locked) done(true);
+        else ask();
+      }, 280);
+    };
+    const ask = (): void => {
+      if (!alive()) return;
+      if (input.locked) {
+        settle();
+        return;
+      }
+      if (handoffTries >= 8) {
+        done(false);
+        return;
+      }
+      handoffTries += 1;
+      void input.lock().then((ok) => {
+        if (!alive()) return;
+        if (ok || input.locked) settle();
+        else window.setTimeout(ask, 70);
+      });
+    };
+    const asked = enterPageFullscreen();
+    if (!asked) {
+      ask();
+      return;
+    }
+    // Same click, while the browser still counts it. Fullscreen often throws this one away; the retry takes it back.
+    void input.lock();
+    let went = false;
+    const go = (): void => {
+      window.clearTimeout(timer);
+      document.removeEventListener('fullscreenchange', go);
+      document.removeEventListener('webkitfullscreenchange', go);
+      if (went || gen !== playGen) return;
+      went = true;
+      ask();
+    };
+    document.addEventListener('fullscreenchange', go);
+    document.addEventListener('webkitfullscreenchange', go);
+    const timer = window.setTimeout(go, 500);
+  }
+  /** Back to a window, when this visit is what made the page fullscreen. */
+  function restorePage(): Promise<void> {
+    if (!shouldRestoreWindow(priorFull, fullscreenNow(document))) return Promise.resolve();
+    return exitPageFullscreen(document).then(
+      () => {
+        screenSecured = false;
+        priorFull = null;
+      },
+      () => undefined,
+    );
+  }
   /**
    * The world is ready: go straight in, with the mouse taken, instead of stopping at the pause screen. A browser only
    * hands over the mouse after a click or key press, so when that was too long ago (or the page was just opened, as it
@@ -1182,9 +1294,8 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     if (params.has('debug') || !loadingEl) return hideLoading();
     setLoading('World ready', 100);
     overlay.style.display = 'none';
-    audio.resume();
-    void input.lock().then((ok) => {
-      if (ok || input.locked) hideLoading();
+    beginPlay((ok) => {
+      if (ok) hideLoading();
       else loadingEl.classList.add('ready');
     });
   }
@@ -1208,8 +1319,8 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
       forward: (input.isDown('KeyW') ? 1 : 0) - (input.isDown('KeyS') ? 1 : 0),
       strafe: (input.isDown('KeyD') ? 1 : 0) - (input.isDown('KeyA') ? 1 : 0),
       jump: input.isDown('Space'),
-      sprint: keys.sprinting || input.isDown('ControlLeft'),
-      sneak: input.isDown('ShiftLeft'),
+      sprint: keys.sprinting || input.mod('ctrl'),
+      sneak: input.mod('shift'),
       left: input.leftDown,
       right: input.rightDown,
       ...(idle.kind === 1 || idle.kind === 2 || idle.kind === 3 ? { il: idle.kind as 1 | 2 | 3, ic: round(Math.min(600, idle.clock)) } : {}),
@@ -1990,8 +2101,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
       // Buttons inside the overlay (export/import) must not start the game.
       if ((e.target as HTMLElement | null)?.closest('[data-no-play]')) return;
       if (!session.ready) return;
-      audio.resume();
-      input.lock();
+      beginPlay();
     },
     { signal },
   );
@@ -2000,10 +2110,10 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     if (!loadingEl?.classList.contains('ready')) return;
     // (a browser shortcut or a modifier on its own is not a way in)
     if (e instanceof KeyboardEvent && (e.ctrlKey || e.metaKey || e.altKey || /^(Shift|Control|Alt|Meta|F\d+)/.test(e.code))) return;
-    audio.resume();
-    void input.lock().then((ok) => {
-      if (!ok && !input.locked) overlay.style.display = 'flex'; // still refused: fall back to the pause screen
-      hideLoading();
+    beginPlay((ok) => {
+      // A refused mouse stays on this button. The pause menu is what Escape opens, once the mouse is actually held.
+      if (ok || input.locked) hideLoading();
+      else loadingEl.classList.add('ready');
     });
   };
   loadingEl?.addEventListener('click', enterNow, { signal });
@@ -2028,14 +2138,22 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
       if (input.locked || !session.ready || windowOpen() || overlay.style.display !== 'none') return;
       if (loadingEl && !loadingEl.classList.contains('gone')) return;
       if ((e.target as HTMLElement | null)?.closest('button, input, select, textarea, a, #overlay, #menu-screen, #quest-log, #codex-window, #social-window, #party-window, #loading-screen, #home-layer')) return;
-      audio.resume();
-      void input.lock();
+      beginPlay();
     },
     { signal },
   );
   document.addEventListener(
     'pointerlockchange',
     () => {
+      // Fullscreen drops the mouse on its own. That is not Escape, so it does not open the menu; the mouse is taken back.
+      if ((screenHandoff || performance.now() < entryGrace) && !input.escapeJustNow()) {
+        overlay.style.display = 'none';
+        if (!input.locked && entryRelocks < 10) {
+          entryRelocks += 1;
+          void input.lock();
+        }
+        return;
+      }
       if (!input.locked) unlockedAt = performance.now();
       // Escape gives up the shape being marked with the Surveyor (a window, the inventory or the chat taking the mouse does not).
       const gaveUp = !input.locked && document.hasFocus() && !document.hidden && land.onUnlock(windowOpen());
@@ -2068,6 +2186,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     },
     { signal },
   );
+  window.addEventListener('pagehide', () => void restorePage(), { signal });
   window.addEventListener(
     'beforeunload',
     () => {
