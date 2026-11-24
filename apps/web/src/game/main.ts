@@ -361,6 +361,8 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   }
   let remote: RemoteSession | null = null;
   let voice: VoiceChat | null = null;
+  /** Set once the world's sound exists. Voice is opened earlier, while connecting, and reads this when you talk. */
+  let gameAudio: GameAudio | null = null;
   /** The server says admin mode is on: the block under the crosshair is described next to it. */
   let adminMode = false;
   let onlineError: string | null = null;
@@ -419,7 +421,13 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
           if (document.pointerLockElement) document.exitPointerLock();
         },
       }, myClass);
-      voice = new VoiceChat((pcm) => remote?.talk(pcm));
+      voice = new VoiceChat(
+        (pcm) => remote?.talk(pcm),
+        () => {
+          gameAudio?.resume();
+          return gameAudio?.context() ?? null;
+        },
+      );
       useUi.setState({ voiceLive: true });
     } catch (err) {
       chat.dispose();
@@ -551,6 +559,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   let campfireSmoke = 0;
   scene.add(torchGlow.group);
   const audio = new GameAudio();
+  gameAudio = audio;
 
   const drops = new ItemEntities(icons, (id) => hand.dropModel(id));  scene.add(drops.group);
   const campfireFood = new CampfireFood((id) => hand.dropModel(id), (x, y, z) => world.getBlock(x, y, z));

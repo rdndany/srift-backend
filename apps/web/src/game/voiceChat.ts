@@ -1,3 +1,35 @@
+/**
+ * Reads the microphone on the audio thread and hands 2048 samples at a time to the page. A silent graph is never
+ * pulled, so the output is a tone far below hearing and the node stays connected to the speakers.
+ */
+const WORKLET = `class SolriftMic extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.buf = new Float32Array(2048);
+    this.n = 0;
+  }
+  process(inputs, outputs) {
+    const ch = inputs[0] && inputs[0][0];
+    if (ch) {
+      let i = 0;
+      while (i < ch.length) {
+        const take = Math.min(2048 - this.n, ch.length - i);
+        this.buf.set(ch.subarray(i, i + take), this.n);
+        this.n += take;
+        i += take;
+        if (this.n === 2048) {
+          this.port.postMessage(this.buf.slice(0));
+          this.n = 0;
+        }
+      }
+    }
+    const out = outputs[0] && outputs[0][0];
+    if (out && out.length) out[0] = 0.00001;
+    return true;
+  }
+}
+registerProcessor('solrift-mic', SolriftMic);`;
+
 /** Quiet by this far, so a step across the line does not cut in and out. Full volume when they are beside you. */
 const DROP = 46;
 /** What is sent: 16 kHz, one channel, 40 ms at a time. Short enough to talk over, small enough for the socket. */
@@ -26,9 +58,9 @@ interface Speaker {
  */
 export class VoiceChat {
   private mic: MediaStream | null = null;
-  private ctx: AudioContext | null = null;
-  private proc: ScriptProcessorNode | null = null;
-  private sink: GainNode | null = null;
+  private src: MediaStreamAudioSourceNode | null = null;
+  private node: AudioNode | null = null;
+  private worklet = false;
   private readonly speakers = new Map<number, Speaker>();
   /** Samples waiting to fill the next frame. */
   private pending: number[] = [];
@@ -36,11 +68,18 @@ export class VoiceChat {
   /** True while the microphone is on and sending. */
   on = false;
   private ticket = 0;
+  /** Frames already handed to the socket in this second, so a fast audio callback cannot get the connection closed. */
+  private sentAt = 0;
+  private sentN = 0;
   private readonly wake = (): void => {
-    void this.out().resume();
+    const ctx = this.out();
+    if (ctx && ctx.state === 'suspended') void ctx.resume();
   };
 
-  constructor(private readonly send: (pcm: string) => void) {
+  constructor(
+    private readonly send: (pcm: string) => void,
+    private readonly openAudio: () => AudioContext | null = () => null,
+  ) {
     window.addEventListener('pointerdown', this.wake);
     window.addEventListener('keydown', this.wake);
   }
@@ -62,10 +101,19 @@ export class VoiceChat {
         return null;
       }
       this.stopMic();
+      const ctx = this.out();
+      if (!ctx) {
+        next.getTracks().forEach((t) => t.stop());
+        return 'This browser has no microphone.';
+      }
+      if (ctx.state === 'suspended') await ctx.resume();
+      if (mine !== this.ticket) {
+        next.getTracks().forEach((t) => t.stop());
+        return null;
+      }
       this.mic = next;
       this.on = true;
-      await this.out().resume();
-      this.arm(next);
+      await this.arm(ctx, next);
       return null;
     } catch {
       if (mine !== this.ticket) return null;
@@ -79,8 +127,9 @@ export class VoiceChat {
     const samples = decodePcm(pcm);
     if (!samples) return;
     const ctx = this.out();
-    void ctx.resume();
-    const speaker = this.speaker(from, name);
+    if (!ctx) return;
+    if (ctx.state === 'suspended') void ctx.resume();
+    const speaker = this.speaker(ctx, from, name);
     const buffer = ctx.createBuffer(1, samples.length, RATE);
     const data = buffer.getChannelData(0);
     for (let i = 0; i < samples.length; i++) data[i] = samples[i] / 32768;
@@ -119,23 +168,20 @@ export class VoiceChat {
     window.removeEventListener('pointerdown', this.wake);
     window.removeEventListener('keydown', this.wake);
     this.stopMic();
-    void this.ctx?.close();
-    this.ctx = null;
     this.speakers.clear();
   }
 
-  private out(): AudioContext {
-    if (!this.ctx) this.ctx = new AudioContext();
-    return this.ctx;
+  /** The context the rest of the game is already playing through. A private one would stay silent and the browser would stop it. */
+  private out(): AudioContext | null {
+    return this.openAudio();
   }
 
-  private speaker(id: number, name: string): Speaker {
+  private speaker(ctx: AudioContext, id: number, name: string): Speaker {
     const had = this.speakers.get(id);
     if (had) {
       had.name = name;
       return had;
     }
-    const ctx = this.out();
     const gain = ctx.createGain();
     gain.gain.value = 0;
     gain.connect(ctx.destination);
@@ -144,54 +190,99 @@ export class VoiceChat {
     return speaker;
   }
 
-  private arm(stream: MediaStream): void {
-    const ctx = this.out();
+  private async arm(ctx: AudioContext, stream: MediaStream): Promise<void> {
     const src = ctx.createMediaStreamSource(stream);
-    const proc = ctx.createScriptProcessor(2048, 1, 1);
-    const sink = ctx.createGain();
-    sink.gain.value = 0;
+    this.src = src;
     this.pending = [];
     this.cursor = 0;
-    proc.onaudioprocess = (e) => {
-      if (!this.on) return;
-      const input = e.inputBuffer.getChannelData(0);
-      const step = e.inputBuffer.sampleRate / RATE;
-      let p = this.cursor;
-      const wait = this.pending;
-      while (p < input.length) {
-        const i = Math.floor(p);
-        const f = p - i;
-        const a = input[i] ?? 0;
-        const b = input[Math.min(input.length - 1, i + 1)] ?? a;
-        wait.push(a + (b - a) * f);
-        p += step;
-      }
-      this.cursor = p - input.length;
-      while (wait.length >= FRAME) {
-        const frame = wait.splice(0, FRAME);
-        const pcm = new Int16Array(FRAME);
-        for (let i = 0; i < FRAME; i++) {
-          const x = Math.max(-1, Math.min(1, frame[i]));
-          pcm[i] = x < 0 ? x * 0x8000 : x * 0x7fff;
+    try {
+      if (!ctx.audioWorklet) throw new Error('no worklet');
+      if (!this.worklet) {
+        const url = URL.createObjectURL(new Blob([WORKLET], { type: 'application/javascript' }));
+        try {
+          await ctx.audioWorklet.addModule(url);
+        } finally {
+          URL.revokeObjectURL(url);
         }
-        this.send(encodePcm(pcm));
+        this.worklet = true;
       }
+      if (!this.on) return;
+      const node = new AudioWorkletNode(ctx, 'solrift-mic', { numberOfInputs: 1, numberOfOutputs: 1 });
+      node.port.onmessage = (e: MessageEvent<Float32Array>) => {
+        if (this.on) this.take(e.data, ctx.sampleRate);
+      };
+      src.connect(node);
+      node.connect(ctx.destination);
+      this.node = node;
+    } catch {
+      try {
+        src.disconnect();
+      } catch {
+        // It was not connected yet.
+      }
+      if (!this.on) return;
+      this.armScript(ctx, src);
+    }
+  }
+
+  /** Older browsers: the same capture, pulled because the output is not silent and not muted. */
+  private armScript(ctx: AudioContext, src: MediaStreamAudioSourceNode): void {
+    const proc = ctx.createScriptProcessor(2048, 1, 1);
+    proc.onaudioprocess = (e) => {
+      const out = e.outputBuffer.getChannelData(0);
+      out[0] = 0.00001;
+      if (!this.on) return;
+      this.take(e.inputBuffer.getChannelData(0), e.inputBuffer.sampleRate);
     };
     src.connect(proc);
-    proc.connect(sink);
-    sink.connect(ctx.destination);
-    this.proc = proc;
-    this.sink = sink;
+    proc.connect(ctx.destination);
+    this.node = proc;
+  }
+
+  private take(input: Float32Array, sampleRate: number): void {
+    const step = sampleRate / RATE;
+    if (!Number.isFinite(step) || step <= 0) return;
+    let p = this.cursor;
+    const wait = this.pending;
+    while (p < input.length) {
+      const i = Math.floor(p);
+      const f = p - i;
+      const a = input[i] ?? 0;
+      const b = input[Math.min(input.length - 1, i + 1)] ?? a;
+      wait.push(a + (b - a) * f);
+      p += step;
+    }
+    this.cursor = p - input.length;
+    while (wait.length >= FRAME) {
+      const frame = wait.splice(0, FRAME);
+      const pcm = new Int16Array(FRAME);
+      for (let i = 0; i < FRAME; i++) {
+        const x = Math.max(-1, Math.min(1, frame[i]));
+        pcm[i] = x < 0 ? x * 0x8000 : x * 0x7fff;
+      }
+      this.emit(encodePcm(pcm));
+    }
+  }
+
+  private emit(pcm: string): void {
+    const now = performance.now();
+    if (now - this.sentAt > 1000) {
+      this.sentAt = now;
+      this.sentN = 0;
+    }
+    if (this.sentN >= 30) return;
+    this.sentN++;
+    this.send(pcm);
   }
 
   private stopMic(): void {
     this.on = false;
     this.mic?.getTracks().forEach((t) => t.stop());
     this.mic = null;
-    this.proc?.disconnect();
-    this.sink?.disconnect();
-    this.proc = null;
-    this.sink = null;
+    this.src?.disconnect();
+    this.node?.disconnect();
+    this.src = null;
+    this.node = null;
     this.pending = [];
   }
 }

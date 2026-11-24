@@ -168,6 +168,11 @@ export class GameAudio {
     if (this.ctx.state === 'suspended') void this.ctx.resume();
   }
 
+  /** The context footsteps and weather already play through, or null before the first click. Voice uses this so it is not a second, silent context the browser suspends. */
+  context(): AudioContext | null {
+    return this.ctx;
+  }
+
   /** The loudness the player chose (see settings.ts). Takes effect at once, or when sound starts. */
   setLevels(levels: Partial<{ master: number; effects: number; ambience: number; muted: boolean }>): void {
     this.levels = { ...this.levels, ...levels };
