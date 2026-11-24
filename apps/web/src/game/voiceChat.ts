@@ -59,7 +59,12 @@ interface Speaker {
 export class VoiceChat {
   private mic: MediaStream | null = null;
   private src: MediaStreamAudioSourceNode | null = null;
+  private shape: BiquadFilterNode | null = null;
   private node: AudioNode | null = null;
+  /** How loud the quiet room is. The gate opens above this, and follows it while nobody is talking. */
+  private floor = 0.003;
+  /** Frames still sent after the voice stops, so the end of a word is not cut off. */
+  private hang = 0;
   private worklet = false;
   private readonly speakers = new Map<number, Speaker>();
   /** Samples waiting to fill the next frame. */
@@ -92,7 +97,8 @@ export class VoiceChat {
       return null;
     }
     if (!navigator.mediaDevices?.getUserMedia) return 'This browser has no microphone.';
-    const audio: MediaTrackConstraints = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+    // voiceIsolation is Chrome's stronger cut of the room around the voice. A browser that does not know it ignores it.
+    const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true, voiceIsolation: true } as MediaTrackConstraints;
     if (deviceId) audio.deviceId = { ideal: deviceId };
     try {
       const next = await navigator.mediaDevices.getUserMedia({ audio });
@@ -195,6 +201,9 @@ export class VoiceChat {
     this.src = src;
     this.pending = [];
     this.cursor = 0;
+    this.floor = 0.003;
+    this.hang = 0;
+    const from = this.cleaned(ctx, src);
     try {
       if (!ctx.audioWorklet) throw new Error('no worklet');
       if (!this.worklet) {
@@ -211,22 +220,33 @@ export class VoiceChat {
       node.port.onmessage = (e: MessageEvent<Float32Array>) => {
         if (this.on) this.take(e.data, ctx.sampleRate);
       };
-      src.connect(node);
+      from.connect(node);
       node.connect(ctx.destination);
       this.node = node;
     } catch {
       try {
-        src.disconnect();
+        from.disconnect();
       } catch {
         // It was not connected yet.
       }
       if (!this.on) return;
-      this.armScript(ctx, src);
+      this.armScript(ctx, from);
     }
   }
 
+  /** Cut rumble below the voice. The browser's own suppressor runs first, on the microphone track. */
+  private cleaned(ctx: AudioContext, src: AudioNode): BiquadFilterNode {
+    const high = ctx.createBiquadFilter();
+    high.type = 'highpass';
+    high.frequency.value = 120;
+    high.Q.value = 0.7;
+    src.connect(high);
+    this.shape = high;
+    return high;
+  }
+
   /** Older browsers: the same capture, pulled because the output is not silent and not muted. */
-  private armScript(ctx: AudioContext, src: MediaStreamAudioSourceNode): void {
+  private armScript(ctx: AudioContext, src: AudioNode): void {
     const proc = ctx.createScriptProcessor(2048, 1, 1);
     proc.onaudioprocess = (e) => {
       const out = e.outputBuffer.getChannelData(0);
@@ -255,13 +275,26 @@ export class VoiceChat {
     this.cursor = p - input.length;
     while (wait.length >= FRAME) {
       const frame = wait.splice(0, FRAME);
+      const mute = this.closed(frame);
       const pcm = new Int16Array(FRAME);
       for (let i = 0; i < FRAME; i++) {
-        const x = Math.max(-1, Math.min(1, frame[i]));
+        const x = mute ? 0 : Math.max(-1, Math.min(1, frame[i]));
         pcm[i] = x < 0 ? x * 0x8000 : x * 0x7fff;
       }
       this.emit(encodePcm(pcm));
     }
+  }
+
+  /** A frame of room tone, not a voice. Stays open briefly after speech so the last syllable is kept. */
+  private closed(frame: number[]): boolean {
+    let sum = 0;
+    for (let i = 0; i < FRAME; i++) sum += frame[i] * frame[i];
+    const rms = Math.sqrt(sum / FRAME);
+    const loud = rms > Math.max(0.014, this.floor * 4);
+    if (!loud) this.floor = Math.min(0.012, this.floor * 0.92 + rms * 0.08);
+    if (loud) this.hang = 8;
+    else if (this.hang > 0) this.hang--;
+    return !loud && this.hang === 0;
   }
 
   private emit(pcm: string): void {
@@ -280,10 +313,14 @@ export class VoiceChat {
     this.mic?.getTracks().forEach((t) => t.stop());
     this.mic = null;
     this.src?.disconnect();
+    this.shape?.disconnect();
     this.node?.disconnect();
     this.src = null;
+    this.shape = null;
     this.node = null;
     this.pending = [];
+    this.floor = 0.003;
+    this.hang = 0;
   }
 }
 
