@@ -31,6 +31,8 @@ export interface MobLike {
   health?: number;
   maxHealth?: number;
   elite?: boolean;
+  /** Hunting someone. Absent, or false, when it is at rest. */
+  aggro?: boolean;
 }
 
 export interface ArrowLike {

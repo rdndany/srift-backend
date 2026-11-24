@@ -803,6 +803,19 @@ export class GameAudio {
     this.blip(2400, 0.8, 0.6, 0.05, 'highpass', 2);
   }
 
+  /**
+   * A Codex of Aurelion opening. Pages turn, a warm gold chord rises, and the piece of gear arrives on a bright bell
+   * with a short shower of sparks. Longer and lower than a jewel, so the two never sound like each other.
+   */
+  codex(): void {
+    this.blip(1400, 0.45, 0.09, 0.16, 'bandpass');
+    setTimeout(() => this.blip(700, 0.5, 0.16, 0.14, 'lowpass'), 50);
+    this.fmBell(349, 0.1, 1.6, 0.06, 1.5, 2, 0.5);
+    [523, 659, 784, 1047].forEach((hz, i) => this.fmBell(hz, 0.15 - i * 0.02, 1.55, 0.14 + i * 0.08, 2, 2.2, 0.62));
+    this.fmBell(1568, 0.16, 1.9, 0.5, 3.5, 3, 0.72);
+    this.glitter(2093, 6, 0.042, 0.56, 0.055, 2);
+  }
+
   /** What was crafted is ready: a soft, bright ding with a few sparkles after it. */
   crafted(): void {
     this.fmBell(1319, 0.18, 0.9, 0, 3.5, 3.5, 0.5);

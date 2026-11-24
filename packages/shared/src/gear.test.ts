@@ -22,6 +22,7 @@ import {
   gearModifiers,
   gearStack,
   gearSuffix,
+  gearRefuse,
   gearUsable,
   gearValue,
   swingRate,
@@ -267,6 +268,48 @@ describe('wearing it', () => {
     expect(gearUsable(makeStack(I.GREATSWORD, 1), null)).toBe(true);
     // A piece for anyone needs only the level.
     expect(gearUsable(piece(armorId(1, 'iron'), 1, 2, undefined, [['vit', 3]]), { id: 'mage', level: 2 })).toBe(true);
+    expect(gearRefuse(sword, { id: 'warrior', level: 3 })).toBe('Requires level 4.');
+    expect(gearRefuse(sword, { id: 'mage', level: 20 })).toBe('That is for a Warrior.');
+    expect(gearRefuse(makeStack(I.GREATSWORD, 1), null)).toBeNull();
+  });
+
+  it('stays in the bag below its level, and the armor it would have given does not count', () => {
+    const s = make('warrior');
+    for (let i = 0; i < 4; i++) s.armor.set(i, null);
+    const chest = piece(armorId(1, 'diamond'), 3, 20, 'warrior', [['ward', 8]]);
+    s.inventory.set(0, chest);
+    s.apply({ t: 'select', slot: 0 });
+    s.drainEvents();
+    s.equipHeld();
+    expect(s.armor.get(1)).toBeNull();
+    expect(s.inventory.get(0)?.gear?.l).toBe(20);
+    expect(s.drainEvents().some((e: SessionEvent) => e.t === 'toast' && e.text === 'Requires level 20.')).toBe(true);
+    s.apply({ t: 'inventory' });
+    s.apply({ t: 'click', slot: 0, button: 0 });
+    const menu = s.menu as { armorStart: number; cursor: ItemStack | null };
+    s.drainEvents();
+    s.apply({ t: 'click', slot: menu.armorStart + 1, button: 0 });
+    expect(s.armor.get(1)).toBeNull();
+    expect(menu.cursor?.gear?.l).toBe(20);
+    expect(s.drainEvents().some((e: SessionEvent) => e.t === 'toast' && e.text === 'Requires level 20.')).toBe(true);
+    s.armor.set(1, chest);
+    expect(s.defense).toBe(0);
+    s.addClassXp(999999);
+    expect(s.cls!.level).toBeGreaterThanOrEqual(20);
+    s.inventory.set(0, { ...chest });
+    s.armor.set(1, null);
+    s.apply({ t: 'select', slot: 0 });
+    s.equipHeld();
+    expect(s.armor.get(1)?.id).toBe(armorId(1, 'diamond'));
+    expect(s.defense).toBe(getItem(armorId(1, 'diamond')).armor!.defense);
+    // A plain diamond chestplate has no level to reach.
+    const low = make('warrior');
+    for (let i = 0; i < 4; i++) low.armor.set(i, null);
+    low.inventory.set(0, makeStack(armorId(1, 'diamond')));
+    low.apply({ t: 'select', slot: 0 });
+    low.equipHeld();
+    expect(low.armor.get(1)?.id).toBe(armorId(1, 'diamond'));
+    expect(low.defense).toBe(getItem(armorId(1, 'diamond')).armor!.defense);
   });
 
   it('adds nothing when not usable, and the key changes with what counts', () => {
@@ -300,19 +343,23 @@ describe('wearing it', () => {
     expect(s.cls!.stats.maxHealth).toBe(plain);
   });
 
-  it('a piece that asks for a higher level adds nothing until the level is reached', () => {
+  it('a piece that asks for a higher level comes off until the level is reached', () => {
     const s = make('warrior');
+    for (let i = 0; i < 4; i++) s.armor.set(i, null);
     const plain = s.cls!.stats.maxHealth;
-    s.armor.set(1, piece(armorId(1, 'iron'), 2, 3, undefined, [['vit', 20], ['might', 10]]));
+    const chest = piece(armorId(1, 'iron'), 2, 3, undefined, [['vit', 20], ['might', 10]]);
+    s.armor.set(1, chest);
     s.tick(idle());
+    expect(s.armor.get(1)).toBeNull();
     expect(s.cls!.stats.maxHealth).toBe(plain);
     s.cls!.addXp(1e6);
-    s.tick(idle());
     expect(s.cls!.level).toBeGreaterThanOrEqual(3);
-    const withGear = s.cls!.stats.maxHealth;
-    s.armor.set(1, null);
+    s.inventory.set(0, chest);
+    s.apply({ t: 'select', slot: 0 });
+    s.equipHeld();
     s.tick(idle());
-    expect(withGear).toBeGreaterThan(s.cls!.stats.maxHealth);
+    expect(s.armor.get(1)?.gear?.l).toBe(3);
+    expect(s.cls!.stats.maxHealth).toBeGreaterThan(plain);
   });
 
   it('a piece of another class adds nothing', () => {

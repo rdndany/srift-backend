@@ -116,6 +116,28 @@ describe('the monsters of the Gilded Tide', () => {
     expect(log.drops.every((d) => d.id === I.AURELION_CODEX)).toBe(true);
   });
 
+  it('fights back when it is hit, and does not run', () => {
+    const world = { getBlock: (_x: number, y: number) => (y < 0 ? B.STONE : y === 0 ? B.GRASS : B.AIR) };
+    const player = { x: 8.5, y: 1, z: 0.5, alive: true, invulnerable: false };
+    const rand = mulberry32(4);
+    const env: MobEnv = { world, player, daylight: 1, rand };
+    const hits: string[] = [];
+    const events: MobEvents = { hurtPlayer: (_a, _kx, _kz, source) => hits.push(source), explode: () => {}, sound: () => {}, drop: () => {} };
+    const mgr = new MobManager(rand);
+    const imp = mgr.spawn('gilt_imp', 2.5, 1, 0.5);
+    for (let i = 0; i < 40; i++) mgr.update(1 / 20, env, events);
+    expect(hits).toHaveLength(0);
+    expect(imp.fleeTimer).toBe(0);
+    mgr.damage(imp, 4, 1, 0, events, true, false, true);
+    expect(imp.aggro).toBe(true);
+    expect(imp.fleeTimer).toBe(0);
+    player.x = imp.body.x + 0.7;
+    player.z = imp.body.z;
+    for (let i = 0; i < 40; i++) mgr.update(1 / 20, env, events);
+    expect(hits).toContain('gilt_imp');
+    expect(imp.fleeTimer).toBe(0);
+  });
+
   it('are not kept in a save', () => {
     const mgr = new MobManager(mulberry32(1));
     const imp = mgr.spawn('gilt_imp', 4.5, 1, 4.5);
@@ -529,7 +551,7 @@ describe('the Codex of Aurelion', () => {
     expect(pieces(s)).toHaveLength(0);
     s.apply({ t: 'click', slot, button: 1 });
     expect(menu.cursor).toBeNull();
-    expect(s.inventory.get(12)).toBeNull();
+    expect(s.inventory.get(12)?.gear?.r).toBe(3);
     expect(pieces(s)).toHaveLength(1);
   });
 
@@ -553,5 +575,41 @@ describe('the Codex of Aurelion', () => {
     s.inventory.set(0, makeStack(I.BOOK, 1));
     expect(s.openCodex(0)).toBe(false);
     expect(s.openCodex(5)).toBe(false);
+  });
+
+  it('puts the piece in the slot the book left empty', () => {
+    const s = make('warrior');
+    s.inventory.set(12, makeStack(I.AURELION_CODEX, 1));
+    s.drainEvents();
+    expect(s.openCodex(12)).toBe(true);
+    expect(s.inventory.get(12)?.gear?.r).toBe(3);
+    expect(s.realm.drops.drops).toHaveLength(0);
+    expect(s.drainEvents().some((e) => e.t === 'codex')).toBe(true);
+  });
+
+  it('throws the piece when the bags have no empty slot', () => {
+    const s = make('mage');
+    for (let i = 0; i < s.inventory.size; i++) if (s.inventory.isUsable(i)) s.inventory.set(i, makeStack(B.COBBLE, 64));
+    s.inventory.set(4, makeStack(I.AURELION_CODEX, 2));
+    s.drainEvents();
+    expect(s.openCodex(4)).toBe(true);
+    expect(s.inventory.get(4)?.id).toBe(I.AURELION_CODEX);
+    expect(s.inventory.get(4)?.count).toBe(1);
+    expect(pieces(s)).toHaveLength(0);
+    expect(s.realm.drops.drops.map((d) => d.stack.gear?.r)).toEqual([3]);
+    expect(s.drainEvents().some((e) => e.t === 'codex')).toBe(true);
+  });
+
+  it('opens one onto the ground when the book is thrown, and leaves the rest of the stack', () => {
+    const s = make('ranger');
+    s.inventory.set(0, makeStack(I.AURELION_CODEX, 3));
+    s.drainEvents();
+    s.apply({ t: 'drop', all: true });
+    expect(s.inventory.get(0)?.count).toBe(2);
+    expect(s.realm.drops.drops).toHaveLength(1);
+    expect(s.realm.drops.drops[0].stack.id).not.toBe(I.AURELION_CODEX);
+    expect(s.realm.drops.drops[0].stack.gear?.r).toBe(3);
+    const heard = s.drainEvents().filter((e) => e.t === 'codex');
+    expect(heard).toEqual([{ t: 'codex', slot: -1 }]);
   });
 });

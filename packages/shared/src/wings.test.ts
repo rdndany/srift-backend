@@ -44,6 +44,7 @@ function make() {
     }
   const s = new GameSession({ seed: 1337, world, generator, naturalSpawning: false, rand: mulberry32(5), mode: 'survival', classId: 'mage' });
   s.finishLoading();
+  s.cls!.level = 20;
   s.teleport(8.5, 101, 8.5, 0, 0);
   s.drainEvents();
   return s;
@@ -154,6 +155,23 @@ describe('the wing slot', () => {
     expect(s.inventory.get(0)).toBeNull();
     expect(p(s).wingNumber).toBe(1);
     expect(toasts(s).join(' ')).toContain('Cinderwings on your back');
+  });
+
+  it('stays in the bag below level 20, and a pair already worn comes off and gives nothing', () => {
+    const s = make();
+    s.cls!.level = 1;
+    const id = wingItemId('cinderwings');
+    s.inventory.set(0, makeStack(id, 1));
+    s.apply({ t: 'select', slot: 0 });
+    s.drainEvents();
+    s.tick(idle({ right: true }));
+    expect(s.wingSlot.get(0)).toBeNull();
+    expect(s.inventory.get(0)?.id).toBe(id);
+    expect(toasts(s).join(' ')).toContain('Requires level 20');
+    s.wingSlot.set(0, makeStack(id, 1));
+    expect(p(s).wingMight).toBe(1);
+    s.tick(idle());
+    expect(s.wingSlot.get(0)).toBeNull();
   });
 
   it('swaps with the pair that is there when a right-click in the bags puts another on', () => {

@@ -180,5 +180,9 @@ describe('the camera on the wire', () => {
     expect(parseNetInput({ ...base, cam: [4, 5, 6] })?.cam).toEqual([4, 5, 6]);
     expect(parseNetInput({ ...base, cam: [4, 5] })?.cam).toBeUndefined();
     expect(parseNetInput(base)).not.toBeNull();
+    expect(parseNetInput({ ...base, il: 2, ic: 1.25 })).toMatchObject({ il: 2, ic: 1.25 });
+    expect(parseNetInput({ ...base, il: 4, ic: 1 })).not.toHaveProperty('il');
+    expect(parseNetInput({ ...base, il: 1, ic: 900 })).toMatchObject({ il: 1 });
+    expect(parseNetInput({ ...base, il: 1, ic: 900 })).not.toHaveProperty('ic');
   });
 });

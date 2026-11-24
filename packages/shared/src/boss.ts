@@ -496,6 +496,9 @@ export class BossBrain {
     m.damageMul = 1;
     m.hasteMul = 1;
     m.aggro = false;
+    m.evade = false;
+    m.threat.clear();
+    m.tank = null;
     m.path = null;
     m.body.x = this.arena.home.x;
     m.body.y = this.arena.home.y;

@@ -230,8 +230,8 @@ describe('abilities', () => {
         expect(getItem(a.icon)).toBeTruthy();
         expect(abilityAt(id, a.slot)).toBe(a);
       }
-      // a new character can start learning straight away: at least two of the books need no level
-      expect(list.filter((a) => a.unlockLevel === 1).length).toBeGreaterThanOrEqual(2);
+      // a new character can start with one book; the other three wait for level 10, 20 and 30
+      expect(list.map((a) => a.unlockLevel)).toEqual([1, 10, 20, 30]);
     }
   });
 
@@ -319,10 +319,10 @@ describe('the class state', () => {
         expect(s.unlocked.has(a.id)).toBe(a.unlockLevel <= 1);
       }
       const s = new ClassState('warrior');
-      s.addXp(totalXpFor(3));
-      expect(s.level).toBe(3);
-      expect(s.learn('iron_defense')).toBe('level');
+      s.addXp(totalXpFor(20));
+      expect(s.level).toBe(20);
       expect(s.learn('charge')).toBe('learned');
+      expect(s.learn('iron_defense')).toBe('level');
     });
 
     it('is not what a level does: reaching one never teaches anything', () => {
@@ -402,10 +402,11 @@ describe('the class state', () => {
     const big = s.addXp(totalXpFor(3) - totalXpFor(2) + 5);
     expect(big.levels).toBe(1);
     expect(s.xp).toBe(5);
-    s.addXp(totalXpFor(5) - totalXpFor(3));
-    expect(s.level).toBe(5);
+    s.addXp(totalXpFor(20) - totalXpFor(3));
+    expect(s.level).toBe(20);
     expect(s.unlocked.size).toBe(0);
-    expect(s.learn('rain_of_arrows')).toBe('learned'); // its book can be read now
+    expect(s.learn('bear_trap')).toBe('learned'); // its book can be read now
+    expect(s.learn('rain_of_arrows')).toBe('level');
   });
 
   it('stops at the cap and ignores bad amounts', () => {
@@ -512,16 +513,17 @@ describe('the class state', () => {
 
   describe('being saved', () => {
     it('keeps the level, experience and unlocked abilities, and nothing about money or timers', () => {
-      const s = stateAt('mage', 6);
+      const s = stateAt('mage', 20);
       s.addXp(7);
       s.commit('fireball');
       const save = s.toJSON();
-      expect(save).toEqual({ v: 1, id: 'mage', lvl: 6, xp: 7, unlocked: expect.arrayContaining(['fireball', 'frost_nova', 'meteor', 'arcane_shield']) });
+      expect(save).toEqual({ v: 1, id: 'mage', lvl: 20, xp: 7, unlocked: expect.arrayContaining(['fireball', 'frost_nova', 'meteor']) });
+      expect(save.unlocked).not.toContain('arcane_shield');
       expect(Object.keys(save).sort()).toEqual(['id', 'lvl', 'unlocked', 'v', 'xp']);
       expect(JSON.stringify(save)).not.toMatch(/sol|wallet|balance|token|price/i);
       const back = new ClassState('mage');
       back.load(JSON.parse(JSON.stringify(save)));
-      expect(back.level).toBe(6);
+      expect(back.level).toBe(20);
       expect(back.xp).toBe(7);
       expect([...back.unlocked].sort()).toEqual([...s.unlocked].sort());
       expect(back.resource).toBe(back.stats.maxResource);

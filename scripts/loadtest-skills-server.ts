@@ -26,7 +26,7 @@ setInterval(() => {
   for (const m of server.room.members.values()) {
     const cls = m.player.cls;
     if (!cls) continue;
-    for (const a of ABILITIES) if (a.classId === cls.classId) cls.learn(a.id);
+    for (const a of ABILITIES) if (a.classId === cls.classId) cls.unlocked.add(a.id);
     cls.resource = 1e6;
   }
 }, 500);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { B, BAG_SLOTS, bagId, bagInventory, bagRoom, Container, HOTBAR_SLOTS, I, makeStack, organizeInventory, parseSessionMessage, PLAYER_SLOTS, toolId } from './index';
+import { B, BAG_SLOTS, bagId, bagInventory, bagRoom, Container, HOTBAR_SLOTS, I, makeStack, depositMatching, organizeContainer, organizeInventory, parseSessionMessage, PLAYER_SLOTS, toolId } from './index';
 
 const SWORD = toolId('sword', 'iron');
 const PICK = toolId('pickaxe', 'iron');
@@ -119,5 +119,61 @@ describe('organize', () => {
 describe('the organize command', () => {
   it('is understood by the protocol', () => {
     expect(parseSessionMessage({ t: 'organize' })).toEqual({ t: 'organize' });
+    expect(parseSessionMessage({ t: 'chestAct', a: 'organize' })).toEqual({ t: 'chestAct', a: 'organize' });
+    expect(parseSessionMessage({ t: 'chestAct', a: 'deposit' })).toEqual({ t: 'chestAct', a: 'deposit' });
+    expect(parseSessionMessage({ t: 'chestAct', a: 'take' })).toBeNull();
+  });
+});
+
+describe('a chest or a stash', () => {
+  it('merges and sorts its own slots', () => {
+    const box = new Container(9);
+    box.set(6, makeStack(I.APPLE, 10));
+    box.set(1, makeStack(B.STONE, 4));
+    box.set(4, makeStack(I.APPLE, 10));
+    expect(organizeContainer(box)).toBe(true);
+    expect(box.get(0)).toMatchObject({ id: I.APPLE, count: 20 });
+    expect(box.get(1)).toMatchObject({ id: B.STONE, count: 4 });
+    expect(box.get(2)).toBeNull();
+    expect(box.countOf(I.APPLE)).toBe(20);
+  });
+
+  it('moves a carried item in when the container already holds that item', () => {
+    const bags = new Container(36);
+    const box = new Container(9);
+    bags.set(0, makeStack(I.APPLE, 5));
+    bags.set(12, makeStack(I.BREAD, 3));
+    bags.set(20, makeStack(I.APPLE, 8));
+    box.set(3, makeStack(I.APPLE, 10));
+    expect(depositMatching(bags, box)).toBe(true);
+    expect(box.countOf(I.APPLE)).toBe(23);
+    expect(bags.countOf(I.APPLE)).toBe(0);
+    expect(bags.get(12)).toMatchObject({ id: I.BREAD, count: 3 });
+  });
+
+  it('leaves a carried item where it is when the container does not hold it, and when nothing more fits', () => {
+    const bags = new Container(9);
+    const box = new Container(1);
+    bags.set(2, makeStack(I.BREAD, 4));
+    bags.set(3, makeStack(I.APPLE, 40));
+    box.set(0, makeStack(I.APPLE, 40));
+    expect(depositMatching(bags, box)).toBe(true);
+    expect(box.get(0)).toMatchObject({ id: I.APPLE, count: 64 });
+    expect(bags.get(3)).toMatchObject({ id: I.APPLE, count: 16 });
+    expect(bags.get(2)).toMatchObject({ id: I.BREAD, count: 4 });
+    expect(depositMatching(bags, new Container(9))).toBe(false);
+  });
+
+  it('moves another of the same item even when the two cannot share a stack', () => {
+    const bags = new Container(9);
+    const box = new Container(4);
+    const sword = toolId('sword', 'iron');
+    bags.set(1, makeStack(sword, 1, 10));
+    bags.set(2, makeStack(toolId('pickaxe', 'iron'), 1));
+    box.set(0, makeStack(sword, 1, 0));
+    expect(depositMatching(bags, box)).toBe(true);
+    expect(box.countOf(sword)).toBe(2);
+    expect(bags.get(1)).toBeNull();
+    expect(bags.get(2)?.id).toBe(toolId('pickaxe', 'iron'));
   });
 });

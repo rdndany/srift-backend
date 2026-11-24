@@ -27,9 +27,10 @@ export function torchView(item: ItemDef, kit: HeldKit): HeldView {
   const group = new THREE.Group();
   group.add(kit.models.sprite(item.tile));
   group.add(kit.models.torchFlame());
-  group.rotation.set(0.05, 0.3, 0);
-  group.scale.setScalar(0.4);
-  // In the off hand the handle runs off the bottom of the view, so it is held, not floating (see OFF_HELD).
+  // The same hold as the off hand, mirrored: the handle runs down out of the fist and the flame stays up.
+  group.rotation.set(0.05, 0.45, -OFF_HELD.lean);
+  group.position.set(0, OFF_HELD.at[1], 0);
+  group.scale.setScalar(OFF_HELD.scale);
   return { object: group, rest: new THREE.Vector3(0.66, -0.32, -0.75), off: OFF_HELD };
 }
 

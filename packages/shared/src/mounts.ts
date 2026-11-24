@@ -23,7 +23,7 @@ export interface MountDef {
   speed: number;
   /** How hard its two skills hit, compared with the crimson one's (1). */
   power: number;
-  /** The level (class level, else the experience level) needed to learn it. */
+  /** The level (class level, else the experience level) needed to put the horn in the slot and to summon it. */
   level: number;
   /** What the stablemaster asks for the horn, in Auren. */
   price: number;
@@ -39,7 +39,7 @@ export const MOUNTS: readonly MountDef[] = [
     horn: 'Horn of Fenrir',
     speed: 1.6,
     power: 1,
-    level: 8,
+    level: 30,
     price: 600,
     blurb: 'A great wolf in crimson armour. It runs down the road faster than anything on two legs.',
   },
@@ -49,7 +49,7 @@ export const MOUNTS: readonly MountDef[] = [
     horn: 'Horn of the Black Fenrir',
     speed: 1.8,
     power: 1.25,
-    level: 14,
+    level: 30,
     price: 1800,
     blurb: 'Fenrir in black plate, the fur of its legs gone dark. Faster than the crimson one, and meaner to look at.',
   },
@@ -59,7 +59,7 @@ export const MOUNTS: readonly MountDef[] = [
     horn: 'Horn of the Blue Fenrir',
     speed: 1.8,
     power: 1.25,
-    level: 14,
+    level: 30,
     price: 1800,
     blurb: 'Fenrir in cold blue steel. The Rift is said to have forged the plate that never rusts.',
   },
@@ -69,7 +69,7 @@ export const MOUNTS: readonly MountDef[] = [
     horn: 'Horn of the Golden Fenrir',
     speed: 2,
     power: 1.6,
-    level: 20,
+    level: 30,
     price: 5000,
     blurb: 'Fenrir in gold, with a mane of light. Twice as fast as walking: the best mount there is.',
   },

@@ -46,6 +46,10 @@ export interface InputFrame {
   left: boolean;
   /** Secondary button: use, place, eat, draw the bow. */
   right: boolean;
+  /** The idle the player's own figure is drawing: 1 sitting, 2 stretching, 3 looking around. Left out when it is just standing. */
+  il?: 1 | 2 | 3;
+  /** Seconds into that idle. */
+  ic?: number;
 }
 
 export const MAX_FRAME_DT = 0.1;
@@ -68,6 +72,8 @@ export type Command =
   | { t: 'shift'; slot: number }
   /** The Organize button of the inventory: merge and sort the backpack and each worn bag (not the hotbar). */
   | { t: 'organize' }
+  /** A chest's Organize (merge and sort it) or Deposit (move matching items out of the bags into it). */
+  | { t: 'chestAct'; a: 'organize' | 'deposit' }
   /** Recipe book: fill the crafting grid with recipe `index` (all = as many crafts as fit). */
   | { t: 'recipe'; index: number; all: boolean }
   /** Craft what is in the grid with the button: the forge for a piece with its jewels, a recipe otherwise (`all`: as many as the grid has the items for). */
@@ -233,6 +239,8 @@ export type SessionEvent =
   | { t: 'jewelDrop'; kind: 'dawn' | 'rift' | 'bloom'; vol: number }
   /** A skill book was read and the ability is now known. */
   | { t: 'learned'; ability: AbilityId }
+  /** A Codex of Aurelion opened and its piece of gear appeared (`slot` is where it landed in the bags, or -1 when it fell on the ground). */
+  | { t: 'codex'; slot: number }
   /** An ability was cast (the button, for the sound and the swing); a refused one is a toast instead. */
   | { t: 'cast'; slot: number }
   | { t: 'hurt' }
@@ -342,6 +350,9 @@ export function parseSessionMessage(raw: unknown): SessionMessage | null {
       const strafe = num(raw.strafe);
       if (dt === null || yaw === null || pitch === null || forward === null || strafe === null) return null;
       for (const k of ['locked', 'jump', 'sprint', 'sneak', 'left', 'right'] as const) if (typeof raw[k] !== 'boolean') return null;
+      const il = num(raw.il);
+      const ic = num(raw.ic);
+      const idle = il === 1 || il === 2 || il === 3 ? { il: il as 1 | 2 | 3, ...(ic !== null && ic >= 0 && ic <= 600 ? { ic } : {}) } : {};
       return {
         t: 'frame',
         dt: clamp(dt, 0, MAX_FRAME_DT),
@@ -356,6 +367,7 @@ export function parseSessionMessage(raw: unknown): SessionMessage | null {
         sneak: raw.sneak as boolean,
         left: raw.left as boolean,
         right: raw.right as boolean,
+        ...idle,
       };
     }
     case 'select': {
@@ -377,6 +389,8 @@ export function parseSessionMessage(raw: unknown): SessionMessage | null {
     case 'organize':
     case 'wake':
       return { t: raw.t };
+    case 'chestAct':
+      return raw.a === 'organize' || raw.a === 'deposit' ? { t: 'chestAct', a: raw.a } : null;
     case 'forge':
       return { t: 'forge', all: raw.all === true };
     case 'creativeClear':
@@ -449,6 +463,7 @@ export function parseSessionMessage(raw: unknown): SessionMessage | null {
       return l ? { t: 'land', ...l } : null;
     }
     case 'stash': {
+      if (raw.a === 'organize' || raw.a === 'deposit') return { t: 'stash', a: raw.a };
       const count = whole(raw.count, 1, 64);
       if (count === null) return null;
       if (raw.a === 'put') {

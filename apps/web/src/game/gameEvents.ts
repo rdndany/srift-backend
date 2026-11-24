@@ -186,6 +186,16 @@ export function makeEventHandler(parts: EventParts): (events: SessionEvent[]) =>
         case 'jewelDrop':
           audio.jewelDrop(e.kind, e.vol);
           break;
+        case 'codex':
+          audio.codex();
+          if (e.slot >= 0) {
+            const n = (useUi.getState().gearGlow?.n ?? 0) + 1;
+            useUi.setState({ gearGlow: { n, slot: e.slot } });
+            setTimeout(() => {
+              if (useUi.getState().gearGlow?.n === n) useUi.setState({ gearGlow: null });
+            }, 1600);
+          }
+          break;
         case 'forgeStart':
           audio.forge(e.craft);
           break;

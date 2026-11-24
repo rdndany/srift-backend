@@ -493,6 +493,59 @@ describe('loopback transport', () => {
     expect(host.rejected).toBe(0);
   });
 
+  it('a swing in the air starts the arm the others see, and a bow does not', () => {
+    const { s } = make();
+    run(s, 1);
+    expect(s.swingAge).toBeGreaterThan(0.9);
+    s.inventory.set(0, makeStack(toolId('sword', 'iron')));
+    s.tick(idle({ left: true }));
+    expect(s.swingAge).toBe(0);
+    run(s, 0.2);
+    expect(s.swingAge).toBeGreaterThan(0.1);
+    expect(s.swingAge).toBeLessThan(0.3);
+    s.inventory.set(0, makeStack(I.BOW));
+    run(s, 0.5, { left: true });
+    expect(s.swingAge).toBeGreaterThan(0.4);
+  });
+
+  it('a drawn bow and an off-hand stab are what the others see, and a monster close by squares the stance', () => {
+    const { s } = make();
+    run(s, 0.5);
+    s.inventory.set(0, makeStack(I.BOW));
+    s.inventory.set(1, makeStack(I.ARROW, 16));
+    s.offhand.set(0, makeStack(I.DAGGER));
+    s.tick(idle({ left: true }));
+    expect(s.showStab).toBe(0);
+    expect(s.swingAge).toBeGreaterThan(0.4);
+    run(s, 0.15, { left: true });
+    expect(s.showStab).toBeGreaterThan(0.05);
+    expect(s.showStab).toBeLessThan(0.3);
+    run(s, 0.5, { right: true });
+    expect(s.bowDraw).toBeGreaterThan(0.2);
+    const drawn = s.showStab;
+    s.tick(idle({ left: true, right: true }));
+    expect(s.showStab).toBeGreaterThan(drawn);
+    s.offhand.set(0, null);
+    run(s, 0.5, { left: true });
+    expect(s.showStab).toBeGreaterThan(0.4);
+
+    expect(s.nearHostile()).toBe(false);
+    s.mobs.spawn('sheep', s.body.x + 2, s.body.y, s.body.z);
+    s.mobs.spawn('zombie', s.body.x + 20, s.body.y, s.body.z);
+    expect(s.nearHostile()).toBe(false);
+    const close = s.mobs.spawn('zombie', s.body.x + 3, s.body.y, s.body.z);
+    expect(s.nearHostile()).toBe(true);
+    close.dead = true;
+    expect(s.nearHostile()).toBe(false);
+  });
+
+  it('keeps the idle a player is drawing, and drops one that is not a sit, a stretch or a look', () => {
+    const base = { t: 'frame', dt: 0.05, locked: true, yaw: 0, pitch: 0, forward: 0, strafe: 0, jump: false, sprint: false, sneak: false, left: false, right: false };
+    expect(parseSessionMessage({ ...base, il: 1, ic: 2.5 })).toMatchObject({ il: 1, ic: 2.5 });
+    expect(parseSessionMessage({ ...base, il: 4, ic: 1 })).not.toHaveProperty('il');
+    expect(parseSessionMessage(base)).not.toHaveProperty('il');
+  });
+
   it('flush hands over events from outside the protocol', () => {
     const { s } = make();
     const seen: SessionEvent[] = [];

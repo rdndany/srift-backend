@@ -90,7 +90,14 @@ export function BossFrame() {
         <div className="bf-plate">
           <div className="bf-name">
             <b>{boss.name}</b>
-            <small>Boss · Phase {boss.phase}</small>
+            <span className="bf-name-side">
+              <span className="stance hot" title="In the fight">
+                <i />
+                <i />
+                <i />
+              </span>
+              <small>Boss · Phase {boss.phase}</small>
+            </span>
           </div>
           <div className="bf-hp" data-testid="boss-hp">
             <div className="bf-hp-fill" style={{ width: `${pct}%` }} />

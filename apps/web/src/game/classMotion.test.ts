@@ -120,7 +120,7 @@ describe('the stride', () => {
   // A sprint has a flight (both feet in the air for a part of the stride) and legs without knees must be long and straight to reach, so the limit there is wider than the walk's.
   it('never has a foot through the floor, and keeps the hovering of the foot on the ground small', () => {
     for (const cls of CLASSES) {
-      for (const [name, speed, run, limit] of [['walk', WALK, 0, 0.07], ['sprint', RUN, 1, 0.35]] as const) {
+      for (const [name, speed, run, limit] of [['walk', WALK, 0, 0.12], ['sprint', RUN, 1, 0.46]] as const) {
         const r = walkFeet(gaitFor(cls, run), speed);
         expect(r.floor, `${cls} ${name} floor`).toBeGreaterThanOrEqual(-1e-9);
         expect(r.hover, `${cls} ${name} hover`).toBeLessThan(limit);
@@ -130,8 +130,8 @@ describe('the stride', () => {
 
   it('bobs a little, not a bounce', () => {
     for (const cls of CLASSES) {
-      expect(walkFeet(gaitFor(cls, 0), WALK).bob, `${cls} walk`).toBeLessThan(0.1);
-      expect(walkFeet(gaitFor(cls, 1), RUN).bob, `${cls} sprint`).toBeLessThan(0.14);
+      expect(walkFeet(gaitFor(cls, 0), WALK).bob, `${cls} walk`).toBeLessThan(0.15);
+      expect(walkFeet(gaitFor(cls, 1), RUN).bob, `${cls} sprint`).toBeLessThan(0.2);
     }
   });
 

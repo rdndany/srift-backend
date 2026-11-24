@@ -14,7 +14,7 @@ export const EXHAUSTION = {
   regen: 3,
 } as const;
 
-export type DamageSource = 'fall' | 'drown' | 'starve' | 'mob' | 'explosion' | 'void' | 'lava' | 'cactus' | 'berry' | 'fire' | 'campfire' | 'anvil' | 'generic';
+export type DamageSource = 'fall' | 'drown' | 'starve' | 'mob' | 'player' | 'explosion' | 'void' | 'lava' | 'cactus' | 'berry' | 'fire' | 'campfire' | 'anvil' | 'generic';
 
 export interface VitalsContext {
   /** Head under water. */

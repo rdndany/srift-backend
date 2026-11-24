@@ -3,7 +3,7 @@ import { isLavaId } from './fluids';
 
 /**
  * Experience orbs: small glowing spheres that come out of a dying mob, a mined ore, a furnace or a bottle. They are not items:
- * they take no room in the bag, they drift toward any player close by and, once they touch one, turn into experience.
+ * they take no room in the bag. A kill's orbs drift to the player who earned them. Any other orb drifts to whoever is close, and once it touches them it turns into experience.
  */
 export interface XpOrb {
   id: number;
@@ -22,6 +22,11 @@ export interface XpOrb {
   phase: number;
   /** It is flying in to a player (not lying about). */
   flying?: boolean;
+  /**
+   * Who a kill's experience belongs to. Set for orbs from a mob a player killed. Unset for an ore, a furnace,
+   * a bottle or a trade. Only that player sees them, and only they are drawn in.
+   */
+  owner?: unknown;
 }
 
 /** A player that can absorb orbs. */
@@ -33,6 +38,8 @@ export interface XpCollector {
   alive: boolean;
   /** An orb reached the player: this much experience. */
   take(value: number): void;
+  /** The player this is, so a kill's experience can be kept for them. */
+  ref?: unknown;
 }
 
 /** The values an orb is worth at each of its eleven sizes (size 0 is the smallest), as in the original. */
@@ -88,7 +95,7 @@ export class XpOrbWorld {
   }
 
   /** Let this much experience out at a place, as one orb or several, flung a little in every direction. */
-  spawn(amount: number, x: number, y: number, z: number): void {
+  spawn(amount: number, x: number, y: number, z: number, owner?: unknown): void {
     for (const value of splitXp(amount)) {
       const a = this.rand() * Math.PI * 2;
       const sp = 0.6 + this.rand() * 1.6;
@@ -104,11 +111,13 @@ export class XpOrbWorld {
         age: 0,
         delay: 0.35,
         phase: this.rand() * Math.PI * 2,
+        ...(owner != null ? { owner } : {}),
       });
       if (this.orbs.length > MAX_XP_ORBS) {
-        // Too many about: the oldest melts into the newest, so the experience is kept.
+        // Too many about: the oldest melts into the newest of the same owner, so the experience is kept.
         const old = this.orbs.shift()!;
-        this.orbs[this.orbs.length - 1].value += old.value;
+        const pile = this.orbs[this.orbs.length - 1];
+        if (pile.owner === old.owner) pile.value += old.value;
       }
     }
   }
@@ -140,7 +149,7 @@ export class XpOrbWorld {
         let by = 0;
         let bz = 0;
         for (const c of collectors) {
-          if (!c.alive) continue;
+          if (!c.alive || (o.owner != null && c.ref !== o.owner)) continue;
           const dx = c.x - o.x;
           const dy = c.y + 0.9 - o.y;
           const dz = c.z - o.z;

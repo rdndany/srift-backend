@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { QuestLog, type MobKind, type BountyView, type BossView, type RiftView, type DungeonView, type AttrKey, type AuctionCommand, type AuctionView, type StashCommand, type StashView, type ClassView, type Container, type CreativeAmount, type GearRoll, type GearSpec, type ClassId, type MountView, type InspectView, type SocialAction, type SocialView, type TradeAct, type TradeView, type Menu, type MenuKind, type PartyAction, type PartyMemberView, type QuestLogJSON, type RecipeBook } from '@solrift/shared';
+import { QuestLog, type MobKind, type BountyView, type BossView, type RiftView, type DungeonView, type AttrKey, type AuctionCommand, type AuctionView, type StashCommand, type StashView, type ClassView, type Container, type CreativeAmount, type GearRoll, type GearSpec, type ClassId, type StatusView, type MountView, type InspectView, type SocialAction, type SocialView, type DuelAct, type TradeAct, type TradeView, type Menu, type MenuKind, type PartyAction, type PartyMemberView, type QuestLogJSON, type RecipeBook } from '@solrift/shared';
 import type { LandClaimView, LandDetail, LandPreview, LandPublicConfig, Perms } from '@solrift/shared';
 import type { ItemIcons } from '../game/icons';
 import type { MapData } from '../game/mapData';
@@ -29,6 +29,8 @@ export interface UiApi {
   shift(slot: number): void;
   /** The Organize button: merge and sort the backpack and each worn bag. */
   organize(): void;
+  /** A chest's Organize (merge and sort it) or Deposit (move matching items from the bags into it). */
+  chestAct(action: 'organize' | 'deposit'): void;
   /** Let go of the stack on the cursor outside the screen: it drops to the ground (all of it, or one). */
   dropCursor(all: boolean): void;
   /** The trash of the open screen: destroy the stack on the cursor (all of it, or one). */
@@ -78,10 +80,18 @@ export interface UiApi {
   whisper(name: string): void;
   /** A step of a trade between players: ask, answer, put things on the table, accept, cancel. */
   tradeAct(act: TradeAct): void;
+  /** Ask somebody to duel, or answer them. */
+  duelAct(act: DuelAct): void;
   /** Open the menu of a player (whisper, trade, invite...) at a place on screen, or close it. */
   openPlayerMenu(name: string, x: number, y: number): void;
   /** Close it; `relock` (the default) goes back to the game when no other window holds the mouse. */
   closePlayerMenu(relock?: boolean): void;
+  /** Turn your microphone on or off. People near you hear you only while it is on. With no argument it switches. `quiet` skips the chat line (a held key would write one every press). */
+  toggleVoice(on?: boolean, quiet?: boolean): void;
+  /** Whether you have silenced this player. */
+  voiceMuted(name: string): boolean;
+  /** Stop hearing this player, or hear them again. */
+  muteVoice(name: string): void;
   /** Finish writing a sign: its lines are sent to the server, or null leaves it as it was. Either way the editor closes. */
   signDone(lines: string[] | null): void;
   /** Use the ability on a button of the ability bar (0..3); the server decides whether it goes off. */
@@ -218,6 +228,8 @@ export interface MobTargetView {
   max: number;
   /** Shown a step above its kind (a strong one of a dungeon). */
   elite: boolean;
+  /** It is in a fight. False when it is at rest. */
+  aggro: boolean;
 }
 
 export interface UiState {
@@ -276,17 +288,25 @@ export interface UiState {
   social: SocialView | null;
   socialOpen: boolean;
   inspect: { name: string; view: InspectView | null } | null;
-  /** The player the crosshair rests on (it stays a few seconds after you look away), for the target frame. */
-  target: { name: string; cls?: ClassId; level?: number; guild?: string } | null;
+  /** The player the crosshair rests on (it stays a few seconds after you look away), for the target frame. `look` is their face. */
+  target: { name: string; cls?: ClassId; level?: number; guild?: string; look?: number; hp?: number; hm?: number; se?: StatusView[] } | null;
   /** The animal, monster or person the crosshair rests on (it stays a few seconds after you look away), for the target frame. */
   mobTarget: MobTargetView | null;
   /** The menu of a player, and where it is drawn. */
   playerMenu: { name: string; x: number; y: number } | null;
+  /** Online, and the microphone can be turned on. `voiceOn` is whether yours is sending. `voiceMuted` is who you will not hear (names in lower case). */
+  voiceLive: boolean;
+  voiceOn: boolean;
+  voiceMuted: string[];
   /** The board of a sign being written (its block and the four lines it says now), or null. */
   signEdit: { x: number; y: number; z: number; lines: string[] } | null;
   /** The trade you are in (the table), and who is asking you to trade. */
   trade: TradeView | null;
   tradeAsk: string | null;
+  /** Who is asking you to duel, the count in the middle of the screen, and whether the fight has started. */
+  duelAsk: string | null;
+  duelCount: number | 'start' | null;
+  dueling: boolean;
   /** The character's class state (null for a character without a class), and whether the class sheet (K) is open. */
   cls: ClassView | null;
   /** The boss being fought (its health bar, phase and the spell it gathers), and the last thing it said or the raid was warned of. */
@@ -310,6 +330,8 @@ export interface UiState {
   mount: MountView;
   /** What a jewel just did to the piece in this slot of the window (shown floating above it; `n` restarts it). */
   jewelFx: { n: number; slot: number; ok: boolean; kind: 'dawn' | 'rift' | 'bloom'; label: string; detail: string } | null;
+  /** The slot a Codex of Aurelion just filled (`slot` is the bag index; `n` restarts the glow). */
+  gearGlow: { n: number; slot: number } | null;
   /** The Runic Altar's last inscription that failed (the window flashes and says so; `n` counts them). */
   altarFail: { n: number } | null;
   /** The last named place entered (the banner shows it for a few seconds; `stamp` restarts it). */
@@ -380,9 +402,15 @@ export const useUi = create<UiState>()(() => ({
   target: null,
   mobTarget: null,
   playerMenu: null,
+  voiceLive: false,
+  voiceOn: false,
+  voiceMuted: [],
   signEdit: null,
   trade: null,
   tradeAsk: null,
+  duelAsk: null,
+  duelCount: null,
+  dueling: false,
   cls: null,
   boss: null,
   dungeon: null,
@@ -393,6 +421,7 @@ export const useUi = create<UiState>()(() => ({
   warmHud: false,
   mount: { mount: 0, pick: 0, cd: [0, 0] },
   jewelFx: null,
+  gearGlow: null,
   altarFail: null,
   zone: null,
   place: '',

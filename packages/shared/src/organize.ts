@@ -9,7 +9,7 @@ import { itemKind } from './tooltip';
  * player arranged it, and nothing is lost: the stacks only get fewer, so they always fit.
  */
 
-const KIND_ORDER = ['Equipment', 'Bag', 'Special', 'Skill Book', 'Glyph Tome', 'Food', 'Item', 'Nature', 'Block', 'Dye', 'Material'];
+const KIND_ORDER = ['Equipment', 'Bag', 'Quest item', 'Special', 'Skill Book', 'Glyph Tome', 'Food', 'Item', 'Nature', 'Block', 'Dye', 'Material'];
 
 const rank = (s: ItemStack): number => {
   const r = KIND_ORDER.indexOf(itemKind(s.id));
@@ -46,6 +46,41 @@ export function compareStacks(a: ItemStack, b: ItemStack): number {
 export function organizeInventory(inventory: Container): boolean {
   let changed = false;
   for (const slots of organizeGroups(inventory)) if (organizeSlotsOf(inventory, slots)) changed = true;
+  return changed;
+}
+
+/** Merge and sort every usable slot of a chest or a stash, the same way the bags are organized. Returns false when nothing moved. */
+export function organizeContainer(box: Container): boolean {
+  const slots: number[] = [];
+  for (let i = 0; i < box.size; i++) if (box.isUsable(i)) slots.push(i);
+  return organizeSlotsOf(box, slots);
+}
+
+/**
+ * Move stacks out of `from` into `into` when `into` already holds that item (an apple in both, the ones being carried go in).
+ * A stack that is already full spills into an empty slot. Two pieces that cannot share a stack, such as two swords, still both go in when there is room.
+ * What does not fit stays where it was. `reject` skips a stack (something the stash will not keep).
+ * Returns false when nothing moved.
+ */
+export function depositMatching(from: Container, into: Container, reject?: (stack: ItemStack) => boolean): boolean {
+  let changed = false;
+  for (let i = 0; i < from.size; i++) {
+    if (!from.isUsable(i)) continue;
+    const stack = from.get(i);
+    if (!stack || reject?.(stack)) continue;
+    let known = false;
+    for (let k = 0; k < into.size && !known; k++) {
+      const there = into.get(k);
+      if (there && there.id === stack.id) known = true;
+    }
+    if (!known) continue;
+    const moving = cloneStack(stack);
+    const left = into.add(moving);
+    const stay = left?.count ?? 0;
+    if (stay === stack.count) continue;
+    from.set(i, stay > 0 ? cloneStack({ ...stack, count: stay }) : null);
+    changed = true;
+  }
   return changed;
 }
 

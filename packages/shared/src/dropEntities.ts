@@ -17,6 +17,13 @@ export interface DropEntity {
   delay: number;
   /** Random offset for the bobbing animation. */
   phase: number;
+  /**
+   * Who a kill's drop belongs to. Set for loot a player earned (the mob they killed). Unset for anything else
+   * (a broken block, an item thrown, a chest). Only that player sees it and can pick it up, unless `share` is set.
+   */
+  owner?: unknown;
+  /** A party kill: the owner's party may see this and pick it up. Anyone else still cannot. */
+  share?: boolean;
 }
 
 /** A player who can pick drops up. picked counts items taken during an update. */
@@ -27,6 +34,10 @@ export interface DropCollector {
   canFit(s: ItemStack): boolean;
   collect(s: ItemStack): ItemStack | null;
   picked: number;
+  /** The player this is, so a kill's drop can be kept for them. */
+  ref?: unknown;
+  /** True when this player is in a party with the owner of a shared kill drop. */
+  sharesWith?(owner: unknown): boolean;
 }
 
 export const MAX_DROPS = 160;
@@ -51,9 +62,9 @@ export class DropWorld {
     return BLOCKS[this.blockAt(Math.floor(x), Math.floor(y), Math.floor(z))].solid;
   }
 
-  spawn(stack: ItemStack, x: number, y: number, z: number, vx = 0, vy = 3, vz = 0, delay = 0.5): void {
+  spawn(stack: ItemStack, x: number, y: number, z: number, vx = 0, vy = 3, vz = 0, delay = 0.5, owner?: unknown, share = false): void {
     if (stack.count <= 0) return;
-    this.drops.push({ id: this.nextId++, stack: cloneStack(stack), x, y, z, vx, vy, vz, age: 0, delay, phase: this.rand() * Math.PI * 2 });
+    this.drops.push({ id: this.nextId++, stack: cloneStack(stack), x, y, z, vx, vy, vz, age: 0, delay, phase: this.rand() * Math.PI * 2, ...(owner != null ? { owner } : {}), ...(share ? { share: true } : {}) });
     if (this.drops.length > MAX_DROPS) this.drops.splice(0, 1);
   }
 
@@ -80,7 +91,7 @@ export class DropWorld {
     return c.picked;
   }
 
-  /** Like `update`, for several players: each drop goes to the nearest one who can take it. */
+  /** Like `update`, for several players. A drop with an owner goes only to that player, or to their party when it is shared. Anything else goes to the nearest one who can take it. */
   updateMany(dt: number, collectors: readonly DropCollector[]): void {
     const step = Math.min(dt, 0.05);
     for (let i = this.drops.length - 1; i >= 0; i--) {
@@ -107,10 +118,11 @@ export class DropWorld {
       }
 
       // An item is picked up by walking onto it: it is not drawn in from a distance (orbs of experience are, items are not).
-      if (d.delay <= 0 && collectors.length > 0) {
-        let c = collectors[0];
+      const takers = d.owner == null ? collectors : collectors.filter((k) => k.ref === d.owner || (d.share === true && k.sharesWith?.(d.owner) === true));
+      if (d.delay <= 0 && takers.length > 0) {
+        let c = takers[0];
         let dist = Infinity;
-        for (const k of collectors) {
+        for (const k of takers) {
           const kd = Math.hypot(k.x - d.x, k.y + 0.9 - (d.y + 0.2), k.z - d.z);
           if (kd < dist) {
             c = k;

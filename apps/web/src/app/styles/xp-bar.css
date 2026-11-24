@@ -1,39 +1,40 @@
-/* Experience bar, drawn as pixel art at 2x like the rest of the HUD (the original is 182 x 5 px). */
+/* Experience bar: the same square glossy bar as health and food, in green. */
 #xp {
   position: relative;
   margin-top: 2px;
 }
 #xp-bar {
   position: relative;
-  height: 18px;
+  height: 20px;
   box-sizing: border-box;
-  padding: 2px;
-  background: #000;
-  image-rendering: pixelated;
-  /* Cut one pixel (2px) off each corner, like the original texture. */
-  clip-path: polygon(2px 0, calc(100% - 2px) 0, calc(100% - 2px) 2px, 100% 2px, 100% calc(100% - 2px), calc(100% - 2px) calc(100% - 2px), calc(100% - 2px) 100%, 2px 100%, 2px calc(100% - 2px), 0 calc(100% - 2px), 0 2px, 2px 2px);
+  padding: 0;
+  overflow: hidden;
+  background: linear-gradient(#1c2a14, #0c1408);
+  border: 2px solid #0c0606;
+  border-radius: 0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 2px 3px rgba(0, 0, 0, 0.45);
 }
 #xp-track {
-  position: relative;
-  height: 100%;
-  background: linear-gradient(#2a2a2a 0 2px, #4b4b4b 2px calc(100% - 2px), #6a6a6a calc(100% - 2px));
+  position: absolute;
+  inset: 0;
+  height: auto;
+  background: none;
 }
 #xp-fill {
   height: 100%;
-  background: linear-gradient(#d6ff7a 0 2px, #84e024 2px calc(100% - 2px), #3f8f10 calc(100% - 2px));
+  background: linear-gradient(#d6ff7a, #5cb818 46%, #2f6e0c);
+  box-shadow: inset 0 3px 0 rgba(255, 255, 255, 0.28), inset 0 -3px 0 rgba(0, 0, 0, 0.35);
 }
 /* At the level cap the bar is grey: it fills towards the next bottle o' enchanting instead of the next level. */
 #xp[data-max] #xp-fill {
-  background: linear-gradient(#e2e2e2 0 2px, #a4a4a4 2px calc(100% - 2px), #666 calc(100% - 2px));
+  background: linear-gradient(#f4f4f4, #b0b0b0 46%, #6a6a6a);
 }
-/* The level and points sit in the bar itself, like the label on the class resource bar below it. */
+/* The level and points sit in the bar itself, like the numbers on health and food. */
 #xp-label {
   position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
+  inset: 0;
   text-align: center;
-  font: 11px/18px 'Monocraft', 'Courier New', monospace;
+  font: 10px/16px 'Monocraft', 'Courier New', monospace;
   color: #fff;
   text-shadow: 1px 1px #000, -1px -1px #000, 1px -1px #000, -1px 1px #000;
   pointer-events: none;

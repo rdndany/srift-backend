@@ -95,6 +95,12 @@
   font-weight: 400;
   letter-spacing: 1px;
 }
+#boss-frame .bf-name-side {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
 #boss-frame .bf-name small {
   font-size: 10px;
   color: var(--boss);

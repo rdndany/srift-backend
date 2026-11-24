@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { B, BASH_ANIM, BED_DIRS, I, getItem, wingByNumber, type ArmorMaterial, type Carry, type OutfitClass, type OutfitDef, type WingDef } from '@solrift/shared';
+import { B, BASH_ANIM, BED_DIRS, I, getItem, wingByNumber, type ArmorMaterial, type Carry, type HeldLight, type OutfitClass, type OutfitDef, type WingDef } from '@solrift/shared';
 import type { EntityLight } from './entityLight';
 import { disposeMageGear, pulseMageGlow, type GearCtx, type MageRig } from './mageGear';
 import { dressMageSculpt } from './mageLook';
@@ -192,6 +192,18 @@ export function armorTexture(material: ArmorLook, hole = false, tone: ArmorTone 
 export function figureLoadout(held: number, offhand: number): { hand: number; shield: number } {
   if (held && getItem(held).shield) return { hand: offhand && !getItem(offhand).shield ? offhand : 0, shield: held };
   return { hand: held, shield: offhand };
+}
+
+/**
+ * The light a figure carries, and which hand it is in. The main hand wins. A shield in the main hand
+ * puts the off-hand item in the right hand, the same way `figureLoadout` does.
+ */
+export function heldLamp(held: number, offhand: number): { light: HeldLight; left: boolean; hang: boolean } | null {
+  const main = getItem(held);
+  if (main.heldLight) return { light: main.heldLight, left: false, hang: main.carry === 'hang' };
+  const off = getItem(offhand);
+  if (!off.heldLight) return null;
+  return { light: off.heldLight, left: !(held && main.shield), hang: off.carry === 'hang' };
 }
 
 /** The glow (a colour, or null) for what each hand of a figure carries, following `figureLoadout`: a shield in the main hand glows on the arm, the off-hand item in the hand. */
@@ -597,6 +609,8 @@ export class Character {
   private shieldIsShield = false;
   /** How the left hand carries what it holds, when that is not a shield. */
   private offSpec: OffCarry | null = null;
+  /** A torch in the right hand, held the same way as one in the left (null for anything else). */
+  private mainSpec: OffCarry | null = null;
   /** 0..1: how far the shield is raised. */
   private raise = 0;
 
@@ -1294,6 +1308,11 @@ export class Character {
     if (obj && color) addAura(obj, color);
   }
 
+  /** Where a carried torch or lantern burns, after this frame's pose. A torch is above the fist; a lantern hangs under the ring. */
+  gripLight(left: boolean, hang: boolean, out: THREE.Vector3): THREE.Vector3 {
+    return (left ? this.offMount : this.heldMount).localToWorld(out.set(0, hang ? -0.42 : 0.5, 0));
+  }
+
   /**
    * Hold an item in the right hand (id 0 = nothing). The model shares geometry and materials with the
    * first-person hand, so the character never disposes it.
@@ -1302,6 +1321,8 @@ export class Character {
     if (id === this.heldId) return;
     this.heldId = id;
     this.carry = getItem(id).carry;
+    this.mainSpec = id === B.TORCH ? OFF_CARRY.torch : null;
+    this.heldMount.scale.setScalar(this.mainSpec?.scale ?? 1);
     this.heldBlade = !!id && this.carry === 'hand' && (!!getItem(id).tool || getItem(id).weapon?.kind === 'melee');
     const use = id ? getItem(id).use : undefined;
     this.aimKind = use === 'bow' || use === 'crossbow' ? use : null;
@@ -1387,6 +1408,11 @@ export class Character {
       }
     } else {
       this.sw.arm = this.sw.out = this.sw.twist = this.sw.lunge = this.sw.elbow = this.sw.wrist = 0;
+      // A torch in this hand is carried like the one in the off hand: up in front, and it swings less.
+      if (this.mainSpec) {
+        const tW = (1 - this.wingW) * (1 - this.swimW) * (1 - 0.5 * wA);
+        right = -armSwing * (1 - tW * (1 - this.mainSpec.swing)) + this.mainSpec.arm * tW;
+      }
     }
     this.armR.rotation.x = right;
     // A staff or a wand is cast with its tip, so as the arm comes up it turns against it and ends up aimed forward (left alone it would turn
@@ -1508,7 +1534,10 @@ export class Character {
    * each is in (eased).
    */
   idleAfter = 30;
+  /** What this figure is doing while it stands (0 none, 1 sit, 2 stretch, 3 look around). */
   private idleKind = 0;
+  /** Another player's figure shows the idle they are actually drawing, and does not pick one of its own. */
+  manualIdle = false;
   private idleLast = 0;
   private idleT = 0;
   private idleClock = 0;
@@ -2329,14 +2358,22 @@ export class Character {
     const leftFree = this.shieldObj && this.shieldIsShield ? 0 : 1 - this.raise;
     // (A blow swung with a blade or a tool folds the forearm for the wind-up and straightens it for the strike.)
     const swim = this.swimW > 0 ? swimShape(this.swimPhase, 0) : null;
-    const fR = flexOf(this.armR) * rightFree * (this.heldId ? 0.75 : 1) + (this.armStruck ? this.sw.elbow : 0) + (swim ? swim.elbowR * this.swimW : 0);
+    const torch = this.mainSpec;
+    const tW = torch && !this.armStruck ? (1 - this.wingW) * (1 - this.swimW) * (1 - 0.5 * this.motion.combatArms) * (1 - eatK) : 0;
+    const fR = flexOf(this.armR) * rightFree * (this.heldId ? 0.75 : 1) * (1 - 0.5 * tW) + (this.armStruck ? this.sw.elbow : 0) + (swim ? swim.elbowR * this.swimW : 0) + (torch ? torch.elbow * tW : 0);
     const os = this.offSpec;
     const carryW = os ? (1 - this.wingW) * (1 - this.swimW) * (1 - 0.5 * this.motion.combatArms) : 0;
     const fL = flexOf(this.armL) * leftFree * (1 - 0.5 * carryW) + (os ? os.elbow * carryW : 0) + (swim ? swim.elbowL * this.swimW : 0);
     this.armR.bend(fR);
     this.armL.bend(fL);
-    // The hand turns back as the forearm comes up: the weapon points as it did.
-    if (this.heldId) this.heldMount.rotation.x -= fR;
+    // The hand turns back as the forearm comes up: the weapon points as it did. A torch is kept upright, mirrored from the off hand.
+    if (this.heldId && tW > 0 && torch) {
+      const upright = -(this.armR.rotation.x + fR) * torch.keep + torch.lean;
+      const normal = this.heldMount.rotation.x - fR;
+      this.heldMount.rotation.x = normal + (upright - normal) * tW;
+      this.heldMount.rotation.z = -torch.roll * tW;
+      this.armR.rotation.z -= torch.inward * tW;
+    } else if (this.heldId) this.heldMount.rotation.x -= fR;
     // (A thing carried is held as its kind asks: the turn of the forearm is taken back, so a torch stays upright however the arm swings.)
     if (os) {
       this.armL.rotation.z += os.inward * carryW;
@@ -2426,7 +2463,9 @@ export class Character {
         leg.rotation.x = target + (sp.x - target) * lag;
       }
     }
-    if (this.heldObj && !this.aimKind && this.carry !== 'hang') {
+    if (this.mainSpec && !this.armStruck && this.eatK < 0.98) {
+      // A torch stays as the elbow set it: upright, tipped out, the same as the off hand.
+    } else if (this.heldObj && !this.aimKind && this.carry !== 'hang') {
       // (A staff or a wand sways with the body, a blade less, it being held in the fist: it is left alone in a blow.)
       const k = (1 - Math.min(1, this.sw.arm * 2)) * (this.carry === 'hand' ? 0.6 : 1);
       this.heldMount.rotation.x += mo.second.weaponX * k;
@@ -2457,6 +2496,37 @@ export class Character {
     this.idleLast = kind || this.idleLast;
     this.idleClock = 0;
     this.idleT = Math.max(this.idleT, this.idleAfter);
+  }
+
+  /** The idle this figure is drawing, so other players can be shown the same one. */
+  get idleShow(): { kind: number; clock: number } {
+    return { kind: this.idleKind, clock: this.idleClock };
+  }
+
+  /** Drop a sit, a stretch or a look and start the wait over. */
+  stopIdle(): void {
+    this.idleKind = 0;
+    this.idleClock = 0;
+    this.idleT = 0;
+    this.idleWait = 0;
+  }
+
+  /**
+   * Show the idle the player themselves is drawing. `kind` 0 is just standing. The clock is theirs; it is taken when it
+   * is a different idle or has drifted.
+   */
+  followIdle(kind: number, clock: number): void {
+    this.manualIdle = true;
+    const k = kind === 1 || kind === 2 || kind === 3 ? kind : 0;
+    if (k === 0) {
+      this.idleKind = 0;
+      return;
+    }
+    if (k !== this.idleKind || Math.abs(this.idleClock - clock) > 0.35) {
+      this.idleKind = k;
+      this.idleClock = clock;
+      this.idleT = this.idleAfter;
+    }
   }
 
   /**
@@ -2565,8 +2635,10 @@ export class Character {
       this.idleT = 0;
       this.idleKind = 0;
       this.idleWait = 0;
+    } else if (this.manualIdle) {
+      if (this.idleKind !== 0) this.idleClock += dt;
     } else this.idleT += dt;
-    if (!busy && this.idleKind === 0 && this.idleT >= this.idleAfter) {
+    if (!this.manualIdle && !busy && this.idleKind === 0 && this.idleT >= this.idleAfter) {
       if (this.idleWait > 0) this.idleWait -= dt;
       else {
         // Not the same one twice in a row.
@@ -2581,7 +2653,7 @@ export class Character {
         this.idleClock = 0;
       }
     }
-    if (this.idleKind !== 0) {
+    if (!this.manualIdle && this.idleKind !== 0) {
       this.idleClock += dt;
       const len = this.idleKind === 2 ? this.motion.stretchSeconds || Character.STRETCH_TIME : this.idleKind === 3 ? Character.LOOK_TIME : Infinity;
       if (this.idleClock >= len) {

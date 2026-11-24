@@ -1,7 +1,7 @@
 import { B, BLOCKS, FALLS, IS_LEAVES, IS_LOG, SOUL_WARD_HEIGHT, SOUL_WARD_RADIUS, chestId, chestInfo, chestPartnerPos, doorId, doorInfo, doorKind, isAnvil, isChest, signInfo } from './blocks';
 import { WORLD_HEIGHT } from './chunk';
 import { LOOT_TABLES, positionRand, rollChest, spawnerKind } from './loot';
-import { bodyOverlapsBlock, type Solid } from './physics';
+import { PLAYER_HEIGHT, PLAYER_WIDTH, bodyOverlapsBlock, type Body, type Solid } from './physics';
 import { mobSolid, mobTouch } from './mobSolids';
 import { BlockEntities } from './blockEntities';
 import { DAY_LENGTH_SECONDS, daylightAt } from './daylight';
@@ -86,8 +86,10 @@ export const XP_AWARD_RANGE = 48;
 export const FOLK_LEAVE = 100;
 /** How far a quest giver may be from their station before they are put back. */
 export const NPC_LEASH = 2.5;
-/** A mob a player killed counts towards the quests of every player this close to where it died. */
+/** A mob a player killed counts towards the quests of every player this close to where it died. Party experience uses the same reach. */
 export const KILL_CREDIT_RANGE = 40;
+/** Each party member near a kill receives the experience times this (a fifth more than killing it alone). */
+export const PARTY_XP = 1.2;
 /** The villagers restock at dawn and again in the afternoon, as the original's (up to) twice a day. */
 const RESTOCK_AFTERNOON = 0.3;
 /** How far ordinary sounds and particles carry. */
@@ -360,34 +362,39 @@ export class Realm {
           if (vol > 0) p.emit({ t: 'mob', kind: mob.kind, sound, vol, x: mob.body.x, y: mob.body.y, z: mob.body.z });
         }
       },
-      drop: (d, x, y, z) => {
+      drop: (d, x, y, z, owner) => {
         const a = this.rand() * Math.PI * 2;
-        this.drops.spawn(makeStack(d.id, d.count), x, y, z, Math.cos(a) * 1.2, 3, Math.sin(a) * 1.2, 0.5);
+        this.drops.spawn(makeStack(d.id, d.count), x, y, z, Math.cos(a) * 1.2, 3, Math.sin(a) * 1.2, 0.5, owner, this.shareKill(owner));
       },
-      xp: (amount, x, y, z) => this.awardXp(amount, x, y, z),
-      coins: (amount, x, y, z) => this.nearestPlayer(x, y, z)?.addCoins(amount, true),
+      xp: (amount, x, y, z, owner) => this.awardXp(amount, x, y, z, owner),
+      coins: (amount, x, y, z, owner) => {
+        const who = owner != null ? this.players.find((p) => p === owner) : this.nearestPlayer(x, y, z);
+        who?.addCoins(amount, true);
+      },
       // A monster may leave a skill book (any of the twelve, for any class, known or not) and, separately, a bag and a jewel.
       loot: (mob, x, y, z) => {
+        const owner = mob.killedBy ?? undefined;
         for (const found of [skillBookDrop(mob.kind, this.rand), bagDrop(mob.kind, this.rand), jewelDrop(mob.kind, this.rand)]) {
           if (found === null) continue;
           const a = this.rand() * Math.PI * 2;
-          this.drops.spawn(makeStack(found, 1), x, y, z, Math.cos(a) * 1.2, 3, Math.sin(a) * 1.2, 0.5);
-          // A jewel has a sound of its own, heard by whoever is near enough (louder the closer it falls).
+          this.drops.spawn(makeStack(found, 1), x, y, z, Math.cos(a) * 1.2, 3, Math.sin(a) * 1.2, 0.5, owner, this.shareKill(owner));
+          // A jewel has a sound of its own. A kill's jewel is heard by the player it belongs to, and by their party when they share it.
           const jewel = jewelKind(found);
           if (jewel) {
-            for (const p of this.players) {
+            const hear = owner != null ? this.players.filter((p) => this.maySeeDrop(p, owner, this.shareKill(owner))) : this.players;
+            for (const p of hear) {
               const vol = Math.max(0, 1 - Math.hypot(x - p.body.x, y - p.body.y, z - p.body.z) / MOB_HEARING);
               if (vol > 0) p.emit({ t: 'jewelDrop', kind: jewel, vol });
             }
           }
         }
         if (mob.def.boss) this.bossLoot(mob, x, y, z);
-        if (mob.elite) this.eliteLoot(x, y, z);
+        if (mob.elite) this.eliteLoot(x, y, z, owner);
         // ...and sometimes a piece of gear with a rarity, a level and bonus stats (see gear.ts).
         const piece = gearDrop(mob.kind, this.rand);
         if (piece) {
           const a = this.rand() * Math.PI * 2;
-          this.drops.spawn(piece, x, y, z, Math.cos(a) * 1.2, 3, Math.sin(a) * 1.2, 0.5);
+          this.drops.spawn(piece, x, y, z, Math.cos(a) * 1.2, 3, Math.sin(a) * 1.2, 0.5, owner, this.shareKill(owner));
         }
       },
       // A kill counts for every player nearby (a party shares its kills, as in the old MMOs).
@@ -524,6 +531,8 @@ export class Realm {
         x: p.body.x,
         y: p.body.y,
         z: p.body.z,
+        ref: p,
+        sharesWith: (owner) => this.maySeeDrop(p, owner, true),
         canFit: (s) => !dead && p.inventory.canFit(s),
         collect: (s) => {
           if (dead) return s;
@@ -548,7 +557,7 @@ export class Realm {
     this.drops.updateMany(dt, collectors);
     this.xpOrbs.update(
       dt,
-      active.map((p) => ({ x: p.body.x, y: p.body.y, z: p.body.z, alive: p.screen !== 'dead' && !p.spectating, take: (v: number) => p.addXp(v, true) })),
+      active.map((p) => ({ x: p.body.x, y: p.body.y, z: p.body.z, ref: p, alive: p.screen !== 'dead' && !p.spectating, take: (v: number) => p.addXp(v, true) })),
     );
     this.fishing.update(dt, {
       rain: this.weather.rain,
@@ -654,11 +663,38 @@ export class Realm {
   // ---- experience ------------------------------------------------------------
 
   /**
-   * Experience that comes of something happening at a place (a mob dying, a bottle breaking, an ore) comes out as orbs there,
-   * which drift to any player who comes near and are taken on touch.
+   * Experience that comes of something happening at a place (a mob dying, a bottle breaking, an ore) comes out as orbs there.
+   * A kill's orbs (`owner`) drift only to that player. A party kill gives each living member within `KILL_CREDIT_RANGE`
+   * their own orbs, worth `PARTY_XP` times as much. Anything else drifts to whoever comes near, and is taken on touch.
    */
-  awardXp(amount: number, x: number, y: number, z: number): void {
-    this.xpOrbs.spawn(amount, x, y, z);
+  awardXp(amount: number, x: number, y: number, z: number, owner?: unknown): void {
+    const killer = owner != null ? this.players.find((p) => p === owner) : undefined;
+    const party = killer ? this.parties.partyOf(killer) : null;
+    if (!killer || !party || party.members.length < 2) {
+      this.xpOrbs.spawn(amount, x, y, z, owner);
+      return;
+    }
+    const bonus = Math.ceil(amount * PARTY_XP);
+    for (const m of party.members) {
+      if (m.screen === 'dead' || m.spectating) continue;
+      if (m !== killer && Math.hypot(m.body.x - x, m.body.z - z) > KILL_CREDIT_RANGE) continue;
+      this.xpOrbs.spawn(bonus, x, y, z, m);
+    }
+  }
+
+  /** True when this kill's loot should be open to the killer's party. Personal boss rewards stay with the one they were rolled for. */
+  private shareKill(owner: unknown): boolean {
+    const p = owner != null ? this.players.find((q) => q === owner) : undefined;
+    const party = p ? this.parties.partyOf(p) : null;
+    return !!party && party.members.length >= 2;
+  }
+
+  /** Whether `viewer` is shown a drop or orb. Shared kill loot is also shown to the owner's current party. */
+  maySeeDrop(viewer: Player, owner: unknown, share = false): boolean {
+    if (owner == null || owner === viewer) return true;
+    if (!share) return false;
+    const party = this.parties.partyOf(viewer);
+    return !!party && party.members.includes(owner as Player);
   }
 
   /** The nearest living player within XP_AWARD_RANGE blocks of a place (who a kill pays out to), if any. */
@@ -995,11 +1031,11 @@ export class Realm {
     }
   }
 
-  /** What an elite leaves: a piece of gear for anybody, uncommon or better. */
-  private eliteLoot(x: number, y: number, z: number): void {
+  /** What an elite leaves: a piece of gear, uncommon or better, for the player who killed it (their party may take it too). */
+  private eliteLoot(x: number, y: number, z: number, owner?: unknown): void {
     const piece = randomGear(5 + Math.floor(this.rand() * 3), pickRarity([60, 33, 7], this.rand), undefined, this.rand);
     const a = this.rand() * Math.PI * 2;
-    this.drops.spawn(piece, x, y + 0.5, z, Math.cos(a) * 1.4, 3.5, Math.sin(a) * 1.4, 0.5);
+    this.drops.spawn(piece, x, y + 0.5, z, Math.cos(a) * 1.4, 3.5, Math.sin(a) * 1.4, 0.5, owner, this.shareKill(owner));
   }
 
   /** Tell everybody in a copy something. */
@@ -1297,12 +1333,12 @@ export class Realm {
       if (p.screen === 'dead' || p.spectating || this.copyAt(p) !== slot) continue;
       const piece = randomGear(7 + Math.floor(this.rand() * 3), pickRarity([0, 62, 38], this.rand), p.cls?.classId, this.rand);
       const a = this.rand() * Math.PI * 2;
-      this.drops.spawn(piece, x, y + 0.5, z, Math.cos(a) * 1.6, 4, Math.sin(a) * 1.6, 0.5);
+      this.drops.spawn(piece, x, y + 0.5, z, Math.cos(a) * 1.6, 4, Math.sin(a) * 1.6, 0.5, p);
       // The Hollow King besides leaves each of them one of his nine relics, all of them burning (see hollowKing.ts).
       if (mob.kind === 'hollow_king') {
         const relic = randomHollowKingRelic(this.rand);
         const b = this.rand() * Math.PI * 2;
-        this.drops.spawn(relic, x, y + 1, z, Math.cos(b) * 1.3, 5, Math.sin(b) * 1.3, 0.5);
+        this.drops.spawn(relic, x, y + 1, z, Math.cos(b) * 1.3, 5, Math.sin(b) * 1.3, 0.5, p);
         p.emit({ t: 'toast', text: `The Hollow King's hoard burns on the floor: ${tooltipName(relic)}` });
       }
     }
@@ -1343,9 +1379,15 @@ export class Realm {
     for (const s of slots) if (s) this.drops.spawn(s, x, y + 0.5, z, (this.rand() - 0.5) * 3, 4, (this.rand() - 0.5) * 3, 0.5);
   }
 
-  /** The monsters and villagers close to a spot, as things a player cannot walk through (undefined when none is). */
-  solidsNear(x: number, y: number, z: number): Solid[] | undefined {
+  /** The players, monsters and villagers close to a spot, as things a player cannot walk through (undefined when none is). */
+  solidsNear(x: number, y: number, z: number, self?: Body): Solid[] | undefined {
     let out: Solid[] | undefined;
+    for (const p of this.players) {
+      const pb = p.body;
+      if (pb === self || p.vitals.dead || p.spectating || p.screen === 'dead') continue;
+      if (Math.abs(pb.x - x) > 4 || Math.abs(pb.z - z) > 4 || Math.abs(pb.y - y) > 3) continue;
+      (out ??= []).push({ x: pb.x, y: pb.y, z: pb.z, r: PLAYER_WIDTH / 2, h: pb.height ?? PLAYER_HEIGHT });
+    }
     for (const m of this.mobs.mobs) {
       if (m.dead || m.width < 0.3) continue;
       // (Its size next to its model, as for a blow: see `Mob.hitDistance`; a giant's arm reaches further than 6 blocks from its middle.)

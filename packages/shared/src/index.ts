@@ -77,6 +77,7 @@ export * from './outfits';
 export * from './companions';
 export * from './wings';
 export * from './accessories';
+export * from './equipLevel';
 export * from './hollowKing';
 export * from './netProtocol';
 export * from './expansions';

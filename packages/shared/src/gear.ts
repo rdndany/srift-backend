@@ -2,6 +2,7 @@ import { MOB_TIER_INFO, mobTier } from './mobTier';
 import { CLASSES, CLASS_IDS, CLASS_LEVELS, isClassId, type ClassId, type StatModifier } from './classes';
 import { ENCHANTS, glyphStat } from './enchant';
 import type { ItemStack } from './inventory';
+import { NECKLACE_LEVEL, RING_LEVEL } from './equipLevel';
 import { I, accessoryOfItem, armorId, getItem, toolId } from './items';
 import type { MobKind } from './mobs';
 
@@ -336,6 +337,15 @@ export function gearUsable(stack: ItemStack | null, who: Wearer | null): boolean
   return who.level >= g.l && (!g.c || g.c === who.id);
 }
 
+/** Why this piece cannot be put on, or null when it can. A plain item always can. */
+export function gearRefuse(stack: ItemStack | null, who: Wearer | null): string | null {
+  if (gearUsable(stack, who)) return null;
+  const g = stack?.gear;
+  if (!g || g.r === 0) return null;
+  if (g.c && who && who.level >= g.l && g.c !== who.id) return `That is for a ${CLASSES[g.c].name}.`;
+  return `Requires level ${g.l}.`;
+}
+
 /** The stat modifiers of the pieces a character wears and holds (the ones they may not use yet add nothing). */
 export function gearModifiers(stacks: readonly (ItemStack | null)[], who: Wearer | null): StatModifier[] {
   const out: StatModifier[] = [];
@@ -347,13 +357,15 @@ export function gearModifiers(stacks: readonly (ItemStack | null)[], who: Wearer
   return out;
 }
 
-/** The stat modifiers of the rings and the necklace a character wears (see accessories.ts): fixed stats, so no level or class is asked for. */
+/** The stat modifiers of the rings and the necklace a character wears (see accessories.ts). Every class may wear them; a ring asks for level 10 and a necklace for level 10. */
 export function accessoryModifiers(stacks: readonly (ItemStack | null)[], who: Wearer | null): StatModifier[] {
   const out: StatModifier[] = [];
   if (!who) return out;
   for (const st of stacks) {
     const def = st ? accessoryOfItem(st.id) : null;
-    if (def) for (const [stat, v] of def.stats) out.push(STAT_INFO[stat].mod(v));
+    if (!def) continue;
+    if (who.level < (def.kind === 'ring' ? RING_LEVEL : NECKLACE_LEVEL)) continue;
+    for (const [stat, v] of def.stats) out.push(STAT_INFO[stat].mod(v));
   }
   return out;
 }
@@ -361,12 +373,14 @@ export function accessoryModifiers(stacks: readonly (ItemStack | null)[], who: W
 /**
  * The stat modifiers of the glyphs a character wears and holds: the glyphs of a stat (Vigor, Might, Fury...) add to the class stats like the
  * bonus stats of the gear itself, and so do for every ability. A Glyph Tome adds nothing, and nor does a piece that needs a higher level
- * than the wearer has (a plain piece, or a ring, always counts).
+ * than the wearer has. A ring or a necklace below its level adds nothing.
  */
 export function glyphModifiers(stacks: readonly (ItemStack | null)[], who: Wearer | null): StatModifier[] {
   const out: StatModifier[] = [];
   if (!who) return out;
   for (const st of stacks) {
+    const jewelry = st ? accessoryOfItem(st.id) : null;
+    if (jewelry && who.level < (jewelry.kind === 'ring' ? RING_LEVEL : NECKLACE_LEVEL)) continue;
     if (!st?.ench || getItem(st.id).storesEnchants || !gearUsable(st, who)) continue;
     for (const [id, rank] of st.ench) {
       const g = glyphStat(id, rank);

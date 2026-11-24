@@ -55,9 +55,30 @@
   100% { opacity: 0; transform: translateY(-4px); }
 }
 #player-frame .token-purse.frame {
+  flex: none;
+  align-items: center;
+  margin: 0;
   font-size: 11px;
-  line-height: 14px;
+  font-weight: 400;
+  line-height: 15px;
+  color: #fff1c2;
+  gap: 4px;
+  text-shadow: 0 2px 0 #000, 0 0 8px rgba(0, 0, 0, 0.9);
   white-space: nowrap;
+}
+#player-frame .token-purse.frame .token-icon {
+  width: 11px;
+  height: 11px;
+}
+#player-frame .token-purse.frame .tp-amount,
+#player-frame .token-purse.frame small {
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 15px;
+  letter-spacing: 0;
+}
+#player-frame .token-purse.frame small {
+  color: #d2b4ff;
 }
 #menu-screen .wow-foot #token-purse {
   gap: 8px;

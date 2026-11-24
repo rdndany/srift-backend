@@ -1,57 +1,94 @@
-/* The target frame: the player the crosshair rests on, to the right of your own frame. */
+/* The target frame: another player, or a creature, in the same shape as your own frame. */
 #target-frame {
   position: fixed;
-  top: 30px;
-  left: 304px;
+  top: 22px;
+  left: 390px;
   z-index: 38;
   display: flex;
   align-items: center;
   cursor: pointer;
   font-family: 'Monocraft', 'Courier New', monospace;
 }
-#target-frame .tf-level {
+#target-frame .tf-portrait-wrap {
   position: relative;
-  z-index: 2;
   flex: none;
-  min-width: 34px;
-  height: 34px;
-  padding: 0 4px;
+  width: 64px;
+  height: 64px;
+  z-index: 2;
+}
+#target-frame .tf-portrait {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  overflow: hidden;
+  background: radial-gradient(circle at 35% 28%, #6a5438, #1c140e 72%);
+  box-shadow:
+    0 0 0 3px #140e08,
+    0 0 0 5px var(--cls, #e6c36a),
+    0 0 0 7px #140e08,
+    0 5px 12px rgba(0, 0, 0, 0.55);
+}
+#target-frame .tf-portrait canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+}
+#target-frame .tf-who,
+#target-frame .tf-mark {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  color: #fff6df;
+}
+#target-frame .tf-mark svg,
+#target-frame .tf-who svg {
+  width: 26px;
+  height: 26px;
+  fill: currentColor;
+  filter: drop-shadow(1px 1px 0 #000);
+}
+#target-frame .tf-level {
+  position: absolute;
+  left: -4px;
+  bottom: -4px;
+  z-index: 2;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 3px;
   box-sizing: border-box;
-  border-radius: 17px;
+  border-radius: 50%;
   text-align: center;
-  font-size: 14px;
-  line-height: 30px;
-  color: #ffe9a8;
-  text-shadow: 1px 1px #000;
-  background: radial-gradient(circle at 40% 30%, #4a3510, #17100a);
-  border: 2px solid var(--cls, #d6aa46);
-  box-shadow: 0 0 0 2px #0b0803, 0 2px 6px rgba(0, 0, 0, 0.6);
+  font-size: 11px;
+  line-height: 20px;
+  color: #2a1604;
+  text-shadow: none;
+  background: radial-gradient(circle at 38% 30%, #ffe9a4, #e0a63a 58%, #8a5a10);
+  border: 2px solid #4a3008;
+  box-shadow: 0 0 0 2px #140e08, 0 2px 4px rgba(0, 0, 0, 0.55);
 }
 #target-frame .tf-plate {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  width: 190px;
-  margin-left: -14px;
-  padding: 6px 10px 6px 22px;
+  width: 200px;
+  margin-left: 6px;
+  padding: 2px 4px 2px 12px;
   box-sizing: border-box;
-  background: linear-gradient(rgba(34, 25, 12, 0.88), rgba(12, 9, 4, 0.88));
-  border: 2px solid #6d5420;
-  border-left: 0;
-  border-radius: 0 8px 8px 0;
-  box-shadow:
-    inset 0 0 0 1px rgba(246, 207, 114, 0.16),
-    0 5px 14px rgba(0, 0, 0, 0.5);
+  background: none;
+  border: 0;
+  box-shadow: none;
 }
 #target-frame .tf-name {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 8px;
-  font-size: 12px;
-  line-height: 14px;
-  color: #ffe9a8;
-  text-shadow: 1px 1px #000;
+  font-size: 14px;
+  line-height: 16px;
+  color: #ffe56a;
+  text-shadow: 0 2px 0 #000, 0 0 8px rgba(0, 0, 0, 0.9);
   white-space: nowrap;
 }
 #target-frame .tf-name b {
@@ -61,20 +98,44 @@
 }
 #target-frame .tf-name small {
   font-size: 10px;
-  color: var(--cls, #d6aa46);
+  color: var(--cls, #e6c36a);
   text-transform: uppercase;
   letter-spacing: 1px;
+  text-shadow: 1px 1px 0 #000;
 }
+#target-frame .tf-fx {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+#target-frame .tf-fx span {
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 14px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid #3a2c18;
+  text-shadow: 1px 1px 0 #000;
+}
+#target-frame .tf-fx .poison { color: #7dff6a; }
+#target-frame .tf-fx .burn { color: #ff8a3a; }
+#target-frame .tf-fx .root { color: #d2b48c; }
+#target-frame .tf-fx .slow { color: #8ec8ff; }
+#target-frame .tf-fx .weak { color: #c9a46a; }
+#target-frame .tf-fx .hunger { color: #e0a050; }
+#target-frame .tf-fx .guard { color: #cfd6e8; }
+#target-frame .tf-fx .shield { color: #b9a4ff; }
+#target-frame .tf-fx .evade { color: #b6f08a; }
 #target-frame .tf-sub {
   display: flex;
   align-items: center;
   justify-content: space-between;
   font-size: 10px;
   line-height: 12px;
-  color: #b9ad8a;
+  color: #f0e2c4;
+  text-shadow: 1px 1px 0 #000;
 }
 #target-frame .tf-guild {
-  color: #6bff8a;
+  color: #7dff9a;
 }
 #target-frame kbd {
   font-family: inherit;
@@ -177,49 +238,52 @@
     0 14px 40px rgba(0, 0, 0, 0.7);
 }
 
-/* The frame of a creature: the same plate, with a health bar under the name and the tier's colour on the ring. */
+/* A creature: the same portrait and bars, with its tier on the ring and a health bar under the name. */
 #target-frame.mob {
   cursor: default;
   pointer-events: none;
 }
-#target-frame.mob .tf-plate {
-  gap: 4px;
-  border-color: color-mix(in srgb, var(--cls) 45%, #6d5420);
+#target-frame.mob .tf-portrait {
+  background: radial-gradient(circle at 35% 28%, color-mix(in srgb, var(--cls) 55%, #2a2014), #120e0a 74%);
 }
-#target-frame.mob[data-tier='epic'] .tf-plate {
+#target-frame.mob[data-tier='epic'] .tf-portrait {
   box-shadow:
-    inset 0 0 0 1px rgba(199, 125, 255, 0.28),
-    0 0 14px rgba(199, 125, 255, 0.3),
-    0 5px 14px rgba(0, 0, 0, 0.5);
+    0 0 0 3px #140e08,
+    0 0 0 5px #c77dff,
+    0 0 0 7px #140e08,
+    0 0 14px rgba(199, 125, 255, 0.45);
 }
-#target-frame.mob[data-tier='rare'] .tf-plate {
+#target-frame.mob[data-tier='rare'] .tf-portrait {
   box-shadow:
-    inset 0 0 0 1px rgba(90, 168, 255, 0.25),
-    0 0 12px rgba(90, 168, 255, 0.25),
-    0 5px 14px rgba(0, 0, 0, 0.5);
+    0 0 0 3px #140e08,
+    0 0 0 5px #5aa8ff,
+    0 0 0 7px #140e08,
+    0 0 12px rgba(90, 168, 255, 0.4);
 }
 #target-frame .tf-hp {
   position: relative;
-  height: 14px;
-  background: #120b07;
-  border: 1px solid #000;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  height: 16px;
+  background: linear-gradient(#3a1818, #140808);
+  border: 2px solid #0c0606;
+  border-radius: 0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 2px 3px rgba(0, 0, 0, 0.45);
   overflow: hidden;
 }
 #target-frame .tf-hp i {
   position: absolute;
   inset: 0 auto 0 0;
+  border-radius: 0;
   transition: width 0.18s ease-out;
-  box-shadow: inset 0 -5px 0 rgba(0, 0, 0, 0.25), inset 0 2px 0 rgba(255, 255, 255, 0.22);
+  box-shadow: inset 0 3px 0 rgba(255, 255, 255, 0.28), inset 0 -4px 0 rgba(0, 0, 0, 0.22);
 }
 #target-frame .tf-hp span {
   position: absolute;
   inset: 0;
   text-align: center;
   font-size: 10px;
-  line-height: 14px;
+  line-height: 12px;
   color: #fff;
-  text-shadow: 1px 1px #000;
+  text-shadow: 1px 1px #000, -1px -1px #000, 1px -1px #000, -1px 1px #000;
 }
 #target-frame .tf-role.hostile {
   color: #ff7a6a;
@@ -237,3 +301,86 @@
 #target-frame .tf-role.trader {
   color: #8cc8ff;
 }
+
+/* A fight or a rest, drawn as a mark: three bars. At rest only the first is lit, dim. In a fight they rise and the frame burns red. */
+.stance {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 11px;
+  flex: none;
+}
+.stance i {
+  display: block;
+  width: 3px;
+  background: #3a3328;
+  border-radius: 1px;
+}
+.stance i:nth-child(1) {
+  height: 4px;
+}
+.stance i:nth-child(2) {
+  height: 7px;
+}
+.stance i:nth-child(3) {
+  height: 10px;
+}
+.stance.calm i:nth-child(1) {
+  background: #7dcea0;
+  box-shadow: 0 0 4px rgba(125, 206, 160, 0.7);
+}
+#target-frame.mob[data-stance='calm'] .tf-portrait {
+  box-shadow:
+    0 0 0 3px #140e08,
+    0 0 0 5px rgba(90, 150, 110, 0.9),
+    0 0 0 7px #140e08,
+    0 2px 6px rgba(0, 0, 0, 0.55);
+}
+.stance.hot i {
+  background: #ff5a42;
+  box-shadow: 0 0 6px rgba(255, 70, 40, 0.85);
+  transform-origin: bottom;
+  animation: stance-rise 0.85s ease-in-out infinite;
+}
+.stance.hot i:nth-child(2) {
+  animation-delay: 0.12s;
+}
+.stance.hot i:nth-child(3) {
+  animation-delay: 0.24s;
+}
+#target-frame.mob[data-stance='hot'] .tf-portrait {
+  border-color: #e23a2c;
+  animation: stance-ring 0.85s ease-in-out infinite;
+}
+#target-frame.mob[data-stance='hot'] .tf-name b {
+  color: #ffb0a4;
+}
+@keyframes stance-rise {
+  0%,
+  100% {
+    transform: scaleY(0.45);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+@keyframes stance-ring {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 3px #140e08,
+      0 0 0 5px rgba(226, 58, 44, 0.75),
+      0 0 0 7px #140e08,
+      0 4px 10px rgba(0, 0, 0, 0.5);
+  }
+  50% {
+    box-shadow:
+      0 0 0 3px #140e08,
+      0 0 0 6px rgba(255, 90, 60, 1),
+      0 0 0 8px #140e08,
+      0 0 16px rgba(255, 60, 30, 0.75);
+  }
+}
+

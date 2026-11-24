@@ -68,6 +68,7 @@ export function mobTargetView(m: MobLike): MobTargetView {
     hp: Math.max(0, Math.min(max, m.health ?? max)),
     max,
     elite: !!m.elite,
+    aggro: !!m.aggro && !m.dead,
   };
 }
 

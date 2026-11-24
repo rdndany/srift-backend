@@ -532,7 +532,7 @@ export interface HeldLight {
 }
 
 /** What the tooltip calls an item under its name (see `itemKind` in tooltip.ts). */
-export type ItemKind = 'Glyph Tome' | 'Skill Book' | 'Mount' | 'Outfit' | 'Companion' | 'Wings' | 'Ring' | 'Necklace' | 'Bag' | 'Special' | 'Jewel' | 'Equipment' | 'Food' | 'Item' | 'Nature' | 'Block' | 'Dye' | 'Material' | 'Utility Tool';
+export type ItemKind = 'Glyph Tome' | 'Skill Book' | 'Mount' | 'Outfit' | 'Companion' | 'Wings' | 'Ring' | 'Necklace' | 'Bag' | 'Special' | 'Quest item' | 'Jewel' | 'Equipment' | 'Food' | 'Item' | 'Nature' | 'Block' | 'Dye' | 'Material' | 'Utility Tool';
 
 export interface ItemDef {
   id: number;
@@ -798,23 +798,23 @@ add({ id: I.EMBERSTONE, name: 'emberstone', tile: tileIndex('emberstone'), maxSt
 add({ id: I.WARDEN_SCROLL, name: 'warden_scroll', tile: tileIndex('warden_scroll'), maxStack: 16, kind: 'Material' });
 add({ id: I.HOLLOW_BONE, name: 'hollow_bone', tile: tileIndex('hollow_bone'), maxStack: 16, kind: 'Material' });
 add({ id: I.HOLLOW_SIGIL, name: 'hollow_sigil', tile: tileIndex('hollow_sigil'), maxStack: 8, kind: 'Special' });
-add({ id: I.RIFT_SINGED_RAG, name: 'rift_singed_rag', tile: tileIndex('rift_singed_rag'), maxStack: 64, undroppable: true, kind: 'Special' });
-add({ id: I.TORN_SATCHEL_SCRAP, name: 'torn_satchel_scrap', tile: tileIndex('torn_satchel_scrap'), maxStack: 64, undroppable: true, kind: 'Special' });
-add({ id: I.DROWNED_REED_CHARM, name: 'drowned_reed_charm', tile: tileIndex('drowned_reed_charm'), maxStack: 64, undroppable: true, kind: 'Special' });
-add({ id: I.REED_EMBER, name: 'reed_ember', tile: tileIndex('reed_ember'), maxStack: 64, undroppable: true, kind: 'Special' });
-add({ id: I.SUN_SCORCHED_TALLY, name: 'sun_scorched_tally', tile: tileIndex('sun_scorched_tally'), maxStack: 64, undroppable: true, kind: 'Special' });
-add({ id: I.CARAVAN_TALLY_TAG, name: 'caravan_tally_tag', tile: tileIndex('caravan_tally_tag'), maxStack: 64, undroppable: true, kind: 'Special' });
-add({ id: I.SAND_EMBER, name: 'sand_ember', tile: tileIndex('sand_ember'), maxStack: 64, undroppable: true, kind: 'Special' });
-add({ id: I.FROZEN_WARD_BELL, name: 'frozen_ward_bell', tile: tileIndex('frozen_ward_bell'), maxStack: 64, undroppable: true, kind: 'Special' });
-add({ id: I.FROST_EMBER, name: 'frost_ember', tile: tileIndex('frost_ember'), maxStack: 64, undroppable: true, kind: 'Special' });
-add({ id: I.WARDEN_LEDGER_PAGE, name: 'warden_ledger_page', tile: tileIndex('warden_ledger_page'), maxStack: 64, undroppable: true, kind: 'Special' });
-add({ id: I.ASHEN_MEDAL, name: 'ashen_medal', tile: tileIndex('ashen_medal'), maxStack: 64, undroppable: true, kind: 'Special' });
-add({ id: I.THRONE_EMBER, name: 'throne_ember', tile: tileIndex('throne_ember'), maxStack: 64, undroppable: true, kind: 'Special' });
-add({ id: I.SCORCHED_FUSE, name: 'scorched_fuse', tile: tileIndex('scorched_fuse'), maxStack: 64, undroppable: true, kind: 'Special' });
-add({ id: I.SEALED_COFFER, name: 'sealed_coffer', tile: tileIndex('sealed_coffer'), maxStack: 64, undroppable: true, kind: 'Special' });
-add({ id: I.SPORE_JAR, name: 'spore_jar', tile: tileIndex('spore_jar'), maxStack: 64, undroppable: true, kind: 'Special' });
-add({ id: I.BEAR_CLAW, name: 'bear_claw', tile: tileIndex('bear_claw'), maxStack: 64, undroppable: true, kind: 'Special' });
-add({ id: I.GILDED_SCALE, name: 'gilded_scale', tile: tileIndex('gilded_scale'), maxStack: 64, undroppable: true, kind: 'Special' });
+add({ id: I.RIFT_SINGED_RAG, name: 'rift_singed_rag', tile: tileIndex('rift_singed_rag'), maxStack: 64, undroppable: true, kind: 'Quest item' });
+add({ id: I.TORN_SATCHEL_SCRAP, name: 'torn_satchel_scrap', tile: tileIndex('torn_satchel_scrap'), maxStack: 64, undroppable: true, kind: 'Quest item' });
+add({ id: I.DROWNED_REED_CHARM, name: 'drowned_reed_charm', tile: tileIndex('drowned_reed_charm'), maxStack: 64, undroppable: true, kind: 'Quest item' });
+add({ id: I.REED_EMBER, name: 'reed_ember', tile: tileIndex('reed_ember'), maxStack: 64, undroppable: true, kind: 'Quest item' });
+add({ id: I.SUN_SCORCHED_TALLY, name: 'sun_scorched_tally', tile: tileIndex('sun_scorched_tally'), maxStack: 64, undroppable: true, kind: 'Quest item' });
+add({ id: I.CARAVAN_TALLY_TAG, name: 'caravan_tally_tag', tile: tileIndex('caravan_tally_tag'), maxStack: 64, undroppable: true, kind: 'Quest item' });
+add({ id: I.SAND_EMBER, name: 'sand_ember', tile: tileIndex('sand_ember'), maxStack: 64, undroppable: true, kind: 'Quest item' });
+add({ id: I.FROZEN_WARD_BELL, name: 'frozen_ward_bell', tile: tileIndex('frozen_ward_bell'), maxStack: 64, undroppable: true, kind: 'Quest item' });
+add({ id: I.FROST_EMBER, name: 'frost_ember', tile: tileIndex('frost_ember'), maxStack: 64, undroppable: true, kind: 'Quest item' });
+add({ id: I.WARDEN_LEDGER_PAGE, name: 'warden_ledger_page', tile: tileIndex('warden_ledger_page'), maxStack: 64, undroppable: true, kind: 'Quest item' });
+add({ id: I.ASHEN_MEDAL, name: 'ashen_medal', tile: tileIndex('ashen_medal'), maxStack: 64, undroppable: true, kind: 'Quest item' });
+add({ id: I.THRONE_EMBER, name: 'throne_ember', tile: tileIndex('throne_ember'), maxStack: 64, undroppable: true, kind: 'Quest item' });
+add({ id: I.SCORCHED_FUSE, name: 'scorched_fuse', tile: tileIndex('scorched_fuse'), maxStack: 64, undroppable: true, kind: 'Quest item' });
+add({ id: I.SEALED_COFFER, name: 'sealed_coffer', tile: tileIndex('sealed_coffer'), maxStack: 64, undroppable: true, kind: 'Quest item' });
+add({ id: I.SPORE_JAR, name: 'spore_jar', tile: tileIndex('spore_jar'), maxStack: 64, undroppable: true, kind: 'Quest item' });
+add({ id: I.BEAR_CLAW, name: 'bear_claw', tile: tileIndex('bear_claw'), maxStack: 64, undroppable: true, kind: 'Quest item' });
+add({ id: I.GILDED_SCALE, name: 'gilded_scale', tile: tileIndex('gilded_scale'), maxStack: 64, undroppable: true, kind: 'Quest item' });
 add({ id: I.JEWEL_DAWN, name: 'jewel_of_dawn', tile: tileIndex('jewel_dawn'), maxStack: 64, kind: 'Jewel' });
 add({ id: I.JEWEL_RIFT, name: 'jewel_of_the_rift', tile: tileIndex('jewel_rift'), maxStack: 64, kind: 'Jewel' });
 add({ id: I.JEWEL_BLOOM, name: 'jewel_of_bloom', tile: tileIndex('jewel_bloom'), maxStack: 64, kind: 'Jewel' });

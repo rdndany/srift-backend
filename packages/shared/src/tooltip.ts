@@ -6,6 +6,7 @@ import { companionBonusText } from './companions';
 import { wingBonusText } from './wings';
 import { CLASSES, offhandModifier, type ClassId } from './classes';
 import { formatEmberTime, EMBER_CAST, EMBER_COOLDOWN } from './emberstone';
+import { COMPANION_LEVEL, NECKLACE_LEVEL, RING_LEVEL, WING_LEVEL } from './equipLevel';
 import { gearSuffix, glyphLine, optionStat, rarityDef, resourceNameOf, rolledStats, statLine } from './gear';
 import { forgeHint, jewelDef, jewelKind } from './jewels';
 import { HK_LORE, HK_NAMES, isHollowKingItem } from './hollowKingData';
@@ -210,14 +211,18 @@ export function tooltipLines(stack: ItemStack | null, viewerClass?: ClassId | nu
   }
 
   if (palOf) {
+    const low = viewerLevel !== undefined && viewerLevel < COMPANION_LEVEL;
     lines.push({ text: companionBonusText(palOf), color: 'good' });
+    lines.push({ text: `Requires level ${COMPANION_LEVEL}`, color: low ? 'warn' : 'stat' });
     lines.push({ text: palOf.blurb, color: 'dim' });
     lines.push({ text: 'It follows you while it is in the companion slot of the inventory screen', color: 'dim' });
     lines.push({ text: 'Right-click to put it in the companion slot', color: 'good' });
   }
 
   if (wingsOf) {
+    const low = viewerLevel !== undefined && viewerLevel < WING_LEVEL;
     lines.push({ text: wingBonusText(wingsOf), color: 'good' });
+    lines.push({ text: `Requires level ${WING_LEVEL}`, color: low ? 'warn' : 'stat' });
     lines.push({ text: `${wingsOf.tier === 1 ? 'First' : 'Second'} wings: double-tap jump to fly (jump climbs, sneak sinks), at ${wingsOf.fly}x your walking speed`, color: 'stat' });
     lines.push({ text: wingsOf.blurb, color: 'dim' });
     lines.push({ text: 'Flying burns hunger, no fall damage while they are worn, and they fold when you are starving', color: 'dim' });
@@ -226,8 +231,11 @@ export function tooltipLines(stack: ItemStack | null, viewerClass?: ClassId | nu
 
   if (jewelryOf) {
     for (const [stat, v] of jewelryOf.stats) lines.push({ text: statLine(stat, v, viewerClass ? CLASSES[viewerClass].resource.name : 'Resource'), color: 'stat' });
+    const need = jewelryOf.kind === 'ring' ? RING_LEVEL : NECKLACE_LEVEL;
+    const low = viewerLevel !== undefined && viewerLevel < need;
     lines.push({ text: jewelryOf.kind === 'ring' ? 'Worn on a finger: you may wear two rings' : 'Worn around the neck: you may wear one necklace', color: 'dim' });
-    lines.push({ text: 'The bonuses work for every class and need no level', color: 'dim' });
+    lines.push({ text: 'The bonuses work for every class', color: 'dim' });
+    lines.push({ text: `Requires level ${need}`, color: low ? 'warn' : 'stat' });
     lines.push({ text: jewelryOf.kind === 'ring' ? 'Right-click to wear it (the inventory screen has two ring slots)' : 'Right-click to wear it (the inventory screen has a necklace slot)', color: 'good' });
   }
 
@@ -289,7 +297,8 @@ export function tooltipLines(stack: ItemStack | null, viewerClass?: ClassId | nu
     const cls = CLASSES[ability.classId];
     const wrongClass = viewerClass !== undefined && viewerClass !== ability.classId;
     lines.push({ text: `Class: ${cls.name}`, color: wrongClass ? 'warn' : 'stat' });
-    lines.push({ text: `Requires level ${ability.unlockLevel}`, color: 'stat' });
+    const lowBook = viewerLevel !== undefined && viewerLevel < ability.unlockLevel;
+    lines.push({ text: `Requires level ${ability.unlockLevel}`, color: lowBook ? 'warn' : 'stat' });
     lines.push({ text: ability.description, color: 'dim' });
     lines.push({ text: `${abilityCost(ability.cost)} ${cls.resource.name.toLowerCase()} - ${num(ability.cooldown)}s cooldown`, color: 'dim' });
     lines.push({ text: 'Right-click to learn this ability', color: 'good' });

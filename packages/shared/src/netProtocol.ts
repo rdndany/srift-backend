@@ -42,6 +42,9 @@ export interface NetInput {
   sneak: boolean;
   left: boolean;
   right: boolean;
+  /** The idle their own figure is drawing (1 sit, 2 stretch, 3 look) and how far into it. Left out while they stand. */
+  il?: 1 | 2 | 3;
+  ic?: number;
 }
 
 export type NetClientMessage =
@@ -59,6 +62,10 @@ export type NetClientMessage =
   | { t: 'guild'; line: string }
   /** One step of a trade between players (see playerTrade.ts). */
   | { t: 'trade'; act: TradeAct }
+  /** Ask somebody to duel, or answer them. */
+  | { t: 'duel'; act: DuelAct }
+  /** Voice signaling for one other player (the sound itself does not pass through the server). */
+  | { t: 'voice'; to: number; sig: VoiceSig }
   | { t: 'leave' };
 
 /** What a player does in a trade: ask somebody, answer a request, work the table, accept, call it off. */
@@ -72,6 +79,9 @@ export type TradeAct =
   | { a: 'coins'; n: number }
   | { a: 'ready'; on: boolean }
   | { a: 'cancel' };
+
+/** What a player does to start a duel: ask somebody, or answer. */
+export type DuelAct = { a: 'ask'; name: string } | { a: 'accept' } | { a: 'decline' };
 
 /** One side of the table. */
 export interface TradeSideView {
@@ -216,6 +226,13 @@ export interface InventoryView {
   menu: MenuView | null;
 }
 
+/** A status or a buff on another player, for their target frame. `n` is seconds left, or points left in an absorb shield. */
+export type StatusKind = 'poison' | 'burn' | 'root' | 'slow' | 'weak' | 'hunger' | 'guard' | 'shield' | 'evade';
+export interface StatusView {
+  k: StatusKind;
+  n: number;
+}
+
 export interface PlayerView {
   id: number;
   name: string;
@@ -257,6 +274,21 @@ export interface PlayerView {
   em?: number;
   /** Lying in a bed: 0 = awake, else 1 + the way the bed points (see BED_DIRS). */
   sleeping: number;
+  /** The idle their own view is drawing: 1 sitting, 2 stretching, 3 looking around. Left out when they are just standing. */
+  il?: 1 | 2 | 3;
+  /** Seconds into that idle. */
+  ic?: number;
+  /** How far a bow or crossbow is drawn, 0 to 1. Left out while it is down. */
+  bd?: number;
+  /** Seconds since a stab of the off-hand dagger. Present only while that thrust is still going. */
+  st?: number;
+  /** Squared up: a monster is within ten blocks. */
+  fg?: 1;
+  /** Health and its maximum, for the target frame. */
+  hp: number;
+  hm: number;
+  /** Status effects and buffs on them. Left out when they have none. */
+  se?: StatusView[];
   /** Their class and class level, for a character that has one. */
   cls?: ClassId;
   clv?: number;
@@ -305,6 +337,8 @@ export interface MobView {
   mx?: number;
   /** A strong one of a dungeon. Sent only when true. */
   el?: 1;
+  /** In a fight (it has someone it is answering). Left out when it is at rest, including on the way home after it gave up. */
+  ag?: 1;
 }
 
 export interface ArrowView {
@@ -434,12 +468,38 @@ export type NetServerMessage =
   | { t: 'trade'; view: TradeView | null }
   /** Somebody asks you to trade (null: the request is over). */
   | { t: 'tradeAsk'; from: string | null }
+  /** Somebody asks you to duel (null: the request is over). */
+  | { t: 'duelAsk'; from: string | null }
+  /** The count in the middle of the screen: 5 down to 1, then Start. Null takes it away. */
+  | { t: 'duel'; n: 1 | 2 | 3 | 4 | 5 | 'start' | null }
+  /** A piece of the voice call with another player (the sound itself does not pass through the server). */
+  | { t: 'voice'; from: number; name: string; sig: VoiceSig }
   | { t: 'notice'; text: string }
   /** Admin mode went on or off for you (the server's word: it shows the admin's panel at the crosshair). */
   | { t: 'admin'; on: boolean }
   | { t: 'kicked'; reason: string };
 
 const isObject = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
+
+/** One step of setting up a voice call: the offer, the answer, or one network candidate. */
+export type VoiceSig = { k: 'offer'; sdp: string } | { k: 'answer'; sdp: string } | { k: 'ice'; c: string };
+
+const SDP_MAX = 12_000;
+const ICE_MAX = 1_200;
+
+function parseVoiceSig(raw: unknown): VoiceSig | null {
+  if (!isObject(raw)) return null;
+  if (raw.k === 'offer' || raw.k === 'answer') {
+    if (typeof raw.sdp !== 'string' || raw.sdp.length < 8 || raw.sdp.length > SDP_MAX) return null;
+    if (!raw.sdp.startsWith('v=0')) return null;
+    return { k: raw.k, sdp: raw.sdp };
+  }
+  if (raw.k === 'ice') {
+    if (typeof raw.c !== 'string' || raw.c.length < 2 || raw.c.length > ICE_MAX) return null;
+    return { k: 'ice', c: raw.c };
+  }
+  return null;
+}
 const fin = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
 const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
 
@@ -461,10 +521,37 @@ export function parseNetInput(raw: unknown): NetInput | null {
     sneak: raw.sneak as boolean,
     left: raw.left as boolean,
     right: raw.right as boolean,
+    ...idleOf(raw),
   };
 }
 
+/** The idle on an input, or nothing when it is not a sit, a stretch or a look. */
+function idleOf(raw: Record<string, unknown>): { il: 1 | 2 | 3; ic?: number } | Record<string, never> {
+  const il = raw.il;
+  if (il !== 1 && il !== 2 && il !== 3) return {};
+  const ic = raw.ic;
+  if (ic === undefined) return { il };
+  if (!fin(ic) || ic < 0 || ic > 600) return { il };
+  return { il, ic: Math.round(ic * 100) / 100 };
+}
+
 const whole = (x: unknown, max: number): x is number => typeof x === 'number' && Number.isInteger(x) && x >= 0 && x <= max;
+
+function parseDuelAct(raw: unknown): DuelAct | null {
+  if (!isObject(raw)) return null;
+  switch (raw.a) {
+    case 'ask': {
+      if (typeof raw.name !== 'string') return null;
+      const name = cleanPlayerName(raw.name);
+      return name ? { a: 'ask', name } : null;
+    }
+    case 'accept':
+    case 'decline':
+      return { a: raw.a };
+    default:
+      return null;
+  }
+}
 
 function parseTradeAct(raw: unknown): TradeAct | null {
   if (!isObject(raw)) return null;
@@ -545,6 +632,15 @@ export function parseNetClientMessage(raw: unknown): NetClientMessage | null {
     case 'trade': {
       const act = parseTradeAct(raw.act);
       return act ? { t: 'trade', act } : null;
+    }
+    case 'duel': {
+      const act = parseDuelAct(raw.act);
+      return act ? { t: 'duel', act } : null;
+    }
+    case 'voice': {
+      const sig = parseVoiceSig(raw.sig);
+      if (!sig || !whole(raw.to, 1_000_000_000) || raw.to < 1) return null;
+      return { t: 'voice', to: raw.to, sig };
     }
     case 'leave':
       return { t: 'leave' };

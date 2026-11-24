@@ -5,8 +5,8 @@ import { compass } from './rift';
 /**
  * The Gilded Tide: every half hour (on the hour and at half past, by the wall clock, the same for every world and every player)
  * golden creatures (gilt imps, hounds, drakes and the rare colossus) appear all over the land, not round the players: one here, one there,
- * each on its own stretch of ground, none of them in a pack and none of them near anybody. They are shy: they never attack, and a hit
- * sends them running. Finding them is the game. They leave nothing but the Codex of Aurelion (see `MobManager.kill`), and a codex opens
+ * each on its own stretch of ground, none of them in a pack and none of them near anybody. They are shy: they never start a fight, and a hit
+ * makes them fight back. Finding them is the game. They leave nothing but the Codex of Aurelion (see `MobManager.kill`), and a codex opens
  * into one piece of Epic gear (see `Player.openCodex`).
  *
  * The rules live here and know nothing of the realm: `InvasionDirector` is driven by a host (the realm; a test makes its own) that finds

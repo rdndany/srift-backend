@@ -50,15 +50,15 @@ import type { XpOrbWorld } from './xpOrbs';
 import { ROD_WEAR, bobberMode, catchXp, isFishingRod, pullMob, rodEnchants, rollCatch, type Bobber, type BobberDraw, type FishingWorld } from './fishing';
 import type { WorldAccess } from './headlessWorld';
 import { BAG_SLOTS, bagInventory, strandedSlots } from './bags';
-import { organizeInventory } from './organize';
+import { depositMatching, organizeContainer, organizeInventory } from './organize';
 import { formatEmberTime, EMBER_CAST, EMBER_COOLDOWN, EMBER_MOVE_LIMIT } from './emberstone';import { MOUNTS, MOUNT_BITE, MOUNT_BLOCK_TEXT, MOUNT_HOWL, MOUNT_CAST, MOUNT_MOVE_LIMIT, MOUNT_STEP_HEIGHT, MOUNTED_EYE, RIDE_CHECK, RIDE_GRACE, mountBlocker, mountDef, rideEnclosed, mountSpeedText, type MountId, type MountView } from './mounts';
 import { Container, HOTBAR_SLOTS, canMerge, cloneStack, makeStack, maxStackOf, type ItemStack } from './inventory';
-import { I, PEARL_TRIP_DAMAGE, accessoryOfItem, bagSlotsOf, bedItemColor, companionOfItem, wingOfItem, blockDrops, breakTime, canHarvest, dyeColor, getItem, harvestHint, holdsInOffhand, isUndroppable, mountOfItem, outfitItems, outfitSetFits, outfitSetOfItem, silkKeeps, skillBookAbility, usedOnBlock, type ItemDef, type ItemUse, type WeaponDef } from './items';
+import { I, PEARL_TRIP_DAMAGE, accessoryOfItem, bagSlotsOf, bedItemColor, companionOfItem, wingOfItem, blockDrops, breakTime, canHarvest, dyeColor, getItem, harvestHint, holdsInOffhand, prefersOffhand, isUndroppable, mountOfItem, outfitItems, outfitSetFits, outfitSetOfItem, silkKeeps, skillBookAbility, usedOnBlock, type ItemDef, type ItemUse, type WeaponDef } from './items';
 import { AnvilMenu, ChestMenu, CraftingMenu, EnchantMenu, CreativeMenu, FurnaceMenu, GrindstoneMenu, TradeMenu, type Menu } from './menu';
 import { tooltipName } from './tooltip';
-import { ARMOR_STAND_POSES, ARROW_GRAVITY, WOOL_REGROW, arrowSpeed, rayAabb, type Mob, type MobEffect, type MobEffects, type MobKind, type MobManager } from './mobs';
+import { ARMOR_STAND_POSES, ARROW_GRAVITY, WOOL_REGROW, arrowSpeed, rayAabb, type Arrow, type Mob, type MobEffect, type MobEffects, type MobKind, type MobManager } from './mobs';
 import { growTree, isSapling } from './trees';
-import { PLAYER_EYE, bodyOverlapsBlock, collides, createBody, stepPlayer, type Body, type MoveInput } from './physics';
+import { PLAYER_EYE, PLAYER_HEIGHT, PLAYER_WIDTH, bodyOverlapsBlock, collides, createBody, stepPlayer, type Body, type MoveInput } from './physics';
 
 /** A Ground Slam: seconds the body crouches before it springs, and seconds the figure stays down on its shield after the blow. */
 export const SLAM_WIND = 0.2;
@@ -98,7 +98,8 @@ import { FIRST_QUEST, NPCS, QuestLog, npcById, questById, rewardCoins, rewardIte
 import { ABILITY_BY_ID, ClassState, abilitiesOf, abilityAt, type AbilityDef, type CastBlock } from './abilities';
 import type { EffectOwner, Fx } from './abilityEffects';
 import { creativeGear } from './creative';
-import { accessoryModifiers, cloneGear, gearKey, gearModifiers, glyphKey, glyphModifiers, pickRarity, randomGear } from './gear';
+import { COMPANION_LEVEL, WING_LEVEL, equipRefuse } from './equipLevel';
+import { accessoryModifiers, cloneGear, gearKey, gearModifiers, gearRefuse, gearUsable, glyphKey, glyphModifiers, pickRarity, randomGear, type Wearer } from './gear';
 import { ACCESSORY_SLOT_COUNT, NECKLACE_SLOT, accessorySlotsOf } from './accessories';
 import { HK } from './hollowKingData';
 import { jewelKind, useJewel } from './jewels';
@@ -167,6 +168,7 @@ export const DEATH_TEXT: Record<string, string> = {
   starve: 'You starved to death',
   void: 'You fell out of the world',
   mob: 'You were slain',
+  player: 'You were slain',
   explosion: 'You were blown up',
   lava: 'You tried to swim in lava',
   cactus: 'You were pricked to death',
@@ -291,6 +293,9 @@ export class Player implements EffectOwner {
   ready = false;
   yaw = 0;
   pitch = 0;
+  /** The idle their own figure is drawing (0 standing, 1 sitting, 2 stretching, 3 looking around), and how far into it. Others draw this, not one of their own. */
+  poseIdle = 0;
+  poseIdleT = 0;
   /**
    * Third person: where the client's camera is (it looks along yaw/pitch). The aim then goes from the eyes to what that camera's
    * crosshair is on, see `look()`. Null in first person, where the eyes are the camera.
@@ -372,7 +377,7 @@ export class Player implements EffectOwner {
   /** Seconds left of the blow after a slam has landed (the figure is still down on its shield). */
   private slamImpact = 0;
   /** A Charge under way: the body runs along `yaw` at `speed` until `left` blocks are covered or it is stopped. */
-  private rush: { yaw: number; speed: number; left: number; time: number; stall: number; dx: number; dz: number; hit: Set<Mob>; def: AbilityDef; mark: Fx } | null = null;
+  private rush: { yaw: number; speed: number; left: number; time: number; stall: number; dx: number; dz: number; hit: Set<Mob>; hitFoe: boolean; def: AbilityDef; mark: Fx } | null = null;
   /** Seconds left alight (flames and lava set you on fire; water puts it out). */
   onFire = 0;
   private fireTimer = 0.5;
@@ -572,6 +577,7 @@ export class Player implements EffectOwner {
 
   deathMessage(): string {
     const base = DEATH_TEXT[this.vitals.lastDamage ?? ''] ?? 'You died';
+    if (this.vitals.lastDamage === 'player' && this.killedBy) return `${base} by ${this.killedBy}`;
     if ((this.vitals.lastDamage === 'mob' || this.vitals.lastDamage === 'explosion') && this.killedBy) {
       const by = this.killedBy === 'arrow' ? 'a skeleton' : this.killedBy === 'tnt' ? 'TNT' : `a ${this.killedBy.replace('_', ' ')}`;
       return `${base} by ${by}`;
@@ -610,6 +616,10 @@ export class Player implements EffectOwner {
 
   /** Seconds since the arm last swung (a blow, a placed block, a block being mined): other players see it from this. */
   swingAge = 9;
+  /** Seconds since the off-hand dagger last stabbed: other players see the thrust from this. It starts long ago. */
+  showStab = 9;
+  /** The other fighter, once a duel has counted down. Null until then, and whenever there is no duel. */
+  duelTarget: Player | null = null;
   /** Seconds since a Shield Bash was thrown (`BASH_ANIM` and more: none): other players see the figure drive its shield forward from this. */
   bashAge = 9;
 
@@ -651,6 +661,7 @@ export class Player implements EffectOwner {
             this.emit({ t: 'inv' });
             return;
           }
+          if (this.tellGearRefuse(c.slot)) return;
           this.menu.click(c.slot, c.button);
           this.emit({ t: 'inv' });
           this.syncChestViewers();
@@ -658,6 +669,7 @@ export class Player implements EffectOwner {
         return;
       case 'shift':
         if (this.menu) {
+          if (this.tellGearRefuse(c.slot, true)) return;
           this.menu.shiftClick(c.slot);
           this.emit({ t: 'inv' });
           this.syncChestViewers();
@@ -665,6 +677,15 @@ export class Player implements EffectOwner {
         return;
       case 'organize':
         if (this.menu && organizeInventory(this.inventory)) this.emit({ t: 'inv' });
+        return;
+      case 'chestAct':
+        if (this.menu instanceof ChestMenu) {
+          const changed = c.a === 'organize' ? organizeContainer(this.menu.chest) : depositMatching(this.inventory, this.menu.chest);
+          if (changed) {
+            this.emit({ t: 'inv' });
+            this.syncChestViewers();
+          }
+        }
         return;
       case 'forge':
         if (this.menu instanceof CraftingMenu && this.menu.startForge(() => this.rand(), c.all === true)) {
@@ -719,8 +740,10 @@ export class Player implements EffectOwner {
         const s = m?.cursor;
         if (!m || !s) return;
         if (this.keepsItem(s.id)) return;
-        const n = c.all ? s.count : 1;
-        this.dropFromPlayer({ ...s, count: n });
+        const n = s.id === I.AURELION_CODEX ? 1 : c.all ? s.count : 1;
+        if (s.id === I.AURELION_CODEX) {
+          if (!this.spillCodex()) return;
+        } else this.dropFromPlayer({ ...s, count: n });
         s.count -= n;
         if (s.count <= 0) m.cursor = null;
         this.emit({ t: 'inv' });
@@ -793,7 +816,7 @@ export class Player implements EffectOwner {
         this.respawn();
         return;
       case 'inventory':
-        this.openMenu(this.mode === 'creative' ? new CreativeMenu(this.inventory) : new CraftingMenu(this.inventory, 2, this.armor, this.offhand, this.mountSlot, this.outfitSlot, () => this.cls?.classId ?? null, this.companionSlot, this.wingSlot, this.accessories));
+        this.openMenu(this.mode === 'creative' ? new CreativeMenu(this.inventory) : new CraftingMenu(this.inventory, 2, this.armor, this.offhand, this.mountSlot, this.outfitSlot, () => this.cls?.classId ?? null, this.companionSlot, this.wingSlot, this.accessories, () => this.gearWearer(), () => this.mountLevel));
         return;
       case 'ability':
         this.useAbility(c.slot);
@@ -805,8 +828,10 @@ export class Player implements EffectOwner {
         const s = this.held;
         if (!s) return;
         if (this.keepsItem(s.id)) return;
-        const n = c.all ? s.count : 1;
-        this.dropFromPlayer({ ...s, count: n });
+        const n = s.id === I.AURELION_CODEX ? 1 : c.all ? s.count : 1;
+        if (s.id === I.AURELION_CODEX) {
+          if (!this.spillCodex()) return;
+        } else this.dropFromPlayer({ ...s, count: n });
         s.count -= n;
         if (s.count <= 0) this.inventory.set(this.selected, null);
         this.emit({ t: 'inv' });
@@ -938,7 +963,7 @@ export class Player implements EffectOwner {
 
   /** Open one of the standard screens without a block (tests, hotkeys). */
   openScreen(kind: 'inventory' | 'crafting' | 'furnace' | 'chest' | 'creative'): void {
-    if (kind === 'inventory') this.openMenu(new CraftingMenu(this.inventory, 2, this.armor, this.offhand, this.mountSlot, this.outfitSlot, () => this.cls?.classId ?? null, this.companionSlot, this.wingSlot, this.accessories));
+    if (kind === 'inventory') this.openMenu(new CraftingMenu(this.inventory, 2, this.armor, this.offhand, this.mountSlot, this.outfitSlot, () => this.cls?.classId ?? null, this.companionSlot, this.wingSlot, this.accessories, () => this.gearWearer(), () => this.mountLevel));
     else if (kind === 'crafting') this.openMenu(new CraftingMenu(this.inventory, 3));
     else if (kind === 'furnace') this.openMenu(new FurnaceMenu(this.inventory, this.blockEntities.furnace(0, 0, 0), (n) => this.spawnXpAtFeet(n)));
     else if (kind === 'chest') this.openMenu(new ChestMenu(this.inventory, this.blockEntities.chest(0, 0, 0)));
@@ -999,7 +1024,7 @@ export class Player implements EffectOwner {
   /** Protection points of everything worn against one kind of damage. */
   private armorProtection(kind: ProtectionKind): number {
     let p = 0;
-    for (let i = 0; i < this.armor.size; i++) p += protectionPoints(this.armor.get(i), kind);
+    for (let i = 0; i < this.armor.size; i++) p += protectionPoints(this.armorThatCounts(i), kind);
     return p;
   }
 
@@ -1923,6 +1948,32 @@ export class Player implements EffectOwner {
     }
   }
 
+  /** A blow from the other fighter of a duel. Anything else is ignored: there is no fighting outside one. */
+  hurtByPlayer(by: Player, amount: number, kx: number, kz: number): void {
+    if (this.duelTarget !== by || by.duelTarget !== this) return;
+    if (this.invulnerable || this.vitals.dead || this.spectating || this.mode !== 'survival') return;
+    if (this.hardcore) amount *= HARD_DAMAGE;
+    if (this.cls) amount = this.cls.mitigate(amount);
+    if (amount <= 0) return;
+    if (this.stabAge < STAB_GUARD_TIME && this.rand() < STAB_GUARD_CHANCE) {
+      this.emit({ t: 'guard', what: this.rand() < 0.5 ? 'parry' : 'dodge' });
+      return;
+    }
+    if (this.tryBlock(amount, kx, kz)) return;
+    const before = this.vitals.health;
+    this.vitals.damage(this.protect(this.afterArmor(amount), 'all'), 'player');
+    if (this.vitals.health < before) {
+      this.emit({ t: 'dmg', x: this.body.x, y: this.body.y + 1.2, z: this.body.z, amount: Math.round((before - this.vitals.health) * 10) / 10, taken: true });
+      this.wearArmor(amount);
+      this.killedBy = by.name;
+      if (kx !== 0 || kz !== 0) {
+        this.body.vx = kx * 7;
+        this.body.vz = kz * 7;
+        if (this.body.onGround) this.body.vy = 4.5;
+      }
+    }
+  }
+
   /** A falling anvil lands on the player: two points a block of the fall, at most forty. */
   hurtByAnvil(amount: number): void {
     if (this.mode !== 'survival' || this.spectating || this.vitals.dead || amount <= 0) return;
@@ -1963,6 +2014,25 @@ export class Player implements EffectOwner {
       if (t !== null && t < hit.dist) return null;
     }
     return hit;
+  }
+
+  /** The other fighter under the crosshair, when a duel has started and no block is in the way. */
+  private aimedDuelist(): { foe: Player; dist: number } | null {
+    const foe = this.duelTarget;
+    if (!foe || foe.duelTarget !== this || foe.vitals.dead || foe.spectating) return null;
+    const d = this.look();
+    const { x: ox, y: oy, z: oz } = this.eye();
+    const b = foe.body;
+    const hw = (b.width ?? PLAYER_WIDTH) / 2;
+    const h = b.height ?? PLAYER_HEIGHT;
+    const t = rayAabb(ox, oy, oz, d.x, d.y, d.z, [b.x - hw, b.y, b.z - hw], [b.x + hw, b.y + h, b.z + hw], MELEE_REACH);
+    if (t === null) return null;
+    const block = raycast(this.world, ox, oy, oz, d.x, d.y, d.z, REACH);
+    if (block) {
+      const bt = rayAabb(ox, oy, oz, d.x, d.y, d.z, [block.x, block.y, block.z], [block.x + 1, block.y + 1, block.z + 1], REACH + 1);
+      if (bt !== null && bt < t) return null;
+    }
+    return { foe, dist: t };
   }
 
   /** Whether the crosshair is on someone to talk to: a villager or a quest giver. */
@@ -2020,11 +2090,55 @@ export class Player implements EffectOwner {
       knock: 1 + levelOf(hs, ENCH.KNOCKBACK),
       fire: 4 * levelOf(hs, ENCH.FIRE_ASPECT),
       looting: levelOf(hs, ENCH.LOOTING),
+      by: this,
     });
     this.showHit(mob, dealt, roll.crit, { blade: dagger, combo });
     // Siphon: a share of what the blow did comes back as health.
     const siphon = siphonShare(levelOf(hs, ENCH.SIPHON));
     if (siphon > 0 && !this.vitals.dead) this.vitals.health = Math.min(this.vitals.maxHealth, this.vitals.health + Math.round(dealt * siphon * 10) / 10);
+    this.attackCooldown = (blade?.kind === 'melee' ? blade.cooldown : 0.5) / (this.cls ? this.cls.stats.attackSpeed : 1);
+    this.emit(stab ? { t: 'swing', off: true } : { t: 'swing' });
+    if (tool || weapon?.kind === 'melee') this.damageHeld(1);
+    this.vitals.addExhaustion(EXHAUSTION.attack);
+    this.emit({ t: 'inv' });
+  }
+
+  /** A blow against the other fighter of a duel that has started. A bow does not poke; the off-hand dagger does. */
+  private attackPlayer(foe: Player, dist: number): void {
+    if (this.duelTarget !== foe || foe.duelTarget !== this) return;
+    const held = this.held;
+    const item = held ? getItem(held.id) : null;
+    const tool = item ? item.tool : null;
+    const weapon = item ? item.weapon : null;
+    const d = this.look();
+    const hs = this.enchHeld();
+    const offItem = this.offhand.get(0) ? getItem(this.offhand.get(0)!.id) : null;
+    const stab = !!offItem && offItem.id === I.DAGGER && !!item && (item.use === 'bow' || item.use === 'crossbow');
+    if (!stab && !!item && (item.use === 'bow' || item.use === 'crossbow')) return;
+    if (stab && dist > STAB_REACH) return;
+    const blade = stab ? offItem!.weapon : weapon;
+    const dagger = stab || item?.id === I.DAGGER;
+    let combo = false;
+    if (dagger) {
+      this.stabs = this.stabAge < COMBO_WINDOW ? this.stabs + 1 : 1;
+      this.stabAge = 0;
+      if (this.stabs >= COMBO_STABS) {
+        combo = true;
+        this.stabs = 0;
+      }
+    } else this.stabs = 0;
+    const base = blade ? (blade.kind === 'melee' ? blade.damage : 1) : tool ? tool.damage : 1;
+    const roll = rollDamage(this.cls?.stats ?? null, 'melee', (base + sharpnessBonus(levelOf(hs, ENCH.SHARPNESS))) * (combo ? 1.5 : 1) * (this.weakTime > 0 ? WEAK_DAMAGE : 1) * this.companionMight * this.wingMight, this.rand);
+    const before = foe.vitals.health;
+    foe.hurtByPlayer(this, roll.amount, d.x, d.z);
+    const dealt = Math.round((before - foe.vitals.health) * 10) / 10;
+    if (dealt > 0) {
+      this.emit({ t: 'dmg', x: foe.body.x, y: foe.body.y + 1.2, z: foe.body.z, amount: dealt, ...(roll.crit ? { crit: true } : {}), ...(dagger ? { blade: true } : {}), ...(combo ? { combo: true } : {}) });
+      const fire = 4 * levelOf(hs, ENCH.FIRE_ASPECT);
+      if (fire > 0) foe.afflict('burn', fire);
+    }
+    const siphon = siphonShare(levelOf(hs, ENCH.SIPHON));
+    if (siphon > 0 && dealt > 0 && !this.vitals.dead) this.vitals.health = Math.min(this.vitals.maxHealth, this.vitals.health + Math.round(dealt * siphon * 10) / 10);
     this.attackCooldown = (blade?.kind === 'melee' ? blade.cooldown : 0.5) / (this.cls ? this.cls.stats.attackSpeed : 1);
     this.emit(stab ? { t: 'swing', off: true } : { t: 'swing' });
     if (tool || weapon?.kind === 'melee') this.damageHeld(1);
@@ -2052,6 +2166,7 @@ export class Player implements EffectOwner {
     this.placeCooldown -= dt;
     this.attackCooldown -= dt;
     this.stabAge = Math.min(9, this.stabAge + dt);
+    this.showStab = Math.min(9, this.showStab + dt);
     this.castCooldown -= dt;
     this.lockedNotice -= dt;
     this.wildHint -= dt;
@@ -2084,13 +2199,18 @@ export class Player implements EffectOwner {
     const d = this.look();
     const eye = this.eye();
     const mobHit = this.aimedMob();
-    if (mobHit && f.left && this.attackCooldown <= 0) this.attackMob(mobHit.mob, mobHit.dist);
+    const foeHit = this.aimedDuelist();
+    const strikeFoe = !!foeHit && (!mobHit || foeHit.dist <= mobHit.dist);
+    if (f.left && this.attackCooldown <= 0) {
+      if (strikeFoe && foeHit) this.attackPlayer(foeHit.foe, foeHit.dist);
+      else if (mobHit) this.attackMob(mobHit.mob, mobHit.dist);
+    }
     if (rightPressed && this.useOnMob()) return;
-    const rigHit = mobHit ? null : this.aimedVehicle();
+    const rigHit = mobHit || strikeFoe ? null : this.aimedVehicle();
     if (rigHit && f.left && this.attackCooldown <= 0) this.hitVehicle(rigHit.vehicle);
     if (rigHit && rightPressed && !f.sneak && this.mount(rigHit.vehicle)) return;
     // Aiming at a mob or a vehicle: don't also mine the block behind it.
-    this.target = mobHit || rigHit ? null : raycast(this.world, eye.x, eye.y, eye.z, d.x, d.y, d.z, REACH);
+    this.target = mobHit || rigHit || strikeFoe ? null : raycast(this.world, eye.x, eye.y, eye.z, d.x, d.y, d.z, REACH);
 
     const held = this.held;
     const item = held ? getItem(held.id) : null;
@@ -2315,6 +2435,48 @@ export class Player implements EffectOwner {
 
     // ---- staff, wand, spellbook: right-click casts ----
     if (f.right && item?.weapon?.kind === 'spell' && this.castCooldown <= 0) this.castWeapon(item.weapon, item.id);
+
+    // The player's own view swings the main hand as soon as the button is down, hit or miss. Others only see swingAge.
+    this.seenSwing(f, item);
+    // A dagger in the off hand stabs the moment the button goes down, hit or miss. Others only see showStab.
+    this.seenStab(f, item);
+  }
+
+  /**
+   * A swing of the main hand while the button is held, whether or not it hits anything. A bow does not swing (a dagger
+   * in the off hand stabs instead). Mining already restarts the same clock; this covers a swing in the air.
+   */
+  private seenSwing(f: InputFrame, item: ReturnType<typeof getItem> | null): void {
+    if (!f.left) return;
+    if (item && (item.use === 'bow' || item.use === 'crossbow')) return;
+    if (this.swingAge < 0.3) return;
+    this.swingAge = 0;
+    this.swingRate = 1;
+  }
+
+  /**
+   * A stab of the dagger in the off hand, with a bow or crossbow in the main hand, whether or not it hits anything.
+   * It cannot start while the bow is drawn, and it waits out the thrust before the next one.
+   */
+  private seenStab(f: InputFrame, item: ReturnType<typeof getItem> | null): void {
+    if (!f.left || this.bowDraw >= 0.02) return;
+    if (!item || (item.use !== 'bow' && item.use !== 'crossbow')) return;
+    const off = this.offhand.get(0);
+    if (!off || off.id !== I.DAGGER) return;
+    if (this.showStab < 0.3) return;
+    this.showStab = 0;
+  }
+
+  /** A living monster within ten blocks and six high: the figure squares up. An animal does not count. */
+  nearHostile(): boolean {
+    const b = this.body;
+    for (const m of this.mobs.mobs) {
+      if (m.dead || !m.def.hostile) continue;
+      const dx = m.body.x - b.x;
+      const dz = m.body.z - b.z;
+      if (dx * dx + dz * dz < 100 && Math.abs(m.body.y - b.y) < 6) return true;
+    }
+    return false;
   }
 
   /**
@@ -2535,12 +2697,14 @@ export class Player implements EffectOwner {
           power: levelOf(hb, ENCH.POWER),
           punch: levelOf(hb, ENCH.PUNCH),
           flame: levelOf(hb, ENCH.FLAME) > 0,
+          by: this,
         });
         // A crossbow bolt hits as hard as the weapon says (9 is a full bow); the class's ranged multiplier and crits come on top.
         const weapon = bow ? getItem(bow.id).weapon : null;
         const shot = weapon ? (arrow.damage * weapon.damage) / 9 : arrow.damage;
         const roll = rollDamage(this.cls?.stats ?? null, 'ranged', shot * (this.weakTime > 0 ? WEAK_DAMAGE : 1) * this.companionMight * this.wingMight, this.rand);
         arrow.damage = roll.amount;
+        this.armDuelArrow(arrow);
         // Where it ends, the archer is told: a number and a mark over what it hit (a headshot counts as a critical hit), or the arrow stands in the wall.
         arrow.onHit = (a, mob, dealt, head) => {
           if (mob) {
@@ -2563,11 +2727,54 @@ export class Player implements EffectOwner {
     this.bowDraw = bow ? Math.min(1, this.bowCharge / full) : 0;
   }
 
+  /** An arrow in a duel also strikes the other fighter, when the shot reaches them before a mob or a wall. */
+  private armDuelArrow(arrow: Arrow): void {
+    if (!this.duelTarget) return;
+    arrow.foeAlong = (x, y, z, dx, dy, dz, len) => {
+      const foe = this.duelTarget;
+      if (!foe || foe.duelTarget !== this || foe.vitals.dead || foe.spectating) return null;
+      const b = foe.body;
+      const hw = (b.width ?? PLAYER_WIDTH) / 2;
+      const h = b.height ?? PLAYER_HEIGHT;
+      return rayAabb(x, y, z, dx, dy, dz, [b.x - hw, b.y, b.z - hw], [b.x + hw, b.y + h, b.z + hw], len);
+    };
+    arrow.onFoe = (a, t) => {
+      const foe = this.duelTarget;
+      if (!foe) return;
+      const h = foe.body.height ?? PLAYER_HEIGHT;
+      const speed = Math.hypot(a.vx, a.vy, a.vz) || 1;
+      const head = h >= 1.2 && a.y + (a.vy / speed) * t >= foe.body.y + h * 0.8;
+      const dealt = head ? a.damage * 1.5 : a.damage;
+      const hlen = Math.hypot(a.vx, a.vz) || 1;
+      const before = foe.vitals.health;
+      foe.hurtByPlayer(this, dealt, a.vx / hlen, a.vz / hlen);
+      const taken = Math.round((before - foe.vitals.health) * 10) / 10;
+      if (taken > 0) this.emit({ t: 'dmg', x: foe.body.x, y: foe.body.y + 1.2, z: foe.body.z, amount: taken, arrow: true, ...(head ? { head: true } : {}) });
+    };
+  }
+
+  /** A spell bolt in a duel bursts on the other fighter when the shot reaches them before a mob or a wall. */
+  private armDuelBolt(arrow: Arrow, burst: (x: number, y: number, z: number) => void): void {
+    if (!this.duelFoe()) return;
+    arrow.foeAlong = (x, y, z, dx, dy, dz, len) => {
+      const foe = this.duelFoe();
+      if (!foe) return null;
+      const b = foe.body;
+      const hw = (b.width ?? PLAYER_WIDTH) / 2;
+      const h = b.height ?? PLAYER_HEIGHT;
+      return rayAabb(x, y, z, dx, dy, dz, [b.x - hw, b.y, b.z - hw], [b.x + hw, b.y + h, b.z + hw], len);
+    };
+    arrow.onFoe = (a, t) => {
+      const speed = Math.hypot(a.vx, a.vy, a.vz) || 1;
+      burst(a.x + (a.vx / speed) * t, a.y + (a.vy / speed) * t, a.z + (a.vz / speed) * t);
+    };
+  }
+
   // ---- classes: abilities, damage dealt, experience -------------------------------------------------------
   // Everything a class does is decided here, on the server's copy of the player. A client names a button (`Command
   // 'ability'`); what the ability costs, whether it is ready, where it aims and what it hits come from this file and
-  // from the player's own state. Abilities act on mobs only: players are never targets (PvP is off), and passive
-  // animals and villagers are left alone by the area abilities.
+  // from the player's own state. Abilities, wands and staves hit mobs, and during a duel they also hit the other
+  // fighter. Passive animals and villagers are left alone by the area abilities.
 
   /** In the realm and alive: pending effects (a meteor on its way) are dropped when this is false. */
   alive(): boolean {
@@ -2608,6 +2815,7 @@ export class Player implements EffectOwner {
    * (the pieces that need a higher level or another class add nothing). Recomputed only when something changed.
    */
   private syncGearBonus(): void {
+    this.shedUnwearable();
     const cls = this.cls;
     if (!cls) return;
     const worn: (ItemStack | null)[] = [this.held, this.offhand.get(0)];
@@ -2809,21 +3017,63 @@ export class Player implements EffectOwner {
     return true;
   }
 
+  /** One piece of Epic gear from a Codex of Aurelion: the character's class, near their level. */
+  private codexPiece(): ItemStack {
+    return randomGear(this.mountLevel + Math.floor(this.rand() * 3) - 1, pickRarity([0, 0, 1], () => this.rand()), this.cls?.classId, () => this.rand());
+  }
+
+  /** The book opens and the piece appears: one sound, and a line saying so. `slot` is where it landed in the bags, or -1 on the ground. */
+  private codexOpened(slot: number): void {
+    this.emit({ t: 'toast', text: 'The Codex of Aurelion opens: a piece of epic gear' });
+    this.emit({ t: 'codex', slot });
+  }
+
+  /**
+   * Put a piece into `prefer` when that slot is empty, otherwise into any empty slot.
+   * Returns that slot, or -1 when the bags are full and the piece is thrown in front of the player.
+   */
+  private placeOrDrop(stack: ItemStack, prefer: number): number {
+    if (this.inventory.isUsable(prefer) && !this.inventory.get(prefer)) {
+      this.inventory.set(prefer, stack);
+      return prefer;
+    }
+    for (let i = 0; i < this.inventory.size; i++) {
+      if (!this.inventory.get(i) && this.inventory.isUsable(i)) {
+        this.inventory.set(i, stack);
+        return i;
+      }
+    }
+    this.dropFromPlayer(stack, 2);
+    return -1;
+  }
+
+  /**
+   * Throw one codex: it opens on the way down, so the ground gets one piece of gear and the rest of the stack stays in hand.
+   * False when the character cannot open one (then the book stays).
+   */
+  private spillCodex(): boolean {
+    if (this.vitals.dead || this.spectating || this.sleeping) return false;
+    this.dropFromPlayer(this.codexPiece(), 2);
+    this.codexOpened(-1);
+    return true;
+  }
+
   /**
    * Open a Codex of Aurelion in the bags (`index` is its slot): it is used up and gives one piece of Epic gear, for the
-   * character's class, near their level. Returns whether the slot held a codex (so the click that opened it does not pick it up).
+   * character's class, near their level. The piece takes that slot when the book leaves it empty, any other empty slot
+   * otherwise, and the ground when the bags are full. Returns whether the slot held a codex (so the click that opened it does not pick it up).
    */
   openCodex(index: number): boolean {
     const stack = this.inventory.get(index);
     if (!stack || stack.id !== I.AURELION_CODEX) return false;
     if (this.vitals.dead || this.spectating || this.sleeping) return true;
-    const piece = randomGear(this.mountLevel + Math.floor(this.rand() * 3) - 1, pickRarity([0, 0, 1], () => this.rand()), this.cls?.classId, () => this.rand());
+    const piece = this.codexPiece();
     if (this.mode === 'survival') {
       stack.count -= 1;
       if (stack.count <= 0) this.inventory.set(index, null);
     }
-    this.giveOrDrop(piece);
-    this.emit({ t: 'toast', text: 'The Codex of Aurelion opens: a piece of epic gear' });
+    const landed = this.placeOrDrop(piece, index);
+    this.codexOpened(landed);
     this.emit({ t: 'inv' });
     return true;
   }
@@ -2857,6 +3107,11 @@ export class Player implements EffectOwner {
     const def = mountDef(id);
     if (!stack || !id || !def) return false;
     if (this.vitals.dead || this.spectating || this.sleeping || this.mountId || this.mountCast) return true;
+    const why = equipRefuse(stack.id, this.mountLevel);
+    if (why) {
+      this.emit({ t: 'toast', text: why });
+      return true;
+    }
     const worn = this.mountSlot.get(0);
     this.mountSlot.set(0, cloneStack({ ...stack, count: 1 }));
     this.inventory.set(index, worn);
@@ -2904,12 +3159,14 @@ export class Player implements EffectOwner {
     return def ? COMPANIONS.indexOf(def) + 1 : 0;
   }
 
-  /** What the companion gives: a share more damage dealt (1.1) and a share of the damage taken that does not land (0.9). */
+  /** What the companion gives: a share more damage dealt (1.1) and a share of the damage taken that does not land (0.9). Nothing until its level. */
   private get companionMight(): number {
+    if (this.mountLevel < COMPANION_LEVEL) return 1;
     const def = COMPANIONS[this.companionNumber - 1];
     return 1 + (def?.might ?? 0);
   }
   private get companionWard(): number {
+    if (this.mountLevel < COMPANION_LEVEL) return 1;
     const def = COMPANIONS[this.companionNumber - 1];
     return 1 - (def?.ward ?? 0);
   }
@@ -2920,6 +3177,11 @@ export class Player implements EffectOwner {
     const def = stack ? companionOfItem(stack.id) : null;
     if (!stack || !def) return false;
     if (this.vitals.dead || this.spectating || this.sleeping) return true;
+    const why = equipRefuse(stack.id, this.mountLevel);
+    if (why) {
+      this.emit({ t: 'toast', text: why });
+      return true;
+    }
     const worn = this.companionSlot.get(0);
     this.companionSlot.set(0, cloneStack({ ...stack, count: 1 }));
     this.inventory.set(index, worn);
@@ -2947,11 +3209,13 @@ export class Player implements EffectOwner {
     return this.flying && this.mode === 'survival' && !this.spectating && this.wingNumber > 0;
   }
 
-  /** What the wings give: a share more damage dealt and a share of the damage taken that does not land. */
+  /** What the wings give: a share more damage dealt and a share of the damage taken that does not land. Nothing until their level. */
   private get wingMight(): number {
+    if (this.mountLevel < WING_LEVEL) return 1;
     return 1 + (this.wingDef?.might ?? 0);
   }
   private get wingWard(): number {
+    if (this.mountLevel < WING_LEVEL) return 1;
     return 1 - (this.wingDef?.ward ?? 0);
   }
 
@@ -2961,6 +3225,11 @@ export class Player implements EffectOwner {
     const def = stack ? wingOfItem(stack.id) : null;
     if (!stack || !def) return false;
     if (this.vitals.dead || this.spectating || this.sleeping) return true;
+    const why = equipRefuse(stack.id, this.mountLevel);
+    if (why) {
+      this.emit({ t: 'toast', text: why });
+      return true;
+    }
     const worn = this.wingSlot.get(0);
     this.wingSlot.set(0, cloneStack({ ...stack, count: 1 }));
     this.inventory.set(index, worn);
@@ -2980,6 +3249,11 @@ export class Player implements EffectOwner {
     const def = stack ? accessoryOfItem(stack.id) : null;
     if (!stack || !def) return false;
     if (this.vitals.dead || this.spectating || this.sleeping) return true;
+    const why = equipRefuse(stack.id, this.mountLevel);
+    if (why) {
+      this.emit({ t: 'toast', text: why });
+      return true;
+    }
     const places = accessorySlotsOf(def.kind);
     const at = places.find((i) => !this.accessories.get(i)) ?? places[0];
     const worn = this.accessories.get(at);
@@ -3011,6 +3285,10 @@ export class Player implements EffectOwner {
     if (this.vitals.dead || this.riding || this.sleeping) return;
     if (this.mountId) {
       this.emit({ t: 'toast', text: "You can't fly while mounted." });
+      return;
+    }
+    if (this.mountLevel < WING_LEVEL) {
+      this.emit({ t: 'toast', text: `Requires level ${WING_LEVEL}.` });
       return;
     }
     if (b.inWater || b.onLadder || this.rootTime > 0) return;
@@ -3126,6 +3404,7 @@ export class Player implements EffectOwner {
       if (len > 0.5 && (dx * look.x + dz * look.z) / len < min) continue;
       this.strike(m, s.damage * power, 'melee', { x: b.x, z: b.z }, s.knock);
     }
+    if (this.foeInCone(s.range, s.arc, 5)) this.strikeFoe(s.damage * power, 'melee', { x: b.x, z: b.z }, s.knock);
     this.vitals.addExhaustion(EXHAUSTION.attack);
     // The bite leaves a mark running to the far end of its reach, in the colour of the mount's lightning.
     this.realm.effects.mark('fang', this.name, b.x, b.y, b.z, s.range, 0.7, { x: b.x + look.x * s.range, y: b.y, z: b.z + look.z * s.range }).mount = id;
@@ -3230,8 +3509,67 @@ export class Player implements EffectOwner {
   strike(mob: Mob, base: number, kind: DamageKind, from: { x: number; z: number }, knock = 1, lift = 0): void {
     if (mob.dead || mob.def.invulnerable) return;
     const roll = rollDamage(this.cls?.stats ?? null, kind, base * (this.weakTime > 0 ? WEAK_DAMAGE : 1) * this.companionMight * this.wingMight, this.rand);
-    this.mobs.damage(mob, roll.amount, mob.body.x - from.x, mob.body.z - from.z, this.realm.mobEvents, true, knock > 0, true, { knock, lift });
+    this.mobs.damage(mob, roll.amount, mob.body.x - from.x, mob.body.z - from.z, this.realm.mobEvents, true, knock > 0, true, { knock, lift, by: this });
     this.showHit(mob, roll.amount, roll.crit);
+  }
+
+  /** The other fighter of a duel that has started, still standing. */
+  private duelFoe(): Player | null {
+    const foe = this.duelTarget;
+    if (!foe || foe.duelTarget !== this || foe.vitals.dead || foe.spectating) return null;
+    return foe;
+  }
+
+  /** That fighter, when they stand within `radius` of the point (their body counts) and `height` of its middle. */
+  private foeAt(x: number, y: number, z: number, radius: number, height: number): Player | null {
+    const foe = this.duelFoe();
+    if (!foe) return null;
+    const b = foe.body;
+    const hw = (b.width ?? PLAYER_WIDTH) / 2;
+    const h = b.height ?? PLAYER_HEIGHT;
+    if (Math.hypot(b.x - x, b.z - z) > radius + hw) return null;
+    if (Math.abs(b.y + h * 0.5 - y) > height) return null;
+    return foe;
+  }
+
+  /** In front of the caster, inside a cone (the same test a shield bash uses on a mob). */
+  private foeInCone(range: number, arc: number, height = 3.5): Player | null {
+    const b = this.body;
+    const foe = this.foeAt(b.x, b.y, b.z, range, height);
+    if (!foe) return null;
+    const look = this.flatLook();
+    const dx = foe.body.x - b.x;
+    const dz = foe.body.z - b.z;
+    const len = Math.hypot(dx, dz);
+    if (len > 0.5 && (dx * look.x + dz * look.z) / len < Math.cos(arc / 2)) return null;
+    return foe;
+  }
+
+  /**
+   * One hit on the other fighter, with the same roll a mob would take. Knock is how hard they are thrown
+   * (0 leaves them where they stand). Lift throws them up when the blow lands. Returns whether any health was lost.
+   */
+  private strikeFoe(base: number, kind: DamageKind, from: { x: number; z: number }, knock = 1, lift = 0): boolean {
+    const foe = this.duelFoe();
+    if (!foe) return false;
+    const roll = rollDamage(this.cls?.stats ?? null, kind, base * (this.weakTime > 0 ? WEAK_DAMAGE : 1) * this.companionMight * this.wingMight, this.rand);
+    const kx = foe.body.x - from.x;
+    const kz = foe.body.z - from.z;
+    const len = Math.hypot(kx, kz) || 1;
+    const before = foe.vitals.health;
+    foe.hurtByPlayer(this, roll.amount, knock > 0 ? (kx / len) * knock : 0, knock > 0 ? (kz / len) * knock : 0);
+    if (lift > 0 && foe.vitals.health < before) foe.body.vy = Math.max(foe.body.vy, lift);
+    const dealt = Math.round((before - foe.vitals.health) * 10) / 10;
+    if (dealt > 0) this.emit({ t: 'dmg', x: foe.body.x, y: foe.body.y + 2.05, z: foe.body.z, amount: dealt, ...(roll.crit ? { crit: true } : {}) });
+    return dealt > 0;
+  }
+
+  /** A blast, a trap or a storm: the other fighter takes it when they stand in it. A trap can also root them. */
+  strikeFoeAt(x: number, y: number, z: number, radius: number, height: number, damage: number, kind: DamageKind, from: { x: number; z: number }, knock = 1, root = 0): boolean {
+    const foe = this.foeAt(x, y, z, radius, height);
+    if (!foe) return false;
+    if (this.strikeFoe(damage, kind, from, knock) && root > 0) foe.afflict('root', root);
+    return true;
   }
 
   /** Tell the player how much a hit of theirs did (the number floats up over the mob). */
@@ -3348,6 +3686,11 @@ export class Player implements EffectOwner {
       this.strike(m, e.damage, def.kind, from, e.knock ?? 0, e.lift ?? 0);
       if (e.stun || e.slow) this.mobs.applyStatus(m, { ...(e.stun ? { stun: e.stun } : {}), ...(e.slow ? { slow: e.slow } : {}) });
     }
+    const foe = this.foeAt(x, y, z, e.radius, 3.5);
+    if (foe && this.strikeFoe(e.damage, def.kind, from, e.knock ?? 0, e.lift ?? 0)) {
+      if (e.stun) foe.afflict('root', e.stun);
+      if (e.slow) foe.afflict('slow', e.slow.seconds, e.slow.mult);
+    }
     // The frost stays on the ground a little while after the wave has passed; a slam leaves its cracks.
     if (def.id === 'frost_nova') this.realm.effects.mark('frost_nova', this.name, x, y, z, e.radius, 2.5);
     else this.realm.effects.mark('slam', this.name, x, y, z, e.radius, 1.4);
@@ -3368,7 +3711,7 @@ export class Player implements EffectOwner {
       }
       mark = this.realm.effects.mark('roll', this.name, b.x, b.y + 0.9, b.z, 1, e.distance / speed + 0.5, { x: b.x + dx * reach, y: b.y + 0.9, z: b.z + dz * reach });
     }
-    this.rush = { yaw: Math.atan2(-dx, -dz), speed, left: e.distance, time: 0, stall: 0, dx, dz, hit: new Set(), def, mark };
+    this.rush = { yaw: Math.atan2(-dx, -dz), speed, left: e.distance, time: 0, stall: 0, dx, dz, hit: new Set(), hitFoe: false, def, mark };
     // Off the mark at once rather than building up speed.
     b.vx = dx * speed * 0.6;
     b.vz = dz * speed * 0.6;
@@ -3407,6 +3750,10 @@ export class Player implements EffectOwner {
         if (r.hit.has(m)) continue;
         r.hit.add(m);
         this.strike(m, e.hit.damage, r.def.kind, { x: b.x - r.dx, z: b.z - r.dz }, e.hit.knock ?? 0, e.hit.lift ?? 0);
+      }
+      if (!r.hitFoe && this.foeAt(b.x, b.y, b.z, e.hit.radius, 2)) {
+        r.hitFoe = true;
+        this.strikeFoe(e.hit.damage, r.def.kind, { x: b.x - r.dx, z: b.z - r.dz }, e.hit.knock ?? 0, e.hit.lift ?? 0);
       }
     }
     // Stopped by something: a block high enough to hop is hopped, a wall ends it.
@@ -3491,6 +3838,8 @@ export class Player implements EffectOwner {
           this.strike(m, e.damage, def.kind, from, e.knock ?? 0, e.lift ?? 0);
           if (e.stun) this.mobs.applyStatus(m, { stun: e.stun });
         }
+        const foe = this.foeInCone(e.range, e.arc);
+        if (foe && this.strikeFoe(e.damage, def.kind, from, e.knock ?? 0, e.lift ?? 0) && e.stun) foe.afflict('root', e.stun);
         // The far end of the mark says which way the blow went.
         fx.mark('bash', this.name, b.x + look.x * 1.2, b.y + 0.9, b.z + look.z * 1.2, e.range / 2, 0.7, { x: b.x + look.x * e.range, y: b.y + 0.9, z: b.z + look.z * e.range });
         return;
@@ -3520,6 +3869,7 @@ export class Player implements EffectOwner {
         }
         const start = { x: b.x, y: b.y, z: b.z };
         const hit = new Set<Mob>();
+        let struckFoe = false;
         const stepLen = 0.4;
         for (let travelled = 0; travelled < e.distance; travelled += stepLen) {
           const nx = b.x + dx * stepLen;
@@ -3538,6 +3888,10 @@ export class Player implements EffectOwner {
               hit.add(m);
               this.strike(m, e.hit.damage, def.kind, { x: b.x - dx, z: b.z - dz }, e.hit.knock ?? 0, e.hit.lift ?? 0);
             }
+            if (!struckFoe && this.foeAt(b.x, b.y, b.z, e.hit.radius, 2)) {
+              struckFoe = true;
+              this.strikeFoe(e.hit.damage, def.kind, { x: b.x - dx, z: b.z - dz }, e.hit.knock ?? 0, e.hit.lift ?? 0);
+            }
           }
         }
         b.vx = 0;
@@ -3551,9 +3905,11 @@ export class Player implements EffectOwner {
         const d = this.look();
         const eye = this.eye();
         const spell = def.id === 'fireball' ? 1 : 2;
-        this.mobs.castBolt(eye.x + d.x * 0.6, eye.y + d.y * 0.6 - 0.1, eye.z + d.z * 0.6, d.x, d.y, d.z, e.speed, spell, (hx, hy, hz, target) => {
+        const burst = (hx: number, hy: number, hz: number, target: Mob | null) => {
           this.boltBurst(hx, hy, hz, target, e.damage, def.kind, e.radius ?? 0, e.burn ?? 0, spell === 1 ? 'fireball_burst' : 'bolt', spell === 1 ? 1 : 0.6);
-        });
+        };
+        const arrow = this.mobs.castBolt(eye.x + d.x * 0.6, eye.y + d.y * 0.6 - 0.1, eye.z + d.z * 0.6, d.x, d.y, d.z, e.speed, spell, burst);
+        this.armDuelBolt(arrow, (hx, hy, hz) => burst(hx, hy, hz, null));
         this.realm.emitNear(eye.x, eye.y, eye.z, { t: 'mob', kind: 'skeleton', sound: 'shoot', vol: 0.5 });
         return;
       }
@@ -3572,6 +3928,14 @@ export class Player implements EffectOwner {
           if (!this.isFoe(m)) continue;
           const t = m.hitDistance(eye.x, eye.y, eye.z, d.x, d.y, d.z, reach, e.width / 2);
           if (t !== null) this.strike(m, e.damage, def.kind, { x: eye.x, z: eye.z }, 0.6);
+        }
+        const foe = this.duelFoe();
+        if (foe) {
+          const body = foe.body;
+          const hw = (body.width ?? PLAYER_WIDTH) / 2 + e.width / 2;
+          const h = body.height ?? PLAYER_HEIGHT;
+          const t = rayAabb(eye.x, eye.y, eye.z, d.x, d.y, d.z, [body.x - hw, body.y, body.z - hw], [body.x + hw, body.y + h, body.z + hw], reach);
+          if (t !== null) this.strikeFoe(e.damage, def.kind, { x: eye.x, z: eye.z }, 0.6);
         }
         fx.mark('pierce', this.name, eye.x + d.x * 0.6, eye.y + d.y * 0.6 - 0.15, eye.z + d.z * 0.6, e.width, 0.5, { x: eye.x + d.x * reach, y: eye.y + d.y * reach, z: eye.z + d.z * reach });
         this.realm.emitNear(eye.x, eye.y, eye.z, { t: 'mob', kind: 'skeleton', sound: 'shoot', vol: 0.6 });
@@ -3627,6 +3991,8 @@ export class Player implements EffectOwner {
       this.strike(m, damage, kind, { x, z }, 0.7);
       if (burn > 0 && !m.dead && !m.body.inWater) m.onFire = Math.max(m.onFire, burn);
     }
+    const foe = this.foeAt(x, y, z, Math.max(radius, 0.45), Math.max(radius, 1) + 1);
+    if (foe && this.strikeFoe(damage, kind, { x, z }, 0.7) && burn > 0) foe.afflict('burn', burn);
     this.realm.effects.mark(mark, this.name, x, y, z, radius || 0.8, ttl);
   }
 
@@ -3652,8 +4018,11 @@ export class Player implements EffectOwner {
     const staff = itemId === I.STAFF;
     // The Hollow King's staff throws fireballs: they burn what they hit.
     const fire = itemId === HK.STAFF;
-    this.mobs.castBolt(eye.x + d.x * 0.6, eye.y + d.y * 0.6 - 0.1, eye.z + d.z * 0.6, d.x, d.y, d.z, weapon.speed ?? 18, fire ? 1 : wand ? 3 : staff ? 4 : 2, (hx, hy, hz, target) => {
+    const arrow = this.mobs.castBolt(eye.x + d.x * 0.6, eye.y + d.y * 0.6 - 0.1, eye.z + d.z * 0.6, d.x, d.y, d.z, weapon.speed ?? 18, fire ? 1 : wand ? 3 : staff ? 4 : 2, (hx, hy, hz, target) => {
       this.boltBurst(hx, hy, hz, target, weapon.damage, weapon.kind, radius, fire ? 5 : 0, fire ? 'fireball_burst' : wand ? 'wand_hit' : staff ? 'staff_hit' : 'bolt', fire ? 1 : 0.6);
+    });
+    this.armDuelBolt(arrow, (hx, hy, hz) => {
+      this.boltBurst(hx, hy, hz, null, weapon.damage, weapon.kind, radius, fire ? 5 : 0, fire ? 'fireball_burst' : wand ? 'wand_hit' : staff ? 'staff_hit' : 'bolt', fire ? 1 : 0.6);
     });
     // Its own sound for each (a wand zaps, a staff booms, a spellbook hums), heard by the players near.
     this.realm.emitNear(eye.x, eye.y, eye.z, { t: 'spell', weapon: itemId === I.STAFF || itemId === HK.STAFF ? 'staff' : itemId === I.SPELLBOOK ? 'spellbook' : 'wand', vol: 0.8 });
@@ -3885,7 +4254,7 @@ export class Player implements EffectOwner {
   get defense(): number {
     let n = 0;
     for (let i = 0; i < this.armor.size; i++) {
-      const s = this.armor.get(i);
+      const s = this.armorThatCounts(i);
       if (s) n += getItem(s.id).armor?.defense ?? 0;
     }
     return n;
@@ -3899,10 +4268,106 @@ export class Player implements EffectOwner {
   private get toughness(): number {
     let n = 0;
     for (let i = 0; i < this.armor.size; i++) {
-      const s = this.armor.get(i);
+      const s = this.armorThatCounts(i);
       if (s) n += getItem(s.id).armor?.toughness ?? 0;
     }
     return n;
+  }
+
+  /** A piece already on that this hero cannot wear yet comes off into the bags (or onto the ground when they are full). */
+  private shedUnwearable(): void {
+    const who = this.gearWearer();
+    const putBack = (s: ItemStack, why: string | null): void => {
+      this.collectOrDrop(cloneStack(s));
+      if (why) this.emit({ t: 'toast', text: why });
+      this.emit({ t: 'inv' });
+    };
+    for (let i = 0; i < this.armor.size; i++) {
+      const s = this.armor.get(i);
+      if (!s || gearUsable(s, who)) continue;
+      this.armor.set(i, null);
+      putBack(s, gearRefuse(s, who));
+    }
+    const off = this.offhand.get(0);
+    if (off && !gearUsable(off, who)) {
+      this.offhand.set(0, null);
+      putBack(off, gearRefuse(off, who));
+    }
+    for (const box of [this.mountSlot, this.companionSlot, this.wingSlot]) {
+      const s = box.get(0);
+      const why = s ? equipRefuse(s.id, this.mountLevel) : null;
+      if (!s || !why) continue;
+      if (box === this.mountSlot) {
+        if (this.mountCast) this.cancelMountCast();
+        if (this.mountId) this.leaveMount();
+      }
+      if (box === this.wingSlot && this.mode === 'survival') this.flying = false;
+      box.set(0, null);
+      putBack(s, why);
+    }
+    for (let i = 0; i < this.accessories.size; i++) {
+      const s = this.accessories.get(i);
+      const why = s ? equipRefuse(s.id, this.mountLevel) : null;
+      if (!s || !why) continue;
+      this.accessories.set(i, null);
+      putBack(s, why);
+    }
+  }
+
+  /** The piece in this armor slot when the wearer may use it. One that needs a higher level or another class protects nothing. */
+  private armorThatCounts(i: number): ItemStack | null {
+    const s = this.armor.get(i);
+    return s && gearUsable(s, this.gearWearer()) ? s : null;
+  }
+
+  /** The class and level a piece of gear is checked against. Null for a hero with no class. */
+  private gearWearer(): Wearer | null {
+    return this.cls ? { id: this.cls.classId, level: this.cls.level } : null;
+  }
+
+  /** Armor, the off hand, the mount, the companion, the wings and the jewelry: the places a level can refuse. */
+  private isWornBox(container: Container): boolean {
+    return container === this.armor || container === this.offhand || container === this.mountSlot || container === this.companionSlot || container === this.wingSlot || container === this.accessories;
+  }
+
+  /** Why this stack cannot be worn yet: the gear's own rule, then the level a companion, wings, jewelry or a horn asks for. */
+  private wearWhy(stack: ItemStack): string | null {
+    return gearRefuse(stack, this.gearWearer()) ?? equipRefuse(stack.id, this.mountLevel);
+  }
+
+  /**
+   * A click or a shift that would put a piece on which this hero cannot wear yet. Says why and leaves it where it is.
+   * Taking a piece off is never refused.
+   */
+  private tellGearRefuse(slotIndex: number, shift = false): boolean {
+    const menu = this.menu;
+    if (!menu) return false;
+    if (!shift) {
+      const cursor = menu.cursor;
+      const slot = menu.slots[slotIndex];
+      if (!cursor || !slot || !this.isWornBox(slot.container)) return false;
+      const why = this.wearWhy(cursor);
+      if (!why) return false;
+      this.emit({ t: 'toast', text: why });
+      return true;
+    }
+    const slot = menu.slots[slotIndex];
+    if (!slot || slot.container !== this.inventory) return false;
+    const stack = slot.container.get(slot.index);
+    if (!stack) return false;
+    const armor = getItem(stack.id).armor;
+    const jewelry = accessoryOfItem(stack.id);
+    const ontoArmor = !!armor && !this.armor.get(armor.slotIndex);
+    const ontoOffhand = !armor && prefersOffhand(stack.id) && !this.offhand.get(0);
+    const ontoMount = mountOfItem(stack.id) !== null && !this.mountSlot.get(0);
+    const ontoCompanion = companionOfItem(stack.id) !== null && !this.companionSlot.get(0);
+    const ontoWing = wingOfItem(stack.id) !== null && !this.wingSlot.get(0);
+    const ontoJewel = !!jewelry && accessorySlotsOf(jewelry.kind).some((i) => !this.accessories.get(i));
+    if (!ontoArmor && !ontoOffhand && !ontoMount && !ontoCompanion && !ontoWing && !ontoJewel) return false;
+    const why = this.wearWhy(stack);
+    if (!why) return false;
+    this.emit({ t: 'toast', text: why });
+    return true;
   }
 
   /** Damage after the worn armor has taken its share. Only survival players are protected from anything. */
@@ -3933,6 +4398,11 @@ export class Player implements EffectOwner {
     const held = this.held;
     const def = held ? getItem(held.id).armor : null;
     if (!held || !def) return false;
+    const why = gearRefuse(held, this.gearWearer());
+    if (why) {
+      this.emit({ t: 'toast', text: why });
+      return true;
+    }
     const worn = this.armor.get(def.slotIndex);
     this.armor.set(def.slotIndex, cloneStack({ ...held, count: 1 }));
     this.inventory.set(this.selected, worn);
@@ -4542,6 +5012,8 @@ export class Player implements EffectOwner {
     this.camera = f.cam ? { x: f.cam[0], y: f.cam[1], z: f.cam[2] } : null;
     if (this.camera) this.camera = sanitizeCamera(this.eye(), this.camera);
     this.sneaking = f.sneak;
+    this.poseIdle = f.il === 1 || f.il === 2 || f.il === 3 ? f.il : 0;
+    this.poseIdleT = this.poseIdle ? Math.max(0, Math.min(600, f.ic ?? 0)) : 0;
     this.moveIn.forward = f.forward;
     this.moveIn.strafe = f.strafe;
   }
@@ -4756,7 +5228,7 @@ export class Player implements EffectOwner {
     if (this.slamLeap?.launched) move.accel = 0.5;
     if (this.rush) rushMove(move, this.rush.yaw, this.rush.speed, this.rush.stall > 0);
     // Monsters and people are solid: the body is pushed out of whoever it walks into.
-    if (!this.flying && !this.spectating) move.solids = this.realm.solidsNear(b.x, b.y, b.z);
+    if (!this.flying && !this.spectating) move.solids = this.realm.solidsNear(b.x, b.y, b.z, b);
     const vyBefore = b.vy;
     const wasOnGround = b.onGround;
     stepPlayer(this.world.physicsReader, b, move, STEP);
@@ -5259,7 +5731,15 @@ export class Player implements EffectOwner {
       return;
     }
     const vault = this.realm.stashes;
-    if (c.a === 'put') {
+    if (c.a === 'organize' || c.a === 'deposit') {
+      const box = vault.of(wallet);
+      const changed = c.a === 'organize' ? organizeContainer(box) : depositMatching(this.inventory, box, (s) => stashBlocker(s) !== null);
+      if (changed) {
+        vault.dirty.add(wallet);
+        this.stashTouched = true;
+        if (c.a === 'deposit') this.emit({ t: 'inv' });
+      }
+    } else if (c.a === 'put') {
       const stack = this.inventory.isUsable(c.slot) ? this.inventory.get(c.slot) : null;
       const blocked = stashBlocker(stack);
       if (blocked || !stack) say(blocked ?? 'There is nothing there.');
@@ -5309,6 +5789,8 @@ export class Player implements EffectOwner {
     if (this.vitals.dead) return 'Your hero is dead: revive it in the game first.';
     const armor = getItem(stack.id).armor;
     if (armor) {
+      const why = gearRefuse(stack, this.gearWearer());
+      if (why) return why;
       const worn = this.armor.get(armor.slotIndex);
       if (worn && stack.count > 1 && !this.inventory.canFit(worn)) return 'Your bags are full.';
       this.armor.set(armor.slotIndex, cloneStack({ ...stack, count: 1 }));
@@ -5323,6 +5805,8 @@ export class Player implements EffectOwner {
       return this.inventory.get(index) === stack ? (toast ?? 'It cannot be worn now.') : null;
     }
     if (holdsInOffhand(stack.id)) {
+      const why = gearRefuse(stack, this.gearWearer());
+      if (why) return why;
       const worn = this.offhand.get(0);
       this.offhand.set(0, cloneStack(stack));
       this.inventory.set(index, worn);
@@ -5418,7 +5902,7 @@ export class Player implements EffectOwner {
   /** Hurt a mob like a player hit would (no cooldown), knocking it away along +x. */
   damageMob(id: number, amount: number): boolean {
     const m = this.mobs.mobs.find((x) => x.id === id);
-    return m ? this.mobs.damage(m, amount, 1, 0, this.realm.mobEvents, true, true, true) : false;
+    return m ? this.mobs.damage(m, amount, 1, 0, this.realm.mobEvents, true, true, true, { by: this }) : false;
   }
 
   // ---- vehicles ---------------------------------------------------------------

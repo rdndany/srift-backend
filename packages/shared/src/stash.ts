@@ -33,8 +33,14 @@ export interface StashView {
   slots: (ItemStack | null)[];
 }
 
-/** What a player can ask of the stash: move `count` of an inventory slot in, or `count` of a stash slot out. */
-export type StashCommand = { a: 'put'; slot: number; count: number } | { a: 'take'; slot: number; count: number };
+/** What a player can ask of the stash: move `count` of an inventory slot in, or `count` of a stash slot out, or tidy the whole stash. */
+export type StashCommand =
+  | { a: 'put'; slot: number; count: number }
+  | { a: 'take'; slot: number; count: number }
+  /** Merge stacks and sort the stash. */
+  | { a: 'organize' }
+  /** Move items being carried into the stash when the same thing is already stored there. */
+  | { a: 'deposit' };
 
 /** Why a stack cannot be put in (null: it can). */
 export function stashBlocker(stack: ItemStack | null): string | null {

@@ -55,11 +55,13 @@ describe('what the frame shows', () => {
     expect(v.hp).toBe(v.max);
     expect(v.max).toBeGreaterThan(0);
     expect(v.level).toBeGreaterThanOrEqual(1);
+    expect(v.aggro).toBe(false);
   });
 
   it('shows the health and the most it was sent, and clamps them', () => {
     const v = mobTargetView(mob(1, 0, 0, { health: 30, maxHealth: 100, elite: true }));
-    expect(v).toMatchObject({ hp: 30, max: 100, elite: true });
+    expect(v).toMatchObject({ hp: 30, max: 100, elite: true, aggro: false });
+    expect(mobTargetView(mob(1, 0, 0, { aggro: true })).aggro).toBe(true);
     expect(mobTargetView(mob(1, 0, 0, { health: -5, maxHealth: 100 })).hp).toBe(0);
   });
 });

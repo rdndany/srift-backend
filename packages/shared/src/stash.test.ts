@@ -46,6 +46,8 @@ describe('the stash vault', () => {
 describe('the stash commands', () => {
   it('accept whole numbers in range and nothing else', () => {
     expect(parseNetClientMessage({ t: 'cmd', c: { t: 'stash', a: 'put', slot: 3, count: 10 } })).toBeTruthy();
+    expect(parseNetClientMessage({ t: 'cmd', c: { t: 'stash', a: 'organize' } })).toEqual({ t: 'cmd', c: { t: 'stash', a: 'organize' } });
+    expect(parseNetClientMessage({ t: 'cmd', c: { t: 'stash', a: 'deposit' } })).toEqual({ t: 'cmd', c: { t: 'stash', a: 'deposit' } });
     for (const bad of [{ a: 'put', slot: -1, count: 1 }, { a: 'put', slot: 1.5, count: 1 }, { a: 'take', slot: STASH_MAX_SLOTS, count: 1 }, { a: 'take', slot: 0, count: 0 }, { a: 'take', slot: 0, count: 65 }, { a: 'steal', slot: 0, count: 1 }, { a: 'put', slot: 0 }]) {
       expect(parseNetClientMessage({ t: 'cmd', c: { t: 'stash', ...bad } }), JSON.stringify(bad)).toBeNull();
     }

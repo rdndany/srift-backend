@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { voiceKeyOk } from './voiceBind';
 
 /**
  * The player's settings: sound, view, picture and mouse. They live here (and in localStorage), not in the game, so the pause screen can
@@ -11,8 +12,16 @@ export interface Settings {
   effects: number;
   ambience: number;
   music: number;
-  /** All sound off (the levels are kept). */
+  /** All sound off (the levels are kept). Voice from other players goes quiet with it. */
   muted: boolean;
+  /** How loud other players are, 0..1. */
+  voice: number;
+  /** Which microphone to speak into. Empty is the browser's usual one. */
+  micDevice: string;
+  /** The microphone opens only while its key is held. Otherwise the key switches it. */
+  pushToTalk: boolean;
+  /** The key that talks (a keyboard code). It is not a key the game already uses. */
+  voiceKey: string;
   /** How fast the view turns with the mouse: 1 is the usual speed. */
   sensitivity: number;
   invertY: boolean;
@@ -38,6 +47,10 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   ambience: 1,
   music: 0.5,
   muted: false,
+  voice: 1,
+  micDevice: '',
+  pushToTalk: false,
+  voiceKey: 'Backquote',
   sensitivity: 1,
   invertY: false,
   fov: 75,
@@ -57,6 +70,7 @@ export const SETTING_RANGE = {
   effects: [0, 1],
   ambience: [0, 1],
   music: [0, 1],
+  voice: [0, 1],
   sensitivity: [0.25, 3],
   fov: [60, 110],
   renderDistance: [3, 16],
@@ -79,6 +93,10 @@ export function parseSettings(raw: unknown): Settings {
     ambience: clamp(o.ambience, ...r.ambience, d.ambience),
     music: clamp(o.music, ...r.music, d.music),
     muted: o.muted === true,
+    voice: clamp(o.voice, ...r.voice, d.voice),
+    micDevice: typeof o.micDevice === 'string' ? o.micDevice.slice(0, 200) : d.micDevice,
+    pushToTalk: o.pushToTalk === true,
+    voiceKey: typeof o.voiceKey === 'string' && voiceKeyOk(o.voiceKey) ? o.voiceKey : d.voiceKey,
     sensitivity: clamp(o.sensitivity, ...r.sensitivity, d.sensitivity),
     invertY: o.invertY === true,
     fov: Math.round(clamp(o.fov, ...r.fov, d.fov)),

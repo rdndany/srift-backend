@@ -108,6 +108,49 @@ export function turnToward(from: number, to: number, dt: number, rate: number, m
   return from + Math.max(-cap, Math.min(cap, step));
 }
 
+/** Where the body is facing, and whether standing still has started turning it toward the crosshair. */
+export interface BodyAim {
+  bodyYaw: number;
+  turnToAim: boolean;
+}
+
+/**
+ * The body faces where it walks, so a sidestep (A or D) is a step forward with the head turned back toward the view.
+ * While it swings, blocks or eats it faces the view instead. The same rule for the player and for everyone else.
+ */
+export function stepBodyFacing(cur: BodyAim, o: {
+  yaw: number;
+  vx?: number;
+  vz?: number;
+  speed: number;
+  airborne: boolean;
+  mounted: boolean;
+  winged: boolean;
+  acting: boolean;
+  dt: number;
+}): BodyAim {
+  let { bodyYaw, turnToAim } = cur;
+  const moving = o.speed > 0.3;
+  if (moving || o.acting || o.mounted) turnToAim = false;
+  if (o.mounted) bodyYaw = o.yaw;
+  else if (o.acting) bodyYaw = turnToward(bodyYaw, o.yaw, o.dt, 24, 22);
+  else if (o.vx === undefined || o.vz === undefined) bodyYaw = followBodyYaw(bodyYaw, o.yaw, moving, o.dt);
+  else if (o.winged) bodyYaw = turnToward(bodyYaw, wingedYaw(o.yaw, o.vx, o.vz, o.speed), o.dt, 9, 12);
+  else if (o.speed > 0.5 && !o.airborne) bodyYaw = turnToward(bodyYaw, motionYaw(o.vx, o.vz), o.dt, 14);
+  else if (!o.airborne) {
+    const gap = Math.abs(wrapAngle(o.yaw - bodyYaw));
+    if (gap > HEAD_TURN_LIMIT) turnToAim = true;
+    else if (gap < 0.08) turnToAim = false;
+    if (turnToAim) bodyYaw = turnToward(bodyYaw, o.yaw, o.dt, 9, 12);
+  } else if (o.speed > 1) bodyYaw = turnToward(bodyYaw, motionYaw(o.vx, o.vz), o.dt, 6, 8);
+  return { bodyYaw, turnToAim };
+}
+
+/** How far the head turns from the body toward the view: on foot only as far as a neck can, and along the body when the view is right behind. */
+export function headYawWant(gaze: number, mounted: boolean): number {
+  return mounted ? Math.max(-1.3, Math.min(1.3, gaze)) : Math.abs(gaze) > 2.3 ? 0 : Math.max(-1.0, Math.min(1.0, gaze));
+}
+
 export interface SelfState {
   x: number;
   y: number;
@@ -239,6 +282,11 @@ export class SelfView {
     this.character.playIdle(kind);
   }
 
+  /** The idle this figure is drawing (0 standing, 1 sit, 2 stretch, 3 look around), for the other players to copy. */
+  idleShow(): { kind: number; clock: number } {
+    return this.character.idleShow;
+  }
+
   /** The body as it stands, cut into cubes (for `DeathFx`), and the way it faces. */
   voxels(): SkinVoxel[] {
     return this.character.voxels();
@@ -279,6 +327,8 @@ export class SelfView {
     const mounted = !!s.mount;
     if (this.mode === 0 && !mounted && !this.rig.mounted) {
       this.character.root.visible = true;
+      // Walking in first person ends a sit: the body is not drawn, but other players are still shown it.
+      if (s.speed > 0.3 || s.airborne || s.blocking || !!s.eating) this.character.stopIdle();
       return;
     }
     this.group.visible = (this.mode !== 0 || mounted) && !s.dead;
@@ -290,29 +340,17 @@ export class SelfView {
     }
     this.attack = Math.min(1, this.attack + (dt * this.attackRate) / SWING_TIME);
     this.bashAge = Math.min(9, this.bashAge + dt);
-    const moving = s.speed > 0.3;
     const before = this.bodyYaw;
     // The body: a mount turns with the view (the head you ride behind must stay in front of you). On foot the camera orbits freely and the body
     // faces where it walks (sideways and backward too, so it always walks forward); while it swings, casts, blocks or aims it faces the
     // crosshair, and standing still it stays as it is until the crosshair goes past what the neck can turn to: then it turns right round to face it.
     const acting = this.attack < 1 || this.character.stabAge < 0.5 || s.blocking || !!s.aiming || !!s.eating || !!s.slam || this.bashAge < BASH_ANIM;
-    if (moving || acting || mounted) this.turnToAim = false;
-    if (mounted) this.bodyYaw = s.yaw;
-    else if (acting) this.bodyYaw = turnToward(this.bodyYaw, s.yaw, dt, 24, 22);
-    else if (s.vx === undefined || s.vz === undefined) this.bodyYaw = followBodyYaw(this.bodyYaw, s.yaw, moving, dt);
-    // On the wings it faces where the view looks (it flies the way the keys push it, along the view, and the crosshair is where it is going).
-    // (It turns part of the way into a drift: flying to the left or diagonally it is half round to where it goes, banked into it, not a post carried sideways.)
-    else if (s.winged && (s.wing ?? 0) > 0) this.bodyYaw = turnToward(this.bodyYaw, wingedYaw(s.yaw, s.vx, s.vz, s.speed), dt, 9, 12);
-    else if (s.speed > 0.5 && !s.airborne) this.bodyYaw = turnToward(this.bodyYaw, motionYaw(s.vx, s.vz), dt, 14);
-    else if (!s.airborne) {
-      const gap = Math.abs(wrapAngle(s.yaw - this.bodyYaw));
-      if (gap > HEAD_TURN_LIMIT) this.turnToAim = true;
-      else if (gap < 0.08) this.turnToAim = false;
-      if (this.turnToAim) this.bodyYaw = turnToward(this.bodyYaw, s.yaw, dt, 9, 12);
-    }
-    // In a jump the body keeps the way the jump was taken, but as the way it goes bends (the keys or the view change in the air) it comes round
-    // with it, more slowly than on the ground: it can be seen to turn in the air.
-    else if (s.speed > 1) this.bodyYaw = turnToward(this.bodyYaw, motionYaw(s.vx, s.vz), dt, 6, 8);
+    const faced = stepBodyFacing(
+      { bodyYaw: this.bodyYaw, turnToAim: this.turnToAim },
+      { yaw: s.yaw, vx: s.vx, vz: s.vz, speed: s.speed, airborne: s.airborne, mounted, winged: !!(s.winged && (s.wing ?? 0) > 0), acting, dt },
+    );
+    this.bodyYaw = faced.bodyYaw;
+    this.turnToAim = faced.turnToAim;
     if (dt > 0) this.turn += (wrapAngle(this.bodyYaw - before) / dt - this.turn) * (1 - Math.exp(-dt * 10));
     const c = this.character;
     if (s.sleeping > 0) {
@@ -335,7 +373,7 @@ export class SelfView {
     // The head looks where you aim, though the body eases round behind it (and the neck only turns so far).
     // Walking backward or sideways, the head turns toward the view only as far as a neck can; right round the back it looks along the body.
     const gaze = wrapAngle(s.yaw - this.bodyYaw);
-    const headWant = mounted ? Math.max(-1.3, Math.min(1.3, gaze)) : Math.abs(gaze) > 2.3 ? 0 : Math.max(-1.0, Math.min(1.0, gaze));
+    const headWant = headYawWant(gaze, mounted);
     this.headYaw += (headWant - this.headYaw) * (1 - Math.exp(-dt * 16));
     c.headPivot.rotation.y = this.headYaw;
     c.headPivot.rotation.x = s.pitch;
@@ -376,6 +414,11 @@ export class SelfView {
   }
 
   private readonly tint = new THREE.Color();
+
+  /** Where the carried torch or lantern burns, once the figure has been posed this frame. */
+  gripLight(left: boolean, hang: boolean, out: THREE.Vector3): THREE.Vector3 {
+    return this.character.gripLight(left, hang, out);
+  }
 
   private lit(s: SelfState): void {
     if (s.light) this.character.setLight(s.light.at(s.x, s.y, s.z, this.tint), s.light, this.group.rotation.y);

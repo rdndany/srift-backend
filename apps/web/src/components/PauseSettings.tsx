@@ -1,7 +1,9 @@
 'use client';
 
-import { useId, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useId, useState, type CSSProperties, type ReactNode } from 'react';
 import { SETTING_RANGE, resetSettings, setSettings, useSettings, type Settings } from '../game/settings';
+import { voiceKeyLabel, voiceKeyOk } from '../game/voiceBind';
+import { useUi } from '../ui/store';
 
 /** The keys the pause screen lists: [keys, what they do]. */
 const CONTROLS: readonly (readonly [readonly string[], string])[] = [
@@ -64,14 +66,14 @@ function Slider({ id, label, hint, value, min, max, step, show, disabled, onChan
 }
 
 /** An on / off switch with a label. */
-function Switch({ id, label, hint, on, onChange }: { id: string; label: string; hint?: string; on: boolean; onChange: (on: boolean) => void }) {
+function Switch({ id, label, hint, on, disabled, onChange }: { id: string; label: string; hint?: string; on: boolean; disabled?: boolean; onChange: (on: boolean) => void }) {
   return (
-    <div className="ps-row ps-switch">
+    <div className={`ps-row ps-switch${disabled ? ' off' : ''}`}>
       <span className="ps-label">
         {label}
         {hint && <small>{hint}</small>}
       </span>
-      <button type="button" id={id} role="switch" aria-checked={on} className={`ps-toggle${on ? ' on' : ''}`} onClick={() => onChange(!on)}>
+      <button type="button" id={id} role="switch" aria-checked={on} className={`ps-toggle${on ? ' on' : ''}`} disabled={disabled} onClick={() => onChange(!on)}>
         <i aria-hidden="true" />
         <span>{on ? 'On' : 'Off'}</span>
       </button>
@@ -97,8 +99,81 @@ function Group({ title, children, reset }: { title: string; children: ReactNode;
 
 const pct = (v: number): string => `${Math.round(v * 100)}%`;
 
+/** The microphones the browser will offer. Names appear after the microphone has been allowed. */
+function useMics(refresh: boolean): { id: string; label: string }[] {
+  const [list, setList] = useState<{ id: string; label: string }[]>([]);
+  useEffect(() => {
+    const devices = navigator.mediaDevices;
+    if (!devices?.enumerateDevices) return;
+    let stop = false;
+    const load = () => {
+      void devices.enumerateDevices().then((all) => {
+        if (stop) return;
+        const mics = all.filter((d) => d.kind === 'audioinput' && d.deviceId);
+        setList(mics.map((d, i) => ({ id: d.deviceId, label: d.label || `Microphone ${i + 1}` })));
+      }).catch(() => undefined);
+    };
+    load();
+    devices.addEventListener('devicechange', load);
+    return () => {
+      stop = true;
+      devices.removeEventListener('devicechange', load);
+    };
+  }, [refresh]);
+  return list;
+}
+
+/** The key that talks. Click it, then press a key. A key the game already uses is refused. */
+function TalkKey({ code, onPick }: { code: string; onPick: (code: string) => void }) {
+  const [listen, setListen] = useState(false);
+  const [taken, setTaken] = useState(false);
+  useEffect(() => {
+    if (!listen) return;
+    const onKey = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.repeat) return;
+      if (e.code === 'Escape') {
+        setListen(false);
+        setTaken(false);
+        return;
+      }
+      if (!voiceKeyOk(e.code)) {
+        setTaken(true);
+        return;
+      }
+      setTaken(false);
+      setListen(false);
+      onPick(e.code);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [listen, onPick]);
+  return (
+    <div className="ps-row ps-switch">
+      <span className="ps-label">
+        Talk key
+        <small>{taken ? 'That key already does something' : listen ? 'Press a key. Escape cancels.' : 'The one you talk with'}</small>
+      </span>
+      <button type="button" id="mic-key" className={`ps-key${listen ? ' listen' : ''}`} onClick={() => { setTaken(false); setListen(true); }}>
+        {listen ? 'Press a key' : voiceKeyLabel(code)}
+      </button>
+    </div>
+  );
+}
+
 function AudioTab({ s }: { s: Settings }) {
   const r = SETTING_RANGE;
+  const live = useUi((st) => st.voiceLive);
+  const micOn = useUi((st) => st.voiceOn);
+  const mics = useMics(micOn);
+  const chosen = mics.some((m) => m.id === s.micDevice) ? s.micDevice : '';
+  const pickMic = (micDevice: string) => {
+    setSettings({ micDevice });
+    if (useUi.getState().voiceOn) useUi.getState().api?.toggleVoice(true);
+  };
+  const talk = voiceKeyLabel(s.voiceKey);
+  const hold = s.pushToTalk;
   return (
     <>
       <Group title="Volume" reset={() => resetSettings(['master', 'effects', 'ambience', 'music', 'muted'])}>
@@ -108,7 +183,43 @@ function AudioTab({ s }: { s: Settings }) {
         <Slider id="ambience" label="Ambience" hint="Wind, rain, birds, caves" value={s.ambience} min={r.ambience[0]} max={r.ambience[1]} step={0.01} show={pct} disabled={s.muted} onChange={(ambience) => setSettings({ ambience })} />
         <Slider id="music" label="Music" hint="Press M to switch it" value={s.music} min={r.music[0]} max={r.music[1]} step={0.01} show={pct} disabled={s.muted} onChange={(music) => setSettings({ music })} />
       </Group>
-      <p className="ps-note">Sound starts once you have clicked into the game. The sliders keep their place between visits.</p>
+      <Group
+        title="Microphone"
+        reset={() => {
+          resetSettings(['voice', 'micDevice', 'pushToTalk', 'voiceKey']);
+          if (useUi.getState().voiceOn) useUi.getState().api?.toggleVoice(false, true);
+        }}
+      >
+        <Switch
+          id="mic-ptt"
+          label="Push to talk"
+          hint={hold ? `Hold ${talk} while you play. The microphone is on only then.` : 'The key switches the microphone on and off'}
+          on={hold}
+          onChange={(pushToTalk) => {
+            setSettings({ pushToTalk });
+            if (pushToTalk && useUi.getState().voiceOn) useUi.getState().api?.toggleVoice(false, true);
+          }}
+        />
+        <TalkKey code={s.voiceKey} onPick={(voiceKey) => setSettings({ voiceKey })} />
+        <Switch id="mic-toggle" label="Microphone" hint={live ? (hold ? `Hold ${talk} in the game.` : `Press ${talk} in the game.`) : 'Only while you play online'} on={micOn} disabled={!live || hold} onChange={(on) => useUi.getState().api?.toggleVoice(on)} />
+        <div className="ps-row ps-switch">
+          <label htmlFor="mic-device">
+            Input
+            <small>The one you speak into</small>
+          </label>
+          <select id="mic-device" className="ps-select" value={chosen || s.micDevice} onChange={(e) => pickMic(e.target.value)}>
+            <option value="">Default</option>
+            {s.micDevice && !mics.some((m) => m.id === s.micDevice) ? <option value={s.micDevice}>Saved microphone</option> : null}
+            {mics.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <Slider id="voice" label="Voices" hint="How loud other players are" value={s.voice} min={r.voice[0]} max={r.voice[1]} step={0.01} show={pct} disabled={s.muted} onChange={(voice) => setSettings({ voice })} />
+      </Group>
+      <p className="ps-note">Sound starts once you have clicked into the game. The sliders keep their place between visits. The microphone stays off until you turn it on, or until you hold its key.</p>
     </>
   );
 }
@@ -149,10 +260,13 @@ function GameplayTab({ s }: { s: Settings }) {
 }
 
 function ControlsTab() {
+  const s = useSettings();
+  const talk = voiceKeyLabel(s.voiceKey);
+  const rows: readonly (readonly [readonly string[], string])[] = [...CONTROLS, [[talk], s.pushToTalk ? 'Push to talk (online)' : 'Microphone (online)']];
   return (
     <section className="ps-group">
       <dl className="ps-keys">
-        {CONTROLS.map(([keys, what]) => (
+        {rows.map(([keys, what]) => (
           <div key={what}>
             <dt>
               {keys.map((k, i) => (

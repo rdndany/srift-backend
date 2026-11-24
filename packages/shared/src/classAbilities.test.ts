@@ -969,6 +969,45 @@ describe('abilities against players (PvP is off)', () => {
     expect(b.vitals.health).toBe(hp);
   });
 
+  it('a duel lets a spell, an ability and a wand hit the other fighter', () => {
+    const { a, b } = duel('mage');
+    levelTo(a, 10);
+    a.cls!.learn('frost_nova');
+    a.cls!.learn('fireball');
+    a.duelTarget = b;
+    b.duelTarget = a;
+    const full = b.vitals.maxHealth;
+    const restore = () => {
+      b.vitals.dead = false;
+      b.vitals.health = full;
+    };
+    a.cls!.resource = a.cls!.stats.maxResource;
+    expect(a.useAbility(1)).toBe('cast');
+    expect(b.vitals.health).toBeLessThan(full);
+    restore();
+    a.cls!.resource = a.cls!.stats.maxResource;
+    expect(a.useAbility(0)).toBe('cast');
+    run(a, 1);
+    expect(b.vitals.health).toBeLessThan(full);
+    restore();
+    a.cls!.resource = a.cls!.stats.maxResource;
+    for (let i = 0; i < 9; i++) if (a.inventory.get(i)?.id === I.WAND) a.selected = i;
+    run(a, 0.2, { right: true });
+    run(a, 0.6);
+    expect(b.vitals.health).toBeLessThan(full);
+  });
+
+  it('a duel lets a shield bash hit the other fighter', () => {
+    const { a, b } = duel('warrior');
+    levelTo(a, 10);
+    a.cls!.learn('shield_bash');
+    a.duelTarget = b;
+    b.duelTarget = a;
+    a.cls!.resource = a.cls!.stats.maxResource;
+    expect(a.useAbility(1)).toBe('cast');
+    expect(b.vitals.health).toBeLessThan(b.vitals.maxHealth);
+  });
+
   it('a client has no way to say how much damage to do: the command carries a button and nothing else', () => {
     expect(parseSessionMessage({ t: 'ability', slot: 1 })).toEqual({ t: 'ability', slot: 1 });
     expect(parseSessionMessage({ t: 'ability', slot: 1, damage: 9999, target: 'x', crit: true, cost: 0, cooldown: 0 })).toEqual({ t: 'ability', slot: 1 });
@@ -1063,7 +1102,7 @@ describe('class experience', () => {
     s.giveItem(skillBookId('meteor'));
     s.giveItem(skillBookId('fireball'));
     s.drainEvents();
-    levelTo(s, 3);
+    levelTo(s, 20);
     const said = toasts(events(s)).join(' ');
     expect(said).toMatch(/You can now learn Meteor/);
     expect(said).not.toMatch(/Fireball/); // level 1 book: it could be read before
@@ -1200,14 +1239,16 @@ describe('the class on screen', () => {
     expect(v0.level).toBe(1);
     expect(v0.abilities.map((a) => a.id)).toEqual(abilitiesOf('mage').map((a) => a.id));
     expect(v0.abilities.map((a) => a.unlocked)).toEqual([false, false, false, false]);
+    expect(v0.maxHealth).toBe(s.vitals.maxHealth);
+    levelTo(s, 10);
     s.cls!.learn('fireball');
     s.cls!.learn('frost_nova');
     expect(s.classView()!.abilities.map((a) => a.unlocked)).toEqual([true, true, false, false]);
-    expect(v0.maxHealth).toBe(s.vitals.maxHealth);
+    const ready = s.classView()!;
     s.useAbility(0);
     const v1 = s.classView()!;
     expect(v1.abilities[0].cd).toBeGreaterThan(0);
-    expect(v1.resource).toBeLessThan(v0.resource);
+    expect(v1.resource).toBeLessThan(ready.resource);
   });
 
   it('is plain data that survives JSON (it goes into every snapshot)', () => {

@@ -119,8 +119,9 @@ describe('the mounts', () => {
     expect(lines[1].text).toBe('Mount');
     expect(text).toContain('+100% movement speed');
     expect(text).toContain('Right-click to put it in the mount slot');
-    expect(lines.find((l) => l.text === 'Requires level 20')?.color).toBe('warn');
-    expect(tooltipLines(makeStack(mountItemId('fenrir'), 1), 'warrior', 9).find((l) => l.text === 'Requires level 8')?.color).toBe('stat');
+    expect(lines.find((l) => l.text === 'Requires level 30')?.color).toBe('warn');
+    expect(tooltipLines(makeStack(mountItemId('fenrir'), 1), 'warrior', 9).find((l) => l.text === 'Requires level 30')?.color).toBe('warn');
+    expect(tooltipLines(makeStack(mountItemId('fenrir'), 1), 'warrior', 30).find((l) => l.text === 'Requires level 30')?.color).toBe('stat');
   });
 });
 
@@ -336,9 +337,11 @@ describe('summoning a mount', () => {
   it('is refused for a horn the level is too low for', () => {
     const { s } = make('survival', 'warrior');
     equip(s, 'fenrir_gold');
-    s.drainEvents();
+    expect(s.mountSlot.get(0)).toBeNull();
+    expect(toasts(s).join(' ')).toContain('Requires level 30');
+    s.mountSlot.set(0, makeStack(mountItemId('fenrir_gold'), 1));
     s.apply({ t: 'mount' });
-    expect(toasts(s).join(' ')).toContain('needs level 20');
+    expect(toasts(s).join(' ')).toContain('needs level 30');
     seconds(s, 2);
     expect(s.mountId).toBeNull();
   });
@@ -716,7 +719,7 @@ describe('the skills of a mount', () => {
 
   it('are not the rider’s class abilities: those are refused, and the rider stays on the mount', () => {
     const g = make('survival', 'warrior');
-    g.s.cls!.level = 12;
+    g.s.cls!.level = 30;
     equip(g.s);
     g.s.apply({ t: 'mount' });
     seconds(g.s, MOUNT_CAST + 0.3);

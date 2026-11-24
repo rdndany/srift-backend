@@ -658,7 +658,7 @@ export const MOBS: Record<MobKind, MobDef> = {
     },
     xp: () => 10,
   },
-  // ---- the Gilded Tide (plain units; they only wander and flee, never attack, and leave only the Codex of Aurelion) ----
+  // ---- the Gilded Tide (they wander until hit; a hit makes them fight back, and they leave only the Codex of Aurelion) ----
   gilt_imp: {
     kind: 'gilt_imp',
     name: 'gilt imp',
@@ -671,7 +671,7 @@ export const MOBS: Record<MobKind, MobDef> = {
     burnsInDaylight: false,
 
     detect: 0,
-    melee: null,
+    melee: { damage: 3, cooldown: 0.75, reach: 1.25 },
     jumpSpeed: 9,
     drops: (r) => (r() < 0.2 ? [{ id: I.AURELION_CODEX, count: 1 }] : []),
     xp: () => 6,
@@ -688,7 +688,7 @@ export const MOBS: Record<MobKind, MobDef> = {
     burnsInDaylight: false,
 
     detect: 0,
-    melee: null,
+    melee: { damage: 4, cooldown: 0.7, reach: 1.45 },
     jumpSpeed: 9,
     drops: (r) => (r() < 0.28 ? [{ id: I.AURELION_CODEX, count: 1 }] : []),
     xp: () => 8,
@@ -705,7 +705,7 @@ export const MOBS: Record<MobKind, MobDef> = {
     burnsInDaylight: false,
 
     detect: 0,
-    melee: null,
+    melee: { damage: 6, cooldown: 1.05, reach: 1.9 },
     jumpSpeed: 8.5,
     drops: (r) => (r() < 0.5 ? [{ id: I.AURELION_CODEX, count: 1 }] : []),
     xp: () => 20,
@@ -722,7 +722,7 @@ export const MOBS: Record<MobKind, MobDef> = {
     burnsInDaylight: false,
 
     detect: 0,
-    melee: null,
+    melee: { damage: 9, cooldown: 1.5, reach: 2.6 },
     jumpSpeed: 8,
     drops: (r) => [{ id: I.AURELION_CODEX, count: 1 + (r() < 0.5 ? 1 : 0) }],
     xp: () => 60,
@@ -1126,13 +1126,13 @@ export interface MobEvents {
   sound(kind: 'say' | 'hurt' | 'death' | 'hiss' | 'shoot' | 'teleport' | 'yes' | 'no', mob: Mob): void;
   /** A villager opens or closes a door (the lower half is at y). Returns false when it could not (somebody is in the way). */
   door?(x: number, y: number, z: number, open: boolean): boolean;
-  drop(drop: Drop, x: number, y: number, z: number): void;
+  drop(drop: Drop, x: number, y: number, z: number, owner?: unknown): void;
   /** A mob died soon after a player hurt it (quests count it; the realm credits the players near). */
   killed?(mob: Mob): void;
-  /** A mob that a player killed (recently hurt by one) is worth experience. */
-  xp?(amount: number, x: number, y: number, z: number): void;
-  /** ...and pays coins too. */
-  coins?(amount: number, x: number, y: number, z: number): void;
+  /** A mob that a player killed (recently hurt by one) is worth experience. `owner` is that player, when there is one. */
+  xp?(amount: number, x: number, y: number, z: number, owner?: unknown): void;
+  /** ...and pays coins too. `owner` is the player the kill belongs to. */
+  coins?(amount: number, x: number, y: number, z: number, owner?: unknown): void;
   /** ...and may leave something only a player's kill earns (a skill book): the realm knows who the killer is and what they still need. */
   loot?(mob: Mob, x: number, y: number, z: number): void;
   /** A thrown bottle o' enchanting burst here. */
@@ -1144,7 +1144,7 @@ export interface MobEvents {
 export interface MobEnv {
   world: BlockReader;
   player: MobPlayer;
-  /** Every player in range. Each mob reacts to the nearest living one; defaults to just player. */
+  /** Every player in range. A mob in a fight answers whoever has hurt it most; otherwise the nearest living one. Defaults to just player. */
   players?: readonly MobPlayer[];
   /** 0 (night) .. 1 (full day). */
   daylight: number;
@@ -1175,6 +1175,12 @@ export class Arrow {
    * arrow is gone after. Only a player's arrow has one.
    */
   onHit: ((a: Arrow, mob: Mob | null, dealt: number, head: boolean) => void) | null = null;
+  /**
+   * A duel: how far along this step the other fighter stands, or null. It is checked with the mobs, and it wins when it is closer.
+   * `onFoe` lands the blow. Only a player's arrow sets either.
+   */
+  foeAlong: ((x: number, y: number, z: number, dx: number, dy: number, dz: number, len: number) => number | null) | null = null;
+  onFoe: ((a: Arrow, t: number) => void) | null = null;
   constructor(
     public x: number,
     public y: number,
@@ -1192,6 +1198,8 @@ export class Arrow {
     public bottle = false,
     /** A thrown ender pearl: whoever threw it (an opaque handle) is teleported to where it lands. */
     public pearl: unknown = null,
+    /** Who shot it, when a player did. Their damage is what the mob remembers. */
+    public owner: unknown = null,
   ) {}
 }
 
@@ -1205,6 +1213,8 @@ export interface HitOpts {
   fire?: number;
   /** Looting level: extra drops when this hit kills. */
   looting?: number;
+  /** Who landed it (the player). Their damage is added to this mob's threat. */
+  by?: unknown;
 }
 
 export interface MobSave {
@@ -1318,6 +1328,19 @@ function packedGear(slots: readonly (ItemStack | null)[]): NonNullable<MobSave['
 const GUARD_SIGHT = 13;
 const GUARD_CALL = 9;
 
+/**
+ * How far past where it spawned a fighter will still follow someone. A little past how far it can see, and never under 40 blocks,
+ * so a zombie can be kited a short way and a boss (who sees much farther) a longer one. Past this it drops whoever it was fighting and walks home.
+ */
+function leashOf(m: Mob): number {
+  return Math.max(40, m.def.detect + (m.def.boss ? 28 : 18));
+}
+
+/** Monsters, bosses and the golden creatures keep a grudge. Farm animals do not: a hit makes them run, and that is all. */
+function holdsThreat(m: Mob): boolean {
+  return m.def.hostile || m.def.boss === true || isGildedKind(m.kind);
+}
+
 /** The health a creature of this kind (and a slime of this size) is born with, as the game runs it: the same figure on a server and in a client. */
 export function mobMaxHealth(kind: MobKind, size = 1): number {
   return (kind === 'slime' ? size * size : MOBS[kind].health) * TUNING.damageScale * (kind === 'dummy' || kind === 'armor_stand' ? 1 : TUNING.mobToughness);
@@ -1336,8 +1359,17 @@ export class Mob {
   standGear: (ItemStack | null)[] | null = null;
   width: number;
   height: number;
-  /** Hunting because it was hurt, or (enderman) looked at. */
+  /** Hunting because it was hurt, or (enderman) looked at. Cleared when it is pulled too far from where it spawned. */
   aggro = false;
+  /** Where it was born. Pulled farther than `leashOf` from here, it drops the fight and walks back. */
+  spawnX: number;
+  spawnZ: number;
+  /** On its way home after a leash break: it ignores everyone until it arrives. */
+  evade = false;
+  /** Damage each player has done to it, keyed by that player's ref. Whoever has the most is who it fights. */
+  readonly threat = new Map<unknown, number>();
+  /** The player it is answering now (their ref), so a tie does not make it swap every tick. */
+  tank: unknown = null;
   hopTimer = 0;
   leapCooldown = 2;
   teleportTimer = 4;
@@ -1433,6 +1465,10 @@ export class Mob {
   openDoors: { x: number; y: number; z: number; t: number }[] = [];
   /** Seconds since a player last hurt it. Only a kill soon after a player hit earns experience. */
   sincePlayerHit = Infinity;
+  /** The player this kill's loot and experience belong to. Set when it dies, null when no player earned it. */
+  killedBy: unknown = null;
+  /** The last player who hurt it, so a burn that finishes the fight still belongs to them. */
+  lastHitBy: unknown = null;
   /** Sheep: wool taken with shears, and seconds until it grows back. */
   sheared = false;
   woolTimer = 0;
@@ -1491,6 +1527,8 @@ export class Mob {
     this.body.width = this.width;
     this.body.height = this.height;
     this.health = this.maxHealth;
+    this.spawnX = x;
+    this.spawnZ = z;
     this.yaw = rand() * Math.PI * 2;
     if (kind === 'armor_stand') this.homeYaw = this.yaw;
     this.wanderYaw = this.yaw;
@@ -1666,10 +1704,11 @@ export class MobManager {
   }
 
   /** Launch a player arrow. `power` is 0..1 (bow draw); it sets speed and damage. */
-  shootArrow(x: number, y: number, z: number, dx: number, dy: number, dz: number, power: number, bow?: { power?: number; punch?: number; flame?: boolean }): Arrow {
+  shootArrow(x: number, y: number, z: number, dx: number, dy: number, dz: number, power: number, bow?: { power?: number; punch?: number; flame?: boolean; by?: unknown }): Arrow {
     const len = Math.hypot(dx, dy, dz) || 1;
     const speed = arrowSpeed(power);
-    const a = new Arrow(x, y, z, (dx / len) * speed, (dy / len) * speed, (dz / len) * speed, (2 + 7 * power) * (1 + 0.25 * (bow?.power ? bow.power + 1 : 0)), true, bow?.punch ?? 0, !!bow?.flame);
+    const a = new Arrow(x, y, z, (dx / len) * speed, (dy / len) * speed, (dz / len) * speed, (2 + 7 * power) * (1 + 0.25 * (bow?.power ? bow.power + 1 : 0)), true, bow?.punch ?? 0, !!bow?.flame, false, null);
+    a.owner = bow?.by ?? null;
     this.arrows.push(a);
     return a;
   }
@@ -1733,9 +1772,12 @@ export class MobManager {
   /** Hurt a mob. (kx,kz) is the knockback direction (away from the attacker). Returns true if it died. */
   damage(mob: Mob, amount: number, kx: number, kz: number, events: MobEvents, dropLoot = true, knock = true, byPlayer = false, hit?: HitOpts): boolean {
     if (mob.dead || amount <= 0 || mob.def.invulnerable) return false;
+    // On the way home after a leash break a blow does nothing: the fight is already over.
+    if (mob.evade && byPlayer) return false;
     if (byPlayer) {
       mob.sincePlayerHit = 0;
       mob.aggro = true;
+      if (hit?.by != null) mob.lastHitBy = hit.by;
     }
     // A knight with its shield up takes a blow from the front on the shield: most of it is stopped, and it is not pushed.
     if (mob.guarding && (kx !== 0 || kz !== 0) && (kx * Math.sin(mob.yaw) + kz * Math.cos(mob.yaw)) / Math.hypot(kx, kz) > KNIGHT_FRONT) {
@@ -1743,7 +1785,9 @@ export class MobManager {
       knock = false;
       events.fx?.('block', mob.body.x - Math.sin(mob.yaw) * 0.5, mob.body.y + mob.height * 0.55, mob.body.z - Math.cos(mob.yaw) * 0.5);
     }
-    mob.health -= amount * TUNING.damageScale * (1 - mob.ward);
+    const dealt = amount * TUNING.damageScale * (1 - mob.ward);
+    if (byPlayer && hit?.by != null && holdsThreat(mob)) mob.threat.set(hit.by, (mob.threat.get(hit.by) ?? 0) + dealt);
+    mob.health -= dealt;
     // A training dummy takes anything and starts over once it has taken all it has.
     if (mob.kind === 'dummy' && mob.health <= 0) mob.health = mob.maxHealth;
     mob.hurtTime = 0;
@@ -1762,24 +1806,38 @@ export class MobManager {
       if (lift > 0) mob.body.vy = lift;
       else if (mob.body.onGround) mob.body.vy = 4.2;
     }
-    if (!mob.def.hostile && mob.kind !== 'dummy' && mob.kind !== 'armor_stand') {
+    if (!mob.def.hostile && mob.kind !== 'dummy' && mob.kind !== 'armor_stand' && !isGildedKind(mob.kind)) {
       mob.fleeTimer = 5;
       mob.fleeX = mob.body.x - kx;
       mob.fleeZ = mob.body.z - kz;
     }
     if (hit?.fire && hit.fire > 0 && !mob.body.inWater) mob.onFire = Math.max(mob.onFire, hit.fire);
     if (mob.health <= 0) {
-      this.kill(mob, events, dropLoot, hit?.looting ?? 0);
+      this.kill(mob, events, dropLoot, hit?.looting ?? 0, byPlayer ? (hit?.by ?? null) : null);
       return true;
     }
     events.sound('hurt', mob);
     return false;
   }
 
-  private kill(mob: Mob, events: MobEvents, dropLoot: boolean, looting = 0): void {
+  /** The player a kill's loot belongs to: the one who landed the last blow, or whoever had hurt it most when it died of that fight. */
+  private killOwner(mob: Mob, by: unknown): unknown {
+    if (by != null) return by;
+    if (mob.sincePlayerHit >= PLAYER_KILL_WINDOW) return null;
+    let best: unknown = null;
+    let n = 0;
+    for (const [who, dealt] of mob.threat) if (dealt > n) { best = who; n = dealt; }
+    return best ?? mob.lastHitBy;
+  }
+
+  private kill(mob: Mob, events: MobEvents, dropLoot: boolean, looting = 0, by: unknown = null): void {
     mob.dead = true;
     mob.deathTime = 0;
     mob.health = 0;
+    mob.killedBy = this.killOwner(mob, by);
+    mob.threat.clear();
+    mob.tank = null;
+    mob.evade = false;
     events.sound('death', mob);
     if (mob.sincePlayerHit < PLAYER_KILL_WINDOW) events.killed?.(mob);
     if (dropLoot && !mob.noDrops && mob.growTimer <= 0) {
@@ -1789,20 +1847,20 @@ export class MobManager {
         const d = cooks && COOKED[drop.id] ? { ...drop, id: COOKED[drop.id] } : drop;
         // Looting adds up to its level in extra items to each kind of drop.
         const more = looting > 0 ? Math.floor(this.rand() * (looting + 1)) : 0;
-        events.drop(more > 0 ? { ...d, count: d.count + more } : d, mob.body.x, mob.body.y + 0.3, mob.body.z);
+        events.drop(more > 0 ? { ...d, count: d.count + more } : d, mob.body.x, mob.body.y + 0.3, mob.body.z, mob.killedBy ?? undefined);
       }
       if (mob.standGear) {
-        events.drop({ id: I.ARMOR_STAND, count: 1 }, mob.body.x, mob.body.y + 0.3, mob.body.z);
-        for (const piece of mob.standGear) if (piece) events.drop(piece, mob.body.x, mob.body.y + 0.5, mob.body.z);
+        events.drop({ id: I.ARMOR_STAND, count: 1 }, mob.body.x, mob.body.y + 0.3, mob.body.z, mob.killedBy ?? undefined);
+        for (const piece of mob.standGear) if (piece) events.drop(piece, mob.body.x, mob.body.y + 0.5, mob.body.z, mob.killedBy ?? undefined);
       }
       if (mob.sincePlayerHit < PLAYER_KILL_WINDOW) {
         // (a rare or epic kind is worth a little more than its base: see `MOB_TIER_INFO`; a boss has its own worth)
         const worth = mob.def.xp(this.rand, mob.traits) * (mob.def.boss ? 1 : MOB_TIER_INFO[mobTier(mob.kind)].xp);
-        events.xp?.(Math.round(worth), mob.body.x, mob.body.y + 0.3, mob.body.z);
+        events.xp?.(Math.round(worth), mob.body.x, mob.body.y + 0.3, mob.body.z, mob.killedBy ?? undefined);
         // The Gilded Tide leaves the Codex of Aurelion and nothing else: no coins, bags, jewels, skill books or gear.
         if (!isGildedKind(mob.kind)) {
           const coins = coinsForKill(mob.kind, mob.size, this.rand);
-          if (coins > 0) events.coins?.(coins, mob.body.x, mob.body.y + 0.3, mob.body.z);
+          if (coins > 0) events.coins?.(coins, mob.body.x, mob.body.y + 0.3, mob.body.z, mob.killedBy ?? undefined);
           events.loot?.(mob, mob.body.x, mob.body.y + 0.3, mob.body.z);
         }
       }
@@ -1863,8 +1921,9 @@ export class MobManager {
         continue;
       }
 
-      env.player = nearestPlayer(players, m.body.x, m.body.z);
+      env.player = this.threatTarget(m, players) ?? nearestPlayer(players, m.body.x, m.body.z);
       const dist = Math.hypot(m.body.x - env.player.x, m.body.z - env.player.z);
+      if (this.pastLeash(m, env.player, dist)) this.breakLeash(m);
       // Despawn far away mobs.
       if (!m.bound && !m.def.boss && ((dist > 110 && !m.def.persistent) || (m.def.hostile && dist > 64 && env.rand() < dt * 0.15))) {
         this.mobs.splice(i, 1);
@@ -2178,6 +2237,67 @@ export class MobManager {
 
   // ---- AI ----------------------------------------------------------------------
 
+  /** The player who has hurt this mob the most and is still there to answer for it. */
+  private threatTarget(m: Mob, players: readonly MobPlayer[]): MobPlayer | null {
+    if (m.evade || m.threat.size === 0 || !holdsThreat(m)) return null;
+    let best: MobPlayer | null = null;
+    let bestN = 0;
+    for (const p of players) {
+      const key = p.ref ?? p;
+      if (!p.alive || p.invulnerable) {
+        m.threat.delete(key);
+        if (m.tank === key) m.tank = null;
+        continue;
+      }
+      const n = m.threat.get(key) ?? 0;
+      if (n > bestN || (n === bestN && n > 0 && key === m.tank)) {
+        bestN = n;
+        best = p;
+      }
+    }
+    if (!best) return null;
+    m.tank = best.ref ?? best;
+    return best;
+  }
+
+  /** In a fight and farther from where it spawned than it will follow. */
+  private pastLeash(m: Mob, player: MobPlayer, dist: number): boolean {
+    if (m.evade || m.dead || !holdsThreat(m)) return false;
+    if (Math.hypot(m.body.x - m.spawnX, m.body.z - m.spawnZ) <= leashOf(m)) return false;
+    return m.aggro || m.threat.size > 0 || (m.def.hostile && player.alive && !player.invulnerable && dist <= m.def.detect);
+  }
+
+  /** Drop the fight, forget who hurt it, and (except the Hollow King, whose script does this) be whole again. */
+  private breakLeash(m: Mob): void {
+    m.evade = true;
+    m.aggro = false;
+    m.threat.clear();
+    m.tank = null;
+    m.fuse = -1;
+    m.path = null;
+    m.phase = 0;
+    if (m.castT <= 0) m.casting = 0;
+    if (m.kind !== 'hollow_king') m.health = m.maxHealth;
+  }
+
+  /** Walk back to where it spawned. Once it is there, it can notice someone again. */
+  private goHome(m: Mob, env: MobEnv, dt: number): void {
+    const home = Math.hypot(m.spawnX - m.body.x, m.spawnZ - m.body.z);
+    if (home < 1.8) {
+      m.evade = false;
+      m.aggro = false;
+      m.path = null;
+      return;
+    }
+    const speed = m.def.runSpeed || m.def.speed * 1.35;
+    m.fuse = -1;
+    if (m.def.flying || m.kind === 'spore_puff' || m.kind === 'ember_wraith') {
+      this.steer(m, m.spawnX, m.body.y, m.spawnZ, speed, dt);
+      return;
+    }
+    this.walkTo(m, env, m.spawnX, m.spawnZ, m.body.y, speed);
+  }
+
   private think(m: Mob, env: MobEnv, events: MobEvents, dt: number, dist: number): void {
     const cmd = m.cmd;
     cmd.forward = 0;
@@ -2219,6 +2339,12 @@ export class MobManager {
       return;
     }
 
+    // Pulled too far from where it was born: the fight is over and it walks home, ignoring everyone.
+    if (m.evade) {
+      this.goHome(m, env, dt);
+      return;
+    }
+
     // The fliers of the Hollow Deep hunt (and, as guards, hover about their post) on their own.
     if (m.kind === 'spore_puff' || m.kind === 'ember_wraith') {
       this.thinkFlyer(m, env, events, dt, dist, canTarget);
@@ -2249,6 +2375,18 @@ export class MobManager {
       m.fleeTimer -= dt;
       this.flee(m, env, dt);
       return;
+    }
+
+    // A golden creature leaves people alone until it is hit. Then it turns on whoever has hurt it most, until the leash pulls it home.
+    if (isGildedKind(m.kind) && m.aggro) {
+      const hunting = p.alive && !p.invulnerable && !env.ward?.(p.x, p.y, p.z);
+      if (hunting) {
+        this.thinkZombie(m, env, events, dt, dist);
+        return;
+      }
+      m.aggro = false;
+      m.threat.clear();
+      m.tank = null;
     }
 
     if (m.kind === 'villager') {
@@ -3533,6 +3671,13 @@ export class MobManager {
           if (t !== null && (!best || t < best.t)) best = { mob: m, t };
         }
       }
+      if (Math.hypot(sx, sy, sz) > 1e-6 && a.foeAlong) {
+        const foeT = a.foeAlong(a.x, a.y, a.z, sx / len, sy / len, sz / len, len);
+        if (foeT !== null && (!best || foeT < best.t)) {
+          a.onFoe?.(a, foeT);
+          return true;
+        }
+      }
       if (best && a.impact) {
         a.impact(ex, ey, ez, best.mob);
         return true;
@@ -3557,7 +3702,7 @@ export class MobManager {
         const m = best.mob;
         const head = !!a.onHit && m.height >= 1.2 && a.y + (sy / len) * best.t >= m.body.y + m.height * 0.8;
         const dealt = head ? a.damage * 1.5 : a.damage;
-        this.damage(m, dealt, a.vx / hlen, a.vz / hlen, events, true, true, true, { knock: 1 + a.punch, fire: a.fire ? 5 : 0 });
+        this.damage(m, dealt, a.vx / hlen, a.vz / hlen, events, true, true, true, { knock: 1 + a.punch, fire: a.fire ? 5 : 0, ...(a.owner != null ? { by: a.owner } : {}) });
         a.onHit?.(a, m, dealt, head);
         return true;
       }

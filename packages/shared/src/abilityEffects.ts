@@ -14,6 +14,11 @@ export interface EffectOwner {
   alive(): boolean;
   /** One hit on a mob, worked out by the caster's class (see `Player.strikeMob`). */
   strike(mob: Mob, damage: number, kind: DamageKind, from: { x: number; z: number }, knock?: number): void;
+  /**
+   * The same hit on the caster's duel opponent, when they stand in the blast. Returns true when they were there,
+   * so a trap can spring on them. A caster with no duel leaves it unset.
+   */
+  strikeFoeAt?(x: number, y: number, z: number, radius: number, height: number, damage: number, kind: DamageKind, from: { x: number; z: number }, knock?: number, root?: number): boolean;
 }
 
 /** What a mark looks like (the client decides how: particles, rings, a column of light). */
@@ -192,6 +197,11 @@ export class EffectField {
         this.removeTrap(i);
         continue;
       }
+      if (t.owner.strikeFoeAt?.(t.x, t.y, t.z, t.radius, 2, t.damage, t.kind, { x: t.x, z: t.z }, 0, t.root)) {
+        this.removeTrap(i);
+        this.mark('trap_snap', t.by, t.x, t.y, t.z, t.radius, 0.8);
+        continue;
+      }
       const victim = mobs.mobs.find((m) => !m.dead && (m.def.hostile || !m.def.ambient) && !m.def.invulnerable && Math.hypot(m.body.x - t.x, m.body.z - t.z) <= t.radius && Math.abs(m.body.y - t.y) <= 2);
       if (!victim) continue;
       this.removeTrap(i);
@@ -210,5 +220,6 @@ export class EffectField {
       if (Math.hypot(m.body.x - z.x, m.body.z - z.z) > z.radius || Math.abs(m.body.y - z.y) > 4) continue;
       z.owner.strike(m, z.damage, z.kind, { x: z.x, z: z.z }, z.knock);
     }
+    z.owner.strikeFoeAt?.(z.x, z.y, z.z, z.radius, 4, z.damage, z.kind, { x: z.x, z: z.z }, z.knock);
   }
 }

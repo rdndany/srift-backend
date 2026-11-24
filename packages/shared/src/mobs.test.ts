@@ -454,6 +454,43 @@ describe('spawner', () => {
   });
 });
 
+describe('threat and the leash', () => {
+  it('chases the player who has hurt it most, not the one standing closer', () => {
+    const h = harness();
+    // The lighter hit stands closer, and off to the side, so they are not simply in the way.
+    const near = { x: 0.5, y: 1, z: 3.5, alive: true, invulnerable: false, ref: { id: 'near' } };
+    const far = { x: 8.5, y: 1, z: 0.5, alive: true, invulnerable: false, ref: { id: 'far' } };
+    h.env.players = [near, far];
+    h.env.player = near;
+    const z = h.mgr.spawn('zombie', 0.5, 1, 0.5);
+    h.mgr.damage(z, 1, 0, 1, h.events, true, false, true, { by: near.ref });
+    h.mgr.damage(z, 6, -1, 0, h.events, true, false, true, { by: far.ref });
+    expect(z.threat.get(far.ref)).toBeGreaterThan(z.threat.get(near.ref) ?? 0);
+    h.run(4);
+    expect(dist(z.body, far)).toBeLessThan(dist(z.body, near));
+  });
+
+  it('drops the fight and walks home once it is pulled far from where it spawned', () => {
+    const h = harness();
+    const z = h.mgr.spawn('zombie', 0.5, 1, 0.5);
+    h.mgr.damage(z, 5, 1, 0, h.events, true, false, true, { by: h.player });
+    z.health = 4;
+    z.body.x = z.spawnX + 48;
+    h.player.x = z.body.x + 2;
+    h.run(0.4);
+    expect(z.aggro).toBe(false);
+    expect(z.evade).toBe(true);
+    expect(z.health).toBe(z.maxHealth);
+    const hp = z.health;
+    expect(h.mgr.damage(z, 5, 1, 0, h.events, true, false, true, { by: h.player })).toBe(false);
+    expect(z.health).toBe(hp);
+    expect(z.aggro).toBe(false);
+    const x = z.body.x;
+    h.run(1.5);
+    expect(z.body.x).toBeLessThan(x - 1);
+  });
+});
+
 describe('player hurt cooldown', () => {
   it('ignores a second mob hit within half a second but not other damage', () => {
     const v = new Vitals();

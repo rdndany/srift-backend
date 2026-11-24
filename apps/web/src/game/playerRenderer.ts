@@ -1,10 +1,10 @@
 import * as THREE from 'three';
-import { CLASSES, MOUNTS, getItem, glowColor } from '@solrift/shared';
-import { BODY_SCALE, Character, SWING_TIME, disposeCharacterAssets, figureGlows, figureLoadout, layDown, standUp } from './character';
+import { BASH_ANIM, CLASSES, MOUNTS, getItem, glowColor } from '@solrift/shared';
+import { BODY_SCALE, Character, SWING_TIME, disposeCharacterAssets, figureGlows, figureLoadout, heldLamp, layDown, standUp } from './character';
 import { paletteOfCode } from './lookPalette';
 import type { OtherPlayer } from './remote';
 import type { EntityLight } from './entityLight';
-import { followBodyYaw, wrapAngle } from './selfView';
+import { headYawWant, stepBodyFacing, wrapAngle } from './selfView';
 import type { StepHandler } from './fenrir';
 import { MountRig, RIDER_LIFT } from './mountRig';
 
@@ -33,6 +33,17 @@ export const LOD = {
 /** One block, 1.8 tall like a person; a single draw call. Shared by every distant player. */
 const BLOCK_GEO = new THREE.BoxGeometry(0.5, 1.8, 0.35).translate(0, 0.9, 0);
 
+/** A torch or lantern someone else is carrying, in world space. */
+export interface CarriedLight {
+  x: number;
+  y: number;
+  z: number;
+  r: number;
+  g: number;
+  b: number;
+  range: number;
+}
+
 interface Figure {
   group: THREE.Group;
   /** Built the first time the player is near enough to deserve it. */
@@ -48,9 +59,13 @@ interface Figure {
   labelKey: string;
   name: string;
   look: number;
-  /** The body's heading: it eases round to where the player looks; `turn` is how fast it is going (radians/s, positive to the left). */
+  /** The body's heading: it faces where they walk, and the head looks back at the view. `turn` is how fast it is going (radians/s, positive to the left). */
   bodyYaw: number;
   turn: number;
+  /** Standing still, the body has started turning to face where they look. */
+  turnToAim: boolean;
+  /** The head, eased toward the view. */
+  headYaw: number;
   /** Their vertical speed (worked out from how they move, eased) and whether that says they are in the air. */
   lastY: number;
   vy: number;
@@ -108,7 +123,7 @@ export class PlayerRenderer {
     block.visible = false;
     group.add(block);
     this.group.add(group);
-    return { group, character: null, rider: null, rig: null, block, blockColor, label: null, labelTex: null, labelKey: '', name: p.name, look: p.look, bodyYaw: p.yaw, turn: 0, lastY: p.y, vy: 0, lastX: p.x, lastZ: p.z, vx: 0, vz: 0, air: false, full: false, blockLit: false, dead: !!p.dead };
+    return { group, character: null, rider: null, rig: null, block, blockColor, label: null, labelTex: null, labelKey: '', name: p.name, look: p.look, bodyYaw: p.yaw, turn: 0, turnToAim: false, headYaw: 0, lastY: p.y, vy: 0, lastX: p.x, lastZ: p.z, vx: 0, vz: 0, air: false, full: false, blockLit: false, dead: !!p.dead };
   }
 
   private makeLabel(f: Figure, p: OtherPlayer): void {
@@ -201,6 +216,36 @@ export class PlayerRenderer {
     }
   }
 
+  /** Torches and lanterns the figures drawn this frame are carrying. Filled by `sync`. */
+  readonly carriedLights: CarriedLight[] = [];
+  private readonly lampPool: CarriedLight[] = [];
+  private readonly lampAt = new THREE.Vector3();
+
+  /** Remember a carried light. A full figure's is at the hand; a distant one is at the chest. */
+  private pushLamp(p: OtherPlayer, character: Character | null): void {
+    if (p.dead || p.sleeping > 0 || p.mount || this.carriedLights.length >= 8) return;
+    const lamp = heldLamp(p.held, p.offhand);
+    if (!lamp) return;
+    let x = p.x;
+    let y = p.y + 1.05;
+    let z = p.z;
+    if (character) {
+      character.gripLight(lamp.left, lamp.hang, this.lampAt);
+      x = this.lampAt.x;
+      y = this.lampAt.y;
+      z = this.lampAt.z;
+    }
+    const spot = this.lampPool[this.carriedLights.length] ?? (this.lampPool[this.carriedLights.length] = { x: 0, y: 0, z: 0, r: 0, g: 0, b: 0, range: 0 });
+    spot.x = x;
+    spot.y = y;
+    spot.z = z;
+    spot.r = lamp.light.r;
+    spot.g = lamp.light.g;
+    spot.b = lamp.light.b;
+    spot.range = lamp.light.level;
+    this.carriedLights.push(spot);
+  }
+
   /** The block takes the shirt colour in the light that falls on the player. */
   private lightBlock(f: Figure, p: OtherPlayer): void {
     const t = this.env ? this.env.at(p.x, p.y, p.z, this.tint) : this.tint.setScalar(Math.max(0.3, this.brightness));
@@ -212,6 +257,7 @@ export class PlayerRenderer {
   sync(players: Iterable<OtherPlayer>, dt: number, eye?: THREE.Vector3): void {
     const t0 = performance.now();
     this.frame++;
+    this.carriedLights.length = 0;
     const list = this.list;
     list.length = 0;
     for (const p of players) list.push(p);
@@ -262,6 +308,9 @@ export class PlayerRenderer {
       f.group.visible = visible;
       if (!visible) {
         hidden++;
+        f.lastX = p.x;
+        f.lastY = p.y;
+        f.lastZ = p.z;
         continue;
       }
       const showLabel = dist < LOD.labelRange;
@@ -276,7 +325,9 @@ export class PlayerRenderer {
         f.block.visible = false;
         if (f.character) f.character.root.visible = false;
         if (f.label) f.label.visible = false;
+        f.lastX = p.x;
         f.lastY = p.y;
+        f.lastZ = p.z;
         f.vy = 0;
         continue;
       }
@@ -291,8 +342,28 @@ export class PlayerRenderer {
         standUp(f.group);
         f.group.position.set(p.x, p.y - (p.sneaking ? 0.1 : 0), p.z);
         if (wantFull) {
+          // The step this frame, before the body decides which way to face: A and D turn the body to face the step.
+          if (dt > 0) {
+            f.vx = (p.x - f.lastX) / dt;
+            f.vz = (p.z - f.lastZ) / dt;
+            f.vy += ((p.y - f.lastY) / dt - f.vy) * (1 - Math.exp(-dt * 12));
+          }
+          f.lastX = p.x;
+          f.lastY = p.y;
+          f.lastZ = p.z;
+          f.air = Math.abs(f.vy) > (f.air ? 1.2 : 3);
+          if (!p.mount && !!this.isWater && this.isWater(p.x, p.y + 0.4, p.z) && (this.isWater(p.x, p.y + 1, p.z) || this.isWater(p.x, p.y - 0.5, p.z))) f.air = false;
+          const swinging = ((p.swingT ?? 9) * (p.swingR ?? 1)) < SWING_TIME;
+          const acting = swinging || (p.stabT ?? 9) < 0.5 || (p.bow ?? 0) > 0.02 || p.blocking || !!p.eating || (p.slam ?? 0) > 0 || (p.bashT ?? 9) < BASH_ANIM;
           const before = f.bodyYaw;
-          f.bodyYaw = followBodyYaw(f.bodyYaw, p.yaw, p.speed > 0.3, dt);
+          // A frame with no step (they just came into view) has no direction to face.
+          const stepped = Math.hypot(f.vx, f.vz) > 0.3;
+          const faced = stepBodyFacing(
+            { bodyYaw: f.bodyYaw, turnToAim: f.turnToAim },
+            { yaw: p.yaw, vx: stepped ? f.vx : undefined, vz: stepped ? f.vz : undefined, speed: stepped ? p.speed : 0, airborne: f.air, mounted: !!p.mount, winged: !!p.winged && (p.wing ?? 0) > 0, acting, dt },
+          );
+          f.bodyYaw = faced.bodyYaw;
+          f.turnToAim = faced.turnToAim;
           if (dt > 0) f.turn += (wrapAngle(f.bodyYaw - before) / dt - f.turn) * (1 - Math.exp(-dt * 10));
         } else {
           f.bodyYaw = p.yaw; // far away nobody can tell
@@ -306,7 +377,9 @@ export class PlayerRenderer {
 
       if (!wantFull) {
         blocks++;
+        f.lastX = p.x;
         f.lastY = p.y;
+        f.lastZ = p.z;
         f.vy = 0;
         f.block.visible = true;
         if (f.character) f.character.root.visible = false;
@@ -315,6 +388,7 @@ export class PlayerRenderer {
           this.lightBlock(f, p);
           f.blockLit = true;
         }
+        this.pushLamp(p, null);
         continue;
       }
       full++;
@@ -342,38 +416,31 @@ export class PlayerRenderer {
         c.setArmor(p.armor);
         c.setHeld(0, this.models);
         c.setShield(0, this.models);
+        f.lastX = p.x;
+        f.lastY = p.y;
+        f.lastZ = p.z;
         this.light(f, p);
         continue;
       }
+      const gaze = wrapAngle(p.yaw - f.bodyYaw);
+      const headWant = headYawWant(gaze, !!p.mount);
+      f.headYaw += (headWant - f.headYaw) * (dt > 0 ? 1 - Math.exp(-dt * 16) : 0);
       c.headPivot.rotation.x = p.pitch;
-      c.headPivot.rotation.y = Math.max(-1.3, Math.min(1.3, wrapAngle(p.yaw - f.bodyYaw)));
+      c.headPivot.rotation.y = f.headYaw;
       // A rider holds nothing: no weapon in the hand, no shield on the arm.
       const load = p.mount ? { hand: 0, shield: 0 } : figureLoadout(p.held, p.offhand);
-      if (dt > 0) f.vy += ((p.y - f.lastY) / dt - f.vy) * (1 - Math.exp(-dt * 12));
-      f.lastY = p.y;
-      // Which way they go against the way they face (they face where they look, and may go sideways or back).
-      if (dt > 0) {
-        const k = 1 - Math.exp(-dt * 10);
-        f.vx += ((p.x - f.lastX) / dt - f.vx) * k;
-        f.vz += ((p.z - f.lastZ) / dt - f.vz) * k;
-      }
-      f.lastX = p.x;
-      f.lastZ = p.z;
       c.setMotionClass(p.cls ?? null);
-      const sp = Math.hypot(f.vx, f.vz);
-      if (sp > 0.5 && p.speed > 0.3) {
-        c.moveF = (-f.vx * Math.sin(f.bodyYaw) - f.vz * Math.cos(f.bodyYaw)) / sp;
-        c.moveR = (f.vx * Math.cos(f.bodyYaw) - f.vz * Math.sin(f.bodyYaw)) / sp;
+      // The body faces the step, so this is forward while they sidestep and only sideways while a swing or a block holds them facing the view.
+      if (p.speed > 0.3) {
+        const by = f.bodyYaw;
+        c.moveF = (-f.vx * Math.sin(by) - f.vz * Math.cos(by)) / p.speed;
+        c.moveR = (f.vx * Math.cos(by) - f.vz * Math.sin(by)) / p.speed;
       } else {
         c.moveF = 1;
         c.moveR = 0;
       }
-      // In the air when they rise or fall fast (with a margin, so the pose does not flicker at the edge).
-      f.air = Math.abs(f.vy) > (f.air ? 1.2 : 3);
       // In water that comes up to the chest or has none under the feet (floating at the surface): swimming, not wading, a leap or a fall.
-      const afloat = !p.mount && !!this.isWater && this.isWater(p.x, p.y + 0.4, p.z) && (this.isWater(p.x, p.y + 1, p.z) || this.isWater(p.x, p.y - 0.5, p.z));
-      if (afloat) f.air = false;
-      c.afloat = afloat;
+      c.afloat = !p.mount && !!this.isWater && this.isWater(p.x, p.y + 0.4, p.z) && (this.isWater(p.x, p.y + 1, p.z) || this.isWater(p.x, p.y - 0.5, p.z));
       c.setWings(p.mount ? 0 : (p.wing ?? 0));
       c.roof = p.wing && this.roofAt ? this.roofAt(p.x, p.y, p.z) : 4;
       c.wingFlying = !p.mount && !!p.winged;
@@ -383,14 +450,22 @@ export class PlayerRenderer {
       c.bashAge = p.mount ? 9 : (p.bashT ?? 9);
       c.charging = !p.mount && !!p.charging;
       c.casting = p.mount ? 0 : (p.casting ?? 0);
+      // The blade has to be in the hand before the swing, or the wrist stays straight for that blow.
+      // The sit, stretch and look are the ones they see on their own figure, not one picked here.
+      c.followIdle(p.idle ?? 0, p.idleT ?? 0);
+      c.setHeld(load.hand, this.models);
+      c.setShield(load.shield, this.models);
+      c.aimDraw = p.mount ? 0 : (p.bow ?? 0);
+      c.aimPitch = p.pitch;
+      c.stabAge = p.mount ? 9 : (p.stabT ?? 9);
+      c.engaged = !p.mount && !!p.engaged;
       c.animate(dt, p.speed, f.turn, Math.min(1, ((p.swingT ?? 9) * (p.swingR ?? 1)) / SWING_TIME), load.hand !== 0, p.blocking && !p.mount, f.vy, f.air, !!p.eating && !p.mount);
       c.setArmor(p.armor);
-      c.setHeld(load.hand, this.models);
       const fx = figureGlows(p.held, p.offhand, glowColor(p.hg), glowColor(p.og));
       c.setHeldGlow(load.hand ? fx.hand : null);
-      c.setShield(load.shield, this.models);
       c.setShieldGlow(load.shield ? fx.shield : null);
       this.light(f, p);
+      this.pushLamp(p, c);
     }
     for (const [id, f] of this.figures) {
       if (live.has(id)) continue;

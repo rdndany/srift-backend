@@ -9,6 +9,7 @@ import { ItemView } from './ItemView';
 export function Hotbar() {
   const api = useUi((s) => s.api);
   const selected = useUi((s) => s.selected);
+  const gearGlow = useUi((s) => s.gearGlow);
   useUi((s) => s.version);
   if (!api) return null;
   const off = api.offhand.get(0);
@@ -22,6 +23,7 @@ export function Hotbar() {
       {Array.from({ length: HOTBAR_SLOTS }, (_, i) => (
         <div key={i} className={`slot${i === selected ? ' selected' : ''}`}>
           <ItemView stack={api.inventory.get(i)} />
+          {gearGlow?.slot === i && <span key={`g${gearGlow.n}`} className="codex-glow" />}
           <em>{i + 1}</em>
         </div>
       ))}

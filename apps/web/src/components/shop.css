@@ -13,6 +13,9 @@
 .shop-win .wow-head::after {
   order: 2;
 }
+.shop-win .wow-head .organize-btn {
+  order: 3;
+}
 
 /* The wares: a grid of slots like the backpack's, scrolling when there are more than a few rows. */
 .vendor-list {

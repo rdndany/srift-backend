@@ -149,10 +149,9 @@ uniform sampler2D uShadowMapE;
 uniform mat4 uShadowMatE;
 uniform float uShadowOnE;
 uniform float uShadowTexelE;
-// A lantern in the hand: where it is, the colour of its light and how far it reaches (0 = none).
-uniform vec3 uHeldPos;
-uniform vec3 uHeldColor;
-uniform float uHeldRange;
+// Torches and lanterns in people's hands (xyz, reach; reach 0 = unused). The first is yours, the rest are whoever is near.
+uniform vec4 uHeld[4];
+uniform vec3 uHeldCol[4];
 // The nearest soul lanterns standing about (x, y, z, reach; reach 0 = unused): the light near them is blue, not warm.
 uniform vec4 uSoul[6];
 
@@ -603,14 +602,16 @@ ${HERO_TILES.map((n) => {
   soulW = smoothstep(0.1, 0.75, soulW);
   torch = mix(torch, mix(vec3(0.1, 0.36, 1.0), vec3(0.6, 0.86, 1.0), clamp(blk * 1.1, 0.0, 1.0)), soulW);
   vec3 blkRGB = pow(blk, 1.45) * flick * torch;
-  if (uHeldRange > 0.0) {
-    vec3 hd = uHeldPos - vWorld;
-    float hl = length(hd);
-    float reach = clamp(1.0 - hl / uHeldRange, 0.0, 1.0);
-    // Faces turned towards the flame take most of it; the ones turned away still get a share (the light bounces).
-    float facing = 0.4 + 0.6 * max(dot(n, hd / max(hl, 0.001)), 0.0);
-    float held = reach * reach * facing * (1.0 + 0.05 * sin(uTime * 8.3 + 1.7));
-    blkRGB += uHeldColor * held;
+  for (int i = 0; i < 4; i++) {
+    if (uHeld[i].w > 0.0) {
+      vec3 hd = uHeld[i].xyz - vWorld;
+      float hl = length(hd);
+      float reach = clamp(1.0 - hl / uHeld[i].w, 0.0, 1.0);
+      // Faces turned towards the flame take most of it; the ones turned away still get a share (the light bounces).
+      float facing = 0.4 + 0.6 * max(dot(n, hd / max(hl, 0.001)), 0.0);
+      float held = reach * reach * facing * (1.0 + 0.05 * sin(uTime * 8.3 + float(i) + 1.7));
+      blkRGB += uHeldCol[i] * held;
+    }
   }
   vec3 L = max(skyRGB, blkRGB) + 0.3 * min(skyRGB, blkRGB);
   L = mix(L, vec3(1.15), aux.g);
@@ -698,6 +699,17 @@ export interface ChunkLighting {
   wind: number;
 }
 
+/** One carried torch or lantern: where it burns, its colour (0..1), and how far the light reaches in blocks. */
+export interface HeldLightSpot {
+  x: number;
+  y: number;
+  z: number;
+  r: number;
+  g: number;
+  b: number;
+  range: number;
+}
+
 export interface ChunkMaterials {
   opaque: THREE.ShaderMaterial;
   translucent: THREE.ShaderMaterial;
@@ -724,8 +736,8 @@ export interface ChunkMaterials {
   setShadowFarBefore(map: THREE.Texture | null, matrix: THREE.Matrix4, blend: number): void;
   /** The small map of what moves (figures, mobs, vehicles), drawn from the same sun as the first one, or null for none. */
   setShadowEntities(map: THREE.Texture | null, matrix: THREE.Matrix4, texel: number): void;
-  /** The light of a lantern in the player's hand: a point in the world, a colour and a reach in blocks (range 0 puts it out). */
-  setHeldLight(pos: THREE.Vector3, color: THREE.Color, range: number): void;
+  /** Torches and lanterns people are carrying. Up to four; a reach of 0 puts that one out. */
+  setHeldLights(spots: readonly HeldLightSpot[]): void;
   /** The soul lantern slots the light shader tints blue around (fill them, e.g. with TorchGlow.soulLights). */
   readonly soulLights: THREE.Vector4[];
   dispose(): void;
@@ -799,9 +811,8 @@ export function createChunkMaterials(atlas: Atlas): ChunkMaterials {
     uShadowMatE: { value: new THREE.Matrix4() },
     uShadowOnE: { value: 0 },
     uShadowTexelE: { value: 1 / 1024 },
-    uHeldPos: { value: new THREE.Vector3() },
-    uHeldColor: { value: new THREE.Vector3(1, 0.7, 0.4) },
-    uHeldRange: { value: 0 },
+    uHeld: { value: Array.from({ length: 4 }, () => new THREE.Vector4(0, 0, 0, 0)) },
+    uHeldCol: { value: Array.from({ length: 4 }, () => new THREE.Vector3(1, 0.7, 0.4)) },
     uSoul: { value: Array.from({ length: 6 }, () => new THREE.Vector4(0, 0, 0, 0)) },
   };
 
@@ -889,10 +900,16 @@ export function createChunkMaterials(atlas: Atlas): ChunkMaterials {
       shared.uShadowTexelE.value = texel;
     },
     soulLights: shared.uSoul.value as THREE.Vector4[],
-    setHeldLight(pos, color, range) {
-      shared.uHeldPos.value.copy(pos);
-      shared.uHeldColor.value.set(color.r, color.g, color.b);
-      shared.uHeldRange.value = range;
+    setHeldLights(spots) {
+      const pos = shared.uHeld.value as THREE.Vector4[];
+      const col = shared.uHeldCol.value as THREE.Vector3[];
+      for (let i = 0; i < 4; i++) {
+        const s = spots[i];
+        if (s && s.range > 0) {
+          pos[i].set(s.x, s.y, s.z, s.range);
+          col[i].set(s.r, s.g, s.b);
+        } else pos[i].w = 0;
+      }
     },
     dispose() {
       palette.dispose();

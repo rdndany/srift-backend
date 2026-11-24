@@ -1,15 +1,69 @@
 'use client';
 
 import type { CSSProperties } from 'react';
-import { CLASSES, MOBS, MOB_ROLE_LABEL, MOB_TIER_INFO, NPCS, RANK_OFFICER, mobRole, shownTier } from '@solrift/shared';
+import { CLASSES, MOBS, MOB_ROLE_LABEL, MOB_TIER_INFO, NPCS, RANK_OFFICER, mobRole, shownTier, type StatusKind } from '@solrift/shared';
 import { useUi } from '../ui/store';
+import { HeadShot } from './PlayerFrame';
 import './player.css';
 
 /** What the loading screen draws of the two target frames (see `warmHud` in the store): the first of each to appear would stand the game still while the browser builds how it is painted. */
-const WARM_PLAYER = { name: 'Aurelia', cls: 'mage' as const, level: 40, guild: 'Dawnwatch' };
-const WARM_MOB = { id: 0, kind: 'zombie' as const, variant: 0, level: 12, hp: 12, max: 20, elite: true };
+const WARM_PLAYER: { name: string; cls: 'mage'; level: number; guild: string; look?: number; hp: number; hm: number; se: { k: StatusKind; n: number }[] } = {
+  name: 'Aurelia',
+  cls: 'mage',
+  level: 40,
+  guild: 'Dawnwatch',
+  hp: 32,
+  hm: 40,
+  se: [{ k: 'poison', n: 6 }, { k: 'guard', n: 8 }],
+};
+const WARM_MOB = { id: 0, kind: 'zombie' as const, variant: 0, level: 12, hp: 12, max: 20, elite: true, aggro: false };
 
-/** The player the crosshair rests on, next to your own frame: name, class, level and guild. U (or a click) opens their menu. */
+/** A simple mark for a creature that has no face: a person, a beast, or something that fights. */
+function KindMark({ role }: { role: string }) {
+  const person = role === 'npc' || role === 'trader';
+  const beast = role === 'passive' || role === 'neutral';
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden>
+      {person ? (
+        <>
+          <rect x="6" y="1" width="4" height="4" />
+          <rect x="4" y="6" width="8" height="5" />
+          <rect x="5" y="12" width="2" height="3" />
+          <rect x="9" y="12" width="2" height="3" />
+        </>
+      ) : beast ? (
+        <>
+          <rect x="2" y="6" width="3" height="3" />
+          <rect x="11" y="6" width="3" height="3" />
+          <rect x="4" y="5" width="8" height="6" />
+          <rect x="6" y="11" width="4" height="2" />
+        </>
+      ) : (
+        <>
+          <rect x="2" y="2" width="5" height="2" />
+          <rect x="9" y="2" width="5" height="2" />
+          <rect x="5" y="4" width="6" height="2" />
+          <rect x="7" y="6" width="2" height="6" />
+          <rect x="4" y="12" width="8" height="2" />
+        </>
+      )}
+    </svg>
+  );
+}
+
+const FX_LABEL: Record<StatusKind, string> = {
+  poison: 'Poison',
+  burn: 'Burn',
+  root: 'Root',
+  slow: 'Slow',
+  weak: 'Weak',
+  hunger: 'Hunger',
+  guard: 'Guard',
+  shield: 'Shield',
+  evade: 'Evade',
+};
+
+/** The player the crosshair rests on, next to your own frame: their face, name, health and status effects. A click (or U) still opens their menu. */
 function TargetFrame() {
   const warm = useUi((s) => s.warmHud);
   const target = useUi((s) => s.target) ?? (warm ? WARM_PLAYER : null);
@@ -17,26 +71,45 @@ function TargetFrame() {
   const trading = useUi((s) => !!s.trade);
   if (!target || (!api && !warm) || trading) return null;
   const def = target.cls ? CLASSES[target.cls] : null;
+  const hm = target.hm && target.hm > 0 ? target.hm : 20;
+  const hp = target.hp ?? hm;
+  const frac = Math.max(0, Math.min(1, hp / hm));
+  const bar = frac > 0.5 ? '#5fcf4a' : frac > 0.25 ? '#e0b030' : '#d8402c';
+  const effects = target.se ?? [];
   return (
     <div
       id="target-frame"
       data-testid="target-frame"
-      style={{ '--cls': def?.color ?? '#d6aa46' } as CSSProperties}
+      style={{ '--cls': def?.color ?? '#e6c36a' } as CSSProperties}
       title="Press U for the menu of this player"
       onClick={(e) => api?.openPlayerMenu(target.name, e.clientX, e.clientY + 24)}
     >
-      <div className="tf-level">{target.level ?? '?'}</div>
+      <div className="tf-portrait-wrap">
+        <div className="tf-portrait">
+          {typeof target.look === 'number' ? <HeadShot code={target.look} /> : <span className="tf-who"><KindMark role="npc" /></span>}
+        </div>
+        <div className="tf-level">{target.level ?? '?'}</div>
+      </div>
       <div className="tf-plate">
         <div className="tf-name">
           <b>{target.name}</b>
-          {def ? <small>{def.name}</small> : null}
+          {target.guild ? <span className="tf-guild">&lt;{target.guild}&gt;</span> : null}
         </div>
-        <div className="tf-sub">
-          {target.guild ? <span className="tf-guild">&lt;{target.guild}&gt;</span> : <span>&nbsp;</span>}
-          <span className="tf-hint">
-            <kbd>U</kbd> menu
+        <div className="tf-hp" data-testid="player-target-hp">
+          <i style={{ width: `${frac * 100}%`, background: bar }} />
+          <span>
+            {Math.ceil(hp).toLocaleString('en-US')} / {Math.round(hm).toLocaleString('en-US')}
           </span>
         </div>
+        {effects.length > 0 ? (
+          <div className="tf-fx">
+            {effects.map((e) => (
+              <span key={e.k} className={e.k}>
+                {FX_LABEL[e.k]} {e.n}{e.k === 'shield' ? '' : 's'}
+              </span>
+            ))}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -72,12 +145,27 @@ function MobTargetFrame() {
   const hurtable = !def.invulnerable;
   const frac = mob.max > 0 ? Math.max(0, Math.min(1, mob.hp / mob.max)) : 0;
   const bar = frac > 0.5 ? '#5fcf4a' : frac > 0.25 ? '#e0b030' : '#d8402c';
+  const stance = role === 'hostile' || role === 'boss' || role === 'neutral';
   return (
-    <div id="target-frame" className="mob" data-testid="mob-target-frame" data-tier={shownTier(mob.kind, mob.elite)} style={{ '--cls': tier.color } as CSSProperties}>
-      <div className="tf-level">{def.boss ? '☠' : mob.level}</div>
+    <div
+      id="target-frame"
+      className="mob"
+      data-testid="mob-target-frame"
+      data-tier={shownTier(mob.kind, mob.elite)}
+      data-stance={stance ? (mob.aggro ? 'hot' : 'calm') : undefined}
+      style={{ '--cls': tier.color } as CSSProperties}
+    >
+      <div className="tf-portrait-wrap">
+        <div className="tf-portrait">
+          <span className="tf-mark">
+            <KindMark role={role} />
+          </span>
+        </div>
+        <div className="tf-level">{mob.level}</div>
+      </div>
       <div className="tf-plate">
         <div className="tf-name">
-          <b style={{ color: tier.color }}>{name}</b>
+          <b>{name}</b>
           <small>{tier.name}</small>
         </div>
         {hurtable ? (
@@ -90,6 +178,13 @@ function MobTargetFrame() {
         ) : null}
         <div className="tf-sub">
           <span className={`tf-role ${role}`}>{title ?? MOB_ROLE_LABEL[role]}{mob.elite ? ' · Elite' : ''}</span>
+          {stance ? (
+            <span className={`stance ${mob.aggro ? 'hot' : 'calm'}`} title={mob.aggro ? 'Fighting whoever has hurt it most' : 'At rest'}>
+              <i />
+              <i />
+              <i />
+            </span>
+          ) : null}
         </div>
       </div>
     </div>
@@ -116,6 +211,9 @@ function PlayerMenu() {
   const adventure = useUi((s) => s.adventure);
   const party = useUi((s) => s.party);
   const trading = useUi((s) => !!s.trade);
+  const voiceLive = useUi((s) => s.voiceLive);
+  const voiceMuted = useUi((s) => s.voiceMuted);
+  const dueling = useUi((s) => s.dueling || s.duelCount !== null);
   const api = useUi((s) => s.api);
   if (!menu || !api) return null;
 
@@ -138,7 +236,12 @@ function PlayerMenu() {
   }
   entries.push({ label: 'Inspect', act: () => api.inspect(menu.name), off: gone, keepMouse: true });
   if (!me) {
-    entries.push({ label: 'Trade', act: () => api.tradeAct({ a: 'ask', name: menu.name }), off: trading ? 'You are already trading' : gone });
+    entries.push({ label: 'Trade', act: () => api.tradeAct({ a: 'ask', name: menu.name }), off: trading ? 'You are already trading' : dueling ? 'You are in a duel' : gone });
+    entries.push({ label: 'Duel', act: () => api.duelAct({ a: 'ask', name: menu.name }), off: dueling ? 'You are already in a duel' : trading ? 'You are already trading' : gone });
+    if (voiceLive) {
+      const silenced = voiceMuted.includes(menu.name.toLowerCase());
+      entries.push({ label: silenced ? 'Unmute' : 'Mute', act: () => api.muteVoice(menu.name), off: gone });
+    }
     if (adventure) {
       entries.push({ label: 'Invite to party', act: () => api.partyAction('invite', menu.name), off: gone ?? (mine && !mine.lead ? 'Only the party leader invites' : undefined) });
     }

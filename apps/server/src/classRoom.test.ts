@@ -284,7 +284,7 @@ describe('class progress that is kept', () => {
     const id = c.join('ann', 'ranger', 'acct-1');
     one.player(id)!.addClassXp(xpTo(6) + 5);
     expect(one.player(id)!.cls!.unlocked.size).toBe(0); // levelling teaches nothing: only a skill book does
-    one.player(id)!.cls!.learn('rain_of_arrows');
+    one.player(id)!.cls!.learn('piercing_shot');
     one.leave(id);
     one.stop();
 
@@ -295,8 +295,8 @@ describe('class progress that is kept', () => {
     expect(p.cls!.classId).toBe('ranger');
     expect(p.cls!.level).toBe(6);
     expect(p.cls!.xp).toBe(5);
-    expect(p.cls!.unlocked.has('rain_of_arrows')).toBe(true);
-    expect([...p.cls!.unlocked]).toEqual(['rain_of_arrows']);
+    expect(p.cls!.unlocked.has('piercing_shot')).toBe(true);
+    expect([...p.cls!.unlocked]).toEqual(['piercing_shot']);
     // and the bag is not handed out a second time
     expect(p.inventory.countOf(I.ARROW)).toBe(32);
   });

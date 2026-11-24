@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BEHIND_DISTANCE, HEAD_TURN_LIMIT, SHOULDER_SIDE, SHOULDER_UP, THIRD_PERSON_DISTANCE, cameraPose, followBodyYaw, wrapAngle } from './selfView';
+import { BEHIND_DISTANCE, HEAD_TURN_LIMIT, SHOULDER_SIDE, SHOULDER_UP, THIRD_PERSON_DISTANCE, cameraPose, followBodyYaw, headYawWant, motionYaw, stepBodyFacing, wrapAngle } from './selfView';
 
 const eye = { x: 10.5, y: 41.62, z: 10.5 };
 const open = (): boolean => false;
@@ -131,6 +131,32 @@ describe('body turning', () => {
     let body = 0;
     for (let i = 0; i < 60; i++) body = followBodyYaw(body, 1.5, true, 1 / 60);
     expect(body).toBeCloseTo(1.5, 1);
+  });
+
+  it('a sidestep turns the body to face the step, and the head looks back at the view', () => {
+    const face = (vx: number) => {
+      let aim = { bodyYaw: 0, turnToAim: false };
+      for (let i = 0; i < 90; i++) {
+        aim = stepBodyFacing(aim, { yaw: 0, vx, vz: 0, speed: 4.3, airborne: false, mounted: false, winged: false, acting: false, dt: 1 / 60 });
+      }
+      return aim.bodyYaw;
+    };
+    const right = face(4.3); // D, while looking along -z
+    const left = face(-4.3); // A
+    expect(right).toBeCloseTo(motionYaw(4.3, 0), 1);
+    expect(left).toBeCloseTo(motionYaw(-4.3, 0), 1);
+    expect(left).toBeCloseTo(-right, 5);
+    // The neck turns back toward the view, and no further than it can.
+    expect(headYawWant(wrapAngle(0 - right), false)).toBeCloseTo(1, 5);
+    expect(headYawWant(wrapAngle(0 - left), false)).toBeCloseTo(-1, 5);
+  });
+
+  it('a swing keeps the body facing the view while they step sideways', () => {
+    let aim = { bodyYaw: 0, turnToAim: false };
+    for (let i = 0; i < 40; i++) {
+      aim = stepBodyFacing(aim, { yaw: 0, vx: 4.3, vz: 0, speed: 4.3, airborne: false, mounted: false, winged: false, acting: true, dt: 1 / 60 });
+    }
+    expect(Math.abs(aim.bodyYaw)).toBeLessThan(0.05);
   });
 
   it('takes the short way round the circle', () => {

@@ -60,7 +60,7 @@ export class TargetPicker {
     const o = this.name ? [...this.remote.others.values()].find((p) => p.name === this.name) : undefined;
     const near = o && Math.hypot(o.x - this.session.body.x, o.z - this.session.body.z) <= TARGET_RANGE * 2;
     if (!o || !near) this.name = null;
-    const next = o && near ? { name: o.name, ...(o.cls ? { cls: o.cls, level: o.clv ?? 0 } : {}), ...(o.gt ? { guild: o.gt } : {}) } : null;
+    const next = o && near ? { name: o.name, look: o.look, hp: o.hp, hm: o.hm, ...(o.cls ? { cls: o.cls, level: o.clv ?? 0 } : {}), ...(o.gt ? { guild: o.gt } : {}), ...(o.se && o.se.length > 0 ? { se: o.se } : {}) } : null;
     const cur = useUi.getState().target;
     if (JSON.stringify(cur) !== JSON.stringify(next)) useUi.setState({ target: next });
   }

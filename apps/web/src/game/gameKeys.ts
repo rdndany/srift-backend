@@ -45,6 +45,8 @@ export interface KeyParts {
 export class KeyActions {
   /** Running: W tapped twice, for as long as it is then held. */
   sprinting = false;
+  /** The talk key was down last frame, so a hold opens the microphone once and a release closes it once. */
+  private voiceHeld = false;
   private lastSpace = -1;
   private lastW = -1;
 
@@ -73,6 +75,17 @@ export class KeyActions {
       }
     }
     if (online && input.wasPressed('KeyT')) chat.show('');
+    if (online) {
+      const hear = getSettings();
+      if (hear.pushToTalk) {
+        input.wasPressed(hear.voiceKey);
+        const held = input.isDown(hear.voiceKey);
+        if (held !== this.voiceHeld) {
+          this.voiceHeld = held;
+          useUi.getState().api?.toggleVoice(held, true);
+        }
+      } else if (input.wasPressed(hear.voiceKey)) useUi.getState().api?.toggleVoice();
+    }
     if (input.wasPressed('Slash')) chat.show('/');
     if (input.wasPressed('F5') || input.wasPressed('KeyV')) {
       selfView.cycle();
@@ -120,6 +133,9 @@ export class KeyActions {
     if (online && useUi.getState().tradeAsk && !useUi.getState().partyInvite) {
       if (input.wasPressed('KeyY')) remote?.trade({ a: 'accept' });
       else if (input.wasPressed('KeyN')) remote?.trade({ a: 'decline' });
+    } else if (online && useUi.getState().duelAsk && !useUi.getState().partyInvite) {
+      if (input.wasPressed('KeyY')) remote?.duel({ a: 'accept' });
+      else if (input.wasPressed('KeyN')) remote?.duel({ a: 'decline' });
     }
     if (online && useUi.getState().adventure) {
       if (input.wasPressed('KeyP')) {

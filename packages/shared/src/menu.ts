@@ -26,7 +26,8 @@ import {
 } from './enchant';
 import type { ClassId } from './classes';
 import type { CreativeAmount } from './creative';
-import { canRollGear } from './gear';
+import { equipRefuse } from './equipLevel';
+import { canRollGear, gearUsable, type Wearer } from './gear';
 import { ACCESSORY_SLOT_COUNT, NECKLACE_SLOT, accessorySlotsOf } from './accessories';
 import { I, accessoryOfItem, allItems, bagSlotsOf, companionOfItem, getItem, holdsInOffhand, mountOfItem, outfitSetFits, outfitSetOfItem, prefersOffhand, wingOfItem } from './items';
 import { FORGE_CHANCE, FORGE_TIME, canForge, forgeCost, forgeLayout, forgeOutcome, forgePiece, forgeTarget, jewelKind, useJewel, type ForgeOutcome } from './jewels';
@@ -354,6 +355,10 @@ export class CraftingMenu extends Menu {
     readonly wings: Container | null = null,
     /** The rings and the necklace (slots 0, 1 and 2), shown beside the wings on the inventory screen. */
     readonly accessories: Container | null = null,
+    /** Who is wearing, so a piece that needs a higher level or another class is refused. Absent: no such check (a plain menu). */
+    readonly wearer: (() => Wearer | null) | null = null,
+    /** The level a companion, wings, jewelry or a horn is checked against. Absent: the wearer's level, or no check. */
+    readonly heroLevel: (() => number) | null = null,
   ) {
     super(player);
     this.kind = size === 2 ? 'inventory' : 'crafting';
@@ -365,25 +370,25 @@ export class CraftingMenu extends Menu {
     if (this.armorStart >= 0) {
       ARMOR_SLOTS.forEach((_, slotIndex) => {
         // Each armor slot takes only its own kind of piece.
-        this.slots.push({ container: armor!, index: slotIndex, kind: 'normal', accepts: (s) => getItem(s.id).armor?.slotIndex === slotIndex });
+        this.slots.push({ container: armor!, index: slotIndex, kind: 'normal', accepts: (s) => getItem(s.id).armor?.slotIndex === slotIndex && this.mayWear(s) });
       });
     }
     this.offhandSlot = this.armorStart >= 0 && offhand ? this.slots.length : -1;
-    if (this.offhandSlot >= 0) this.slots.push({ container: offhand!, index: 0, kind: 'normal', accepts: (s) => holdsInOffhand(s.id) });
+    if (this.offhandSlot >= 0) this.slots.push({ container: offhand!, index: 0, kind: 'normal', accepts: (s) => holdsInOffhand(s.id) && this.mayWear(s) });
     this.mountSlot = this.offhandSlot >= 0 && mount ? this.slots.length : -1;
-    if (this.mountSlot >= 0) this.slots.push({ container: mount!, index: 0, kind: 'normal', accepts: (s) => mountOfItem(s.id) !== null });
+    if (this.mountSlot >= 0) this.slots.push({ container: mount!, index: 0, kind: 'normal', accepts: (s) => mountOfItem(s.id) !== null && this.meetsEquip(s) });
     this.outfitSlot = this.mountSlot >= 0 && outfit ? this.slots.length : -1;
     if (this.outfitSlot >= 0) this.slots.push({ container: outfit!, index: 0, kind: 'normal', accepts: (s) => outfitSetFits(s.id, this.outfitClass()) });
     this.companionSlot = this.outfitSlot >= 0 && companion ? this.slots.length : -1;
-    if (this.companionSlot >= 0) this.slots.push({ container: companion!, index: 0, kind: 'normal', accepts: (s) => companionOfItem(s.id) !== null });
+    if (this.companionSlot >= 0) this.slots.push({ container: companion!, index: 0, kind: 'normal', accepts: (s) => companionOfItem(s.id) !== null && this.meetsEquip(s) });
     this.wingSlot = this.companionSlot >= 0 && wings ? this.slots.length : -1;
-    if (this.wingSlot >= 0) this.slots.push({ container: wings!, index: 0, kind: 'normal', accepts: (s) => wingOfItem(s.id) !== null });
+    if (this.wingSlot >= 0) this.slots.push({ container: wings!, index: 0, kind: 'normal', accepts: (s) => wingOfItem(s.id) !== null && this.meetsEquip(s) });
     this.accessoryStart = this.wingSlot >= 0 && accessories ? this.slots.length : -1;
     if (this.accessoryStart >= 0) {
       // Two ring slots and a necklace slot: each takes only its own kind.
       for (let i = 0; i < ACCESSORY_SLOT_COUNT; i++) {
         const kind = i === NECKLACE_SLOT ? 'necklace' : 'ring';
-        this.slots.push({ container: accessories!, index: i, kind: 'normal', accepts: (s) => accessoryOfItem(s.id)?.kind === kind });
+        this.slots.push({ container: accessories!, index: i, kind: 'normal', accepts: (s) => accessoryOfItem(s.id)?.kind === kind && this.meetsEquip(s) });
       }
     }
   }
@@ -392,17 +397,29 @@ export class CraftingMenu extends Menu {
     return [this.player, ...(this.armor ? [this.armor] : []), ...(this.offhand ? [this.offhand] : []), ...(this.mount ? [this.mount] : []), ...(this.outfit ? [this.outfit] : []), ...(this.companion ? [this.companion] : []), ...(this.wings ? [this.wings] : []), ...(this.accessories ? [this.accessories] : [])];
   }
 
+  /** A rolled piece goes on only when this wearer has its level and its class. A menu with no wearer asks nothing. */
+  private mayWear(stack: ItemStack): boolean {
+    return !this.wearer || gearUsable(stack, this.wearer());
+  }
+
+  /** A companion, wings, jewelry or a horn goes on only when this hero has its level. A menu that was given neither a level nor a wearer asks nothing. */
+  private meetsEquip(stack: ItemStack): boolean {
+    const level = this.heroLevel ? this.heroLevel() : this.wearer ? (this.wearer()?.level ?? 0) : null;
+    if (level === null) return true;
+    return !equipRefuse(stack.id, level);
+  }
+
   /** Shift-click puts armor on (into an empty slot of its kind) instead of moving it around the inventory. */
   protected override quickTargets(from: number, stack: ItemStack): number[] {
     const def = getItem(stack.id).armor;
-    if (def && this.armorStart >= 0 && from < PLAYER_SLOTS && !this.armor!.get(def.slotIndex)) return [this.armorStart + def.slotIndex];
-    if (prefersOffhand(stack.id) && this.offhandSlot >= 0 && from < PLAYER_SLOTS && !this.offhand!.get(0)) return [this.offhandSlot];
-    if (mountOfItem(stack.id) !== null && this.mountSlot >= 0 && from < PLAYER_SLOTS && !this.mount!.get(0)) return [this.mountSlot];
+    if (def && this.armorStart >= 0 && from < PLAYER_SLOTS && !this.armor!.get(def.slotIndex) && this.mayWear(stack)) return [this.armorStart + def.slotIndex];
+    if (prefersOffhand(stack.id) && this.offhandSlot >= 0 && from < PLAYER_SLOTS && !this.offhand!.get(0) && this.mayWear(stack)) return [this.offhandSlot];
+    if (mountOfItem(stack.id) !== null && this.mountSlot >= 0 && from < PLAYER_SLOTS && !this.mount!.get(0) && this.meetsEquip(stack)) return [this.mountSlot];
     if (outfitSetOfItem(stack.id) && this.outfitSlot >= 0 && from < PLAYER_SLOTS && !this.outfit!.get(0) && outfitSetFits(stack.id, this.outfitClass())) return [this.outfitSlot];
-    if (companionOfItem(stack.id) && this.companionSlot >= 0 && from < PLAYER_SLOTS && !this.companion!.get(0)) return [this.companionSlot];
-    if (wingOfItem(stack.id) && this.wingSlot >= 0 && from < PLAYER_SLOTS && !this.wings!.get(0)) return [this.wingSlot];
+    if (companionOfItem(stack.id) && this.companionSlot >= 0 && from < PLAYER_SLOTS && !this.companion!.get(0) && this.meetsEquip(stack)) return [this.companionSlot];
+    if (wingOfItem(stack.id) && this.wingSlot >= 0 && from < PLAYER_SLOTS && !this.wings!.get(0) && this.meetsEquip(stack)) return [this.wingSlot];
     const jewelry = accessoryOfItem(stack.id);
-    if (jewelry && this.accessoryStart >= 0 && from < PLAYER_SLOTS) {
+    if (jewelry && this.accessoryStart >= 0 && from < PLAYER_SLOTS && this.meetsEquip(stack)) {
       const free = accessorySlotsOf(jewelry.kind).find((i) => !this.accessories!.get(i));
       if (free !== undefined) return [this.accessoryStart + free];
     }

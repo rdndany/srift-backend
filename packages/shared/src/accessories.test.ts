@@ -34,6 +34,7 @@ function make(classId: 'warrior' | 'mage' | 'ranger' = 'warrior') {
   const world = new HeadlessWorld(generator);
   const s = new GameSession({ seed: ADVENTURE_SEED, world, generator, naturalSpawning: false, rand: mulberry32(5), classId, mode: 'survival' });
   s.finishLoading();
+  s.cls!.raiseLevel(10);
   s.clearInventory();
   s.drainEvents();
   return s;
@@ -239,5 +240,21 @@ describe('keeping them', () => {
     expect(s.accessories.isEmpty()).toBe(true);
     expect(s.inventory.countOf(ringId('iron'))).toBe(1);
     expect(s.inventory.countOf(necklaceId('gold'))).toBe(1);
+  });
+
+  it('stays in the bag below level 10, and one already worn comes off and adds nothing', () => {
+    const s = make();
+    s.cls!.level = 1;
+    s.inventory.set(5, makeStack(ringId('iron'), 1));
+    s.inventory.set(6, makeStack(necklaceId('gold'), 1));
+    expect(s.deskEquip(5)).toBe('Requires level 10.');
+    expect(s.deskEquip(6)).toBe('Requires level 10.');
+    expect(s.accessories.isEmpty()).toBe(true);
+    s.tick(idle());
+    const plain = s.cls!.stats.maxHealth;
+    s.accessories.set(0, makeStack(ringId('diamond'), 1));
+    s.tick(idle());
+    expect(s.accessories.get(0)).toBeNull();
+    expect(s.cls!.stats.maxHealth).toBe(plain);
   });
 });

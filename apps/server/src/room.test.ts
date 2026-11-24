@@ -8,6 +8,7 @@ import {
   LAPIS,
   lookCode,
   lookFromName,
+  PARTY_XP,
   makeStack,
   mulberry32,
   parseNetClientMessage,
@@ -291,6 +292,28 @@ describe('a shared world', () => {
     expect(b.snap.players[0].x).toBeCloseTo(CX + 0.5, 1);
   });
 
+  it('the other player is sent with their health and their status effects', () => {
+    const room = makeRoom();
+    const a = joinAt(room, 'alex', CX + 0.5, CZ + 0.5);
+    const b = joinAt(room, 'bob', CX + 5.5, CZ + 0.5);
+    const alex = room.player(a.id!)!;
+    alex.vitals.health = 11;
+    alex.afflict('poison', 5);
+    alex.afflict('burn', 3);
+    alex.afflict('slow', 4, 0.4);
+    room.tick();
+    const seen = b.snap.players.find((p) => p.name === 'alex')!;
+    expect(seen.hp).toBeCloseTo(11, 0);
+    expect(seen.hm).toBe(alex.vitals.maxHealth);
+    expect(seen.se).toEqual([
+      { k: 'poison', n: 5 },
+      { k: 'burn', n: 3 },
+      { k: 'slow', n: 4 },
+    ]);
+    expect(a.snap.players.find((p) => p.name === 'bob')!.se).toBeUndefined();
+    expect(a.snap.players.find((p) => p.name === 'bob')!.hp).toBeGreaterThan(0);
+  });
+
   it('block edits reach everyone, and late joiners get them as edits', () => {
     const room = makeRoom();
     const a = joinAt(room, 'alex');
@@ -354,6 +377,68 @@ describe('a shared world', () => {
     ticks(room, 10);
     expect(room.player(b.id!)!.inventory.countOf(B.DIRT)).toBe(3);
     expect(room.player(a.id!)!.inventory.countOf(B.DIRT)).toBe(0);
+  });
+
+  it('a mob a player kills leaves its meat and experience for that player alone', () => {
+    const room = makeRoom();
+    const killer = joinAt(room, 'alex', CX + 0.5, CZ + 0.5);
+    const other = joinAt(room, 'bob', CX + 2.5, CZ + 0.5);
+    const pig = room.realm.mobs.spawn('pig', CX + 2.5, FLOOR + 1, CZ + 0.5);
+    const who = room.player(killer.id!)!;
+    room.realm.mobs.damage(pig, 100, 0, 0, room.realm.mobEvents, true, false, true, { by: who });
+    ticks(room, 40);
+    const bob = room.player(other.id!)!;
+    expect(bob.inventory.countOf(I.RAW_MEAT)).toBe(0);
+    expect(bob.xp.total).toBe(0);
+    expect(other.snap.drops.some((d) => d.item === I.RAW_MEAT)).toBe(false);
+    expect(other.snap.orbs ?? []).toHaveLength(0);
+    expect(who.xp.total).toBeGreaterThan(0);
+    expect(killer.snap.drops.some((d) => d.item === I.RAW_MEAT)).toBe(true);
+    who.teleport(CX + 2.5, FLOOR + 1, CZ + 0.5, 0, 0);
+    ticks(room, 20);
+    expect(who.inventory.countOf(I.RAW_MEAT)).toBeGreaterThan(0);
+    expect(bob.inventory.countOf(I.RAW_MEAT)).toBe(0);
+  });
+
+  it('a party near a kill each gains the experience with a fifth more, and any of them can take the meat', () => {
+    const room = makeRoom();
+    const killer = joinAt(room, 'alex', CX + 0.5, CZ + 0.5);
+    const mate = joinAt(room, 'bob', CX + 2.5, CZ + 0.5);
+    const stranger = joinAt(room, 'cara', CX + 4.5, CZ + 0.5);
+    const far = joinAt(room, 'dee', CX + 0.5, CZ + 80);
+    const alex = room.player(killer.id!)!;
+    const bob = room.player(mate.id!)!;
+    const cara = room.player(stranger.id!)!;
+    const dee = room.player(far.id!)!;
+    room.realm.parties.invite(alex, 'bob');
+    room.realm.parties.accept(bob);
+    room.realm.parties.invite(alex, 'dee');
+    room.realm.parties.accept(dee);
+    const worth = (who: typeof alex) => room.realm.xpOrbs.orbs.filter((o) => o.owner === who).reduce((s, o) => s + o.value, 0);
+    room.realm.awardXp(10, CX + 2.5, FLOOR + 1, CZ + 0.5, alex);
+    expect(worth(alex)).toBe(Math.ceil(10 * PARTY_XP));
+    expect(worth(bob)).toBe(Math.ceil(10 * PARTY_XP));
+    expect(worth(cara)).toBe(0);
+    expect(worth(dee)).toBe(0);
+    const pig = room.realm.mobs.spawn('pig', CX + 2.5, FLOOR + 1, CZ + 0.5);
+    room.realm.mobs.damage(pig, 100, 0, 0, room.realm.mobEvents, true, false, true, { by: alex });
+    ticks(room, 2);
+    expect(stranger.snap.drops.some((d) => d.item === I.RAW_MEAT)).toBe(false);
+    expect(mate.snap.drops.some((d) => d.item === I.RAW_MEAT)).toBe(true);
+    expect(killer.snap.drops.some((d) => d.item === I.RAW_MEAT)).toBe(true);
+    const killXp = worth(alex);
+    expect(killXp).toBeGreaterThan(Math.ceil(10 * PARTY_XP));
+    expect(worth(bob)).toBe(killXp);
+    expect(worth(cara)).toBe(0);
+    expect(worth(dee)).toBe(0);
+    ticks(room, 40);
+    expect(bob.inventory.countOf(I.RAW_MEAT)).toBeGreaterThan(0);
+    expect(alex.inventory.countOf(I.RAW_MEAT)).toBe(0);
+    expect(cara.inventory.countOf(I.RAW_MEAT)).toBe(0);
+    expect(bob.xp.total).toBeGreaterThan(0);
+    expect(alex.xp.total).toBe(bob.xp.total);
+    expect(cara.xp.total).toBe(0);
+    expect(dee.xp.total).toBe(0);
   });
 
   it('items on the ground are sent with their count, name and enchantments for the label above them', () => {

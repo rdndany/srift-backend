@@ -13,6 +13,8 @@ import {
   Furnace,
   FurnaceMenu,
   PLAYER_EYE,
+  PLAYER_HEIGHT,
+  PLAYER_WIDTH,
   PLAYER_SLOTS,
   SLEEP_EYE,
   STEP,
@@ -66,8 +68,10 @@ import {
   type InspectView,
   type SocialAction,
   type SocialView,
+  type DuelAct,
   type TradeAct,
   type TradeView,
+  type VoiceSig,
   type BobberDraw,
   type BobberMode,
   mountOfItem,
@@ -113,6 +117,20 @@ export interface OtherPlayer {
   slam?: number;
   /** Lying in a bed: 0 = awake, else 1 + the bed's direction. */
   sleeping: number;
+  /** The idle they are drawing (0 standing, 1 sit, 2 stretch, 3 look around) and how far into it. */
+  idle?: number;
+  idleT?: number;
+  /** How far a bow or crossbow is drawn (0 to 1). */
+  bow?: number;
+  /** Seconds since an off-hand dagger stab (it runs on by itself; a new stab restarts it). */
+  stabT?: number;
+  /** Squared up because a monster is close. */
+  engaged?: boolean;
+  /** Health and its maximum, for the target frame. */
+  hp: number;
+  hm: number;
+  /** Status effects and buffs on them. */
+  se?: PlayerView['se'];
   /** Their class and class level (a character without one has none). */
   cls?: ClassId;
   clv?: number;
@@ -146,6 +164,11 @@ export interface RemoteCallbacks {
   /** Your trade: the table opens, changes and closes (null); and somebody asks you to trade (null: the request is over). */
   onTrade?(view: TradeView | null): void;
   onTradeAsk?(from: string | null): void;
+  /** Somebody asks you to duel (null: the request is over), and the count in the middle of the screen. */
+  onDuelAsk?(from: string | null): void;
+  onDuel?(n: 1 | 2 | 3 | 4 | 5 | 'start' | null): void;
+  /** Someone near you is setting up a voice call. */
+  onVoice?(from: number, name: string, sig: VoiceSig): void;
   onClose(reason: string): void;
 }
 
@@ -171,6 +194,22 @@ const angleLerp = (a: number, b: number, t: number): number => {
   if (d < -Math.PI) d += Math.PI * 2;
   return a + d * t;
 };
+
+/** How fast the figure actually moved this frame (blocks per second), from the step it took. */
+export function remoteSpeed(stepX: number, stepZ: number, dt: number): number {
+  return Math.hypot(stepX, stepZ) / Math.max(dt, 1e-3);
+}
+
+/**
+ * A swing already on screen keeps its own clock. A snapshot of that same swing is a little behind
+ * and must not pull the arm back to the start (that leaves the sword still). A new blow is the age
+ * jumping back by more than this.
+ */
+export const SWING_RESTART = 0.12;
+export function takeSwing(local: number, incoming: number | undefined): number {
+  if (incoming === undefined) return local;
+  return incoming + SWING_RESTART < local ? incoming : local;
+}
 
 /**
  * The client's end of an online game. The server owns the world; this keeps a mirror of what the
@@ -440,6 +479,16 @@ export class RemoteSession implements ClientSession {
     this.send({ t: 'trade', act });
   }
 
+  /** Ask somebody to duel, or answer them. */
+  duel(act: DuelAct): void {
+    this.send({ t: 'duel', act });
+  }
+
+  /** One step of a voice call with the player `to` (their id). */
+  voice(to: number, sig: VoiceSig): void {
+    this.send({ t: 'voice', to, sig });
+  }
+
   guild(line: string): void {
     this.send({ t: 'guild', line });
   }
@@ -496,6 +545,7 @@ export class RemoteSession implements ClientSession {
         sneak: f.sneak,
         left: f.left,
         right: f.right,
+        ...(f.il === 1 || f.il === 2 || f.il === 3 ? { il: f.il, ic: f.ic } : {}),
       };
       this.predict(input);
       this.pending.push(input);
@@ -520,6 +570,11 @@ export class RemoteSession implements ClientSession {
       const near = 6 + mobTouch(m.kind, scale, def.width * scale);
       if (Math.abs(m.body.x - b.x) > near || Math.abs(m.body.z - b.z) > near || Math.abs(m.body.y - b.y) > 6 + def.height * scale) continue;
       (out ??= []).push(mobSolid(m.kind, m.body.x, m.body.y, m.body.z, m.yaw, scale, def.width * scale, def.height * scale));
+    }
+    for (const p of this.others.values()) {
+      if (p.dead) continue;
+      if (Math.abs(p.x - b.x) > 4 || Math.abs(p.z - b.z) > 4 || Math.abs(p.y - b.y) > 3) continue;
+      (out ??= []).push({ x: p.x, y: p.y, z: p.z, r: PLAYER_WIDTH / 2, h: PLAYER_HEIGHT });
     }
     return out;
   }
@@ -571,13 +626,17 @@ export class RemoteSession implements ClientSession {
     for (const p of this.others.values()) {
       const dx = p.tx - p.x;
       const dz = p.tz - p.z;
-      p.speed += (Math.hypot(dx, dz) / Math.max(dt, 1e-3) - p.speed) * Math.min(1, dt * 6);
-      p.x += dx * k;
+      // The step this frame, not the distance still left: the legs match how far the body actually moves.
+      const stepX = dx * k;
+      const stepZ = dz * k;
+      p.speed = remoteSpeed(stepX, stepZ, dt);
+      p.x += stepX;
       p.y += (p.ty - p.y) * k;
-      p.z += dz * k;
+      p.z += stepZ;
       p.yaw = angleLerp(p.yaw, p.tyaw, k);
       p.pitch += (p.tpitch - p.pitch) * k;
       p.swingT = Math.min(9, (p.swingT ?? 9) + dt);
+      p.stabT = Math.min(9, (p.stabT ?? 9) + dt);
       p.bashT = Math.min(9, (p.bashT ?? 9) + dt);
     }
     for (const m of this.mobTargets.values()) {
@@ -667,6 +726,15 @@ export class RemoteSession implements ClientSession {
         return;
       case 'tradeAsk':
         this.cb.onTradeAsk?.(msg.from);
+        return;
+      case 'duelAsk':
+        this.cb.onDuelAsk?.(msg.from);
+        return;
+      case 'duel':
+        this.cb.onDuel?.(msg.n);
+        return;
+      case 'voice':
+        this.cb.onVoice?.(msg.from, msg.name, msg.sig);
         return;
       case 'notice':
         this.cb.onNotice(msg.text);
@@ -788,7 +856,7 @@ export class RemoteSession implements ClientSession {
       case 'grindstone':
         return new GrindstoneMenu(this.inventory, { creative: () => false, xp: () => {}, rand: () => 0, done: () => {} });
       default:
-        return new CraftingMenu(this.inventory, 2, this.armor, this.offhand, this.mountSlot, this.outfitSlot, () => this.cls?.id ?? null, this.companionSlot, this.wingSlot, this.accessories);
+        return new CraftingMenu(this.inventory, 2, this.armor, this.offhand, this.mountSlot, this.outfitSlot, () => this.cls?.id ?? null, this.companionSlot, this.wingSlot, this.accessories, () => (this.cls ? { id: this.cls.id, level: this.cls.level } : null), () => this.cls?.level ?? this.xp.level);
     }
   }
 
@@ -818,7 +886,7 @@ export class RemoteSession implements ClientSession {
       seen.add(v.id);
       let p = this.others.get(v.id);
       if (!p) {
-        p = { id: v.id, name: v.name, look: v.look, x: v.x, y: v.y, z: v.z, yaw: v.yaw, pitch: v.pitch, sneaking: v.sneaking, held: v.held, armor: v.armor, offhand: v.offhand, blocking: v.blocking, sleeping: v.sleeping, speed: 0, tx: v.x, ty: v.y, tz: v.z, tyaw: v.yaw, tpitch: v.pitch };
+        p = { id: v.id, name: v.name, look: v.look, x: v.x, y: v.y, z: v.z, yaw: v.yaw, pitch: v.pitch, sneaking: v.sneaking, held: v.held, armor: v.armor, offhand: v.offhand, blocking: v.blocking, sleeping: v.sleeping, hp: v.hp, hm: v.hm, speed: 0, tx: v.x, ty: v.y, tz: v.z, tyaw: v.yaw, tpitch: v.pitch };
         this.others.set(v.id, p);
       }
       p.look = v.look; // (a set put on or taken off shows at once)
@@ -836,13 +904,21 @@ export class RemoteSession implements ClientSession {
       p.blocking = v.blocking;
       p.eating = v.ea === 1;
       p.dead = v.dd === 1;
-      if (v.sw !== undefined && v.sw < (p.swingT ?? 9)) p.swingT = v.sw;
+      p.swingT = takeSwing(p.swingT ?? 9, v.sw);
       if (v.sw !== undefined) p.swingR = v.sr ?? 1;
       if (v.bs !== undefined && v.bs < (p.bashT ?? 9)) p.bashT = v.bs;
       p.slam = v.sl ?? 0;
       p.charging = v.rs === 1;
       p.casting = v.em ?? 0;
       p.sleeping = v.sleeping;
+      p.idle = v.il ?? 0;
+      p.idleT = v.ic ?? 0;
+      p.bow = v.bd ?? 0;
+      p.stabT = takeSwing(p.stabT ?? 9, v.st);
+      p.engaged = v.fg === 1;
+      p.hp = v.hp;
+      p.hm = v.hm;
+      p.se = v.se;
       p.cls = v.cls;
       p.clv = v.clv;
       p.gt = v.gt;
@@ -889,6 +965,7 @@ export class RemoteSession implements ClientSession {
       o.health = v.hp;
       o.maxHealth = v.mx;
       o.elite = v.el === 1;
+      o.aggro = v.ag === 1;
       o.fuse = v.fuse;
       o.fuseFraction = v.fuse < 0 ? 0 : Math.min(1, v.fuse / 1.5);
       list.push(o);

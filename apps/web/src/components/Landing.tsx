@@ -6,7 +6,7 @@ import { ClassSkills } from './ClassSkills';
 import { AccountPanel } from './AccountPanel';
 import { COUNTS } from './beyondGuide';
 import { Blocks } from './BlockCube';
-import { BlurWords, ClickSparks, CountUp, Embers, Marquee, Reveal, Spot, useFrontMotion } from './fx';
+import { ClickSparks, CountUp, Embers, Marquee, Reveal, Spot, useFrontMotion } from './fx';
 import { ItemSprite } from './ItemSprite';
 import { SCROLL_KEY, goBeyond, goMarket, goToken, goFarm, goShop } from './frontNav';
 import { ART, SHOT } from './homeAssets';
@@ -142,17 +142,10 @@ export function Landing({ onEnter }: { onEnter: (way: Way, mode: HomeMode | null
         <div className="fp-shade" aria-hidden="true" />
 
         <div className="fp-center">
-          <div className="fp-chips">
-            <p className="fp-chip">
-              <i aria-hidden="true" />
-              Powered by Solana
-            </p>
-            <p className="fp-chip fp-ver" id="game-version" title="Game version">
-              Version {GAME_VERSION}
-            </p>
-          </div>
           <h1 className="fp-logo hero-logo">
-            <img src="/art/solrift-logo.png" alt="SolRift" draggable={false} />
+            <span className="fp-logo-tilt">
+              <img src="/art/solrift-logo.png" alt="SolRift" draggable={false} />
+            </span>
           </h1>
           {latest && (
             <p className="fp-xp" id="hero-expansion" style={{ ['--xp' as string]: latest.accent }}>
@@ -160,11 +153,8 @@ export function Landing({ onEnter }: { onEnter: (way: Way, mode: HomeMode | null
               <span className="fp-xp-name">{latest.subtitle}</span>
             </p>
           )}
-          <p className="fp-tag">
-            <BlurWords text="Mine. Craft. Seal the Rifts." delay={0.55} />
-          </p>
           <p className="fp-lead">
-            An open-world voxel MMORPG. Build and mine, take quests in the village of Dawnwatch, and battle monsters with your friends. Rifts tear open for everyone nearby to close, and every half hour the Gilded Tide hides golden creatures across the land. Free in your browser, no download.
+            An open-world voxel MMORPG. Quest in Dawnwatch, close the rifts with friends, and face the Gilded Tide. Free in your browser.
           </p>
           <div className="fp-actions">
             <span className="fp-glow">
@@ -197,6 +187,15 @@ export function Landing({ onEnter }: { onEnter: (way: Way, mode: HomeMode | null
         <button className="fp-cue" onClick={() => scrollTo('fp-strip')} aria-label="Scroll down">
           <i />
         </button>
+        <div className="fp-chips">
+          <p className="fp-chip">
+            <i aria-hidden="true" />
+            Powered by Solana
+          </p>
+          <p className="fp-chip fp-ver" id="game-version" title="Game version">
+            Version {GAME_VERSION}
+          </p>
+        </div>
       </section>
 
       <main className="fp-below">
@@ -210,7 +209,7 @@ export function Landing({ onEnter }: { onEnter: (way: Way, mode: HomeMode | null
           <Marquee items={STRIP} />
         </div>
 
-        <ul className="fp-stats">
+        <ul className="fp-stats fp-px">
           {(
             [
               [3, 'Classes to master'],

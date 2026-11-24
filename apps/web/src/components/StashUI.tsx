@@ -100,6 +100,19 @@ export function StashWindow({ npc }: { npc: NpcDef }) {
             <span className="shop-sub" data-testid="stash-count" title="Shared by every character of your wallet. Nobody else can open it.">
               {used} / {slots.length} - shared by your wallet's characters
             </span>
+            <button
+              type="button"
+              className="organize-btn"
+              data-testid="stash-deposit"
+              disabled={!signedIn}
+              title="Move items from your bags and hotbar into the stash when the same thing is already stored there"
+              onClick={() => api.stash({ a: 'deposit' })}
+            >
+              Deposit
+            </button>
+            <button type="button" className="organize-btn" data-testid="stash-organize" disabled={!signedIn} title="Merge stacks and sort the stash" onClick={() => api.stash({ a: 'organize' })}>
+              Organize
+            </button>
           </div>
           <div className="vendor-list">
             <div className="slot-grid shop-bags" style={{ gridTemplateColumns: 'repeat(9, 52px)' }}>

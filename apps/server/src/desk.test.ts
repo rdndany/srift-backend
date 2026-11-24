@@ -279,6 +279,7 @@ describe('expeditions', () => {
     const helped = account('hero-b', 'wallet-two');
     made(room, helped, (p) => {
       p.clearInventory();
+      p.cls!.level = 20;
       p.giveItem(wingItemId(WINGS[0].id), 1);
       p.giveItem(companionItemId(COMPANIONS[0].id), 1);
     });

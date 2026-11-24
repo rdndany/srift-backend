@@ -194,8 +194,8 @@ const setPose = (out: CombatPose, from: Partial<CombatPose>): CombatPose => Obje
 /** Heavy and planted: the feet wide, the weight low, the chest out, the shield up and the blade ready. */
 const WARRIOR: Profile = {
   id: 'warrior',
-  walk: { stride: 0.56, duty: 0.56, lift: 0.07, plant: 0.7, impact: 0.02, armSwing: 0.34, armLag: 0.5, armPump: 0.04, hipYaw: 0.08, shoulderYaw: 0.16, sway: 0.034, roll: 0.04, lean: 0.05, headStab: 0.75, headBob: 0.008, legLag: 0, spread: 0.07, knee: 0.62, kneeLoad: 0.13, elbow: 0.16, elbowSwing: 0.3, spineRoll: 0.05, spineBob: 0.015, shrug: 0.02 },
-  sprint: { stride: 0.86, duty: 0.42, lift: 0.17, plant: 0.42, impact: 0.05, armSwing: 0.85, armLag: 0.35, armPump: 0.34, hipYaw: 0.11, shoulderYaw: 0.3, sway: 0.03, roll: 0.045, lean: 0.24, headStab: 0.9, headBob: 0.014, legLag: 0, spread: 0.08, knee: 1.25, kneeLoad: 0.3, elbow: 1.0, elbowSwing: 0.3, spineRoll: 0.09, spineBob: 0.03, shrug: 0.04 },
+  walk: { stride: 0.82, duty: 0.56, lift: 0.1, plant: 0.58, impact: 0.02, armSwing: 0.56, armLag: 0.5, armPump: 0.04, hipYaw: 0.08, shoulderYaw: 0.16, sway: 0.034, roll: 0.04, lean: 0.05, headStab: 0.75, headBob: 0.008, legLag: 0, spread: 0.07, knee: 0.62, kneeLoad: 0.13, elbow: 0.16, elbowSwing: 0.3, spineRoll: 0.05, spineBob: 0.015, shrug: 0.02 },
+  sprint: { stride: 1.12, duty: 0.42, lift: 0.18, plant: 0.3, impact: 0.05, armSwing: 1.15, armLag: 0.35, armPump: 0.34, hipYaw: 0.11, shoulderYaw: 0.3, sway: 0.03, roll: 0.045, lean: 0.24, headStab: 0.9, headBob: 0.014, legLag: 0, spread: 0.08, knee: 1.25, kneeLoad: 0.3, elbow: 1.0, elbowSwing: 0.3, spineRoll: 0.09, spineBob: 0.03, shrug: 0.04 },
   idle: {
     splay: 0.17, stagger: 0.05, lean: -0.05, armOut: 0.1, armFwd: 0.07, breath: 4.4, chest: 0.014, shoulder: 0.011,
     shift: 0.032, shiftRoll: 0.03, shiftEvery: [5, 9], shiftHz: 0.8, glance: 0.2, glanceEvery: [6, 11], glanceHz: 1.1, tilt: 0.03, nod: 0.03,
@@ -220,8 +220,8 @@ const WARRIOR: Profile = {
 /** Upright and flowing: the feet close, the hands kept in front, the body trailing a little behind its own step, and a hand always ready to channel. */
 const MAGE: Profile = {
   id: 'mage',
-  walk: { stride: 0.5, duty: 0.52, lift: 0.08, plant: 0.5, impact: 0.004, armSwing: 0.26, armLag: 0.75, armPump: 0.02, hipYaw: 0.1, shoulderYaw: 0.1, sway: 0.02, roll: 0.03, lean: 0.025, headStab: 0.92, headBob: 0.004, legLag: 0.55, spread: 0.015, knee: 0.55, kneeLoad: 0.1, elbow: 0.2, elbowSwing: 0.3, spineRoll: 0.04, spineBob: 0.01, shrug: 0.015 },
-  sprint: { stride: 0.78, duty: 0.44, lift: 0.14, plant: 0.45, impact: 0.01, armSwing: 0.5, armLag: 0.6, armPump: 0.22, hipYaw: 0.1, shoulderYaw: 0.2, sway: 0.018, roll: 0.03, lean: 0.15, headStab: 0.92, headBob: 0.008, legLag: 0.7, spread: 0.03, knee: 1.1, kneeLoad: 0.2, elbow: 0.85, elbowSwing: 0.3, spineRoll: 0.07, spineBob: 0.02, shrug: 0.03 },
+  walk: { stride: 0.74, duty: 0.52, lift: 0.1, plant: 0.55, impact: 0.004, armSwing: 0.44, armLag: 0.75, armPump: 0.02, hipYaw: 0.1, shoulderYaw: 0.1, sway: 0.02, roll: 0.03, lean: 0.025, headStab: 0.92, headBob: 0.004, legLag: 0.55, spread: 0.015, knee: 0.55, kneeLoad: 0.1, elbow: 0.2, elbowSwing: 0.3, spineRoll: 0.04, spineBob: 0.01, shrug: 0.015 },
+  sprint: { stride: 1.02, duty: 0.44, lift: 0.16, plant: 0.32, impact: 0.01, armSwing: 0.75, armLag: 0.6, armPump: 0.22, hipYaw: 0.1, shoulderYaw: 0.2, sway: 0.018, roll: 0.03, lean: 0.15, headStab: 0.92, headBob: 0.008, legLag: 0.7, spread: 0.03, knee: 1.1, kneeLoad: 0.2, elbow: 0.85, elbowSwing: 0.3, spineRoll: 0.07, spineBob: 0.02, shrug: 0.03 },
   idle: {
     splay: 0.025, stagger: 0.035, lean: 0.0, armOut: 0.045, armFwd: 0.1, breath: 5.2, chest: 0.007, shoulder: 0.005,
     shift: 0.012, shiftRoll: 0.012, shiftEvery: [6, 11], shiftHz: 0.6, glance: 0.16, glanceEvery: [5, 9], glanceHz: 0.9, tilt: 0.13, nod: 0.05,
@@ -246,8 +246,8 @@ const MAGE: Profile = {
 /** Light and alert: the knees soft, a lean into the toes, quick looks, long quiet strides and a bow ready but not drawn. */
 const RANGER: Profile = {
   id: 'ranger',
-  walk: { stride: 0.62, duty: 0.5, lift: 0.1, plant: 0.48, impact: 0.006, armSwing: 0.5, armLag: 0.35, armPump: 0.05, hipYaw: 0.08, shoulderYaw: 0.15, sway: 0.016, roll: 0.025, lean: 0.08, headStab: 0.95, headBob: 0.003, legLag: 0, spread: 0.04, knee: 0.68, kneeLoad: 0.14, elbow: 0.18, elbowSwing: 0.3, spineRoll: 0.05, spineBob: 0.015, shrug: 0.02 },
-  sprint: { stride: 0.98, duty: 0.38, lift: 0.21, plant: 0.32, impact: 0.012, armSwing: 1.02, armLag: 0.3, armPump: 0.3, hipYaw: 0.11, shoulderYaw: 0.32, sway: 0.02, roll: 0.03, lean: 0.28, headStab: 0.96, headBob: 0.008, legLag: 0, spread: 0.06, knee: 1.5, kneeLoad: 0.26, elbow: 1.15, elbowSwing: 0.3, spineRoll: 0.1, spineBob: 0.035, shrug: 0.045 },
+  walk: { stride: 0.86, duty: 0.5, lift: 0.12, plant: 0.55, impact: 0.006, armSwing: 0.72, armLag: 0.35, armPump: 0.05, hipYaw: 0.08, shoulderYaw: 0.15, sway: 0.016, roll: 0.025, lean: 0.08, headStab: 0.95, headBob: 0.003, legLag: 0, spread: 0.04, knee: 0.68, kneeLoad: 0.14, elbow: 0.18, elbowSwing: 0.3, spineRoll: 0.05, spineBob: 0.015, shrug: 0.02 },
+  sprint: { stride: 1.18, duty: 0.38, lift: 0.22, plant: 0.3, impact: 0.012, armSwing: 1.22, armLag: 0.3, armPump: 0.3, hipYaw: 0.11, shoulderYaw: 0.32, sway: 0.02, roll: 0.03, lean: 0.28, headStab: 0.96, headBob: 0.008, legLag: 0, spread: 0.06, knee: 1.5, kneeLoad: 0.26, elbow: 1.15, elbowSwing: 0.3, spineRoll: 0.1, spineBob: 0.035, shrug: 0.045 },
   idle: {
     splay: 0.075, stagger: 0.09, lean: 0.07, armOut: 0.06, armFwd: 0.14, breath: 3.4, chest: 0.01, shoulder: 0.007,
     shift: 0.022, shiftRoll: 0.025, shiftEvery: [2.2, 4.5], shiftHz: 1.6, glance: 0.55, glanceEvery: [1.4, 3.2], glanceHz: 2.2, tilt: 0.06, nod: 0.07,
@@ -272,8 +272,8 @@ const RANGER: Profile = {
 /** A figure with no class: an even, ordinary walk (what every figure had before the classes had their own). */
 const PLAIN: Profile = {
   id: 'plain',
-  walk: { stride: 0.8, duty: 0.5, lift: 0.06, plant: 0.35, impact: 0, armSwing: 0.65, armLag: 0.35, armPump: 0, hipYaw: 0.05, shoulderYaw: 0.15, sway: 0.022, roll: 0.025, lean: 0.04, headStab: 0.5, headBob: 0.014, legLag: 0, spread: 0.03, knee: 0.55, kneeLoad: 0.1, elbow: 0.18, elbowSwing: 0.3, spineRoll: 0.045, spineBob: 0.012, shrug: 0.02 },
-  sprint: { stride: 1.0, duty: 0.42, lift: 0.12, plant: 0.35, impact: 0, armSwing: 0.85, armLag: 0.35, armPump: 0.2, hipYaw: 0.06, shoulderYaw: 0.24, sway: 0.022, roll: 0.025, lean: 0.14, headStab: 0.5, headBob: 0.014, legLag: 0, spread: 0.06, knee: 1.1, kneeLoad: 0.2, elbow: 0.9, elbowSwing: 0.3, spineRoll: 0.08, spineBob: 0.025, shrug: 0.035 },
+  walk: { stride: 1.05, duty: 0.5, lift: 0.1, plant: 0.38, impact: 0, armSwing: 0.9, armLag: 0.35, armPump: 0, hipYaw: 0.05, shoulderYaw: 0.15, sway: 0.022, roll: 0.025, lean: 0.04, headStab: 0.5, headBob: 0.014, legLag: 0, spread: 0.03, knee: 0.55, kneeLoad: 0.1, elbow: 0.18, elbowSwing: 0.3, spineRoll: 0.045, spineBob: 0.012, shrug: 0.02 },
+  sprint: { stride: 1.28, duty: 0.42, lift: 0.15, plant: 0.3, impact: 0, armSwing: 1.1, armLag: 0.35, armPump: 0.2, hipYaw: 0.06, shoulderYaw: 0.24, sway: 0.022, roll: 0.025, lean: 0.14, headStab: 0.5, headBob: 0.014, legLag: 0, spread: 0.06, knee: 1.1, kneeLoad: 0.2, elbow: 0.9, elbowSwing: 0.3, spineRoll: 0.08, spineBob: 0.025, shrug: 0.035 },
   idle: {
     splay: 0.03, stagger: 0, lean: 0, armOut: 0.03, armFwd: 0, breath: 3.3, chest: 0.007, shoulder: 0.004,
     shift: 0.012, shiftRoll: 0.014, shiftEvery: [8, 14], shiftHz: 0.5, glance: 0.1, glanceEvery: [6, 12], glanceHz: 0.8, tilt: 0.03, nod: 0.03,

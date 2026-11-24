@@ -53,7 +53,9 @@ import {
   type NetClientMessage,
   type NetInput,
   type NetServerMessage,
+  type VoiceSig,
   type PlayerView,
+  type StatusView,
   type SaveMode,
   type SelfView,
   type SessionEvent,
@@ -85,6 +87,7 @@ import {
   Trade,
   TRADE_ASK_SECONDS,
   tradeBlocker,
+  type DuelAct,
   type TradeAct,
   type TradeSide,
   type TradeSideView,
@@ -119,6 +122,23 @@ export interface RoomConnection {
    */
   sendSnapshot?(snap: Snapshot, playersJson: string): unknown;
   close(reason: string): void;
+}
+
+/** Statuses and buffs the target frame draws for this player. Seconds are rounded up; a shield is the points it still holds. */
+function statusOf(p: Player): StatusView[] {
+  const out: StatusView[] = [];
+  const sec = (n: number) => Math.ceil(n);
+  if (p.poison > 0.05) out.push({ k: 'poison', n: sec(p.poison) });
+  if (p.onFire > 0.05) out.push({ k: 'burn', n: sec(p.onFire) });
+  if (p.rootTime > 0.05) out.push({ k: 'root', n: sec(p.rootTime) });
+  if (p.slowTime > 0.05) out.push({ k: 'slow', n: sec(p.slowTime) });
+  if (p.weakTime > 0.05) out.push({ k: 'weak', n: sec(p.weakTime) });
+  if (p.foodSick > 0.05) out.push({ k: 'hunger', n: sec(p.foodSick) });
+  const cls = p.cls;
+  if (cls && cls.reductionLeft > 0.05) out.push({ k: 'guard', n: sec(cls.reductionLeft) });
+  if (cls && cls.absorbAmount > 0.5) out.push({ k: 'shield', n: Math.ceil(cls.absorbAmount) });
+  if (cls && cls.immuneLeft > 0.05) out.push({ k: 'evade', n: sec(cls.immuneLeft) });
+  return out;
 }
 
 /** One player as the others see them this tick, written to JSON at most once. */
@@ -231,6 +251,18 @@ function lookOf(m: { look: number; player: Player }): number {
 
 type QueueItem = { k: 'input'; f: NetInput } | { k: 'cmd'; c: Command };
 
+/** How far (blocks) two fighters may drift before the duel ends. */
+const DUEL_BREAK = 40;
+
+/** One duel, shared by the two fighters. `left` is the ticks until the fight begins; `live` is when blows land. */
+interface Duel {
+  a: Member;
+  b: Member;
+  left: number;
+  live: boolean;
+  sent: number | 'start';
+}
+
 interface Member {
   id: number;
   name: string;
@@ -259,6 +291,8 @@ interface Member {
   lastSeq: number;
   invDirty: boolean;
   chatTokens: number;
+  /** Voice setup messages still allowed (a token bucket). */
+  voiceTokens: number;
   /** Looks at the social window and at other players that may still be made (token bucket). */
   socialTokens: number;
   /** Friends and the people they ignore (kept with the account). */
@@ -271,6 +305,10 @@ interface Member {
   trade: { trade: Trade; peer: Member } | null;
   /** Somebody who asked to trade with them, and the tick the request lapses. */
   tradeAsk: { from: number; until: number } | null;
+  /** The duel they are in (the same object for both fighters). */
+  duel: Duel | null;
+  /** Somebody who asked to duel them, and the tick the request lapses. */
+  duelAsk: { from: number; until: number } | null;
   /** Clicks at the trade table they may still make (token bucket). */
   tradeTokens: number;
   /** Commands the player may still send (token bucket), so inventory clicks cannot be flooded. */
@@ -306,6 +344,11 @@ const SOCIAL_BURST = 8;
 /** Clicks at a trade table: filling it takes a few quick ones. */
 const TRADE_RATE = 6;
 const TRADE_BURST = 20;
+/** Voice setup messages (offers and network candidates). A call starts with a short burst. */
+const VOICE_RATE = 12;
+const VOICE_BURST = 24;
+/** How far apart two players may be for the server to pass their voice setup along. The sound itself never comes here. */
+const VOICE_REACH = 48;
 const MAX_STEPS_PER_TICK = 15;
 const EDITS_PER_MESSAGE = 6000;
 
@@ -865,7 +908,7 @@ export class GameRoom {
     // A look nobody chose (an old client, a bot) is made from the name, so players still tell apart.
     // (The server alone passes an outfit: a guest's look came through `parseNetClientMessage`, which takes a plain look only.)
     const look = parseWornCode(wantedLook) !== null ? (wantedLook as number) : lookCode(lookFromName(name));
-    const m: Member = { id, name, look, key, admin, wallet, fightTick: -Infinity, adminOn: false, mutedUntil: 0, player, conn, queue: [], budget: 0, ack: 0, lastSeq: 0, invDirty: true, chatTokens: 5, socialTokens: SOCIAL_BURST, book: key && this.opts.store ? parseSocialBook(this.opts.store.getJson(`social:${key}`)) : new SocialBook(), replyTo: null, guildInvite: null, trade: null, tradeAsk: null, tradeTokens: TRADE_BURST, cmdTokens: CMD_BURST, score: 0, warned: false, messages: 0, fxSent: new Map(), signRev: -1, signCell: '', signCount: 0 };
+    const m: Member = { id, name, look, key, admin, wallet, fightTick: -Infinity, adminOn: false, mutedUntil: 0, player, conn, queue: [], budget: 0, ack: 0, lastSeq: 0, invDirty: true, chatTokens: 5, voiceTokens: VOICE_BURST, socialTokens: SOCIAL_BURST, book: key && this.opts.store ? parseSocialBook(this.opts.store.getJson(`social:${key}`)) : new SocialBook(), replyTo: null, guildInvite: null, trade: null, tradeAsk: null, duel: null, duelAsk: null, tradeTokens: TRADE_BURST, cmdTokens: CMD_BURST, score: 0, warned: false, messages: 0, fxSent: new Map(), signRev: -1, signCell: '', signCount: 0 };
     this.members.set(id, m);
 
     conn.send({ t: 'joined', id, name, look: lookOf(m), seed: this.seed, kind: this.kind, tickHz: this.tickHz, time: this.realm.time });
@@ -896,6 +939,7 @@ export class GameRoom {
     }
     this.members.delete(id);
     if (m.trade) this.endTrade(m, `${m.name} left: the trade was called off.`);
+    if (m.duel) this.endDuel(m.duel, `${m.name} left. The duel is over.`);
     this.broadcast({ t: 'notice', text: `${m.name} left` });
     this.logChat('', `${m.name} left`);
     this.presence(m, false);
@@ -983,6 +1027,12 @@ export class GameRoom {
       case 'trade':
         this.tradeAct(m, msg.act);
         return;
+      case 'duel':
+        this.duelAct(m, msg.act);
+        return;
+      case 'voice':
+        this.relayVoice(m, msg.to, msg.sig);
+        return;
       case 'inspect':
         if (this.socialLimit(m)) {
           const target = findMember(this.members.values(), msg.name);
@@ -994,6 +1044,19 @@ export class GameRoom {
         return;
       default:
     }
+  }
+
+  /** Pass a voice-setup message to one other player, and only when the two are near each other. */
+  private relayVoice(m: Member, to: number, sig: VoiceSig): void {
+    if (m.voiceTokens < 1) return;
+    m.voiceTokens -= 1;
+    const other = this.members.get(to);
+    if (!other || other.id === m.id) return;
+    const dx = m.player.body.x - other.player.body.x;
+    const dy = m.player.body.y - other.player.body.y;
+    const dz = m.player.body.z - other.player.body.z;
+    if (dx * dx + dy * dy + dz * dz > VOICE_REACH * VOICE_REACH) return;
+    other.conn.send({ t: 'voice', from: m.id, name: m.name, sig });
   }
 
   private chat(m: Member, text: string): void {
@@ -1262,6 +1325,122 @@ export class GameRoom {
     }
   }
 
+  /** How near the two are, and whether either is in no state to fight. */
+  private duelBlocker(a: Player, b: Player): string | null {
+    if (a.vitals.dead || b.vitals.dead) return 'A dead player cannot duel.';
+    if (a.mode === 'creative' || b.mode === 'creative') return 'Nobody duels in creative mode.';
+    if (a.spectating || b.spectating) return 'A spectator cannot duel.';
+    const dx = a.body.x - b.body.x;
+    const dy = a.body.y - b.body.y;
+    const dz = a.body.z - b.body.z;
+    if (Math.hypot(dx, dy, dz) > 10) return 'You are too far apart to duel.';
+    return null;
+  }
+
+  private startDuel(a: Member, b: Member): void {
+    for (const o of [a, b]) {
+      o.duelAsk = null;
+      if (this.members.has(o.id)) o.conn.send({ t: 'duelAsk', from: null });
+    }
+    const duel: Duel = { a, b, left: 5 * this.tickHz, live: false, sent: 5 };
+    a.duel = duel;
+    b.duel = duel;
+    this.tell(a, `Duel with ${b.name}. Get ready.`);
+    this.tell(b, `Duel with ${a.name}. Get ready.`);
+    for (const o of [a, b]) o.conn.send({ t: 'duel', n: 5 });
+  }
+
+  private endDuel(d: Duel, text: string | null): void {
+    if (d.a.duel !== d && d.b.duel !== d) return;
+    for (const o of [d.a, d.b]) {
+      if (o.duel === d) o.duel = null;
+      o.player.duelTarget = null;
+      if (!this.members.has(o.id)) continue;
+      if (text) this.tell(o, text);
+      o.conn.send({ t: 'duel', n: null });
+    }
+  }
+
+  private showCount(d: Duel, n: 1 | 2 | 3 | 4 | 5 | 'start'): void {
+    d.sent = n;
+    for (const o of [d.a, d.b]) if (this.members.has(o.id)) o.conn.send({ t: 'duel', n });
+  }
+
+  /** Every tick: the count, then the fight, and a request that nobody answered. */
+  private watchDuels(all: Member[]): void {
+    for (const m of all) {
+      if (m.duelAsk && this.tickCount >= m.duelAsk.until) {
+        m.duelAsk = null;
+        m.conn.send({ t: 'duelAsk', from: null });
+      }
+      const d = m.duel;
+      if (!d || d.a !== m) continue;
+      if (!d.live) {
+        d.left -= 1;
+        if (d.left <= 0) {
+          d.live = true;
+          d.a.player.duelTarget = d.b.player;
+          d.b.player.duelTarget = d.a.player;
+          this.showCount(d, 'start');
+        } else {
+          const n = Math.ceil(d.left / this.tickHz);
+          if (n >= 1 && n <= 5 && n !== d.sent) this.showCount(d, n as 1 | 2 | 3 | 4 | 5);
+        }
+        continue;
+      }
+      const dx = d.a.player.body.x - d.b.player.body.x;
+      const dy = d.a.player.body.y - d.b.player.body.y;
+      const dz = d.a.player.body.z - d.b.player.body.z;
+      const dead = d.a.player.vitals.dead || d.b.player.vitals.dead || d.a.player.screen === 'dead' || d.b.player.screen === 'dead';
+      if (dead || d.a.player.spectating || d.b.player.spectating) this.endDuel(d, 'The duel is over.');
+      else if (Math.hypot(dx, dy, dz) > DUEL_BREAK) this.endDuel(d, 'The duel is over. You are too far apart.');
+    }
+  }
+
+  /** Asking and answering: what the player menu and /duel do. */
+  private duelAct(m: Member, act: DuelAct): void {
+    if (m.tradeTokens < 1) {
+      this.strike(m, STRIKES.socialSpam, 'duel spam');
+      return;
+    }
+    m.tradeTokens -= 1;
+    const p = m.player;
+    switch (act.a) {
+      case 'ask': {
+        if (m.duel) return this.tell(m, 'You are already in a duel.');
+        if (m.trade) return this.tell(m, 'You are trading. Finish or cancel that trade first.');
+        const target = findMember(this.members.values(), act.name);
+        if (!target) return this.tell(m, `${act.name} is not online.`);
+        if (target === m) return this.tell(m, 'You cannot duel yourself.');
+        if (target.duel) return this.tell(m, `${target.name} is in a duel.`);
+        if (target.trade) return this.tell(m, `${target.name} is busy trading.`);
+        const blocked = this.duelBlocker(p, target.player);
+        if (blocked) return this.tell(m, blocked);
+        if (target.book.isIgnored(entryOf(m))) return this.tell(m, `Asked ${target.name} to duel.`);
+        if (m.duelAsk && m.duelAsk.from === target.id && this.tickCount < m.duelAsk.until) return this.startDuel(target, m);
+        target.duelAsk = { from: m.id, until: this.tickCount + TRADE_ASK_SECONDS * this.tickHz };
+        target.conn.send({ t: 'duelAsk', from: m.name });
+        this.tell(target, `${m.name} wants to duel you. /duel accept or /duel decline.`);
+        return this.tell(m, `Asked ${target.name} to duel.`);
+      }
+      case 'accept':
+      case 'decline': {
+        const ask = m.duelAsk;
+        m.duelAsk = null;
+        m.conn.send({ t: 'duelAsk', from: null });
+        const from = ask && this.tickCount < ask.until ? this.members.get(ask.from) : undefined;
+        if (!from) return this.tell(m, 'Nobody is asking you to duel.');
+        if (act.a === 'decline') return this.tell(from, `${m.name} turned down the duel.`);
+        if (m.duel || from.duel) return this.tell(m, 'A duel is already underway.');
+        if (m.trade || from.trade) return this.tell(m, 'Finish the trade first.');
+        const blocked = this.duelBlocker(p, from.player);
+        if (blocked) return this.tell(m, blocked);
+        return this.startDuel(from, m);
+      }
+      default:
+    }
+  }
+
   /** Asking, answering, filling the table, accepting and calling off: what the trade window and /trade do. */
   private tradeAct(m: Member, act: TradeAct): void {
     if (m.tradeTokens < 1) {
@@ -1273,10 +1452,12 @@ export class GameRoom {
     switch (act.a) {
       case 'ask': {
         if (m.trade) return this.tell(m, 'You are already trading. Finish or cancel that trade first.');
+        if (m.duel) return this.tell(m, 'You are in a duel.');
         const target = findMember(this.members.values(), act.name);
         if (!target) return this.tell(m, `${act.name} is not online.`);
         if (target === m) return this.tell(m, 'You cannot trade with yourself.');
         if (target.trade) return this.tell(m, `${target.name} is busy trading.`);
+        if (target.duel) return this.tell(m, `${target.name} is in a duel.`);
         const blocked = tradeBlocker(p, target.player);
         if (blocked) return this.tell(m, blocked);
         if (target.book.isIgnored(entryOf(m))) return this.tell(m, `Asked ${target.name} to trade.`); // they are not told
@@ -1296,6 +1477,7 @@ export class GameRoom {
         if (!from) return this.tell(m, 'Nobody is asking you to trade.');
         if (act.a === 'decline') return this.tell(from, `${m.name} turned down the trade.`);
         if (m.trade || from.trade) return this.tell(m, from.trade ? `${from.name} is busy trading.` : 'You are already trading.');
+        if (m.duel || from.duel) return this.tell(m, 'A duel is underway.');
         const blocked = tradeBlocker(p, from.player);
         if (blocked) return this.tell(m, blocked);
         return this.startTrade(from, m);
@@ -1377,7 +1559,7 @@ export class GameRoom {
     if (CHAT_COMMANDS.has(cmd) && this.muted(m)) return this.tell(m, 'You are muted.');
     switch (cmd) {
       case 'help':
-        this.tell(m, `Commands: /help /who /home /w /r /me /friend /ignore /inspect /trade /guild /g /party /p${this.cheatsFor(m) ? ' /time /weather /gamemode /tp /xp /coins /rift /invasion' : ''}${m.adminOn ? ' (admin: /admin help)' : m.admin ? ' /admin' : ''}`);
+        this.tell(m, `Commands: /help /who /home /w /r /me /friend /ignore /inspect /trade /duel /guild /g /party /p${this.cheatsFor(m) ? ' /time /weather /gamemode /tp /xp /coins /rift /invasion' : ''}${m.adminOn ? ' (admin: /admin help)' : m.admin ? ' /admin' : ''}`);
         return;
       case 'who':
         this.tell(m, `Online (${this.members.size}): ${[...this.members.values()].map((x) => x.name).join(', ')}`);
@@ -1447,6 +1629,12 @@ export class GameRoom {
         if (sub === 'accept' || sub === 'decline' || sub === 'cancel') return this.tradeAct(m, { a: sub });
         const who = args.join(' ');
         return who ? this.tradeAct(m, { a: 'ask', name: who }) : this.tell(m, 'Usage: /trade <player>');
+      }
+      case 'duel': {
+        const sub = (args[0] ?? '').toLowerCase();
+        if (sub === 'accept' || sub === 'decline') return this.duelAct(m, { a: sub });
+        const who = args.join(' ');
+        return who ? this.duelAct(m, { a: 'ask', name: who }) : this.tell(m, 'Usage: /duel <player>');
       }
       case 'inspect': {
         const who = args.join(' ');
@@ -1940,6 +2128,7 @@ export class GameRoom {
     for (const m of all) {
       m.budget = Math.min(MAX_BUDGET, m.budget + dt);
       m.chatTokens = Math.min(5, m.chatTokens + dt / 2);
+      m.voiceTokens = Math.min(VOICE_BURST, m.voiceTokens + dt * VOICE_RATE);
       m.socialTokens = Math.min(SOCIAL_BURST, m.socialTokens + dt * SOCIAL_RATE);
       m.tradeTokens = Math.min(TRADE_BURST, m.tradeTokens + dt * TRADE_RATE);
       m.cmdTokens = Math.min(CMD_BURST, m.cmdTokens + dt * CMD_RATE);
@@ -1957,6 +2146,7 @@ export class GameRoom {
     this.keepAuctions(all);
     this.keepStashes(all);
     this.watchTrades(all);
+    this.watchDuels(all);
     this.flush(all);
   }
 
@@ -2058,6 +2248,7 @@ export class GameRoom {
 
   private playerFrame(o: Member): PlayerFrame {
     const ob = o.player.body;
+    const se = statusOf(o.player);
     return {
       x: ob.x,
       z: ob.z,
@@ -2088,6 +2279,13 @@ export class GameRoom {
         ...(o.player.emberProgress > 0 ? { em: round(o.player.emberProgress) } : {}),
         ...(o.player.bashAge < BASH_ANIM ? { bs: round(o.player.bashAge) } : {}),
         sleeping: o.player.sleeping ? o.player.sleeping.dir + 1 : 0,
+        ...(o.player.poseIdle >= 1 && o.player.poseIdle <= 3 ? { il: o.player.poseIdle as 1 | 2 | 3, ic: round(Math.min(600, o.player.poseIdleT)) } : {}),
+        ...(o.player.bowDraw > 0.02 ? { bd: round(o.player.bowDraw) } : {}),
+        ...(o.player.showStab < 0.35 ? { st: round(o.player.showStab) } : {}),
+        ...(o.player.nearHostile() ? { fg: 1 as const } : {}),
+        hp: round(o.player.vitals.health),
+        hm: round(o.player.vitals.maxHealth),
+        ...(se.length > 0 ? { se } : {}),
         ...(o.player.mountId ? { mt: o.player.mountView().mount } : {}),
         ...(o.player.companionNumber > 0 ? { pt: o.player.companionNumber } : {}),
         ...(o.player.wingNumber > 0 ? { wg: o.player.wingNumber } : {}),
@@ -2279,6 +2477,7 @@ export class GameRoom {
         ...(mob.gear ? { gear: [...mob.gear] } : {}),
         ...(mob.health < mob.maxHealth || mob.elite ? { hp: Math.max(0, Math.ceil(mob.health)), mx: Math.round(mob.maxHealth) } : {}),
         ...(mob.elite ? { el: 1 as const } : {}),
+        ...(mob.aggro && !mob.evade ? { ag: 1 as const } : {}),
       });
     }
 
@@ -2300,12 +2499,14 @@ export class GameRoom {
 
     const drops: DropView[] = [];
     for (const d of this.realm.drops.drops) {
+      if (!this.realm.maySeeDrop(p, d.owner, d.share === true)) continue;
       if (!near(d.x, d.z, VIEW_DROPS)) continue;
       drops.push({ id: d.id, item: d.stack.id, count: d.stack.count, damage: d.stack.damage, ...(d.stack.name ? { name: d.stack.name } : {}), ...(d.stack.ench && d.stack.ench.length > 0 ? { ench: d.stack.ench } : {}), ...(d.stack.gear ? { g: d.stack.gear } : {}), x: round(d.x), y: round(d.y), z: round(d.z), age: round(d.age), phase: round(d.phase) });
     }
 
     const orbs: XpOrbView[] = [];
     for (const o of this.realm.xpOrbs.orbs) {
+      if (!this.realm.maySeeDrop(p, o.owner, false)) continue;
       if (near(o.x, o.z, VIEW_DROPS)) orbs.push({ id: o.id, v: o.value, x: round(o.x), y: round(o.y), z: round(o.z), age: round(o.age), phase: round(o.phase) });
     }
 

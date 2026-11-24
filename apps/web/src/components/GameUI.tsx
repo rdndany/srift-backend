@@ -10,6 +10,7 @@ import { PartyUI } from './PartyUI';
 import { SocialUI } from './SocialUI';
 import { CodexUI } from './CodexUI';
 import { TradeUI } from './TradeUI';
+import { DuelUI } from './DuelUI';
 import { PlayerUI } from './PlayerUI';
 import { PickupFeed } from './PickupFeed';
 import { RecipeToast } from './RecipeToast';
@@ -123,6 +124,7 @@ export function GameUI() {
       <CodexUI />
       <PlayerUI />
       <TradeUI />
+      <DuelUI />
       <LandUI />
       <SignEditor />
     </>

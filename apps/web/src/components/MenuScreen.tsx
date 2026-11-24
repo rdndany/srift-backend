@@ -92,6 +92,8 @@ function Slot({ index, onHover, ghost, ghostCount, preview, selected, hot, forge
   // With a jewel in hand, every item it would not work on is dimmed under a dark mask (empty slots are left alone).
   const jewelFx = useUi((s) => s.jewelFx);
   const fx = jewelFx && jewelFx.slot === index ? jewelFx : null;
+  const gearGlow = useUi((s) => s.gearGlow);
+  const glowed = gearGlow && slot.container === menu.player && slot.index === gearGlow.slot ? gearGlow : null;
   const dim = !!menu.cursor && slot.kind === 'normal' && jewelKind(menu.cursor.id) !== null && !!menu.stackAt(index) && !menu.jewelFits(index);
   const stack = menu.stackAt(index);
   const forging = !!forge && !!stack;
@@ -142,6 +144,7 @@ function Slot({ index, onHover, ghost, ghostCount, preview, selected, hot, forge
           </div>
         </>
       )}
+      {glowed && <span key={`g${glowed.n}`} className="codex-glow" />}
     </div>
   );
 }
@@ -608,7 +611,15 @@ export function MenuScreen() {
     title = menu.chest.size > 27 ? 'Large Chest' : 'Chest';
     body = (
       <>
-        <Head>Storage</Head>
+        <div className="wow-head">
+          <span>Storage</span>
+          <button type="button" className="organize-btn" data-testid="chest-deposit" title="Move items from your bags and hotbar into this chest when it already holds the same thing" onClick={() => api.chestAct('deposit')}>
+            Deposit
+          </button>
+          <button type="button" className="organize-btn" data-testid="chest-organize" title="Merge stacks and sort this chest" onClick={() => api.chestAct('organize')}>
+            Organize
+          </button>
+        </div>
         <Grid indices={range(menu.chestStart, menu.chestStart + menu.chest.size)} cols={9} onHover={setHover} />
         <Backpack onHover={setHover} />
       </>

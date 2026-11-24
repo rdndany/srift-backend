@@ -66,7 +66,7 @@ export function TokenPurse({ where }: { where: 'frame' | 'bags' }) {
   if (balance === null) return null;
   return (
     <div id={where === 'bags' ? 'token-purse' : undefined} className={`token-purse ${where}`} data-testid={`token-purse-${where}`} data-balance={balance} title="Your $SOLRIFT: earned by playing, kept with your wallet. Withdraw it on the token page.">
-      <TokenIcon size={where === 'bags' ? 18 : 14} />
+      <TokenIcon size={where === 'bags' ? 18 : 11} />
       <span className="tp-amount">{balance.toLocaleString()}</span>
       <small>$SOLRIFT</small>
       {gain > 0 && (

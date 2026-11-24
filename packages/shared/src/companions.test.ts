@@ -39,6 +39,7 @@ function make() {
     }
   const s = new GameSession({ seed: 1337, world, generator, naturalSpawning: false, rand: mulberry32(5), mode: 'survival', classId: 'mage' });
   s.finishLoading();
+  s.cls!.level = 10;
   s.teleport(8.5, 101, 8.5, 0, 0);
   s.drainEvents();
   return s;
@@ -125,6 +126,23 @@ describe('the companion slot', () => {
     expect(s.inventory.get(0)).toBeNull();
     expect(p(s).companionNumber).toBe(1);
     expect(toasts(s).join(' ')).toContain('Cinder Imp follows you');
+  });
+
+  it('stays in the bag below level 10, and one already worn comes off and gives nothing', () => {
+    const s = make();
+    s.cls!.level = 1;
+    const id = companionItemId('cinder-imp');
+    s.inventory.set(0, makeStack(id, 1));
+    s.apply({ t: 'select', slot: 0 });
+    s.drainEvents();
+    s.tick(idle({ right: true }));
+    expect(s.companionSlot.get(0)).toBeNull();
+    expect(s.inventory.get(0)?.id).toBe(id);
+    expect(toasts(s).join(' ')).toContain('Requires level 10');
+    s.companionSlot.set(0, makeStack(id, 1));
+    expect(p(s).companionMight).toBe(1);
+    s.tick(idle());
+    expect(s.companionSlot.get(0)).toBeNull();
   });
 
   it('swaps with the one that is there when a right-click in the bags puts another in', () => {

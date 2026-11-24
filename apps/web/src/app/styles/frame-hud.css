@@ -38,62 +38,63 @@
   box-shadow: inset 0 0 0 1px #000, inset 3px 3px 7px rgba(0, 0, 0, 0.65);
 }
 
-/* The experience bar and the class resource bar are sunken wells like the ones in the inventory. */
+/* The experience bar and the class resource bar match the health and food bars. */
 #xp-bar {
-  height: 18px;
-  padding: 1px;
+  height: 20px;
+  padding: 0;
   clip-path: none;
-  background: rgba(0, 0, 0, 0.6);
-  border: 2px solid;
-  border-color: var(--w-well);
+  background: linear-gradient(#1c2a14, #0c1408);
+  border: 2px solid #0c0606;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 2px 3px rgba(0, 0, 0, 0.45);
 }
 #xp-track {
-  background: #1a140c;
+  background: none;
 }
 #xp-label {
-  line-height: 14px;
-  color: var(--w-gold-hi);
+  line-height: 16px;
+  color: #fff;
 }
 #hotbar .cb-res,
-#class-bar .cb-res {
-  background: #0b0806;
-  border: 2px solid;
-  border-color: var(--w-well);
-  box-shadow: none;
+#class-bar .cb-res,
+#hud-bottom .cb-res {
+  height: 20px;
+  background: linear-gradient(#1a1c28, #0c0e14);
+  border: 2px solid #0c0606;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 2px 3px rgba(0, 0, 0, 0.45);
 }
 
-/* The character frame, top left. */
+/* The character frame, top left: portrait, name and glossy bars, with no plate behind them. */
 #player-frame .pf-portrait {
   box-shadow:
-    0 0 0 3px var(--w-edge),
-    0 0 0 5px var(--w-bronze-hi),
-    0 0 0 7px var(--w-edge),
-    0 5px 14px rgba(0, 0, 0, 0.6);
+    0 0 0 3px #140e08,
+    0 0 0 6px #e6c36a,
+    0 0 0 8px #140e08,
+    0 6px 14px rgba(0, 0, 0, 0.55);
 }
 #player-frame .pf-level {
-  color: var(--w-gold-hi);
-  background: linear-gradient(#3a2d1a, #1c150c);
-  border: 2px solid var(--w-bronze-hi);
-  box-shadow: 0 0 0 2px var(--w-edge), 0 2px 6px rgba(0, 0, 0, 0.6);
+  color: #2a1604;
+  text-shadow: none;
+  background: radial-gradient(circle at 38% 30%, #ffe9a4, #e0a63a 58%, #8a5a10);
+  border: 2px solid #4a3008;
+  box-shadow: 0 0 0 2px #140e08, 0 2px 4px rgba(0, 0, 0, 0.6);
 }
 #player-frame .pf-plate {
-  background: var(--w-panel);
-  border: 3px solid var(--w-edge);
-  border-left: 0;
+  background: none;
+  border: 0;
   border-radius: 0;
-  box-shadow: var(--w-frame), 0 5px 14px rgba(0, 0, 0, 0.5);
-}
-#player-frame .pf-name {
-  color: var(--w-gold-hi);
-}
-#player-frame .pf-bar {
-  background: #0b0806;
-  border: 2px solid;
-  border-color: var(--w-well);
   box-shadow: none;
 }
+#player-frame .pf-name {
+  color: #ffe56a;
+}
+#player-frame .pf-bar {
+  background: linear-gradient(#3a1818, #140808);
+  border: 2px solid #0c0606;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 2px 3px rgba(0, 0, 0, 0.45);
+}
 #player-frame .pf-bar.health.hardcore {
-  border-color: #efe3b0;
+  border-color: #120606;
+  box-shadow: 0 0 0 1px #efe3b0, 0 2px 0 rgba(0, 0, 0, 0.45);
 }
 
 /* The quests, top right: only each quest's title and what it asks for, as lettering on the screen. */

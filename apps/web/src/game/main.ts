@@ -96,7 +96,7 @@ import { BobberRenderer } from './bobbers';
 import { rodLine } from './held/basic';
 import { EatFx } from './eatFx';
 import { LevelUpFx } from './levelUpFx';
-import { CHEWS_PER_SECOND } from './character';
+import { CHEWS_PER_SECOND, heldLamp } from './character';
 import { EntityLight } from './entityLight';
 import { LocalSaveStore } from './storage';
 import { paletteOfCode } from './lookPalette';
@@ -127,6 +127,7 @@ import { makeLandClient } from './landClient';
 import { KeyActions } from './gameKeys';
 import { RecipeMemory } from './recipeMemory';
 import { makeUiApi } from './uiApi';
+import { VoiceChat } from './voiceChat';
 import { makeUiSync } from './uiSync';
 import { TargetPicker } from './targeting';
 import { MobTargetPicker } from './mobTargeting';
@@ -268,6 +269,9 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   };
 
   const scene = new THREE.Scene();
+  // The same haze the land uses. Creatures are plain materials, so without this a gold mob stays a bright dot on a faded hill.
+  const distanceFog = new THREE.Fog(0x8fc4ff, 60, 120);
+  scene.fog = distanceFog;
   const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.05, 600);
   camera.rotation.order = 'YXZ';
   scene.add(camera);
@@ -356,6 +360,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     void (saveBridge.flush?.() ?? Promise.resolve()).finally(() => opts.switchWorld?.(kind, session.mode));
   }
   let remote: RemoteSession | null = null;
+  let voice: VoiceChat | null = null;
   /** The server says admin mode is on: the block under the crosshair is described next to it. */
   let adminMode = false;
   let onlineError: string | null = null;
@@ -396,6 +401,9 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
         onInspect: (name, view) => useUi.setState({ inspect: { name, view } }),
         onTrade: (view) => showTrade(view),
         onTradeAsk: (from) => useUi.setState({ tradeAsk: from }),
+        onDuelAsk: (from) => useUi.setState({ duelAsk: from }),
+        onDuel: (n) => useUi.setState(n === null ? { duelCount: null, dueling: false } : n === 'start' ? { duelCount: 'start', dueling: true } : { duelCount: n, dueling: false }),
+        onVoice: (from, name, sig) => voice?.signal(from, name, sig),
         onNotice: (text) => {
           chat.add(text, 'notice');
           // A reward was added to the wallet's balance: read it again so the number on screen is the true one.
@@ -411,6 +419,8 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
           if (document.pointerLockElement) document.exitPointerLock();
         },
       }, myClass);
+      voice = new VoiceChat(remote.id, (to, sig) => remote?.voice(to, sig));
+      useUi.setState({ voiceLive: true });
     } catch (err) {
       chat.dispose();
       renderer.dispose();
@@ -438,6 +448,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   if (!online && !guest) await world.loadSaved();
   if (opts.isCancelled?.()) {
     remote?.leave();
+    voice?.dispose();
     chat.dispose();
     world.dispose();
     renderer.dispose();
@@ -716,9 +727,9 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   // Mobs, other players and your own body are lit like the world: sky colour, caves, torches, sun on each face.
   const handLight = new THREE.Color();
   const heldLightFull = new THREE.Color();
-  const heldLightColor = new THREE.Color();
   const heldLightAt = new THREE.Vector3();
   const heldLightDir = new THREE.Vector3();
+  const heldSpots: { x: number; y: number; z: number; r: number; g: number; b: number; range: number }[] = [];
   let debugHideHand = false;
 
   // The map: painted from the chunks around you and remembered. The map item draws from it.
@@ -759,7 +770,10 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     }
     const tabs = ['inventory', 'attributes', 'crafting', 'spells'] as const;
     if (tabs[step] === 'spells' && !session.classView()) return;
-    const menu = new CraftingMenu(session.inventory, 2, session.armor, session.offhand, session.mountSlot, session.outfitSlot, () => session.classView()?.id ?? null, session.companionSlot, session.wingSlot, session.accessories);
+    const menu = new CraftingMenu(session.inventory, 2, session.armor, session.offhand, session.mountSlot, session.outfitSlot, () => session.classView()?.id ?? null, session.companionSlot, session.wingSlot, session.accessories, () => {
+      const c = session.classView();
+      return c ? { id: c.id, level: c.level } : null;
+    }, () => session.classView()?.level ?? session.xp.level);
     menu.attachBags(session.inventory, session.bags);
     useUi.setState({ warmMenu: menu, invTab: tabs[step] });
   }
@@ -998,12 +1012,15 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     signEdit: null,
     trade: null,
     tradeAsk: null,
+    duelAsk: null,
+    duelCount: null,
+    dueling: false,
     invTab: 'inventory',
     dialogNpc: null,
     shopOpen: false,
     auction: null,
     stash: null,
-    api: makeUiApi({ session, remote, input, chat, icons, store, guest, recipes, windows, sendCommand, openSpellbook }),
+    api: makeUiApi({ session, remote, input, chat, icons, store, guest, recipes, windows, voice, sendCommand, openSpellbook }),
     mode: session.mode,
     hardcore: session.hardcore,
     spectating: session.spectating,
@@ -1171,6 +1188,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
 
   function buildFrame(dt: number, cam: { x: number; y: number; z: number } | null = null): InputFrame {
     const round = (v: number): number => Math.round(v * 100) / 100;
+    const idle = selfView.idleShow();
     return {
       t: 'frame',
       dt,
@@ -1185,6 +1203,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
       sneak: input.isDown('ShiftLeft'),
       left: input.leftDown,
       right: input.rightDown,
+      ...(idle.kind === 1 || idle.kind === 2 || idle.kind === 3 ? { il: idle.kind as 1 | 2 | 3, ic: round(Math.min(600, idle.clock)) } : {}),
     };
   }
 
@@ -1418,6 +1437,9 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
         seaShade = 0;
         const water = new THREE.Color(0xc2480a);
         world.setFog(water, 0.1, 4);
+        distanceFog.color.copy(water);
+        distanceFog.near = 0.1;
+        distanceFog.far = 4;
         drawnFar = 4;
         scene.background = water;
         sky.setView(water, 0, true);
@@ -1442,6 +1464,9 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
         const near = fogFar * 0.32 * reach;
         const far = Math.max(near + 24, fogFar * 0.9 * reach);
         world.setFog(seaFog, near, far, seaZenith);
+        distanceFog.color.copy(seaFog);
+        distanceFog.near = near;
+        distanceFog.far = far;
         drawnFar = far;
         scene.background = seaFog;
         // The sky stays. The horizon takes the colour of the water; the sun, the moon and the clouds are still there above it.
@@ -1470,7 +1495,11 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
       }
       sky.setView(caveFog, caveDark, false);
       drawnFar = fogFar * 0.98 * fogScale * (1 - 0.35 * caveDark);
-      world.setFog(caveFog, fogFar * 0.55 * fogScale * (1 - 0.45 * caveDark), drawnFar, sky.domeZenith);
+      const fogNear = fogFar * 0.55 * fogScale * (1 - 0.45 * caveDark);
+      world.setFog(caveFog, fogNear, drawnFar, sky.domeZenith);
+      distanceFog.color.copy(caveFog);
+      distanceFog.near = fogNear;
+      distanceFog.far = drawnFar;
       scene.background = caveFog;
       light.glow.multiplyScalar(1 - caveDark);
       // Walking into lush, dripstone or deep dark country shows its name, as walking into a village does.
@@ -1493,25 +1522,6 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     world.setDay(sky.brightness);
     world.setTime(performance.now() / 1000);
     world.materials.setLighting(light);
-    // An item that gives light (a lantern: see `ItemDef.heldLight`) in either hand lights up its surroundings (the main hand's wins):
-    // a point of its light by the hand.
-    const handLamp = getItem(session.held ? session.held.id : 0).heldLight ?? getItem(session.offhand.get(0)?.id ?? 0).heldLight;
-    if (handLamp && !body.eyeInWater && session.screen !== 'dead' && !session.spectating) {
-      camera.getWorldDirection(heldLightDir);
-      heldLightAt.copy(camera.position).addScaledVector(heldLightDir, 0.5);
-      heldLightAt.y -= 0.25;
-      heldLightColor.setRGB(handLamp.r, handLamp.g, handLamp.b);
-      world.materials.setHeldLight(heldLightAt, heldLightColor, handLamp.level);
-    } else {
-      // No lamp in hand: the slot of the light by the hand lights the cave round a burning boss (the Hollow King) instead.
-      let king: (typeof session.mobs.mobs)[number] | null = null;
-      for (const mob of session.mobs.mobs) if (mob.kind === 'hollow_king' && !mob.dead && (!king || Math.hypot(mob.body.x - camera.position.x, mob.body.z - camera.position.z) < Math.hypot(king.body.x - camera.position.x, king.body.z - camera.position.z))) king = mob;
-      if (king && Math.hypot(king.body.x - camera.position.x, king.body.z - camera.position.z) < 40) {
-        heldLightAt.set(king.body.x, king.body.y + 4.6, king.body.z);
-        heldLightColor.setRGB(1, 0.46, 0.14);
-        world.materials.setHeldLight(heldLightAt, heldLightColor, 20 + 1.2 * Math.sin(performance.now() / 160));
-      } else world.materials.setHeldLight(heldLightAt, heldLightColor, 0);
-    }
     // Shadows only matter while the sun (or moon) shines on the open; underground and underwater they would be wasted work.
     if (shadows) {
       // (Not before the warm-up is over: it builds the depth shader of the maps, and the first chunks drawn into one would build it in the middle of the loading.)
@@ -1548,20 +1558,26 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     particles.setBrightness(sky.brightness);
     drops.setBrightness(sky.brightness);
     remote?.update(dt);
+    if (voice && remote) {
+      const at = session.viewPos();
+      const hear = getSettings();
+      voice.step(at, remote.others.values(), new Set(useUi.getState().voiceMuted), hear.muted ? 0 : hear.voice);
+    }
     updateNetText(dt);
     players.setBrightness(sky.brightness);
     if (remote) {
       players.sync(remote.others.values(), dt, camera.position);
       targets?.update();
-    }
+    } else players.carriedLights.length = 0;
     mobTargets.update();
     {
       // The companions: yours (the one in your companion slot) and those of the players in view.
       const owners: PetOwner[] = [];
       const mine = companionOfItem(session.companionSlot.get(0)?.id ?? 0);
-      if (mine && session.screen !== 'dead' && !session.spectating) {
+      // In first person the camera sits in your head, so your own companion is left out of the view. Other players' companions stay.
+      if (mine && selfView.mode !== 0 && session.screen !== 'dead' && !session.spectating) {
         const at = session.viewPos();
-        owners.push({ key: -1, pet: COMPANIONS.indexOf(mine) + 1, x: at.x, y: at.y, z: at.z, yaw: selfView.mode !== 0 ? selfView.facing : input.yaw, lift: session.mountView().mount > 0 ? 0.8 : 0 });
+        owners.push({ key: -1, pet: COMPANIONS.indexOf(mine) + 1, x: at.x, y: at.y, z: at.z, yaw: selfView.facing, lift: session.mountView().mount > 0 ? 0.8 : 0 });
       }
       if (remote) for (const o of remote.others.values()) if (o.pet && !o.dead) owners.push({ key: o.id, pet: o.pet, x: o.x, y: o.y, z: o.z, yaw: o.yaw, lift: o.mount ? 0.8 : 0 });
       companions.sync(owners, dt);
@@ -1607,6 +1623,45 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
       viewer: camera.position,
       light: entityLight,
     });
+    // A torch or a lantern lights the ground around the hand that holds it: yours, and anyone else's you can see.
+    // In first person yours sits by the camera, where the hand is. In third person the camera is away from you, so it sits on the hand.
+    heldSpots.length = 0;
+    const lamp = heldLamp(session.held ? session.held.id : 0, session.offhand.get(0)?.id ?? 0);
+    if (lamp && !body.eyeInWater && session.screen !== 'dead' && !session.spectating) {
+      if (selfView.mode === 0) {
+        camera.getWorldDirection(heldLightDir);
+        heldLightAt.copy(camera.position).addScaledVector(heldLightDir, 0.5);
+        heldLightAt.y -= 0.25;
+      } else {
+        selfView.gripLight(lamp.left, lamp.hang, heldLightAt);
+        const dx = heldLightAt.x - view.x;
+        const dy = heldLightAt.y - view.y;
+        const dz = heldLightAt.z - view.z;
+        if (dx * dx + dy * dy + dz * dz > 16) heldLightAt.set(view.x, view.y + 1.15, view.z);
+      }
+      heldSpots.push({ x: heldLightAt.x, y: heldLightAt.y, z: heldLightAt.z, r: lamp.light.r, g: lamp.light.g, b: lamp.light.b, range: lamp.light.level });
+    }
+    if (players.carriedLights.length > 1) {
+      const cx = camera.position.x;
+      const cy = camera.position.y;
+      const cz = camera.position.z;
+      players.carriedLights.sort((a, b) => (a.x - cx) ** 2 + (a.y - cy) ** 2 + (a.z - cz) ** 2 - ((b.x - cx) ** 2 + (b.y - cy) ** 2 + (b.z - cz) ** 2));
+    }
+    for (const c of players.carriedLights) {
+      if (heldSpots.length >= 4) break;
+      heldSpots.push(c);
+    }
+    if (!lamp && heldSpots.length < 4) {
+      // No lamp in your hand: a free slot lights the cave round a burning boss (the Hollow King).
+      let king: (typeof session.mobs.mobs)[number] | null = null;
+      for (const mob of session.mobs.mobs) if (mob.kind === 'hollow_king' && !mob.dead && (!king || Math.hypot(mob.body.x - camera.position.x, mob.body.z - camera.position.z) < Math.hypot(king.body.x - camera.position.x, king.body.z - camera.position.z))) king = mob;
+      if (king && Math.hypot(king.body.x - camera.position.x, king.body.z - camera.position.z) < 40) {
+        const flick = 20 + 1.2 * Math.sin(performance.now() / 160);
+        heldSpots.push({ x: king.body.x, y: king.body.y + 4.6, z: king.body.z, r: 1, g: 0.46, b: 0.14, range: flick });
+      }
+    }
+    world.materials.setHeldLights(heldSpots);
+    entityLight.setHeld(heldSpots);
     chat.tick();
     drops.sync(session.drops.drops, camera.position, session.classView()?.id ?? myClass);
     const foods = local ? local.blockEntities.foods() : (remote?.campfires ?? []);
@@ -1718,7 +1773,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     const heldNow = session.held;
     hand.setLight(entityLight.at(body.x, body.y, body.z, handLight));
     // The hand that holds a light is lit by it: nothing about it goes dark.
-    if (handLamp) hand.setLight(heldLightFull.setRGB(1, 1, 1));
+    if (lamp) hand.setLight(heldLightFull.setRGB(1, 1, 1));
     hand.setArmor([0, 1, 2, 3].map((i) => session.armor.get(i)?.id ?? 0));
     hand.visible = !debugHideHand && mountNow === 0 && session.screen !== 'dead' && !session.spectating && !body.eyeInWater && !session.sleeping && selfView.mode === 0;
     hand.setMapUp(useUi.getState().mapUp);
@@ -2054,6 +2109,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     savePlayer();
     net?.close();
     remote?.leave();
+    voice?.dispose();
     chat.dispose();
     players.dispose();
     companions.dispose();
@@ -2105,7 +2161,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     atlas.dispose();
     postfx.dispose();
     renderer.dispose();
-    useUi.setState({ api: null, screen: 'none', adventure: false, codex: null, codexOpen: false, beyondNotes: [], questLogOpen: false, partyOpen: false, socialOpen: false, social: null, inspect: null, target: null, mobTarget: null, playerMenu: null, signEdit: null, trade: null, tradeAsk: null, invTab: 'inventory', mount: { mount: 0, pick: 0, cd: [0, 0] }, cls: null, party: [], partyInvite: null, dialogNpc: null, shopOpen: false, auction: null, stash: null, zone: null, questNotes: [], map: null, mapUp: false, poison: 0, foodSick: 0 });
+    useUi.setState({ api: null, screen: 'none', adventure: false, codex: null, codexOpen: false, beyondNotes: [], questLogOpen: false, partyOpen: false, socialOpen: false, social: null, inspect: null, target: null, mobTarget: null, playerMenu: null, voiceLive: false, voiceOn: false, voiceMuted: [], signEdit: null, trade: null, tradeAsk: null, duelAsk: null, duelCount: null, dueling: false, invTab: 'inventory', mount: { mount: 0, pick: 0, cd: [0, 0] }, cls: null, party: [], partyInvite: null, dialogNpc: null, shopOpen: false, auction: null, stash: null, zone: null, questNotes: [], map: null, mapUp: false, poison: 0, foodSick: 0 });
     mapData.dispose();
     mapSheet.dispose();
     useUi.getState().quests.loadJSON(null);

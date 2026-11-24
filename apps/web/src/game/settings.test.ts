@@ -16,11 +16,28 @@ describe('settings', () => {
     expect(s.sensitivity).toBe(DEFAULT_SETTINGS.sensitivity);
     expect(s.muted).toBe(true);
     expect(s.invertY).toBe(true);
+    expect(s.voice).toBe(DEFAULT_SETTINGS.voice);
+    expect(s.micDevice).toBe('');
+    expect(s.pushToTalk).toBe(false);
+    expect(s.voiceKey).toBe('Backquote');
   });
 
   it('round the view numbers to whole ones', () => {
     const s = parseSettings({ fov: 80.6, renderDistance: 9.4 });
     expect(s.fov).toBe(81);
     expect(s.renderDistance).toBe(9);
+  });
+
+  it('keeps a microphone and holds how loud voices are', () => {
+    const s = parseSettings({ voice: 4, micDevice: 'desk-mic' });
+    expect(s.voice).toBe(1);
+    expect(s.micDevice).toBe('desk-mic');
+    expect(parseSettings({ voice: -2, micDevice: 3 }).voice).toBe(0);
+    expect(parseSettings({ micDevice: 3 }).micDevice).toBe('');
+    expect(parseSettings({ pushToTalk: true, voiceKey: 'KeyJ' }).pushToTalk).toBe(true);
+    expect(parseSettings({ voiceKey: 'KeyJ' }).voiceKey).toBe('KeyJ');
+    expect(parseSettings({ voiceKey: 'KeyE' }).voiceKey).toBe('Backquote');
+    expect(parseSettings({ voiceKey: 'F5' }).voiceKey).toBe('Backquote');
+    expect(parseSettings({ voiceKey: 4 }).voiceKey).toBe('Backquote');
   });
 });
