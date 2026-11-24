@@ -403,7 +403,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
         onTradeAsk: (from) => useUi.setState({ tradeAsk: from }),
         onDuelAsk: (from) => useUi.setState({ duelAsk: from }),
         onDuel: (n) => useUi.setState(n === null ? { duelCount: null, dueling: false } : n === 'start' ? { duelCount: 'start', dueling: true } : { duelCount: n, dueling: false }),
-        onVoice: (from, name, sig) => voice?.signal(from, name, sig),
+        onTalk: (from, name, pcm) => voice?.hear(from, name, pcm),
         onNotice: (text) => {
           chat.add(text, 'notice');
           // A reward was added to the wallet's balance: read it again so the number on screen is the true one.
@@ -419,7 +419,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
           if (document.pointerLockElement) document.exitPointerLock();
         },
       }, myClass);
-      voice = new VoiceChat(remote.id, (to, sig) => remote?.voice(to, sig));
+      voice = new VoiceChat((pcm) => remote?.talk(pcm));
       useUi.setState({ voiceLive: true });
     } catch (err) {
       chat.dispose();

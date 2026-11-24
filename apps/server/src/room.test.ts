@@ -1349,3 +1349,22 @@ describe('fishing', () => {
     expect(room.realm.fishing.bobbers).toHaveLength(0);
   });
 });
+
+describe('voice', () => {
+  it('carries a microphone frame to a player standing near, and not to the speaker or someone far away', () => {
+    const room = makeRoom();
+    const a = joinAt(room, 'alex');
+    const b = joinAt(room, 'bob', CX + 2.5, CZ + 0.5);
+    const c = joinAt(room, 'cara', CX + 80.5, CZ + 0.5);
+    const frame = 'abcdefghij';
+    const msg = parseNetClientMessage({ t: 'talk', d: frame });
+    expect(msg).toEqual({ t: 'talk', d: frame });
+    a.clear();
+    b.clear();
+    c.clear();
+    room.receive(a.id!, msg!);
+    expect(a.of('talk')).toHaveLength(0);
+    expect(b.of('talk')).toEqual([{ t: 'talk', from: a.id, name: 'alex', d: frame }]);
+    expect(c.of('talk')).toHaveLength(0);
+  });
+});

@@ -344,9 +344,9 @@ const SOCIAL_BURST = 8;
 /** Clicks at a trade table: filling it takes a few quick ones. */
 const TRADE_RATE = 6;
 const TRADE_BURST = 20;
-/** Voice setup messages (offers and network candidates). A call starts with a short burst. */
-const VOICE_RATE = 12;
-const VOICE_BURST = 24;
+/** Microphone frames a player may send. One frame is 40 ms, so a steady talk is about 25 a second. */
+const VOICE_RATE = 40;
+const VOICE_BURST = 20;
 /** How far apart two players may be for the server to pass their voice setup along. The sound itself never comes here. */
 const VOICE_REACH = 48;
 const MAX_STEPS_PER_TICK = 15;
@@ -1033,6 +1033,9 @@ export class GameRoom {
       case 'voice':
         this.relayVoice(m, msg.to, msg.sig);
         return;
+      case 'talk':
+        this.relayTalk(m, msg.d);
+        return;
       case 'inspect':
         if (this.socialLimit(m)) {
           const target = findMember(this.members.values(), msg.name);
@@ -1057,6 +1060,21 @@ export class GameRoom {
     const dz = m.player.body.z - other.player.body.z;
     if (dx * dx + dy * dy + dz * dz > VOICE_REACH * VOICE_REACH) return;
     other.conn.send({ t: 'voice', from: m.id, name: m.name, sig });
+  }
+
+  /** Pass one microphone frame to the players standing near the speaker. It is not kept. */
+  private relayTalk(m: Member, d: string): void {
+    if (m.voiceTokens < 1) return;
+    m.voiceTokens -= 1;
+    const reach = VOICE_REACH * VOICE_REACH;
+    for (const other of this.members.values()) {
+      if (other.id === m.id) continue;
+      const dx = m.player.body.x - other.player.body.x;
+      const dy = m.player.body.y - other.player.body.y;
+      const dz = m.player.body.z - other.player.body.z;
+      if (dx * dx + dy * dy + dz * dz > reach) continue;
+      other.conn.send({ t: 'talk', from: m.id, name: m.name, d });
+    }
   }
 
   private chat(m: Member, text: string): void {

@@ -64,8 +64,10 @@ export type NetClientMessage =
   | { t: 'trade'; act: TradeAct }
   /** Ask somebody to duel, or answer them. */
   | { t: 'duel'; act: DuelAct }
-  /** Voice signaling for one other player (the sound itself does not pass through the server). */
+  /** Voice signaling for one other player (kept for older clients; the sound now rides on `talk`). */
   | { t: 'voice'; to: number; sig: VoiceSig }
+  /** One frame of the microphone, for the players standing near you. The server passes it on; it is not stored. */
+  | { t: 'talk'; d: string }
   | { t: 'leave' };
 
 /** What a player does in a trade: ask somebody, answer a request, work the table, accept, call it off. */
@@ -472,8 +474,10 @@ export type NetServerMessage =
   | { t: 'duelAsk'; from: string | null }
   /** The count in the middle of the screen: 5 down to 1, then Start. Null takes it away. */
   | { t: 'duel'; n: 1 | 2 | 3 | 4 | 5 | 'start' | null }
-  /** A piece of the voice call with another player (the sound itself does not pass through the server). */
+  /** A piece of an older voice call (the sound itself did not pass through the server). */
   | { t: 'voice'; from: number; name: string; sig: VoiceSig }
+  /** One frame of a nearby player's microphone. */
+  | { t: 'talk'; from: number; name: string; d: string }
   | { t: 'notice'; text: string }
   /** Admin mode went on or off for you (the server's word: it shows the admin's panel at the crosshair). */
   | { t: 'admin'; on: boolean }
@@ -641,6 +645,11 @@ export function parseNetClientMessage(raw: unknown): NetClientMessage | null {
       const sig = parseVoiceSig(raw.sig);
       if (!sig || !whole(raw.to, 1_000_000_000) || raw.to < 1) return null;
       return { t: 'voice', to: raw.to, sig };
+    }
+    case 'talk': {
+      if (typeof raw.d !== 'string' || raw.d.length < 8 || raw.d.length > 4000) return null;
+      if (!/^[A-Za-z0-9+/]+={0,2}$/.test(raw.d)) return null;
+      return { t: 'talk', d: raw.d };
     }
     case 'leave':
       return { t: 'leave' };

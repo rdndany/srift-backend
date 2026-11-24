@@ -169,6 +169,8 @@ export interface RemoteCallbacks {
   onDuel?(n: 1 | 2 | 3 | 4 | 5 | 'start' | null): void;
   /** Someone near you is setting up a voice call. */
   onVoice?(from: number, name: string, sig: VoiceSig): void;
+  /** One frame of a nearby player's microphone. */
+  onTalk?(from: number, name: string, pcm: string): void;
   onClose(reason: string): void;
 }
 
@@ -489,6 +491,11 @@ export class RemoteSession implements ClientSession {
     this.send({ t: 'voice', to, sig });
   }
 
+  /** One frame of this player's microphone, for whoever is standing near. */
+  talk(pcm: string): void {
+    this.send({ t: 'talk', d: pcm });
+  }
+
   guild(line: string): void {
     this.send({ t: 'guild', line });
   }
@@ -735,6 +742,9 @@ export class RemoteSession implements ClientSession {
         return;
       case 'voice':
         this.cb.onVoice?.(msg.from, msg.name, msg.sig);
+        return;
+      case 'talk':
+        this.cb.onTalk?.(msg.from, msg.name, msg.d);
         return;
       case 'notice':
         this.cb.onNotice(msg.text);
