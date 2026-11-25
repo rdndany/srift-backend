@@ -71,6 +71,11 @@ export default function GameView() {
   const [start, setStart] = useState<PlayChoice | 'home' | 'direct' | null>(null);
   const identity = useProfile((s) => s.identity);
   const name = useProfile((s) => s.name);
+  // Island survival is marked guest so it stays off the wallet character, but the world is saved on this device.
+  const isle =
+    (start !== null && start !== 'home' && start !== 'direct' && start.world === 'isle') ||
+    (start === 'direct' && new URLSearchParams(location.search).get('world') === 'isle');
+  const guest = identity === 'guest' && !isle;
   useEffect(() => {
     // An id address (`play.solrift.io/<uid>`) opened on its own, not from the lobby's Play: go through the lobby first.
     if (!entryAllowed(location.pathname)) return void location.replace(gamePath());
@@ -130,6 +135,7 @@ export default function GameView() {
       <div id="item-name" />
       <GameUI />
       <div id="debug" />
+      <div id="isle-day" />
       <div id="admin-bar" />
       <div id="block-info" />
       {start !== null && start !== 'home' && <LoadingScreen />}
@@ -166,7 +172,11 @@ export default function GameView() {
               </button>
               <div className="pause-box" data-no-play>
                 <h2>Account</h2>
-                {identity === 'guest' ? (
+                {isle ? (
+                  <p className="guest-note" id="guest-pause-note">
+                    Playing as <b>{name}</b>. This island is saved on this device.
+                  </p>
+                ) : guest ? (
                   <p className="guest-note" id="guest-pause-note">
                     Playing as <b>{name}</b>, a guest. Nothing is saved: your world, progress and character are gone when you leave. To keep them next time, quit and enter with a Solana wallet.
                   </p>
@@ -177,13 +187,13 @@ export default function GameView() {
                   </>
                 )}
               </div>
-              {identity !== 'guest' && (
+              {!guest && (
                 <div className="pause-box only-single" data-no-play>
                   <h2>World</h2>
                   <WorldTools />
                 </div>
               )}
-              <QuitButton guest={identity === 'guest'} />
+              <QuitButton guest={guest} />
             </section>
 
             <PauseSettings />

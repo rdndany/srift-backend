@@ -8,7 +8,7 @@ import { COPY, COUNTS, DEEDS, FAMILIES, PLACES, RARITY_LABEL, REALMS, CAVES, bio
 import { SHOTS, shotUrl, type Shot } from './beyondShots';
 import { ClickSparks, Embers, Reveal, Spot, useFrontMotion } from './fx';
 import { lobbyUrl } from '../game/route';
-import { SCROLL_KEY, goMarket, goToken, goFarm, goShop } from './frontNav';
+import { SCROLL_KEY, goMarket, goToken, goFarm, goShop, goRanks } from './frontNav';
 import { ART } from './homeAssets';
 import './home.css';
 import './front.css';
@@ -176,8 +176,8 @@ export function BeyondPage() {
   /** Straight into the lobby, with The World Beyond already chosen. */
   const play = () => {
     void import('./GameLobby').then(({ saveLobbyChoice }) => {
-      saveLobbyChoice({ way: 'single', mode: 'survival', world: 'beyond' });
-      location.assign(lobbyUrl({ way: 'single', mode: 'survival', world: 'beyond' }));
+      saveLobbyChoice({ way: 'single', mode: 'creative', world: 'beyond' });
+      location.assign(lobbyUrl({ way: 'single', mode: 'creative', world: 'beyond' }));
     });
   };
 
@@ -202,6 +202,7 @@ export function BeyondPage() {
             <button onClick={() => toFront('site-features')}>Classes</button>
             <button onClick={() => toFront('l-expansions')}>Expansions</button>
             <button className="fp-link-farm" onClick={goFarm}>Farm</button>
+            <button className="fp-link-ranks" onClick={goRanks}>Ranks</button>
             <button className="fp-link-market" onClick={goMarket}>Market</button>
             <button className="fp-link-shop" onClick={goShop}>Shop</button>
             <button className="fp-link-token" onClick={goToken}>Token</button>

@@ -472,6 +472,11 @@ export const ITEM_TILES = [
   // the relics of the Hollow King (see hollowKingData.ts)
   ...Object.values(HK_ITEM_NAMES),
   'cinderbolt_crossbow_frame',
+  'coral_fan_yellow',
+  'coral_fan_red',
+  'bubble_bloom',
+  'diver_helm',
+  'oxygen',
 ] as const;
 
 /** All atlas tiles: block textures first (stable indices), then item sprites. */
@@ -2145,9 +2150,12 @@ for (const cube of BEYOND_CUBES) {
     else if (!cube.leaf) JOINERY_BURN_PLANKS.push(id);
   }
 }
+const SEA_PLANT_KEYS = new Set(['kelp', 'seagrass', 'coral_fan_pink', 'coral_fan_blue']);
 for (const leafy of BEYOND_PLANTS) {
   const id = laidBeyond.id[leafy.key];
-  DEFS.push(def(id, leafy.key, leafy.key, leafy.key, leafy.key, { ...plant(BEYOND_SOUND[leafy.sound ?? 'grass']), light: leafy.light ?? 0 }));
+  // Sea plants count as water for swimming, and a current does not wash them out.
+  const sea = SEA_PLANT_KEYS.has(leafy.key);
+  DEFS.push(def(id, leafy.key, leafy.key, leafy.key, leafy.key, { ...plant(BEYOND_SOUND[leafy.sound ?? 'grass']), light: leafy.light ?? 0, ...(sea ? { liquid: true, replaceable: false } : {}) }));
 }
 for (const s of BEYOND_SHAPES) {
   const at = laidBeyond.shape[s.key];
@@ -2156,6 +2164,14 @@ for (const s of BEYOND_SHAPES) {
   groveShapes(laidBeyond.id[s.key], `${s.key}_slab`, `${s.key}_stairs`, `${s.key}_wall`, s.wall ? at.wall : 0, tile, at.slab, at.stair, BEYOND_SOUND[cube.sound], cube.tool === 'axe' ? 'axe' : 'pickaxe', cube.hardness, s.wood, cube.harvest);
 }
 for (const id of BEYOND_LOGS) layAxis(id);
+/** Yellow and red coral fans. Placed after every laid-out run so no older id moves. */
+export const CORAL_FAN_YELLOW = connectId++;
+export const CORAL_FAN_RED = connectId++;
+/** A sea plant that breathes out a column of bubbles. Standing in the column refills your air. */
+export const BUBBLE_BLOOM = connectId++;
+DEFS.push(def(CORAL_FAN_YELLOW, 'coral_fan_yellow', 'coral_fan_yellow', 'coral_fan_yellow', 'coral_fan_yellow', { ...plant('grass'), liquid: true, replaceable: false }));
+DEFS.push(def(CORAL_FAN_RED, 'coral_fan_red', 'coral_fan_red', 'coral_fan_red', 'coral_fan_red', { ...plant('grass'), liquid: true, replaceable: false }));
+DEFS.push(def(BUBBLE_BLOOM, 'bubble_bloom', 'bubble_bloom', 'bubble_bloom', 'bubble_bloom', { ...plant('grass'), liquid: true, replaceable: false }));
 if (connectId >= BLOCK_COUNT) throw new Error('The World Beyond ran past the block id limit');
 
 export function chestId(dir: number, half: number): number {

@@ -663,6 +663,32 @@ describe('breeding', () => {
     expect(s.held?.count).toBe(5); // (the helper puts a fresh stack in hand each time)
   });
 
+  it('follows the player who is holding the food it is bred with', () => {
+    const { s } = make();
+    const hen = s.mobs.spawn('chicken', CX + 0.5, FLOOR + 1, CZ + 8.5);
+    const pig = s.mobs.spawn('pig', CX + 8.5, FLOOR + 1, CZ + 0.5);
+    const away = (m: Mob) => Math.hypot(m.body.x - s.body.x, m.body.z - s.body.z);
+    hold(s, I.WHEAT_SEEDS);
+    const henFar = away(hen);
+    const pigFar = away(pig);
+    run(s, 3);
+    expect(away(hen)).toBeLessThan(henFar - 1.5);
+    expect(away(pig)).toBeGreaterThan(pigFar - 1.5);
+    hold(s, I.CARROT);
+    const pigHeld = away(pig);
+    run(s, 3);
+    expect(away(pig)).toBeLessThan(pigHeld - 1.5);
+    // Close enough to feed, and no closer: it stops in front of the player.
+    hold(s, I.WHEAT_SEEDS);
+    s.teleport(CX + 0.5, FLOOR + 1, CZ + 0.5, 0, 0);
+    hen.body.x = CX + 0.5;
+    hen.body.z = CZ + 2.6;
+    run(s, 2);
+    const close = away(hen);
+    expect(close).toBeGreaterThan(1.5);
+    expect(close).toBeLessThan(3.2);
+  });
+
   it('gives two animals in love a baby, which is small, grows up, and drops nothing', () => {
     const { s } = make('creative');
     const [a, b] = pair(s);

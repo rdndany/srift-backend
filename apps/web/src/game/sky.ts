@@ -66,6 +66,23 @@ function moonTexture(): THREE.CanvasTexture {
   return pixelTexture(c);
 }
 
+/** The same square moon, drawn only as a bright rim, so a black-moon night is not a black block in the sky. */
+function eclipseTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 16;
+  const g = c.getContext('2d')!;
+  for (let y = 1; y < 15; y++) {
+    for (let x = 1; x < 15; x++) {
+      const edge = Math.min(x - 1, y - 1, 14 - x, 14 - y);
+      if (edge > 1) continue;
+      const rim = edge === 0 ? [255, 246, 220] : [176, 198, 228];
+      g.fillStyle = `rgb(${rim[0]},${rim[1]},${rim[2]})`;
+      g.fillRect(x, y, 1, 1);
+    }
+  }
+  return pixelTexture(c);
+}
+
 function pixelTexture(c: HTMLCanvasElement): THREE.CanvasTexture {
   const t = new THREE.CanvasTexture(c);
   t.magFilter = THREE.NearestFilter;
@@ -184,6 +201,8 @@ export class Sky {
   rain = 0;
   dim = 0;
   flash = 0;
+  /** Isle black-moon night: a bright rim in the sky, and no moonlight on the land. Every other world leaves this off. */
+  blackMoon = false;
   /** The colour of the sky at the horizon, which fog and the background share. */
   readonly color = new THREE.Color(DAY_SKY);
   readonly zenith = new THREE.Color(DAY_ZENITH);
@@ -226,6 +245,9 @@ export class Sky {
   private cloudMat: THREE.ShaderMaterial;
   private cloudKey = '';
   private readonly textures: THREE.Texture[] = [];
+  private moonMap: THREE.Texture | null = null;
+  private eclipseMap: THREE.Texture | null = null;
+  private moonWasBlack = false;
   private readonly tmp = new THREE.Color();
   private horizonOverride = new THREE.Color();
   private hasOverride = false;
@@ -253,8 +275,11 @@ export class Sky {
 
     const sunTex = sunTexture();
     const moonTex = moonTexture();
+    const eclipseTex = eclipseTexture();
     const glowTex = glowTexture();
-    this.textures.push(sunTex, moonTex, glowTex);
+    this.moonMap = moonTex;
+    this.eclipseMap = eclipseTex;
+    this.textures.push(sunTex, moonTex, eclipseTex, glowTex);
     const quad = (size: number, tex: THREE.Texture, order: number, additive = false) => {
       const m = new THREE.Mesh(
         new THREE.PlaneGeometry(size, size),
@@ -393,7 +418,7 @@ export class Sky {
     const warm = 1 - smoothstep(0.02, 0.5, sunHeight);
     // Golden hour is a little stronger than noon; at night the same slot carries the moon's silver-blue light.
     L.sun.copy(SUN_NOON).lerp(SUN_LOW, warm).multiplyScalar((0.5 + 0.45 * warm) * sunUp);
-    const moonLit = smoothstep(0.05, 0.3, moonUp) * Math.max(0, 1 - this.rain * 0.9);
+    const moonLit = this.blackMoon ? 0 : smoothstep(0.05, 0.3, moonUp) * Math.max(0, 1 - this.rain * 0.9);
     if (moonLit > 0) L.sun.copy(MOON_LIGHT).multiplyScalar(moonLit);
     L.ambient.copy(AMBIENT_DAY).lerp(AMBIENT_DUSK, duskAmt * 0.9).lerp(AMBIENT_NIGHT, 1 - dayAmt).lerp(AMBIENT_GREY, this.rain * 0.8);
     if (this.flash > 0) L.ambient.addScalar(this.flash * 0.35);
@@ -407,13 +432,21 @@ export class Sky {
     // ---- sun and moon ----
     const horizonFade = smoothstep(-0.12, 0.03, sunHeight);
     (this.sun.material as THREE.MeshBasicMaterial).opacity = clear * horizonFade;
-    (this.moon.material as THREE.MeshBasicMaterial).opacity = clear * smoothstep(-0.03, 0.12, -sunHeight);
+    const moonMat = this.moon.material as THREE.MeshBasicMaterial;
+    moonMat.opacity = clear * smoothstep(-0.03, 0.12, -sunHeight);
+    moonMat.color.setRGB(1, 1, 1);
+    if (this.blackMoon !== this.moonWasBlack && this.moonMap && this.eclipseMap) {
+      this.moonWasBlack = this.blackMoon;
+      moonMat.map = this.blackMoon ? this.eclipseMap : this.moonMap;
+      moonMat.needsUpdate = true;
+    }
     const sg = this.sunGlow.material as THREE.MeshBasicMaterial;
     sg.color.copy(SUN_NOON).lerp(SUN_LOW, warm);
     sg.opacity = clear * horizonFade * (0.2 + 0.5 * duskAmt);
     const mg = this.moonGlow.material as THREE.MeshBasicMaterial;
-    mg.color.setRGB(0.5, 0.6, 0.85);
-    mg.opacity = clear * smoothstep(-0.03, 0.12, -sunHeight) * 0.35;
+    const moonFade = clear * smoothstep(-0.03, 0.12, -sunHeight);
+    mg.color.setRGB(this.blackMoon ? 1 : 0.5, this.blackMoon ? 0.92 : 0.6, this.blackMoon ? 0.72 : 0.85);
+    mg.opacity = moonFade * (this.blackMoon ? 0.7 : 0.35);
     this.starMat.opacity = (1 - smoothstep(-0.2, 0.05, sunHeight)) * clear;
 
     this.updateClouds(camera, dayAmt, duskAmt);

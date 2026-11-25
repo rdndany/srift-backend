@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { B, GROVE, growPlants, type PlantChunk } from './index';
+import { B, GROVE, SAPLING_GROW_SECONDS, cropGrowthSeconds, growPlants, type PlantChunk } from './index';
 
 /** One edited chunk with a few blocks set in it. */
 function chunk(blocks: Record<number, number>): PlantChunk {
@@ -33,5 +33,37 @@ describe('growing plants over time', () => {
     const world = { getBlock: () => 0, setBlock: () => true };
     growPlants([chunk({ 0x123: B.FIRE })], world, 2, () => 1, (x, y, z) => fires.push([x, y, z]));
     expect(fires).toEqual([[3, 1, 2]]);
+  });
+
+  it('waits about as long as Minecraft before a sapling or a seed grows', () => {
+    expect(SAPLING_GROW_SECONDS).toBeCloseTo((4096 / 60) * 7, 5);
+    const lone = { getBlock: (x: number, y: number, z: number) => (x === 0 && y === 0 && z === 0 ? B.FARMLAND : B.DIRT) };
+    const plot = {
+      getBlock: (x: number, y: number, z: number) => (y === 0 && Math.abs(x) <= 1 && Math.abs(z) <= 1 ? B.FARMLAND : B.DIRT),
+    };
+    const row = {
+      getBlock: (x: number, y: number, z: number) => {
+        if (y === 1 && z === 0 && Math.abs(x) <= 1) return B.WHEAT_0;
+        if (y === 0 && Math.abs(x) <= 1 && Math.abs(z) <= 1) return B.FARMLAND;
+        return B.DIRT;
+      },
+    };
+    // One moist block: seven random ticks per age, and seven ages spread over three pictures.
+    expect(cropGrowthSeconds(lone, 0, 1, 0, B.WHEAT_0)).toBeCloseTo((4096 / 60) * 7 * (7 / 3), 4);
+    // A 3 by 3 of farmland is the fast farm: about eight minutes a picture, about 24 minutes to ripe.
+    expect(cropGrowthSeconds(plot, 0, 1, 0, B.WHEAT_0)).toBeCloseTo((4096 / 60) * 7, 4);
+    // A straight row grows half as fast.
+    expect(cropGrowthSeconds(row, 0, 1, 0, B.WHEAT_0)).toBeCloseTo((4096 / 60) * 14, 4);
+    const world = {
+      getBlock: (x: number, y: number, z: number) => (x === (300 & 15) && y === (300 >> 8) && z === ((300 >> 4) & 15) ? B.SAPLING : B.DIRT),
+      setBlock: () => true,
+    };
+    const sapling = chunk({ 300: B.SAPLING });
+    let rolls = 0;
+    expect(growPlants([sapling], world, 2, () => {
+      rolls++;
+      return 0.5;
+    })).toBe(0);
+    expect(rolls).toBe(1);
   });
 });

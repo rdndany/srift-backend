@@ -1871,6 +1871,99 @@ function sugarCaneGrid(): Cell[] {
   return g;
 }
 
+/** A coral fan: a short stem and a spread of branches. */
+function coralFanGrid(body: RGB, tip: RGB): Cell[] {
+  const g = blank();
+  const put = (x: number, y: number, c: RGB) => {
+    if (x >= 0 && y >= 0 && x < N && y < N) g[y * N + x] = c;
+  };
+  for (let y = 9; y < 16; y++) {
+    put(7, y, body);
+    put(8, y, [Math.max(0, body[0] - 30), Math.max(0, body[1] - 30), Math.max(0, body[2] - 20)]);
+  }
+  const arms: [number, number, number][] = [
+    [7, 8, -1],
+    [8, 8, 1],
+    [6, 6, -1],
+    [9, 6, 1],
+    [5, 4, -1],
+    [10, 4, 1],
+  ];
+  for (const [x, y, d] of arms) {
+    put(x, y, body);
+    put(x + d, y - 1, tip);
+    put(x + d * 2, y - 2, tip);
+    put(x + d * 2, y - 3, body);
+  }
+  return g;
+}
+
+/** A bubble bloom: a short green stalk and pale bubbles rising off it. */
+function bubbleBloomGrid(): Cell[] {
+  const g = blank();
+  const stem: RGB = [36, 150, 96];
+  const dark: RGB = [20, 96, 64];
+  const bubble: RGB = [186, 236, 255];
+  for (let y = 9; y < 16; y++) {
+    g[y * N + 7] = stem;
+    g[y * N + 8] = dark;
+  }
+  const dots: [number, number][] = [
+    [5, 7],
+    [10, 6],
+    [4, 4],
+    [11, 4],
+    [6, 2],
+    [9, 3],
+    [8, 1],
+  ];
+  for (const [x, y] of dots) g[y * N + x] = bubble;
+  return g;
+}
+
+/** The diving helmet: a steel box, a glass face behind bars, and a copper fitting on the side. */
+function divingHelmGrid(): Cell[] {
+  const g = blank();
+  const steel: RGB = [168, 176, 186];
+  const dark: RGB = [58, 66, 76];
+  const glass: RGB = [90, 186, 204];
+  const copper: RGB = [204, 118, 46];
+  for (let y = 2; y <= 13; y++) {
+    for (let x = 3; x <= 12; x++) g[y * N + x] = steel;
+  }
+  for (let y = 5; y <= 11; y++) {
+    for (let x = 5; x <= 10; x++) g[y * N + x] = dark;
+  }
+  for (let y = 5; y <= 11; y++) {
+    for (const x of [5, 7, 9]) g[y * N + x] = glass;
+  }
+  for (let y = 6; y <= 10; y++) {
+    g[y * N + 13] = copper;
+    g[y * N + 14] = copper;
+  }
+  g[1 * N + 7] = copper;
+  g[1 * N + 8] = copper;
+  g[12 * N + 4] = dark;
+  g[12 * N + 11] = dark;
+  return g;
+}
+
+/** A glass bottle of air. */
+function oxygenGrid(): Cell[] {
+  const g = blank();
+  const neck: RGB = [168, 176, 184];
+  const glass: RGB = [176, 228, 238];
+  const air: RGB = [72, 186, 214];
+  for (let y = 1; y <= 3; y++) {
+    g[y * N + 7] = neck;
+    g[y * N + 8] = neck;
+  }
+  for (let y = 4; y <= 14; y++) {
+    for (let x = 5; x <= 10; x++) g[y * N + x] = y < 9 ? air : glass;
+  }
+  return g;
+}
+
 /** A round pad seen from above, with a notch cut out of it. */
 function lilyPadGrid(): Cell[] {
   const g = blank();
@@ -3497,6 +3590,11 @@ const BUILDERS: Record<string, () => Cell[]> = {
   red_mushroom: () => mushroomGrid([208, 44, 44], [244, 236, 224]),
   sugar_cane: sugarCaneGrid,
   lily_pad: lilyPadGrid,
+  coral_fan_yellow: () => coralFanGrid([232, 196, 64], [255, 236, 140]),
+  coral_fan_red: () => coralFanGrid([214, 64, 72], [255, 150, 130]),
+  bubble_bloom: bubbleBloomGrid,
+  diver_helm: divingHelmGrid,
+  oxygen: oxygenGrid,
   pink_petals: petalsGrid,
   cave_vines: () => caveVinesGrid(false),
   cave_vines_berries: () => caveVinesGrid(true),

@@ -4,6 +4,7 @@ import {
   decodeChunk,
   encodeChunk,
   migrateLegacySave,
+  parseIsleSave,
   parsePlayerSave,
   parseWorldState,
   type PlayerSave,
@@ -24,6 +25,8 @@ import {
  */
 
 const DB_NAME = 'solrift';
+/** Island survival always uses this database, whichever character is signed in. */
+const ISLE_DB = `${DB_NAME}-isle`;
 const DB_VERSION = 3;
 const CHUNKS = 'chunks';
 const PLAYERS = 'players';
@@ -152,9 +155,8 @@ async function claimPlainDb(name: string): Promise<void> {
   await moveDb(DB_NAME, name);
 }
 
-function open(): Promise<IDBDatabase> {
+function open(name = scopedName()): Promise<IDBDatabase> {
   legacyChecked ??= migrateLegacyDb().catch((err) => console.warn('could not move the old saves over', err));
-  const name = scopedName();
   return legacyChecked
     .then(() => claimPlainDb(name))
     .catch((err) => console.warn('could not move the saves over to the character', err))
@@ -210,6 +212,110 @@ const request = <T>(req: IDBRequest<T>): Promise<T> =>
 export interface SavedWorld {
   seed: number;
   player: PlayerSave;
+  /** Isle survival: the day reached, from this same save. */
+  day?: number;
+}
+
+interface IsleHit {
+  name: string;
+  seed: number;
+  player: PlayerSave;
+  day: number;
+  at: number;
+}
+
+/** Save databases already on this device. Opening a name that is not here would create an empty one. */
+async function listedSaveDatabases(): Promise<Set<string>> {
+  const names = new Set<string>();
+  if (typeof indexedDB === 'undefined' || typeof indexedDB.databases !== 'function') return names;
+  for (const d of await indexedDB.databases()) {
+    if (d.name && (d.name === DB_NAME || d.name.startsWith(`${DB_NAME}-`))) names.add(d.name);
+  }
+  return names;
+}
+
+/** Island seeds in one database, with the day stored beside that character. */
+async function isleHitsIn(db: IDBDatabase, name: string): Promise<IsleHit[]> {
+  if (!db.objectStoreNames.contains(PLAYERS)) return [];
+  const playerStore = db.transaction(PLAYERS).objectStore(PLAYERS);
+  const [keys, values] = await Promise.all([request(playerStore.getAllKeys()), request(playerStore.getAll())]);
+  const hits: IsleHit[] = [];
+  for (let i = 0; i < keys.length; i++) {
+    const key = String(keys[i]);
+    const match = /^(-?\d+)-isle$/.exec(key);
+    if (!match) continue;
+    const seed = Number(match[1]);
+    if (!Number.isInteger(seed) || String(seed) !== match[1]) continue;
+    let player: PlayerSave | null;
+    try {
+      player = parsePlayerSave(values[i]);
+    } catch {
+      continue;
+    }
+    if (!player) continue;
+    let day = player.dy ?? 0;
+    if (db.objectStoreNames.contains(WORLDS)) {
+      try {
+        const state = parseWorldState(await request(db.transaction(WORLDS).objectStore(WORLDS).get(key)));
+        const fromWorld = parseIsleSave(state?.isle)?.day ?? 0;
+        if (fromWorld > day) day = fromWorld;
+      } catch {
+        // A world record from a newer game: the day saved on the character still counts.
+      }
+    }
+    hits.push({ name, seed, player, day: day >= 1 ? day : 1, at: player.savedAt ?? 0 });
+  }
+  return hits;
+}
+
+/** Bring one island (its character, its clock and its edited land) into the island database. */
+async function copyIsleRecord(fromName: string, seed: number): Promise<void> {
+  const worldId = `${seed}-isle`;
+  const prefix = `${worldId}:`;
+  const from = await openDb(fromName);
+  try {
+    const player = await request(from.transaction(PLAYERS).objectStore(PLAYERS).get(worldId));
+    const world = from.objectStoreNames.contains(WORLDS) ? await request(from.transaction(WORLDS).objectStore(WORLDS).get(worldId)) : undefined;
+    const chunks: { key: IDBValidKey; value: unknown }[] = [];
+    if (from.objectStoreNames.contains(CHUNKS)) {
+      await new Promise<void>((resolve, reject) => {
+        const req = from.transaction(CHUNKS).objectStore(CHUNKS).openCursor();
+        req.onsuccess = () => {
+          const cur = req.result;
+          if (!cur) return resolve();
+          if (String(cur.key).startsWith(prefix)) chunks.push({ key: cur.key, value: cur.value });
+          cur.continue();
+        };
+        req.onerror = () => reject(req.error);
+      });
+    }
+    const to = await open(ISLE_DB);
+    try {
+      const tx = to.transaction([PLAYERS, WORLDS, CHUNKS], 'readwrite');
+      const blocks = tx.objectStore(CHUNKS);
+      await new Promise<void>((resolve, reject) => {
+        const req = blocks.openCursor();
+        req.onsuccess = () => {
+          const cur = req.result;
+          if (!cur) {
+            if (player !== undefined) tx.objectStore(PLAYERS).put(player, worldId);
+            if (world !== undefined) tx.objectStore(WORLDS).put(world, worldId);
+            for (const c of chunks) blocks.put(c.value, c.key);
+            resolve();
+            return;
+          }
+          if (String(cur.key).startsWith(prefix)) cur.delete();
+          cur.continue();
+        };
+        req.onerror = () => reject(req.error);
+      });
+      await done(tx);
+    } finally {
+      to.close();
+    }
+  } finally {
+    from.close();
+  }
 }
 
 export class LocalSaveStore implements SaveStore {
@@ -230,6 +336,59 @@ export class LocalSaveStore implements SaveStore {
       }
     });
     return out.sort((a, b) => (b.player.savedAt ?? 0) - (a.player.savedAt ?? 0));
+  }
+
+  /**
+   * The one island on this device, or null. The newest character wins, including one that was saved
+   * into a signed-in character's database. It is copied into the island database, and any older island there is removed.
+   */
+  static async isleWorld(): Promise<SavedWorld | null> {
+    const listed = await listedSaveDatabases();
+    const names = new Set(listed);
+    names.add(ISLE_DB);
+    const hits: IsleHit[] = [];
+    for (const name of names) {
+      let db: IDBDatabase;
+      try {
+        db = name === ISLE_DB && !listed.has(ISLE_DB) ? await open(ISLE_DB) : await openDb(name);
+      } catch {
+        continue;
+      }
+      try {
+        hits.push(...(await isleHitsIn(db, name)));
+      } catch {
+        // This database could not be read. The others still count.
+      } finally {
+        db.close();
+      }
+    }
+    hits.sort((a, b) => b.at - a.at || b.day - a.day);
+    let best: IsleHit | null = hits[0] ?? null;
+    if (!best) return null;
+    if (best.name !== ISLE_DB) {
+      try {
+        await copyIsleRecord(best.name, best.seed);
+      } catch (err) {
+        console.warn('could not bring the island save across', err);
+        best = hits.find((h) => h.name === ISLE_DB) ?? null;
+      }
+    }
+    if (!best) return null;
+    const keep = best;
+    for (const extra of hits) {
+      if (extra.name === ISLE_DB && extra.seed !== keep.seed) await LocalSaveStore.dropIsle(extra.seed);
+    }
+    return { seed: keep.seed, player: keep.player, day: keep.day };
+  }
+
+  /** Forget one island seed: its chunks, its player, and the recipe book for that seed. Scope must be 'isle'. */
+  static async dropIsle(seed: number): Promise<void> {
+    await new LocalSaveStore(`${seed}-isle`).clear();
+    try {
+      localStorage.removeItem(`solrift-recipes-${LocalSaveStore.scopeKey()}${seed}-isle`);
+    } catch {
+      /* storage blocked: the world itself is already gone */
+    }
   }
 
   /** Play this wallet character's saves from now on (null: the plain database). Games and cloud syncs started after this use it. */
@@ -264,13 +423,19 @@ export class LocalSaveStore implements SaveStore {
     } catch {
       /* storage blocked: nothing to remove */
     }
-  }  private dbp: Promise<IDBDatabase> | null = null;
-  private frozen = false;
+  }
 
-  constructor(private readonly worldId: string) {}
+  private dbp: Promise<IDBDatabase> | null = null;
+  private frozen = false;
+  /** Island worlds ignore the signed-in character and always use the island database. */
+  private readonly dbName: string | null;
+
+  constructor(private readonly worldId: string) {
+    this.dbName = worldId.endsWith('-isle') ? ISLE_DB : null;
+  }
 
   private db(): Promise<IDBDatabase> {
-    return (this.dbp ??= open());
+    return (this.dbp ??= open(this.dbName ?? undefined));
   }
 
   private chunkKey(cx: number, cz: number): string {

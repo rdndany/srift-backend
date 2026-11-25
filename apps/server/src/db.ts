@@ -11,6 +11,12 @@ import { PERK_HERO_SLOT, SqliteTokenRepo, type TokenRepo } from './tokenRepo';
 /** Characters every wallet can have. Hero slots bought with $SOLRIFT add to it (`Repo.maxCharacters`). */
 export const MAX_CHARACTERS = 3;
 
+/** How many names a leaderboard shows. */
+export const BOARD_LIMIT = 50;
+
+/** A reported island day above this is refused. A real day is twenty minutes, so this is longer than anyone plays. */
+export const MAX_ISLE_DAYS = 10_000;
+
 /**
  * One character of a wallet. Every character is its own `accounts` row: it owns its progress (room save, cloud
  * worlds) and a session points at the character being played. Several rows share a wallet; a row without a
@@ -74,6 +80,13 @@ export interface Repo {
   touchSession(tokenHash: string, now: number, expiresAt: number): void;
   deleteSession(tokenHash: string): void;
   deleteExpiredSessions(now: number): number;
+  /**
+   * Keep this character's best Survival Island day. A smaller report does not replace a larger one.
+   * Returns the day now stored (0 when the account is missing or the report is not a day).
+   */
+  noteIsleDays(accountId: string, days: number, now: number): number;
+  /** Survival Island, longest survival first. A tie keeps whoever reached that day first. */
+  isleBoard(limit: number): { name: string; days: number }[];
   close(): void;
 }
 
@@ -141,6 +154,11 @@ export class SqliteRepo implements Repo {
       );
       CREATE INDEX IF NOT EXISTS sessions_account ON sessions(account_id);
       CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at);
+      CREATE TABLE IF NOT EXISTS isle_days (
+        account_id TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+        days INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
     `);
     // Accounts made before characters existed have no `look` column yet.
     const cols = this.db.prepare('PRAGMA table_info(accounts)').all() as unknown as { name: string }[];
@@ -237,6 +255,7 @@ export class SqliteRepo implements Repo {
     this.cloud.transaction(() => {
       for (const w of this.cloud.listWorlds(id)) this.cloud.deleteWorld(id, w.worldId);
       this.room.deleteJson(`player:${id}`);
+      this.db.prepare('DELETE FROM isle_days WHERE account_id = ?').run(id);
       const others = this.listCharacters(gone.wallet).filter((c) => c.id !== id);
       if (others.length === 0) {
         // The wallet's last character: the account stays, empty, and the name is free.
@@ -283,6 +302,34 @@ export class SqliteRepo implements Repo {
 
   deleteExpiredSessions(now: number): number {
     return Number(this.db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(now).changes);
+  }
+
+  noteIsleDays(accountId: string, days: number, now: number): number {
+    const row = this.db.prepare('SELECT days FROM isle_days WHERE account_id = ?').get(accountId) as unknown as { days: number } | undefined;
+    const held = row?.days ?? 0;
+    if (!Number.isInteger(days) || days < 1 || days > MAX_ISLE_DAYS || days <= held) return held;
+    if (!this.db.prepare('SELECT 1 AS ok FROM accounts WHERE id = ?').get(accountId)) return 0;
+    this.db
+      .prepare(
+        `INSERT INTO isle_days (account_id, days, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(account_id) DO UPDATE SET days = excluded.days, updated_at = excluded.updated_at
+         WHERE excluded.days > isle_days.days`,
+      )
+      .run(accountId, days, now);
+    return days;
+  }
+
+  isleBoard(limit: number): { name: string; days: number }[] {
+    const n = Math.max(1, Math.min(BOARD_LIMIT, Math.floor(limit)));
+    return this.db
+      .prepare(
+        `SELECT a.display_name AS name, d.days AS days
+           FROM isle_days d JOIN accounts a ON a.id = d.account_id
+          WHERE a.look IS NOT NULL
+          ORDER BY d.days DESC, d.updated_at ASC, a.display_name ASC
+          LIMIT ?`,
+      )
+      .all(n) as unknown as { name: string; days: number }[];
   }
 
   close(): void {

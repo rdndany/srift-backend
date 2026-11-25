@@ -242,6 +242,7 @@ describe('crashes and failing storage', () => {
       getJson: (k) => inner.getJson(k),
       setJson: (k, v) => inner.setJson(k, v),
       deleteJson: (k) => inner.deleteJson(k),
+      listJson: (prefix) => inner.listJson(prefix),
     };
     const quiet = console.error;
     console.error = () => undefined;

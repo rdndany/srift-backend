@@ -11,7 +11,7 @@ import { Blocks } from './BlockCube';
 import { HeroLine } from './CampHero';
 import { CampTrips, DailyCard } from './CampTrips';
 import { ClickSparks, Embers, Reveal, useFrontMotion } from './fx';
-import { SCROLL_KEY, goBeyond, goMarket, goToken, goShop } from './frontNav';
+import { SCROLL_KEY, goBeyond, goMarket, goToken, goShop, goRanks } from './frontNav';
 import { ART } from './homeAssets';
 import { WalletLinks } from './WalletLinks';
 import './home.css';
@@ -159,6 +159,7 @@ export function FarmPage() {
             <button className="fp-link-farm" aria-current="page" onClick={() => document.getElementById('home-layer')?.scrollTo({ top: 0, behavior: 'smooth' })}>
               Farm
             </button>
+            <button className="fp-link-ranks" onClick={goRanks}>Ranks</button>
             <button className="fp-link-market" onClick={goMarket}>
               Market
             </button>

@@ -287,6 +287,44 @@ export function roofGap(world: BlockReader, b: Body): number {
   return 4;
 }
 
+/**
+ * A swimmer pressed into a shore. Puts the feet on top of that lip when it is only a block or so above
+ * the water, and steps inland so a short or wide body does not rise in place and fall back. A sea wall
+ * is not a ladder.
+ */
+function climbShore(world: BlockReader, b: Body, dirX: number, dirZ: number): boolean {
+  const w = b.width ?? PLAYER_WIDTH;
+  const h = b.height ?? PLAYER_HEIGHT;
+  const px = b.x + dirX * 0.2;
+  const pz = b.z + dirZ * 0.2;
+  if (!collides(world, px, b.y, pz, w, h)) return false;
+  const ax = Math.floor(b.x + dirX * (w * 0.5 + 0.02));
+  const az = Math.floor(b.z + dirZ * (w * 0.5 + 0.02));
+  let top = Math.floor(b.y + 0.02);
+  const limit = top + 3;
+  while (top < limit) {
+    const id = world.getBlock(ax, top, az);
+    if (IS_SOLID[id] !== 1 || IS_LIQUID[id] === 1) break;
+    top++;
+  }
+  if (top === limit || top - b.y > 2.05 || top <= b.y + 0.05) return false;
+  const spots: ReadonlyArray<readonly [number, number]> = [
+    [ax + 0.5, az + 0.5],
+    [b.x + dirX * (w * 0.5 + 0.08), b.z + dirZ * (w * 0.5 + 0.08)],
+  ];
+  for (const [nx, nz] of spots) {
+    if (collides(world, nx, top, nz, w, h)) continue;
+    const under = world.getBlock(Math.floor(nx), top - 1, Math.floor(nz));
+    if (IS_SOLID[under] !== 1 || IS_LIQUID[under] === 1) continue;
+    b.x = nx;
+    b.y = top;
+    b.z = nz;
+    b.vy = 0;
+    return true;
+  }
+  return false;
+}
+
 /** Advance the player body by dt seconds. Fixed-timestep friendly. */
 export function stepPlayer(world: BlockReader, b: Body, input: MoveInput, dt: number): void {
   const feetBlock = world.getBlock(Math.floor(b.x), Math.floor(b.y + 0.4), Math.floor(b.z));
@@ -356,14 +394,20 @@ export function stepPlayer(world: BlockReader, b: Body, input: MoveInput, dt: nu
     b.vy -= (thick ? 5 : 6) * dt;
     if (input.jump) b.vy += (thick ? 14 : 20) * dt;
     b.vy = Math.max(thick ? -1.6 : -3, Math.min(b.vy, thick ? 2.2 : 3.4));
-    // Climbing out: pressed against a bank a block above the surface, with room on top, a swimmer who
-    // keeps jumping gets a heave that carries them up and over (swimming speed alone never reaches it).
+    // Climbing out. A body already touching the bank cannot rise: the face overhead cancels the jump and
+    // it stays draped on the lip. Step it onto a lip that is only a block or so above the water. A high
+    // wall is left alone, and so is a swimmer who is not trying to climb.
     const push = Math.hypot(wx, wz);
     if (input.jump && push > 0.05) {
-      const px = b.x + (wx / push) * 0.12;
-      const pz = b.z + (wz / push) * 0.12;
-      if (collides(world, px, b.y, pz, b.width, b.height) && !collides(world, px, b.y + 1.5, pz, b.width, b.height)) {
-        b.vy = Math.max(b.vy, thick ? 8 : 9.6);
+      const dirX = wx / push;
+      const dirZ = wz / push;
+      const placed = !thick && climbShore(world, b, dirX, dirZ);
+      if (!placed) {
+        const px = b.x + dirX * 0.12;
+        const pz = b.z + dirZ * 0.12;
+        if (collides(world, px, b.y, pz, b.width, b.height) && !collides(world, px, b.y + 1.5, pz, b.width, b.height)) {
+          b.vy = Math.max(b.vy, thick ? 8 : 9.6);
+        }
       }
     }
   } else {

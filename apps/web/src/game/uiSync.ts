@@ -57,6 +57,9 @@ export function makeUiSync(session: ClientSession, input: Input, overlay: HTMLEl
     const health = Math.ceil(session.vitals.health);
     const hunger = Math.ceil(session.vitals.hunger);
     const air = Math.round(session.vitals.air * 2) / 2;
+    const submerged = session.body.eyeInWater === true && session.body.eyeInLava !== true;
+    const bottle = session.bottleSec < 0 ? -1 : Math.round(session.bottleSec * 2) / 2;
+    const spare = session.bottleSec < 0 ? 0 : session.bottleSpare;
     const s = useUi.getState();
     // The bar is 182 px wide in the original, so finer steps are invisible.
     const xpProgress = Math.round(session.xp.progress * 182) / 182;
@@ -71,8 +74,8 @@ export function makeUiSync(session: ClientSession, input: Input, overlay: HTMLEl
     if (s.hardcore !== session.hardcore || s.spectating !== session.spectating) {
       useUi.setState({ hardcore: session.hardcore, spectating: session.spectating });
     }
-    if (s.health !== health || s.hunger !== hunger || s.air !== air || s.mode !== session.mode || s.selected !== session.selected || s.level !== level || s.xpProgress !== xpProgress) {
-      useUi.setState({ health, hunger, air, level, xpProgress, mode: session.mode, selected: session.selected });
+    if (s.health !== health || s.hunger !== hunger || s.air !== air || s.submerged !== submerged || s.bottle !== bottle || s.spare !== spare || s.mode !== session.mode || s.selected !== session.selected || s.level !== level || s.xpProgress !== xpProgress) {
+      useUi.setState({ health, hunger, air, submerged, bottle, spare, level, xpProgress, mode: session.mode, selected: session.selected });
     }
     if (session.screen !== shownScreen) {
       shownScreen = session.screen;

@@ -28,6 +28,7 @@ import {
   lookCode,
   lookOfCode,
   newCharacterSheet,
+  blankCharacterSheet,
   outfitItems,
   playerNameProblem,
   randomLook,
@@ -53,7 +54,7 @@ import { RealmChat } from './CampChat';
 import { ClassSkills } from './ClassSkills';
 import { statLines } from './ClassPicker';
 import { ClickSparks, Embers, useFrontMotion } from './fx';
-import { FRONT_MENU, SCROLL_KEY, frontUrl, goBeyond, goMarket, goToken, goFarm, goShop } from './frontNav';
+import { FRONT_MENU, SCROLL_KEY, frontUrl, goBeyond, goMarket, goToken, goFarm, goShop, goRanks } from './frontNav';
 import { HANDOFF_KEYS, siteUrl, whereAmI } from '../game/route';
 import { ART } from './homeAssets';
 import { ItemSprite } from './ItemSprite';
@@ -67,7 +68,7 @@ import './campPage.css';
 import './responsive.css';
 
 /** What the lobby hands to the game: a world of your own, or the shared realm. */
-export type PlayTarget = { kind: 'single'; seed: number; mode: HomeMode; world?: 'beyond' } | { kind: 'multi' };
+export type PlayTarget = { kind: 'single'; seed: number; mode: HomeMode; world?: 'beyond' | 'isle' } | { kind: 'multi' };
 
 type Who = 'guest' | 'wallet';
 
@@ -77,8 +78,29 @@ export interface LobbyChoice {
   way: Way;
   mode: HomeMode;
   /** Which world a single-player game starts in, when the page that sent the player asked for one (the World Beyond's page does). */
-  world?: 'beyond';
+  world?: 'beyond' | 'isle';
 }
+/** The one character of island survival, kept on this device and never mixed with a multiplayer hero. */
+const ISLE_HERO = 'solrift-isle-hero';
+function readIsleHero(): { name: string; look: number } | null {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const raw = JSON.parse(localStorage.getItem(ISLE_HERO) ?? 'null') as { name?: unknown; look?: unknown } | null;
+    if (!raw || typeof raw.name !== 'string' || typeof raw.look !== 'number') return null;
+    const name = cleanPlayerName(raw.name);
+    return name ? { name, look: raw.look } : null;
+  } catch {
+    return null;
+  }
+}
+function writeIsleHero(hero: { name: string; look: number }): void {
+  try {
+    localStorage.setItem(ISLE_HERO, JSON.stringify(hero));
+  } catch {
+    /* storage blocked: the character lasts for this visit */
+  }
+}
+
 export function saveLobbyChoice(c: LobbyChoice): void {
   try {
     sessionStorage.setItem(CHOICE_KEY, JSON.stringify(c));
@@ -93,7 +115,9 @@ function readLobbyChoice(): LobbyChoice {
     if (q.has('way')) {
       const way: Way = q.get('way') === 'multi' ? 'multi' : 'single';
       const mode = MODES.find((m) => m.id === q.get('mode'))?.id ?? 'survival';
-      const choice: LobbyChoice = { way, mode, ...(q.get('world') === 'beyond' ? { world: 'beyond' as const } : {}) };
+      const picked = q.get('world');
+      const world = picked === 'beyond' || picked === 'isle' ? picked : undefined;
+      const choice: LobbyChoice = { way, mode, ...(world ? { world } : {}) };
       saveLobbyChoice(choice);
       for (const k of HANDOFF_KEYS) q.delete(k);
       history.replaceState(null, '', `${location.pathname}${q.size ? `?${q}` : ''}${location.hash}`);
@@ -104,7 +128,8 @@ function readLobbyChoice(): LobbyChoice {
   }
   try {
     const raw = JSON.parse(sessionStorage.getItem(CHOICE_KEY) ?? 'null');
-    return { way: raw?.way === 'multi' ? 'multi' : 'single', mode: MODES.find((m) => m.id === raw?.mode)?.id ?? 'survival', ...(raw?.world === 'beyond' ? { world: 'beyond' as const } : {}) };
+    const world = raw?.world === 'beyond' || raw?.world === 'isle' ? raw.world : undefined;
+    return { way: raw?.way === 'multi' ? 'multi' : 'single', mode: MODES.find((m) => m.id === raw?.mode)?.id ?? 'survival', ...(world ? { world } : {}) };
   } catch {
     return { way: 'single', mode: 'survival' };
   }
@@ -300,9 +325,14 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
   const replaceLook = useProfile((s) => s.replaceLook);
 
   const [{ way, mode, world: chosenWorld }] = useState(readLobbyChoice);
+  /** Survival single player is the island. It is not a world picked beside the overworld. */
+  const island = way === 'single' && mode === 'survival';
   const [seedText, setSeedText] = useState('');
-  const [beyond, setBeyond] = useState(chosenWorld === 'beyond');
+  const [worldPick, setWorldPick] = useState<'overworld' | 'beyond' | 'isle'>(chosenWorld === 'beyond' ? 'beyond' : 'overworld');
+  const [isleHero, setIsleHero] = useState<{ name: string; look: number } | null>(null);
   const [worlds, setWorlds] = useState<SavedWorld[] | null>(null);
+  /** Days survived on the one island, once its save has been read. */
+  const [isleDay, setIsleDay] = useState<number | null>(null);
   const [removing, setRemoving] = useState<number | null>(null);
   const [worldError, setWorldError] = useState<string | null>(null);
 
@@ -335,8 +365,8 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
 
   const signedIn = status === 'in' && account !== null;
   const hasCharacter = signedIn && account.look !== null;
-  /** The name, look and class are being made (a guest always; a wallet when it has no character yet, or asked for one more). */
-  const creating = (who === 'guest' && !guestMade) || (signedIn && (account.look === null || makingNew));
+  /** The name, look and class are being made (a guest always; a wallet when it has no character yet, or asked for one more). Island survival has one character and no class. */
+  const creating = island ? isleHero === null : (who === 'guest' && !guestMade) || (signedIn && (account.look === null || makingNew));
   // The figure wears the set the hero has on in the world (it is in the hero's outfit slot).
   const wornOutfit = signedIn ? (account.outfit ?? null) : null;
   useEffect(() => {
@@ -349,14 +379,26 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
   // A guest starts from what this tab remembers (or a random name).
   useEffect(() => {
     hydrateProfile();
-    const s = useProfile.getState();
-    // (A new character starts with no name and no class: the player makes both.)
+    const profile = useProfile.getState();
+    if (island) {
+      const hero = readIsleHero();
+      setIsleHero(hero);
+      profile.setClassId(null);
+      profile.setIdentity('guest');
+      LocalSaveStore.setScope('isle');
+      if (hero) {
+        useProfile.setState({ name: hero.name });
+        profile.replaceLook(lookOfCode(hero.look));
+      } else useProfile.setState({ name: '' });
+      return;
+    }
     useProfile.setState({ name: '' });
-    if (!useAuth.getState().account) s.setIdentity('guest');
-  }, []);
+    if (!useAuth.getState().account) profile.setIdentity('guest');
+  }, [island]);
 
   // A signed-in wallet is who plays: its character (or the making of one) takes over the page.
   useEffect(() => {
+    if (island) return;
     if (status !== 'in' || !account) return;
     setWho('wallet');
     useProfile.getState().setIdentity('wallet');
@@ -391,9 +433,24 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
         });
   useEffect(() => {
     if (status === 'loading') return;
+    if (island) {
+      LocalSaveStore.setScope('isle');
+      LocalSaveStore.isleWorld().then(
+        (saved) => {
+          setWorlds(saved ? [saved] : []);
+          setIsleDay(saved ? saved.day ?? 1 : null);
+        },
+        (err) => {
+          console.warn('could not read the island', err);
+          setWorlds([]);
+          setIsleDay(null);
+        },
+      );
+      return;
+    }
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, characterId]);
+  }, [status, characterId, island]);
 
   const removeWorld = async (seed: number) => {
     if (removing !== seed) return setRemoving(seed);
@@ -405,6 +462,22 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
     }
     setRemoving(null);
     await refresh();
+  };
+
+  /** Forget the one island on this device. The first click asks; the second deletes it. */
+  const forgetIsle = async () => {
+    if (!latest || working) return;
+    if (removing !== latest.seed) return setRemoving(latest.seed);
+    LocalSaveStore.setScope('isle');
+    try {
+      await LocalSaveStore.dropIsle(latest.seed);
+      setWorldError(null);
+      setWorlds([]);
+      setIsleDay(null);
+    } catch (err) {
+      setWorldError(`Could not delete the island: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    setRemoving(null);
   };
 
   // ---- who: guest or wallet
@@ -522,19 +595,29 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
   }, [hasCharacter, characterId, way, sheetGen]);
   const sheetWorld = clash ?? latest;
   const accountClass = account?.class ?? null;
-  const localSheet = useMemo(() => (sheetWorld ? sheetOfSave(sheetWorld.player, accountClass) : null), [sheetWorld, accountClass]);
+  const localSheet = useMemo(() => (sheetWorld ? sheetOfSave(sheetWorld.player, island ? null : accountClass) : null), [sheetWorld, accountClass, island]);
   /** What is known of the character from its saved worlds (a guest keeps none); null: nothing saved yet. */
   const savedSheet: SheetData | null | undefined = way === 'multi' ? (who === 'guest' ? null : realmSheet) : worlds === null ? undefined : localSheet;
   /** A character that has never been played carries what its class starts a survival world with: shown, so that the bags are seen before PLAY. */
   const starterClass: ClassId | null = account?.class ?? (who === 'guest' ? pick : null);
-  const starter = !creating && savedSheet === null && starterClass !== null && mode !== 'creative';
-  const rawSheet: SheetData | null | undefined = starter ? newCharacterSheet(starterClass) : savedSheet;
+  const starter = !island && !creating && savedSheet === null && starterClass !== null && mode !== 'creative';
+  const rawSheet: SheetData | null | undefined = island ? (creating ? null : (savedSheet ?? blankCharacterSheet())) : starter ? newCharacterSheet(starterClass) : savedSheet;
   /** Health follows the gear, so a piece that adds health moves the bar as well as the stats. */
   const sheet: SheetData | null | undefined = rawSheet ? withWornHealth(rawSheet) : rawSheet;
   const sheetSource = starter ? 'Starting kit' : way === 'multi' ? 'Dawnwatch realm' : sheetWorld ? `${modeInfo(modeOfSave(sheetWorld.player)).name} world ${sheetWorld.seed}` : '';
 
   /** What keeps PLAY from working yet, in words. */
-  const blocker: string | null = who === 'wallet' && !signedIn ? 'Sign in with a wallet, or play as a guest' : creating && problem ? problem : creating && !pick ? 'Pick a class' : null;
+  const blocker: string | null = island
+    ? creating && problem
+      ? problem
+      : null
+    : who === 'wallet' && !signedIn
+      ? 'Sign in with a wallet, or play as a guest'
+      : creating && problem
+        ? problem
+        : creating && !pick
+          ? 'Pick a class'
+          : null;
 
   /** CREATE: the character is made, and the page shows it with what it carries (PLAY is a separate press). A wallet character is permanent: the first press asks, the second one creates it. */
   const create = async () => {
@@ -542,6 +625,16 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
     setTouched(true);
     if (blocker) return;
     const profile = useProfile.getState();
+    if (island) {
+      const hero = { name: cleaned, look: lookCode(look) };
+      writeIsleHero(hero);
+      setIsleHero(hero);
+      profile.setIdentity('guest');
+      profile.setClassId(null);
+      useProfile.setState({ name: cleaned });
+      setTouched(false);
+      return;
+    }
     if (who === 'guest') {
       profile.setIdentity('guest');
       useProfile.setState({ name: cleaned });
@@ -571,6 +664,15 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
   const commit = async (): Promise<boolean> => {
     if (creating || blocker) return false;
     const profile = useProfile.getState();
+    if (island) {
+      if (!isleHero) return false;
+      profile.setIdentity('guest');
+      profile.setClassId(null);
+      useProfile.setState({ name: isleHero.name });
+      profile.replaceLook(lookOfCode(isleHero.look));
+      LocalSaveStore.setScope('isle');
+      return true;
+    }
     if (who === 'guest') {
       profile.setIdentity('guest');
       useProfile.setState({ name: cleaned });
@@ -591,12 +693,26 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
     setWorking(false);
     if (ok) onEnter(t);
   };
+  // Survival is the island. Creative and Hardcore choose the overworld or The World Beyond.
+  const land: 'overworld' | 'beyond' | 'isle' = island ? 'isle' : worldPick === 'beyond' ? 'beyond' : 'overworld';
   const playNow = () => {
     if (way === 'multi') return void start({ kind: 'multi' });
     const seed = parseSeed(seedText);
     // A seed is a world's name on this device: reuse the world if it is already there.
     const existing = worlds?.find((w) => w.seed === seed);
-    void start({ kind: 'single', seed, mode: existing && !beyond ? modeOfSave(existing.player) : mode, ...(beyond ? { world: 'beyond' as const } : {}) });
+    const go = async () => {
+      // Island survival keeps one seed. A different one replaces the island that was saved.
+      if (island && latest && latest.seed !== seed) {
+        LocalSaveStore.setScope('isle');
+        try {
+          await LocalSaveStore.dropIsle(latest.seed);
+        } catch {
+          /* the new island still starts; the next visit keeps only the newest */
+        }
+      }
+      void start({ kind: 'single', seed, mode: existing && land === 'overworld' ? modeOfSave(existing.player) : mode, ...(land === 'overworld' ? {} : { world: land }) });
+    };
+    void go();
   };
 
   const info = modeInfo(mode);
@@ -641,7 +757,7 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
         return;
       }
       if (typing || deleting) return;
-      if (creating && !working && /^[1-9]$/.test(e.key) && CLASS_IDS[Number(e.key) - 1]) {
+      if (creating && !island && !working && /^[1-9]$/.test(e.key) && CLASS_IDS[Number(e.key) - 1]) {
         choose(CLASS_IDS[Number(e.key) - 1]);
         return;
       }
@@ -656,12 +772,12 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   });
-  const shownClass: ClassId | null = creating || who === 'guest' ? pick : (account?.class ?? null);
-  const shownName = creating ? cleaned || 'Nameless' : who === 'guest' ? cleaned : (account?.displayName ?? '');
-  const showFigure = who === 'guest' || signedIn;
+  const shownClass: ClassId | null = island ? null : creating || who === 'guest' ? pick : (account?.class ?? null);
+  const shownName = island ? isleHero?.name || cleaned || 'Nameless' : creating ? cleaned || 'Nameless' : who === 'guest' ? cleaned : (account?.displayName ?? '');
+  const showFigure = island || who === 'guest' || signedIn;
   const shownDef = shownClass ? CLASSES[shownClass] : null;
   /** What the figure and the text on the right show: while choosing, the class under the pointer, else the one in use. */
-  const viewClass: ClassId | null = creating ? (peek ?? pick) : shownClass;
+  const viewClass: ClassId | null = island ? null : creating ? (peek ?? pick) : shownClass;
   const viewDef = viewClass ? CLASSES[viewClass] : null;
   /** The figure wears what the saved character really wears once that is known, else the class's own clothes. While the character is being made it wears none: the class is chosen, not put on. */
   const wornIds = !creating && sheet ? sheet.armor.flatMap((s) => (s ? [s.id] : [])) : null;
@@ -684,8 +800,8 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
 
   return (
     <div className="fp gamepage" ref={root} data-ready={settled ? '1' : '0'}>
-      <div className="gp-bg" style={{ backgroundImage: `url(${ART.characterSelect})` }} aria-hidden="true" />
-      <div className={`gp-loading ${settled ? 'done' : ''}`} id="lobby-loading" role="status" aria-live="polite" aria-hidden={settled} style={{ backgroundImage: `radial-gradient(ellipse 55% 50% at 50% 50%, rgba(5, 4, 12, 0.5), rgba(5, 4, 12, 0.15) 100%), linear-gradient(rgba(5, 4, 12, 0.55), rgba(5, 4, 12, 0.7)), url(${ART.characterSelect})`, backgroundSize: 'cover', backgroundPosition: 'center 30%' }}>
+      <div className="gp-bg" style={{ backgroundImage: `url(${island ? '/art/island-mode-survival.png' : ART.characterSelect})` }} aria-hidden="true" />
+      <div className={`gp-loading ${settled ? 'done' : ''}`} id="lobby-loading" role="status" aria-live="polite" aria-hidden={settled} style={{ backgroundImage: `radial-gradient(ellipse 55% 50% at 50% 50%, rgba(5, 4, 12, 0.5), rgba(5, 4, 12, 0.15) 100%), linear-gradient(rgba(5, 4, 12, 0.55), rgba(5, 4, 12, 0.7)), url(${island ? '/art/island-mode-survival.png' : ART.characterSelect})`, backgroundSize: 'cover', backgroundPosition: 'center 30%' }}>
         <div className="gp-loading-blocks" aria-hidden="true">
           {[B.GRASS, B.PLANKS, B.STONE, B.GOLD_ORE, B.DIAMOND_ORE].map((id, i) => (
             <span key={id} style={{ animationDelay: `s` }}>
@@ -697,7 +813,7 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
         <i className="gp-loading-bar" aria-hidden="true">
           <b />
         </i>
-        <small>Loading your characters</small>
+        <small>{island ? 'Loading' : 'Loading your characters'}</small>
       </div>
       <div className="gp-shade" aria-hidden="true" />
       <ClickSparks />
@@ -717,6 +833,7 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
               </button>
             ))}
             <button className="fp-link-farm" onClick={goFarm}>Farm</button>
+            <button className="fp-link-ranks" onClick={goRanks}>Ranks</button>
             <button className="fp-link-market" onClick={goMarket}>Market</button>
             <button className="fp-link-shop" onClick={goShop}>Shop</button>
             <button className="fp-link-token" onClick={goToken}>Token</button>
@@ -772,7 +889,12 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
         </p>
         {/* ---------------------------------------------------- your characters (left) */}
         <section className="gp-roster" id="lb-slots" aria-label="Characters" ref={rosterRef}>
-          {!(who === 'wallet' && !signedIn) && (
+          {island ? (
+            <header className="gp-roster-head">
+              <h2>Character</h2>
+              <span>{isleHero ? '1 / 1' : 'One character'}</span>
+            </header>
+          ) : !(who === 'wallet' && !signedIn) && (
             <header className="gp-roster-head">
               <h2>{who === 'guest' ? 'Guest' : 'Your characters'}</h2>
               {who === 'guest' ? (
@@ -789,7 +911,7 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
               ) : null}
             </header>
           )}
-          {who === 'wallet' && signedIn && (
+          {!island && who === 'wallet' && signedIn && (
             <p className="lb-signed" id="who-account">
               <span className="lb-signed-ico" aria-hidden="true">
                 <svg viewBox="0 0 12 12" width="16" height="16" shapeRendering="crispEdges">
@@ -809,7 +931,23 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
             </p>
           )}
 
-          {who === 'wallet' && !signedIn ? (
+          {island ? (
+            <div className="lb-slots" id="char-slots" role="group" aria-label="Character">
+              <button type="button" className="lb-slot lb-card isle" aria-pressed="true">
+                <span className="slot-ico" aria-hidden="true">
+                  <svg className="isle-sun" viewBox="0 0 16 16" width="36" height="36" shapeRendering="crispEdges">
+                    <path fill="#ffb24d" d="M7 0h2v2H7zM7 14h2v2H7zM0 7h2v2H0zM14 7h2v2h-2zM2 2h2v2H2zM12 2h2v2h-2zM2 12h2v2H2zM12 12h2v2h-2z" />
+                    <path fill="#ffe08a" d="M5 4h6v1H5zM4 5h8v6H4zM5 11h6v1H5z" />
+                    <path fill="#fff6d0" d="M6 6h4v4H6z" />
+                  </svg>
+                </span>
+                <span className="slot-copy">
+                  <span className="slot-name">{isleHero?.name ?? 'New character'}</span>
+                  <small className="slot-class">Day {isleDay ?? 1}</small>
+                </span>
+              </button>
+            </div>
+          ) : who === 'wallet' && !signedIn ? (
             <div className="gp-signin" id="wallet-pane">
               <h2>Solana wallet</h2>
               {status === 'loading' ? (
@@ -1018,7 +1156,7 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
             <>
               {creating ? (
                 <>
-                  <p className="gp-kicker">{signedIn && account.characters.length > 0 ? `New character (${account.characters.length + 1} of ${account.maxCharacters})` : 'New character'}</p>
+                  <p className="gp-kicker">{!island && signedIn && account.characters.length > 0 ? `New character (${account.characters.length + 1} of ${account.maxCharacters})` : 'New character'}</p>
                   <h1 id="gp-create">Create your character</h1>
                 </>
               ) : (
@@ -1029,9 +1167,9 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
                   <p className="gp-sub">
                     {shownDef && <ItemSprite id={shownDef.startingWeapon} size={22} />}
                     <span id="char-class-fixed" data-class={shownClass ?? ''}>
-                      {shownDef ? shownDef.name : 'None (before classes)'}
+                      {shownDef ? shownDef.name : island ? `Day ${isleDay ?? 1}` : 'None (before classes)'}
                     </span>
-                    <em>{who === 'guest' ? 'Guest' : 'Wallet'}</em>
+                    <em>{island ? 'Island' : who === 'guest' ? 'Guest' : 'Wallet'}</em>
                     {sheet && (
                       <span className="gp-coins" id="char-coins" data-coins={sheet.coins} title={CURRENCY.name}>
                         <CoinIcon size={20} />
@@ -1081,6 +1219,8 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
                       </span>
                     ) : null}
                   </div>
+                  {!island && (
+                    <>
                   <div className="lb-field">
                     <Step n={2} done={!!pick}>
                       Class
@@ -1116,12 +1256,17 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
                       Pick a class to go on.
                     </span>
                   )}
+                    </>
+                  )}
                 </div>
               )}
 
+              {!island && (
               <p className="gp-text" id="class-hint">
                 {viewDef ? `${viewDef.tagline}. ${viewDef.description}` : 'Pick a class to see what it can do. Every class can mine, build, craft and explore.'}
               </p>
+              )}
+              {island && !creating && <p className="gp-text">A simple character. Nothing is carried.</p>}
 
               {viewClass && (
                 <div className="gp-block">
@@ -1146,7 +1291,7 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
 
               {creating && (
                 <details className="gp-look" id="look-more" open>
-                  <summary className="gp-step done" data-step="3">
+                  <summary className="gp-step done" data-step={island ? '2' : '3'}>
                     <i aria-hidden="true">{'\u2713'}</i>
                     Appearance
                     <small>already set: change what you like</small>
@@ -1175,8 +1320,10 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
                 </div>
               )}
 
-              <p className={`lb-note ${who === 'wallet' ? 'good' : 'warn'}`} id="who-save-note">
-                {who === 'guest'
+              <p className={`lb-note ${island || who !== 'wallet' ? 'warn' : 'good'}`} id="who-save-note">
+                {island
+                  ? 'One character on this device. It has no class and carries nothing. It is not one of your multiplayer characters.'
+                  : who === 'guest'
                   ? 'Guest mode: this character and everything you do are forgotten when you leave.'
                   : creating
                     ? `Saved to your account${account ? ` (${shortAddress(account.wallet)})` : ''}: you will look like this on every device, and your progress is kept.`
@@ -1211,6 +1358,7 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
           <button type="button" className="gp-back" id="back-home" onClick={home}>
             &larr; Back
           </button>
+          {!island && (
           <div className="gp-who" id="lb-who" role="group" aria-label="Who is playing?">
             <button type="button" id="who-guest" className={who === 'guest' ? 'on' : ''} aria-pressed={who === 'guest'} onClick={() => void chooseGuest()}>
               <b>Guest</b>
@@ -1221,6 +1369,7 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
               <small>Progress is saved</small>
             </button>
           </div>
+          )}
         </div>
 
         <div className="gp-go" id="dest-chip">
@@ -1231,15 +1380,23 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
                   <span>Seed</span>
                   <input id="seed-input" value={seedText} onChange={(e) => setSeedText(e.target.value)} placeholder="random" spellCheck={false} autoComplete="off" maxLength={40} />
                 </label>
-                <div className="lb-seg" role="group" aria-label="Which world">
-                  <button type="button" id="world-overworld" className={beyond ? '' : 'on'} aria-pressed={!beyond} onClick={() => setBeyond(false)}>
-                    Overworld
-                  </button>
-                  <button type="button" id="world-beyond" className={beyond ? 'on' : ''} aria-pressed={beyond} onClick={() => setBeyond(true)}>
-                    The World Beyond
-                  </button>
+                <div className="lb-seg" role="group" aria-label={island ? 'Mode' : 'Which world'}>
+                  {island ? (
+                    <button type="button" id="world-isle" className="on" aria-pressed="true">
+                      Island
+                    </button>
+                  ) : (
+                    <>
+                      <button type="button" id="world-overworld" className={land === 'overworld' ? 'on' : ''} aria-pressed={land === 'overworld'} onClick={() => setWorldPick('overworld')}>
+                        Overworld
+                      </button>
+                      <button type="button" id="world-beyond" className={land === 'beyond' ? 'on' : ''} aria-pressed={land === 'beyond'} onClick={() => setWorldPick('beyond')}>
+                        The World Beyond
+                      </button>
+                    </>
+                  )}
                 </div>
-                {worlds && worlds.length > 0 && (
+                {worlds && worlds.length > 0 && !island && (
                   <details className="gp-worlds">
                     <summary>Your worlds ({worlds.length})</summary>
                     <div className="lb-worlds">
@@ -1254,7 +1411,7 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
                                 {w.player.gameOver && <em> &middot; game over</em>}
                                 <small>{timeAgo(w.player.savedAt ?? null)}</small>
                               </span>
-                              <button type="button" className="lb-mini play" disabled={working} onClick={() => void start({ kind: 'single', seed: w.seed, mode: m })}>
+                              <button type="button" className="lb-mini play" disabled={working} onClick={() => void start({ kind: 'single', seed: w.seed, mode: island ? mode : m, ...(island ? { world: 'isle' as const } : {}) })}>
                                 Play
                               </button>
                               <button type="button" className="lb-mini delete danger" onClick={() => void removeWorld(w.seed)}>
@@ -1269,9 +1426,20 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
                   </details>
                 )}
               </div>
-              {(clash || beyond) && (
-                <p className="lb-hint">{clash ? `You already have this world (${modeInfo(modeOfSave(clash.player)).name}): Play opens it.` : 'A vast planet of 110 biomes, saved apart from the overworld.'}</p>
-              )}
+              {island ? (
+                <p className="lb-hint">
+                  {latest
+                    ? `One island is kept. Continue opens seed ${latest.seed}. Delete starts over.`
+                    : 'One island, water on every side. Days are counted. One seed is kept.'}
+                </p>
+              ) : (land === 'overworld' && clash) || land === 'beyond' ? (
+                <p className="lb-hint">
+                  {land === 'overworld' && clash
+                    ? `You already have this world (${modeInfo(modeOfSave(clash.player)).name}): Play opens it.`
+                    : 'A vast planet of 110 biomes, saved apart from the overworld.'}
+                </p>
+              ) : null}
+              {island && worldError && <p className="lb-warn">{worldError}</p>}
             </div>
           ) : (
             <RealmPill />
@@ -1287,17 +1455,25 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
                   <span>
                     <b>{shownName}</b>
                     <small>
-                      {shownDef ? shownDef.name : 'Adventurer'} &middot; {who === 'guest' ? 'Guest' : 'Wallet'}
+                      {island ? `Day ${isleDay ?? 1}` : shownDef ? shownDef.name : 'Adventurer'} &middot; {island ? 'Nothing carried' : who === 'guest' ? 'Guest' : 'Wallet'}
                     </small>
                   </span>
                 </>
               )}
             </span>
+            {way === 'single' && island && latest && !creating && (
+              <button type="button" className="lb-continue fp-ghost fp-px lb-forget" disabled={working || blocker !== null} onClick={() => void forgetIsle()}>
+                <span>
+                  {removing === latest.seed ? 'Sure?' : 'Delete'}
+                  <small>{removing === latest.seed ? 'This island is gone' : 'Start over'}</small>
+                </span>
+              </button>
+            )}
             {way === 'single' && latest && !creating && (
-              <button type="button" className="lb-continue fp-ghost fp-px" disabled={working || blocker !== null} onClick={() => void start({ kind: 'single', seed: latest.seed, mode })}>
+              <button type="button" className="lb-continue fp-ghost fp-px" disabled={working || blocker !== null} onClick={() => void start({ kind: 'single', seed: latest.seed, mode, ...(island ? { world: 'isle' as const } : {}) })}>
                 <span>
                   {over ? 'Visit last world' : 'Continue'}
-                  <small>{timeAgo(latest.player.savedAt ?? null)}</small>
+                  <small>{island ? `seed ${latest.seed} · ` : ''}{timeAgo(latest.player.savedAt ?? null)}</small>
                 </span>
               </button>
             )}

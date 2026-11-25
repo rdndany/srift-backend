@@ -114,7 +114,8 @@ export class BlockEntities {
     return lines;
   }
 
-  /** The signs with writing on them within  blocks of (x, z). */
+  /** The signs with writing on them within 
+ blocks of (x, z). */
   signsNear(x: number, z: number, r: number): { x: number; y: number; z: number; lines: string[] }[] {
     const out: { x: number; y: number; z: number; lines: string[] }[] = [];
     for (const [k, lines] of this.signs) {
@@ -290,5 +291,18 @@ export class BlockEntities {
       c.loadJSON(v);
       if (c.busy) this.campfires.set(k, c);
     }
+  }
+
+  /** True once a generated chest at this spot has been opened or broken. */
+  wasRolled(x: number, y: number, z: number): boolean {
+    return this.rolled.has(key(x, y, z));
+  }
+
+  /** Drop a chest's record without spilling its contents (the night ship takes its hold with it). */
+  discardChest(x: number, y: number, z: number): void {
+    const k = key(x, y, z);
+    this.chests.delete(k);
+    this.pair.delete(k);
+    this.rolled.add(k);
   }
 }

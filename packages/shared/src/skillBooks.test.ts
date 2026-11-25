@@ -310,7 +310,7 @@ describe('buying skill books', () => {
 
   it('takes the coins and hands over the book, which then teaches the ability', () => {
     for (const [npc, classId] of merchants) {
-      const s = make(classId);
+      const s = make(classId, 3, 'creative');
       s.clearInventory();
       s.addCoins(5000);
       talkTo(s, npc);
@@ -327,7 +327,7 @@ describe('buying skill books', () => {
       expect(slot).toBeGreaterThanOrEqual(0);
       expect(s.learnFromBook(slot)).toBe(true);
       expect(s.cls!.unlocked.has(ability)).toBe(true);
-      expect(bookCount(s, ability)).toBe(0);
+      expect(bookCount(s, ability)).toBe(1); // creative keeps the book
     }
   });
 
@@ -381,7 +381,7 @@ describe('skill books from quests', () => {
 
   it('are handed over on completion', () => {
     for (const c of ['warrior', 'mage', 'ranger'] as const) {
-      const s = make(c);
+      const s = make(c, 3, 'creative');
       const q = questById({ warrior: 'cl_w1', mage: 'cl_m1', ranger: 'cl_r1' }[c])!;
       s.quests!.done.add('ms00');
       s.quests!.done.add('ms01');
@@ -459,7 +459,7 @@ describe('skill books from monsters', () => {
 
   it('lie on the ground where a monster killed by a player fell, of any class, even for what the killer knows', () => {
     for (const killerClass of ['warrior', null] as const) {
-      const s = make(killerClass, 21);
+      const s = make(killerClass, 21, 'creative');
       if (s.cls) for (const a of abilitiesOf(s.cls.classId)) s.cls.unlocked.add(a.id); // knows every book of its own class
       s.teleport(5.5, generator.hubY + 1, 8.5);
       run(s, 0.2);
@@ -481,6 +481,28 @@ describe('skill books from monsters', () => {
       expect(classes.size, String(killerClass)).toBeGreaterThanOrEqual(2);
       if (killerClass) expect([...seen].some((i) => ABILITIES[i].classId === killerClass)).toBe(true);
     }
+  });
+
+  it('are not found, and no uncommon gear is left, when the killer is in survival', () => {
+    const s = make('warrior', 30);
+    s.teleport(5.5, generator.hubY + 1, 8.5);
+    run(s, 0.2);
+    for (let i = 0; i < 400; i++) {
+      const id = s.spawnMob('zombie', 5.5, generator.hubY + 1, 6.5);
+      expect(s.damageMob(id, 500)).toBe(true);
+    }
+    expect(s.realm.drops.drops.some((d) => skillBookAbility(d.stack.id) !== null || (d.stack.gear !== undefined && d.stack.gear.r > 0))).toBe(false);
+  });
+
+  it('are not sold to a survival player', () => {
+    const s = make('mage');
+    s.clearInventory();
+    s.addCoins(5000);
+    talkTo(s, 'lysa');
+    const i = shopOf('lysa')!.stock.findIndex((w) => skillBookAbility(w.id) === 'fireball');
+    s.apply({ t: 'shop', a: 'buy', i, n: 1 });
+    expect(bookCount(s, 'fireball')).toBe(0);
+    expect(s.coins).toBe(5000);
   });
 
   it('are not left by a monster that nobody killed', () => {

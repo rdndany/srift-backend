@@ -33,6 +33,10 @@ import {
   IS_LIQUID,
   IS_SOLID,
   isWaterBlock,
+  isBubbleBloom,
+  isSeaPlant,
+  parseIsleSave,
+  WORLD_HEIGHT,
   roofGap,
   createBody,
   type SaveMode,
@@ -85,6 +89,7 @@ import { ChaseCamera } from './chaseCamera';
 import { Rain } from './rain';
 import { RemoteSession } from './remote';
 import { saveBridge } from './saveBridge';
+import { reportIsleDay } from './isleBoard';
 import { Sky } from './sky';
 import { PostFx, type FxFlags } from './postfx';
 import { SunShadows } from './shadows';
@@ -135,15 +140,34 @@ import { MobTargetPicker } from './mobTargeting';
 import { ViewFeel, type FeelFrame } from './viewFeel';
 
 
-/** How much water is over the eyes: the first block above them that is not water, and whether that opens to the sky. */
+/** How much water is over the eyes, and whether that column opens to the sky. A plant or a pocket of air under stone is still a cave. */
 function waterColumn(world: { getBlock(x: number, y: number, z: number): number }, x: number, y: number, z: number): { depth: number; surface: number; open: boolean } {
   const ix = Math.floor(x);
   const iz = Math.floor(z);
   let iy = Math.floor(y);
-  for (let i = 0; i < 80; i++) {
+  const through = (id: number): boolean => isWaterBlock(id) || isSeaPlant(id);
+  for (let n = 0; n < 96; n++) {
+    if (iy >= WORLD_HEIGHT) return { depth: Math.max(0, iy - y), surface: iy, open: true };
     const id = world.getBlock(ix, iy, iz);
-    if (!isWaterBlock(id)) return { depth: Math.max(0, iy - y), surface: iy, open: IS_SOLID[id] !== 1 };
-    iy++;
+    if (through(id)) {
+      iy++;
+      continue;
+    }
+    if (IS_SOLID[id] === 1) return { depth: Math.max(0, iy - y), surface: iy, open: false };
+    // Air. A stone roof within a few blocks means the sun does not reach this water.
+    let gap = 0;
+    for (let k = 0; k < 8 && iy + k < WORLD_HEIGHT; k++) {
+      const above = world.getBlock(ix, iy + k, iz);
+      if (IS_SOLID[above] === 1) return { depth: Math.max(0, iy - y), surface: iy, open: false };
+      if (through(above)) {
+        iy += k;
+        gap = -1;
+        break;
+      }
+      gap++;
+    }
+    if (gap < 0) continue;
+    return { depth: Math.max(0, iy - y), surface: iy, open: true };
   }
   return { depth: Math.max(0, iy - y), surface: iy, open: true };
 }
@@ -285,7 +309,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
       else if (!open && session.ready) input.lock();
     },
   );
-  const worldName = (kind: WorldKind): string => (kind === 'square' ? 'square platform' : kind === 'beyond' ? 'World Beyond' : kind === 'showcase' ? 'block showcase' : kind === 'castle' ? 'castle grounds' : 'overworld');
+  const worldName = (kind: WorldKind): string => (kind === 'square' ? 'square platform' : kind === 'beyond' ? 'World Beyond' : kind === 'showcase' ? 'block showcase' : kind === 'castle' ? 'castle grounds' : kind === 'isle' ? 'isle' : 'overworld');
   /** Single-player has no one to talk to, but `/` still takes the few cheats (they need creative mode). */
   function localCommand(text: string): void {
     const [name, arg] = text.replace(/^\//, '').trim().toLowerCase().split(/\s+/);
@@ -449,12 +473,26 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   const SEED = remote ? remote.seed : KIND === 'adventure' ? ADVENTURE_SEED : opts.seed ?? Number(params.get('seed') ?? 1337);
   /** Each kind of world keeps its own save, so the square never touches the overworld's blocks. */
   const worldId = KIND === 'overworld' ? String(SEED) : `${SEED}-${KIND}`;
+  if (!online && KIND === 'isle') LocalSaveStore.setScope('isle');
   const store = new LocalSaveStore(worldId);
   /** A guest keeps nothing: a frozen store drops every write, and the world keeps the blocks they change in memory for this visit only. */
   const guest = !online && opts.guest === true;
   if (guest) store.freeze();
   const world = new World(SEED, atlas, online || guest ? null : store, KIND);
-  if (!online && !guest) await world.loadSaved();
+  let thinSea = false;
+  let raiseKelp = false;
+  if (!online && !guest && KIND === 'isle') {
+    try {
+      const prev = await store.loadWorldState();
+      const saved = parseIsleSave(prev?.isle);
+      thinSea = saved?.sparse !== true;
+      raiseKelp = saved?.tall !== true;
+    } catch {
+      thinSea = false;
+      raiseKelp = false;
+    }
+  }
+  if (!online && !guest) await world.loadSaved(thinSea, raiseKelp);
   if (opts.isCancelled?.()) {
     remote?.leave();
     voice?.dispose();
@@ -481,7 +519,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
         generator: makeGenerator(SEED, KIND),
         mode: forcedMode ?? opts.mode ?? 'survival',
         hardcore: forcedMode === null && opts.hardcore === true,
-        classId: myClass,
+        classId: KIND === 'isle' ? null : myClass,
         /** `?nomobs` turns off natural spawning (used by deterministic tests). */
         naturalSpawning: !params.has('nomobs'),
         /** Rifts come with the monsters (and `?norifts` keeps them away). */
@@ -492,11 +530,13 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
         villagers: !params.has('nomobs') || params.has('villagers'),
       });
   const session: ClientSession = local ?? remote!;
+  if (local) world.onChunk = (cx, cz, data) => local.realm.soakChunk(cx, cz, data);
   remote?.attachWorld(world, (blocks) => world.applyRemoteEdits(blocks));
   const body = session.body;
   const weather = session.weather;
 
   const sky = new Sky();
+  const isleDay = document.getElementById('isle-day');
   /** The sun's shadow map (`?noshadows` turns it off, `?shadows=4096` sharpens the near map, `?shadowfar=0` drops the wide one). */
   const shadowSize = Math.min(4096, Math.max(512, Number(params.get('shadows')) || 2048));
   const shadows = params.has('noshadows') ? null : new SunShadows(world.materials, shadowSize, 64, params.get('shadowfar') === '0' ? 0 : 256);
@@ -514,12 +554,12 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   let placeWait = 0;
   const caveFog = new THREE.Color();
   const beyondTint = new THREE.Color();
-  const seaFog = new THREE.Color();
-  const seaZenith = new THREE.Color();
   /** The water's surface, how much daylight is left at this depth, and how strong the sun shafts are. */
   let seaSurface = 0;
   let seaShafts = 0;
   let seaShade = 1;
+  const seaFog = new THREE.Color();
+  const seaZenith = new THREE.Color();
   scene.add(sky.group);
   const postfx = new PostFx(renderer, scene, camera, sky.sunMesh);
   const fxWanted: FxFlags = ((): FxFlags => {
@@ -558,6 +598,8 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   scene.add(particles.bubbles);
   const torchGlow = new TorchGlow();
   let campfireSmoke = 0;
+  let bloomScan = 0;
+  const blooms: { x: number; y: number; z: number; d: number }[] = [];
   scene.add(torchGlow.group);
   const audio = new GameAudio();
   gameAudio = audio;
@@ -891,6 +933,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     local.loadWorldState(savedWorld, { weather: !params.has('weather') });
     sky.time = session.time;
   }
+  if (local && KIND === 'isle') local.realm.markIsleSea();
   if (local && (startWeather === 'rain' || startWeather === 'thunder' || startWeather === 'clear')) {
     local.weather.set(startWeather, 100000);
     weather.rain = startWeather === 'clear' ? 0 : 1;
@@ -898,6 +941,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   }
   if (local && savedPlayer) {
     local.loadPlayer(savedPlayer, forcedMode !== null);
+    if (savedPlayer.dy) local.realm.keepIsleDay(savedPlayer.dy);
     input.yaw = local.yaw;
     input.pitch = local.pitch;
   }
@@ -1541,6 +1585,12 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
 
     sky.time = session.time;
     sky.rain = weather.rain;
+    const isle = KIND === 'isle' && local ? local.realm.isleInfo() : null;
+    sky.blackMoon = isle?.blackMoon ?? false;
+    if (isleDay) {
+      isleDay.classList.toggle('on', !!isle);
+      if (isle) isleDay.textContent = isle.note ? `Day ${isle.day} · ${isle.note}` : `Day ${isle.day}`;
+    }
     // (The World Beyond's skies: an eternal night under a sky that gives little light.)
     sky.dim = beyond ? Math.min(0.92, 1 - (1 - weather.darkness) * beyond.feel.light) : weather.darkness;
     sky.flash = weather.flash;
@@ -1673,6 +1723,33 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     }
     entityLight.update(sky);
     particles.underwater(dt, camera.position.x, camera.position.y, camera.position.z, body.eyeInWater && body.eyeInLava !== true, (x, y, z) => isWaterBlock(world.getBlock(x, y, z)));
+    bloomScan -= dt;
+    if (bloomScan <= 0) {
+      bloomScan = 0.45;
+      blooms.length = 0;
+      const cx = Math.floor(camera.position.x);
+      const cz = Math.floor(camera.position.z);
+      const top = Math.min(80, Math.floor(camera.position.y) + 6);
+      for (let dz = -10; dz <= 10; dz++) {
+        for (let dx = -10; dx <= 10; dx++) {
+          if (dx * dx + dz * dz > 100) continue;
+          const x = cx + dx;
+          const z = cz + dz;
+          let y = top;
+          for (let i = 0; i < 48 && y > 1; i++, y--) {
+            const id = world.getBlock(x, y, z);
+            if (isBubbleBloom(id)) {
+              blooms.push({ x: x + 0.5, y: y + 1, z: z + 0.5, d: dx * dx + dz * dz });
+              break;
+            }
+            if (IS_SOLID[id] === 1) break;
+          }
+        }
+      }
+      blooms.sort((a, b) => a.d - b.d);
+      if (blooms.length > 6) blooms.length = 6;
+    }
+    particles.columns(dt, blooms);
     particles.update(dt);
     deathFx.update(dt);
     particles.setBrightness(sky.brightness);
@@ -2075,8 +2152,11 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   /** Persist the player and the world clock/weather/chests (chunks are saved by world.save()). */
   function savePlayer(): Promise<void> {
     if (!local || !local.ready) return Promise.resolve();
+    const isleDay = KIND === 'isle' ? (local.realm.isleInfo()?.day ?? 0) : 0;
     return Promise.all([store.savePlayer(local.savePlayer()), store.saveWorldState(local.saveWorldState())]).then(
-      () => undefined,
+      () => {
+        if (isleDay >= 1) reportIsleDay(isleDay);
+      },
       (err) => console.warn('save failed', err),
     );
   }

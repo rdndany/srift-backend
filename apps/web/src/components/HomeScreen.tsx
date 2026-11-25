@@ -22,7 +22,7 @@ export interface PlayChoice {
   guest?: boolean;
 }
 
-const choiceFor = (seed: number, mode: HomeMode, guest: boolean, world?: 'beyond'): PlayChoice => ({ seed, ...startOptionsFor(mode), ...(guest ? { guest: true } : {}), ...(world ? { world } : {}) });
+const choiceFor = (seed: number, mode: HomeMode, guest: boolean, world?: 'beyond' | 'isle'): PlayChoice => ({ seed, ...startOptionsFor(mode), ...(guest ? { guest: true } : {}), ...(world ? { world } : {}) });
 
 /**
  * The title screen: the front page at `/`, whose PLAY buttons ask single player or multiplayer (and the game mode) in a
@@ -42,6 +42,10 @@ export function HomeScreen({ onPlay }: { onPlay: (choice: PlayChoice) => void })
       const uid = identity === 'wallet' && account ? account.id : newUid();
       markEntry(uid);
       location.assign(realmPath(uid));
+      return;
+    }
+    if (t.kind === 'single' && t.world === 'isle') {
+      onPlay(choiceFor(t.seed, t.mode, false, 'isle'));
       return;
     }
     let mode = t.mode;

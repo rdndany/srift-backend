@@ -312,6 +312,74 @@ describe('player arrows', () => {
   });
 });
 
+describe('animals leaving the water', () => {
+  /** Water fills x < 4 up to y 4. Dry ground starts at x >= 4, with its top at `lip`. */
+  function shore(lip: number) {
+    return {
+      getBlock: (x: number, y: number) => {
+        if (y <= 0) return B.STONE;
+        if (x >= 4) return y < lip ? B.STONE : y === lip ? B.GRASS : B.AIR;
+        return y <= 4 ? B.WATER : B.AIR;
+      },
+    };
+  }
+
+  it.each([
+    ['pig', 4],
+    ['pig', 5],
+    ['fox', 4],
+    ['fox', 5],
+    ['chicken', 4],
+    ['chicken', 5],
+    ['rabbit', 5],
+    ['cat', 5],
+  ] as const)('a %s swims out onto a shore whose top is %i', (kind, lip) => {
+    const h = harness({ world: shore(lip) as ReturnType<typeof flat> });
+    h.player.x = 80;
+    h.player.z = 0.5;
+    const m = h.mgr.spawn(kind, 2.2, 2, 0.5);
+    h.run(8);
+    expect(m.body.x, `x=${m.body.x.toFixed(2)} y=${m.body.y.toFixed(2)} water=${m.body.inWater}`).toBeGreaterThan(4.2);
+    expect(m.body.y).toBeGreaterThanOrEqual(lip - 0.05);
+    expect(m.body.inWater).toBe(false);
+  });
+});
+
+describe('mobs inside a block', () => {
+  it('walks a mob out of a chest or a log it was standing inside', () => {
+    const h = harness({ world: flat({ '0,1,0': B.CHEST, '3,1,0': B.LOG }) });
+    h.player.x = 40;
+    const pig = h.mgr.spawn('pig', 0.5, 1, 0.5);
+    const fox = h.mgr.spawn('fox', 3.5, 1, 0.5);
+    h.run(0.4);
+    expect(Math.hypot(pig.body.x - 0.5, pig.body.z - 0.5)).toBeGreaterThan(0.4);
+    expect(Math.hypot(fox.body.x - 3.5, fox.body.z - 0.5)).toBeGreaterThan(0.4);
+  });
+});
+
+describe('animals left behind', () => {
+  it('removes an animal once the player is far away', () => {
+    const h = harness();
+    h.mgr.spawn('pig', 0.5, 1, 0.5);
+    h.player.x = 400;
+    h.run(1);
+    expect(h.mgr.mobs.filter((m) => m.kind === 'pig')).toHaveLength(0);
+  });
+
+  it('keeps an island animal where it stands, and still drops a monster', () => {
+    const h = harness();
+    h.env.keepAnimals = true;
+    const pig = h.mgr.spawn('pig', 0.5, 1, 0.5);
+    h.mgr.spawn('zombie', 0.5, 1, 2.5);
+    h.player.x = 400;
+    h.run(2);
+    expect(h.mgr.mobs.some((m) => m === pig)).toBe(true);
+    expect(pig.body.x).toBeCloseTo(0.5);
+    expect(pig.body.z).toBeCloseTo(0.5);
+    expect(h.mgr.mobs.some((m) => m.kind === 'zombie')).toBe(false);
+  });
+});
+
 describe('mob persistence', () => {
   it('round-trips nearby living mobs with health and facing', () => {
     const h = harness();

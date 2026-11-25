@@ -261,32 +261,30 @@ const Head = ({ children }: { children: ReactNode }) => (
     <span>{children}</span>
   </div>
 );
-/** Where the arrow is when the grid holds something to craft: the button that starts it (the forge for a piece with its jewels), with the chance, and the bar of the crafting at work. */
+/** Between the grid and the result: the Craft button stays there even when the grid is empty. A piece with its jewels says Forge, and shows the chance. */
 function ForgeButton({ menu }: { menu: CraftingMenu }) {
   const api = useUi((s) => s.api)!;
   const ready = menu.forgeReady();
   const craft = menu.craftReady();
   const forging = menu.forging;
+  const forgeJob = !!ready || forging?.sets === 0;
   return (
     <div className={`forge-box${forging ? ' on' : ''}`} data-testid="forge-box">
       <button
-        className="forge-btn"
+        className={`forge-btn${forging ? ' busy' : ''}`}
         data-testid="forge-button"
         disabled={!ready && !craft}
-        title={craft ? 'Shift-click: as many as the items allow' : undefined}
         onMouseDown={(e) => {
           e.preventDefault();
-          if (e.button === 0 && (ready || craft)) api.forge(e.shiftKey);
+          if (e.button === 0 && (ready || craft)) api.forge(false);
         }}
       >
-        {forging ? (forging.sets > 0 ? 'Crafting' : 'Forging') : ready ? 'Forge' : 'Craft'}
+        <span>{forgeJob ? 'Forge' : 'Craft'}</span>
+        {forging && <i className="forge-fill" style={{ animationDuration: `${forging.duration}s` }} />}
       </button>
-      <div className="forge-chance">
-        <b>{ready || forging?.sets === 0 ? Math.round(FORGE_CHANCE * 100) : 100}%</b>
-      </div>
-      {forging && (
-        <div className="forge-bar" aria-hidden>
-          <i style={{ animationDuration: `${forging.duration}s` }} />
+      {forgeJob && (
+        <div className="forge-chance">
+          <b>{Math.round(FORGE_CHANCE * 100)}%</b>
         </div>
       )}
     </div>
@@ -419,9 +417,7 @@ export function MenuScreen() {
 
   // The forge: a piece at +9 or more with its jewels in the grid. It is started with a button and works for a while (the grid is
   // locked and the jewels are drawn into the piece) before the piece comes out in the result slot.
-  const forgeReady = menu instanceof CraftingMenu ? menu.forgeReady() : null;
   const forgeAt = menu instanceof CraftingMenu ? forgePiece(menu.grid.slots) : null;
-  const craftReady = menu instanceof CraftingMenu ? menu.craftReady() : null;
   const forgeCore = menu instanceof CraftingMenu && forgeAt ? menu.grid.slots.indexOf(forgeAt.piece) : -1;
 
   // Every window is the inventory's bronze frame; kind lets the narrower ones (everything but the crafting grid and the creative palette) size themselves.
@@ -571,7 +567,7 @@ export function MenuScreen() {
                 ghostCounts={ghostCounts}
                 forge={menu.forging ? { core: forgeCore, time: menu.forging.duration } : null}
               />
-              {forgeReady || craftReady || menu.forging ? <ForgeButton menu={menu} /> : <div className="arrow">&#10140;</div>}
+              <ForgeButton menu={menu} />
               <Grid indices={[menu.resultSlot]} cols={1} onHover={setHover} className="big" previews={forgePreview ? [forgePreview] : null} />
             </div>
             <RecipeDetail menu={menu} index={preview ?? picked} />

@@ -1,6 +1,10 @@
 import {
   B,
+  BB,
   GROVE,
+  CORAL_FAN_YELLOW,
+  CORAL_FAN_RED,
+  BUBBLE_BLOOM,
   BED_DIRS,
   BLOCKS,
   IS_LIQUID,
@@ -46,6 +50,7 @@ import {
   signInfo,
   pillarFor,
 } from './blocks';
+import { isWaterId } from './fluids';
 import { canFireStay } from './fire';
 import type { BlockReader } from './physics';
 
@@ -122,6 +127,23 @@ const HANGING = new Set<number>([B.CAVE_VINES, B.CAVE_VINES_BERRIES, B.SPORE_BLO
 const DESERT_SOIL = new Set<number>([B.SAND, B.DIRT, B.RED_SAND, B.COARSE_DIRT, B.TERRACOTTA, B.TERRACOTTA_ORANGE, B.TERRACOTTA_YELLOW, B.TERRACOTTA_RED, B.TERRACOTTA_WHITE, B.TERRACOTTA_BROWN, B.TERRACOTTA_LIGHT_GRAY]);
 /** What reeds grow from (next to water). */
 const REED_SOIL = new Set<number>([B.GRASS, B.DIRT, B.SAND, B.RED_SAND, B.PODZOL, B.COARSE_DIRT, B.MUD, B.CLAY]);
+/** What kelp, seagrass and coral stand on. */
+const SEA_FLOOR = new Set<number>([B.SAND, B.RED_SAND, B.GRAVEL, B.CLAY, B.DIRT, B.MUD, B.SANDSTONE, B.STONE, B.GRASS]);
+
+/** Kelp, the one sea plant that grows up through the water. */
+export function isKelp(id: number): boolean {
+  return id === BB.kelp;
+}
+
+/** Kelp, seagrass, the coral fans, and the bubble bloom. They stand in the sea and you swim through them. */
+export function isSeaPlant(id: number): boolean {
+  return id === BB.kelp || id === BB.seagrass || id === BB.coral_fan_pink || id === BB.coral_fan_blue || id === CORAL_FAN_YELLOW || id === CORAL_FAN_RED || id === BUBBLE_BLOOM;
+}
+
+/** The sea plant whose bubbles refill your air. */
+export function isBubbleBloom(id: number): boolean {
+  return id === BUBBLE_BLOOM;
+}
 const isStillWater = (id: number): boolean => id === B.WATER;
 
 /** Can `id` exist at (x, y, z) given its surroundings? */
@@ -215,6 +237,19 @@ export function canStayAt(id: number, world: BlockReader, x: number, y: number, 
     return [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => IS_LIQUID[world.getBlock(x + dx, y - 1, z + dz)] === 1);
   }
   if (id === B.LILY_PAD) return isStillWater(world.getBlock(x, y - 1, z));
+  if (isSeaPlant(id)) {
+    const below = world.getBlock(x, y - 1, z);
+    if (isKelp(id)) {
+      if (below !== BB.kelp && !SEA_FLOOR.has(below)) return false;
+    } else if (isBubbleBloom(id)) {
+      if (IS_SOLID[below] !== 1 || IS_LIQUID[below] === 1) return false;
+    } else if (!SEA_FLOOR.has(below)) return false;
+    const above = world.getBlock(x, y + 1, z);
+    if (isWaterId(above)) return true;
+    if (isKelp(id) && above === BB.kelp) return true;
+    if (above !== B.AIR) return false;
+    return [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => isWaterId(world.getBlock(x + dx, y, z + dz)));
+  }
   if (id === B.BROWN_MUSHROOM || id === B.RED_MUSHROOM) {
     const below = world.getBlock(x, y - 1, z);
     return IS_SOLID[below] === 1 && IS_LIQUID[below] === 0;
@@ -256,6 +291,8 @@ export function placesUpper(ny: number, fy = 0.5, drop = 0): boolean {
  * of another block with the given normal (null = cannot be placed there).
  */
 export function placementFor(block: number, nx: number, ny: number, nz: number, yaw = 0, fy = 0.5, drop = 0): number | null {
+  // A bubble bloom grows in the sea. It is not a plant you can carry and set down again.
+  if (block === BUBBLE_BLOOM) return null;
   if (block === B.RAIL_X || block === B.RAIL_Z) {
     // Rails lie on a block's top; clicking the side of a block puts one beside it (it needs a floor
     // there, which `canStayAt` checks). Never on a ceiling.
@@ -376,15 +413,81 @@ export function isTillable(id: number): boolean {
   return id === B.GRASS || id === B.DIRT || id === B.SNOW || id === B.PODZOL || id === B.COARSE_DIRT;
 }
 
-/** Mean seconds for a crop to advance one growth stage. */
-export const CROP_STAGE_SECONDS = 45;
-/** Mean seconds for a cactus or a sugar cane to grow one block taller. */
-export const COLUMN_GROW_SECONDS = 80;
+/**
+ * Seconds between random ticks on one block, at Minecraft's default random-tick speed of 3
+ * (3 picks out of 4096 blocks, 20 times a second). Saplings, seeds, cane and cactus all wait on this.
+ */
+export const RANDOM_TICK_SECONDS = 4096 / 60;
+
+/** How many pictures a crop has here, against how many ages Minecraft uses. Wheat has 8 ages and 4 pictures. */
+function stageStretch(id: number): number {
+  if (id >= B.BEETROOT_0 && id <= B.BEETROOT_3) return 1;
+  if (id >= B.SWEET_BERRY_0 && id <= B.SWEET_BERRY_3) return 1;
+  if (id >= B.COCOA_BASE && id < B.COCOA_BASE + 12) return 1;
+  return 7 / 3;
+}
+
+function cropFamily(id: number): number {
+  if (id >= B.WHEAT_0 && id <= B.WHEAT_3) return 1;
+  if (id >= B.POTATO_0 && id <= B.POTATO_3) return 2;
+  if (id >= B.CARROT_0 && id <= B.CARROT_3) return 3;
+  if (id >= B.MELON_STEM_0 && id <= B.MELON_STEM_3) return 4;
+  if (id >= B.PUMPKIN_STEM_0 && id <= B.PUMPKIN_STEM_3) return 5;
+  if (id >= B.BEETROOT_0 && id <= B.BEETROOT_3) return 6;
+  if (id >= B.SWEET_BERRY_0 && id <= B.SWEET_BERRY_3) return 7;
+  if (id >= B.COCOA_BASE && id < B.COCOA_BASE + 12) return 8;
+  return 0;
+}
+
+/**
+ * Mean seconds until this crop advances one picture.
+ * Farmland counts as moist. A full plot of it is the fast Minecraft farm; a single block is slower.
+ * A straight row of the same crop is halved, the same as Minecraft.
+ */
+export function cropGrowthSeconds(world: BlockReader, x: number, y: number, z: number, id: number): number {
+  let speed = 1;
+  for (let dz = -1; dz <= 1; dz++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      let bonus = world.getBlock(x + dx, y - 1, z + dz) === B.FARMLAND ? 3 : 0;
+      if (dx !== 0 || dz !== 0) bonus /= 4;
+      speed += bonus;
+    }
+  }
+  const family = cropFamily(id);
+  if (family !== 0) {
+    const north = cropFamily(world.getBlock(x, y, z - 1)) === family;
+    const south = cropFamily(world.getBlock(x, y, z + 1)) === family;
+    const east = cropFamily(world.getBlock(x + 1, y, z)) === family;
+    const west = cropFamily(world.getBlock(x - 1, y, z)) === family;
+    if ((north && south) || (east && west)) speed /= 2;
+  }
+  const attempts = Math.floor(25 / speed) + 1;
+  return RANDOM_TICK_SECONDS * attempts * stageStretch(id);
+}
+
+/** Mean seconds for a cactus or a sugar cane to grow one block taller (16 random ticks in Minecraft). */
+export const CANE_GROW_SECONDS = RANDOM_TICK_SECONDS * 16;
+/** Bamboo tries three times as often as sugar cane. */
+export const BAMBOO_GROW_SECONDS = RANDOM_TICK_SECONDS * 3;
+/** A ripe melon or pumpkin stem tries to fruit on every random tick. */
+export const FRUIT_GROW_SECONDS = RANDOM_TICK_SECONDS;
 /** How tall a cactus or a sugar cane grows, counting the block already there. */
 export const COLUMN_MAX = 3;
+/** How tall kelp grows, counting the block already there. */
+export const KELP_MAX = 16;
 
-/** Grow a cactus or sugar cane one block up, when there is room and it is not already full height. */
+/** Grow a cactus, sugar cane or kelp one block, when there is room and it is not already full height. Kelp grows into water. */
 export function growColumn(world: BlockReader & { setBlock(x: number, y: number, z: number, id: number): boolean }, x: number, y: number, z: number, id: number): boolean {
+  if (isKelp(id)) {
+    if (world.getBlock(x, y + 1, z) !== B.WATER) return false;
+    let height = 1;
+    for (let dy = 1; dy < KELP_MAX; dy++) {
+      if (world.getBlock(x, y - dy, z) !== id) break;
+      height++;
+    }
+    if (height >= KELP_MAX) return false;
+    return world.setBlock(x, y + 1, z, id);
+  }
   if (id !== B.CACTUS && id !== B.SUGAR_CANE && id !== GROVE.bamboo) return false;
   if (world.getBlock(x, y + 1, z) !== B.AIR) return false;
   const max = id === GROVE.bamboo ? 12 : COLUMN_MAX;

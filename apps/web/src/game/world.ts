@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { B, CHUNK_SIZE, IS_LEAVES, IS_LIQUID, IS_SOLID, LIGHT_EMIT, WORLD_HEIGHT, blockIndex, chunkKey, growPlants, type BlockReader, type SaveStore, type WorldAccess, type WorldKind } from '@solrift/shared';
+import { B, CHUNK_SIZE, IS_LEAVES, IS_LIQUID, IS_SOLID, LIGHT_EMIT, WORLD_HEIGHT, blockIndex, chunkKey, floodIsleGaps, growPlants, raiseIsleKelp, thinIsleSea, unstackIsleBlooms, type BlockReader, type SaveStore, type WorldAccess, type WorldKind } from '@solrift/shared';
 import type { Atlas } from './atlas';
 import { createChunkMaterials, type ChunkMaterials } from './chunkMaterial';
 import type { MeshData, MeshResult } from './mesher';
@@ -66,12 +66,14 @@ export class World implements WorldAccess {
   private offsets: { dx: number; dz: number; d: number }[] = [];
   private frame = 0;
   private disposed = false;
+  /** A chunk has its blocks. The game uses this to put out torches that water has already reached. */
+  onChunk: ((cx: number, cz: number, data: Uint16Array) => void) | null = null;
 
   constructor(
-    seed: number,
+    private readonly seed: number,
     atlas: Atlas,
     private readonly store: Pick<SaveStore, 'loadChunks' | 'saveChunks'> | null,
-    kind: WorldKind = 'overworld',
+    private readonly kind: WorldKind = 'overworld',
   ) {
     this.materials = createChunkMaterials(atlas);
 
@@ -86,10 +88,22 @@ export class World implements WorldAccess {
     this.setRenderDistance(this.renderDistance);
   }
 
-  async loadSaved(): Promise<void> {
+  async loadSaved(thinSea = false, raiseKelp = false): Promise<void> {
     if (!this.store) return;
     try {
       const saved = await this.store.loadChunks();
+      if (this.kind === 'isle') {
+        const changed = [...new Set([...unstackIsleBlooms(saved), ...floodIsleGaps(saved), ...(thinSea ? thinIsleSea(this.seed, saved) : []), ...(raiseKelp ? raiseIsleKelp(this.seed, saved) : [])])];
+        if (changed.length > 0) {
+          const batch: [number, number, Uint16Array][] = [];
+          for (const key of changed) {
+            const [cx, cz] = key.split(',').map(Number);
+            const data = saved.get(key);
+            if (data) batch.push([cx, cz, data]);
+          }
+          await this.store.saveChunks(batch);
+        }
+      }
       for (const [k, data] of saved) {
         const [cx, cz] = k.split(',').map(Number);
         this.modifiedChunks.set(chunkKey(cx, cz), data);
@@ -348,6 +362,7 @@ export class World implements WorldAccess {
       rev: 0,
     };
     this.chunks.set(chunkKey(cx, cz), entry);
+    this.onChunk?.(cx, cz, data);
     return entry;
   }
 

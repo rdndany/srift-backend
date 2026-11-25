@@ -10,6 +10,8 @@
   gap: 6px;
 }
 .forge-btn {
+  position: relative;
+  overflow: hidden;
   width: 100%;
   padding: 8px 0 9px;
   font: inherit;
@@ -26,6 +28,10 @@
   box-shadow: 0 0 14px rgba(255, 120, 40, 0.45), inset 0 0 10px rgba(255, 180, 80, 0.25);
   animation: forge-ready 1.6s ease-in-out infinite;
 }
+.forge-btn > span {
+  position: relative;
+  z-index: 1;
+}
 .forge-btn:hover:not(:disabled) {
   background: linear-gradient(#a64a1a, #5c2410);
 }
@@ -33,9 +39,37 @@
   transform: translateY(1px);
 }
 .forge-btn:disabled {
-  cursor: progress;
+  cursor: default;
   animation: none;
-  filter: saturate(0.7) brightness(0.85);
+  color: #9a8868;
+  text-shadow: 1px 1px 0 #000;
+  background: linear-gradient(#3a2c18, #22180e);
+  border-top-color: #6a5030;
+  border-left-color: #5a4028;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.45);
+  filter: none;
+}
+.forge-btn.busy:disabled {
+  cursor: progress;
+  color: #ffe9b8;
+  text-shadow: 0 1px 0 #000, 0 0 8px rgba(255, 150, 50, 0.7);
+  background: linear-gradient(#8a3a14, #4a1a08);
+  border-top-color: #d98a3a;
+  border-left-color: #c0702a;
+  box-shadow: inset 0 0 10px rgba(255, 180, 80, 0.25);
+  filter: none;
+}
+.forge-fill {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  bottom: 2px;
+  height: 4px;
+  transform-origin: left;
+  background: linear-gradient(90deg, #ff5a1a, #ffd24a);
+  box-shadow: 0 0 8px #ff8a3a;
+  animation: forge-bar linear both;
+  pointer-events: none;
 }
 @keyframes forge-ready {
   50% {

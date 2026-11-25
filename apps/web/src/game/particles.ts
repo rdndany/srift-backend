@@ -67,6 +67,7 @@ export class Particles {
   private bnext = 0;
   private bAcc = 0;
   private sAcc = 0;
+  private vAcc = 0;
   private bfade: THREE.InstancedBufferAttribute;
   private bkind: THREE.InstancedBufferAttribute;
   private bubbleMat: THREE.ShaderMaterial;
@@ -400,6 +401,38 @@ export class Particles {
       this.sAcc -= 0.05;
       this.spawnBubble(x, y, z, true);
     }
+  }
+
+  /** Bubbles rising from sea blooms. One call covers every column in view. `underwater` must have run first. */
+  columns(dt: number, spots: readonly { x: number; y: number; z: number }[]): void {
+    if (!this.waterAt || spots.length === 0) return;
+    this.vAcc += dt;
+    if (this.vAcc < 0.22) return;
+    this.vAcc = 0;
+    const water = this.waterAt;
+    for (const s of spots) {
+      let rise = 0;
+      for (let i = 1; i <= 32; i++) {
+        if (!water(Math.floor(s.x), Math.floor(s.y + i), Math.floor(s.z))) break;
+        rise = i;
+      }
+      const py = s.y + Math.random() * Math.max(0.6, rise);
+      this.placeRise(s.x + (Math.random() - 0.5) * 0.2, py, s.z + (Math.random() - 0.5) * 0.2, true);
+    }
+  }
+
+  private placeRise(x: number, y: number, z: number, column = false): void {
+    const i = this.bnext++ % BUBBLES;
+    this.bpx[i] = x;
+    this.bpy[i] = y;
+    this.bpz[i] = z;
+    this.bvx[i] = (Math.random() * 2 - 1) * 0.01;
+    this.bvy[i] = 0.01;
+    this.bvz[i] = (Math.random() * 2 - 1) * 0.01;
+    this.bmax[i] = this.blife[i] = column ? 3.4 : 2.2;
+    this.bsize[i] = column ? 0.11 + Math.random() * 0.08 : 0.07 + Math.random() * 0.05;
+    this.brise[i] = 1;
+    this.bkind.setX(i, 0);
   }
 
   private spawnBubble(x: number, y: number, z: number, speck: boolean): void {

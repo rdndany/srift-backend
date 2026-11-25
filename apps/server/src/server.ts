@@ -4,6 +4,7 @@ import { PROTOCOL_VERSION, isClientMessage, parseNetClientMessage, type NetServe
 import { AuthService, SESSION_COOKIE, createAuthRouter, readCookie } from './auth';
 import { CloudService, createCloudRouter, type CloudServiceOptions } from './cloud';
 import { Desk, createDeskRouter } from './desk';
+import { createLeaderboardRouter } from './leaderboard';
 import { SqliteRepo, type Repo } from './db';
 import { GameRoom, STRIKES, type RoomOptions } from './room';
 import { TokenService, createTokenRouter, type TradeMove } from './token';
@@ -147,6 +148,7 @@ export function createGameServer(opts: GameServerOptions): GameServer {
 
   // The Camp: what a hero can do from a phone (see desk.ts).
   const deskRoutes = createDeskRouter(auth, new Desk(room, repo.room), room, { trustProxy: opts.trustProxy ?? false });
+  const leaderboardRoutes = createLeaderboardRouter(auth, repo, repo.room, { trustProxy: opts.trustProxy ?? false });
 
   // What the token shop puts in a wallet's Stash, and what the lobby shows a hero wearing (it is in the outfit slot of the saved hero).
   token.stash = { free: (wallet) => room.stashFree(wallet), count: (wallet, itemId) => room.stashCount(wallet, itemId), give: (wallet, itemId) => room.stashGive(wallet, itemId) };
@@ -185,6 +187,7 @@ export function createGameServer(opts: GameServerOptions): GameServer {
     void authRoutes(req, res)
       .then((handled) => handled || cloudRoutes(req, res))
       .then((handled) => handled || tokenRoutes(req, res))
+      .then((handled) => handled || leaderboardRoutes(req, res))
       .then((handled) => handled || deskRoutes(req, res))
       .then((handled) => {
         if (!handled) res.writeHead(404).end();

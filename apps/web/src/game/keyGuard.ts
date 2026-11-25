@@ -86,6 +86,32 @@ export function wantKeyboardLock(playing: boolean, fullscreen: boolean, focused:
   return playing && fullscreen && focused && !hidden;
 }
 
+/**
+ * What to do with Keyboard Lock. A held Escape keeps the lock until the key comes up: dropping it on the way down
+ * makes that same tap leave fullscreen, and Escape then stops reaching the game.
+ */
+export function keyboardLockAction(want: boolean, escapeHeld: boolean): 'lock' | 'unlock' | 'hold' {
+  if (want) return 'lock';
+  if (escapeHeld) return 'hold';
+  return 'unlock';
+}
+
+/** F11 is about to leave fullscreen. The lock has to be dropped first, or Escape stays captured once the window is back. */
+export function unlockKeyboardForKey(code: string, fullscreen: boolean): boolean {
+  return code === 'F11' && fullscreen;
+}
+
+/**
+ * Fullscreen just ended. 'release' asks the browser to drop the mouse. 'reset' means it already dropped the mouse
+ * and never said so, so the game still thinks it has it and a later Escape does nothing.
+ */
+export function mouseAfterFullscreen(fullscreen: boolean, pointerHeld: boolean, thinkHeld: boolean): 'release' | 'reset' | 'keep' {
+  if (fullscreen) return 'keep';
+  if (pointerHeld) return 'release';
+  if (thinkHeld) return 'reset';
+  return 'keep';
+}
+
 export interface KeyboardLock {
   lock(): Promise<void>;
   unlock(): void;

@@ -9,7 +9,7 @@ import { Blocks } from './BlockCube';
 import { CharacterPreview } from './CharacterPreview';
 import { ClickSparks, Embers, Reveal, useFrontMotion } from './fx';
 import { lobbyUrl } from '../game/route';
-import { SCROLL_KEY, goBeyond, goFarm, goMarket, goToken } from './frontNav';
+import { SCROLL_KEY, goBeyond, goFarm, goMarket, goToken, goRanks } from './frontNav';
 import { ART } from './homeAssets';
 import { TokenIcon } from './TokenPurse';
 import { useTokenBalance } from './TokenWallet';
@@ -136,6 +136,9 @@ export function ShopPage() {
             <button onClick={() => toFront('l-expansions')}>Expansions</button>
             <button className="fp-link-farm" onClick={goFarm}>
               Farm
+            </button>
+            <button className="fp-link-ranks" onClick={goRanks}>
+              Ranks
             </button>
             <button className="fp-link-market" onClick={goMarket}>
               Market

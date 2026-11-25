@@ -82,3 +82,23 @@
   pointer-events: none;
 }
 
+#isle-day {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: none;
+  pointer-events: none;
+  padding: 4px 10px;
+  background: rgba(0, 0, 0, 0.45);
+  color: #f4e4b2;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+#isle-day.on {
+  display: block;
+}
+

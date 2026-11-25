@@ -163,6 +163,7 @@ describe('the Hollow King in his copy', () => {
     expect(Math.abs(king.body.x - x0)).toBeLessThan(1);
 
     const before = realm.drops.drops.length;
+    s.setMode('creative');
     realm.mobs.damage(king, 99999, 0, 0, realm.mobEvents, true, false, true);
     expect(king.dead).toBe(true);
     const gear = realm.drops.drops.slice(before).filter((d) => d.stack.gear && d.stack.gear.r >= 2);

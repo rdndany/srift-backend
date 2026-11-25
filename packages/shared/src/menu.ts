@@ -1,6 +1,6 @@
 import { ARMOR_SLOTS } from './armor';
 import { BAG_MAX, BAG_MENU_SLOTS, BAG_SLOTS, bagFits, bagRoom } from './bags';
-import { RECIPES, findRecipe, recipeLayout } from './crafting';
+import { RECIPES, craftMultiplier, findRecipe, recipeLayout } from './crafting';
 import {
   Container,
   HOTBAR_SLOTS,
@@ -464,11 +464,12 @@ export class CraftingMenu extends Menu {
 
   /**
    * Start crafting what is in the grid, with the button: a piece with its jewels is forged (it can fail, see `forgeOutcome`), and
-   * a recipe is crafted (with `all`, as many times as the grid has the items for). The dice are rolled now, the grid is locked
-   * while it works, the items stay where they are, and `stepForge` brings the outcome after `FORGE_TIME` seconds for the
-   * forge and `CRAFT_TIME` for a recipe: then the items are used up and what was made is in the result slot.
+   * a recipe is crafted once for every copy of its ingredients in the grid (two logs make eight planks). The dice are rolled
+   * now, the grid is locked while it works, the items stay where they are, and `stepForge` brings the outcome after
+   * `FORGE_TIME` seconds for the forge and `CRAFT_TIME` for a recipe: then the items are used up and what was made is in
+   * the result slot.
    */
-  startForge(rand: () => number, all = false): boolean {
+  startForge(rand: () => number, _all = false): boolean {
     if (this.forging || this.forged) return false;
     const up = forgeOutcome(this.grid.slots, rand);
     if (up) {
@@ -478,11 +479,8 @@ export class CraftingMenu extends Menu {
     }
     const r = findRecipe(this.grid.slots, this.size, this.size);
     if (!r) return false;
-    let sets = 1;
-    if (all) {
-      const have = this.grid.slots.filter((s): s is ItemStack => !!s).map((s) => s.count);
-      sets = Math.max(1, Math.min(...have, Math.floor(getItem(r.result.id).maxStack / r.result.count)));
-    }
+    const sets = craftMultiplier(this.grid.slots, r);
+    if (sets < 1) return false;
     const stack = makeStack(r.result.id, r.result.count * sets);
     this.forging = { elapsed: 0, duration: CRAFT_TIME, sets, outcome: { ok: true, stack, text: '', label: '', detail: '' } };
     this.recalc();
@@ -538,7 +536,8 @@ export class CraftingMenu extends Menu {
       return;
     }
     const r = findRecipe(this.grid.slots, this.size, this.size);
-    this.result.set(0, r ? makeStack(r.result.id, r.result.count) : null);
+    const sets = r ? craftMultiplier(this.grid.slots, r) : 0;
+    this.result.set(0, r && sets > 0 ? makeStack(r.result.id, r.result.count * sets) : null);
   }
 
   /**
@@ -583,9 +582,10 @@ export class CraftingMenu extends Menu {
 
   /**
    * The recipe book's click: put the ingredients of recipe `index` into the grid from the inventory.
-   * What was in the grid goes back to the inventory first, as in the original. With `all` it fills as
-   * many crafts as the inventory allows (up to a stack per cell). Does nothing, and changes nothing, when
-   * the inventory cannot make the recipe once, or the recipe does not fit this grid.
+   * What was in the grid goes back to the inventory first, as in the original, unless the grid already
+   * holds this recipe: then one more click adds one more set. With `all` it fills as many crafts as the
+   * inventory allows (up to a stack per cell). Does nothing, and changes nothing, when the inventory
+   * cannot make the recipe once, or the recipe does not fit this grid.
    */
   fillRecipe(index: number, all: boolean): boolean {
     if (this.forging) return false;
@@ -595,6 +595,7 @@ export class CraftingMenu extends Menu {
     const r = RECIPES[index];
     const layout = r ? recipeLayout(r, this.size) : null;
     if (!layout) return false;
+    if (!all && this.holdsRecipe(layout)) return this.addOneSet(layout);
 
     const cellsFor = new Map<number, number>();
     for (const id of layout) if (id !== 0) cellsFor.set(id, (cellsFor.get(id) ?? 0) + 1);
@@ -622,6 +623,44 @@ export class CraftingMenu extends Menu {
     this.recalc();
     return true;
   }
+
+  /** The grid is exactly this recipe: the same item in each filled cell, and nothing in the empty ones. */
+  private holdsRecipe(layout: number[]): boolean {
+    if (layout.length !== this.grid.size) return false;
+    let any = false;
+    for (let i = 0; i < layout.length; i++) {
+      const want = layout[i];
+      const have = this.grid.get(i);
+      if (want === 0) {
+        if (have) return false;
+      } else if (!have || have.id !== want) {
+        return false;
+      } else any = true;
+    }
+    return any;
+  }
+
+  /** Add one more craft of a recipe the grid already holds. Leaves the grid alone when the bags cannot spare it. */
+  private addOneSet(layout: number[]): boolean {
+    const need = new Map<number, number>();
+    for (const id of layout) if (id !== 0) need.set(id, (need.get(id) ?? 0) + 1);
+    for (const [id, n] of need) if (this.player.countOf(id) < n) return false;
+    for (let i = 0; i < layout.length; i++) {
+      const id = layout[i];
+      if (id === 0) continue;
+      const stack = this.grid.get(i);
+      if (!stack || stack.count >= getItem(id).maxStack) return false;
+    }
+    for (let i = 0; i < layout.length; i++) {
+      const id = layout[i];
+      if (id === 0) continue;
+      this.player.remove(id, 1);
+      this.grid.get(i)!.count += 1;
+    }
+    this.recalc();
+    return true;
+  }
+
   protected override onTake(slot: Slot): void {
     if (slot.kind !== 'result') return;
     if (this.forged) {
@@ -629,13 +668,14 @@ export class CraftingMenu extends Menu {
       this.recalc();
       return;
     }
-    // Using up the ingredients: one of each occupied cell.
+    // The result slot showed every craft the grid could make, so taking it uses that many of each ingredient.
+    const r = findRecipe(this.grid.slots, this.size, this.size);
+    const sets = r ? craftMultiplier(this.grid.slots, r) : 0;
     for (let i = 0; i < this.grid.size; i++) {
       const s = this.grid.get(i);
-      if (s) {
-        s.count -= 1;
-        if (s.count <= 0) this.grid.set(i, null);
-      }
+      if (!s || sets < 1) continue;
+      s.count -= sets;
+      if (s.count <= 0) this.grid.set(i, null);
     }
     this.recalc();
   }

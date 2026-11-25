@@ -1,6 +1,6 @@
 'use client';
 
-import { MAX_AIR } from '@solrift/shared';
+import { MAX_AIR, OXYGEN_SECONDS } from '@solrift/shared';
 import { useUi } from '../ui/store';
 
 const BUBBLE = ['...xxx...', '.xhhxxxx.', '.hxxxxxs.', 'xhxxxxxxs', 'xxxxxxxxs', 'xxxxxxxxs', '.xxxxxxs.', '.xxxxxxs.', '...xss...'];
@@ -46,13 +46,30 @@ function Bubble({ lit }: { lit: boolean }) {
 export function AirBubbles() {
   const mode = useUi((s) => s.mode);
   const air = useUi((s) => s.air);
+  const submerged = useUi((s) => s.submerged);
+  const bottle = useUi((s) => s.bottle);
+  const spare = useUi((s) => s.spare);
   if (mode === 'creative') return null;
-  const bubbles = air < MAX_AIR - 0.01 ? Math.ceil((air / MAX_AIR) * 10) : 0;
-  if (bubbles <= 0) return null;
+  if (bottle >= 0) {
+    const lit = Math.max(1, Math.ceil((bottle / OXYGEN_SECONDS) * 10));
+    return (
+      <div id="air-row" className="vrow">
+        {Array.from({ length: 10 }, (_, i) => (
+          <Bubble key={i} lit={i < lit} />
+        ))}
+        <span className="ox-count" title="Time left in the open bottle, and spare bottles">{spare > 0 ? `${Math.ceil(bottle)}s ×${spare}` : `${Math.ceil(bottle)}s`}</span>
+      </div>
+    );
+  }
+  const full = air >= MAX_AIR - 0.01;
+  // On land a full breath hides the row. Under water it stays, so a bloom can fill every bubble without the row vanishing.
+  if (!submerged && full) return null;
+  const lit = full ? 10 : Math.max(0, Math.ceil((air / MAX_AIR) * 10));
+  if (!submerged && lit <= 0) return null;
   return (
     <div id="air-row" className="vrow">
       {Array.from({ length: 10 }, (_, i) => (
-        <Bubble key={i} lit={i < bubbles} />
+        <Bubble key={i} lit={i < lit} />
       ))}
     </div>
   );

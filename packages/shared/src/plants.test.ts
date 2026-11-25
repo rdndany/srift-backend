@@ -4,6 +4,7 @@ import {
   ATLAS_ROWS,
   ATLAS_TILES,
   B,
+  BB,
   BLOCKS,
   CHUNK_SIZE,
   I,
@@ -22,6 +23,8 @@ import {
   computeLight,
   findRecipe,
   getItem,
+  growColumn,
+  isSeaPlant,
   isTillable,
   isTorch,
   makeStack,
@@ -81,6 +84,20 @@ describe('torches', () => {
     expect(canStayAt(B.TORCH_PX, w, 4, 3, 4)).toBe(false);
     expect(canStayAt(B.TORCH_PX, wall, 4, 3, 4)).toBe(true);
     expect(canStayAt(B.TORCH_NX, wall, 4, 3, 4)).toBe(false);
+  });
+
+  it('stands in the sea and kelp grows up into the water', () => {
+    const w = reader({ '0,1,0': B.SAND, '0,2,0': BB.kelp, '0,3,0': B.WATER, '1,2,0': B.WATER });
+    const grow = Object.assign(w, { setBlock: (x: number, y: number, z: number, id: number) => (w.set(x, y, z, id), true) });
+    expect(isSeaPlant(BB.kelp)).toBe(true);
+    expect(isSeaPlant(BB.seagrass)).toBe(true);
+    expect(BLOCKS[BB.kelp].liquid).toBe(true);
+    expect(canStayAt(BB.kelp, w, 0, 2, 0)).toBe(true);
+    expect(canStayAt(BB.seagrass, reader({ '0,1,0': B.SAND, '0,3,0': B.WATER }), 0, 2, 0)).toBe(true);
+    expect(canStayAt(BB.kelp, reader(), 0, 2, 0)).toBe(false);
+    expect(growColumn(grow, 0, 2, 0, BB.kelp)).toBe(true);
+    expect(w.getBlock(0, 3, 0)).toBe(BB.kelp);
+    expect(growColumn(grow, 0, 3, 0, BB.kelp)).toBe(false);
   });
 
   it('wall torches drop a normal torch, and torches craft from coal and a stick', () => {

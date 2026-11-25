@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ENCH, I, makeStack, toolId, armorId, tooltipLines } from './index';
+import { ENCH, I, allItems, makeStack, toolId, armorId, tooltipLines } from './index';
 
 const text = (id: number) => tooltipLines(makeStack(id, 1)).map((l) => l.text);
 
@@ -68,5 +68,21 @@ describe('item tooltips', () => {
     expect(text(I.STICK)[1]).toBe('Material');
     expect(tooltipLines(null)).toEqual([]);
     for (const id of [I.ENCHANTED_BOOK, I.BOW, I.BED_COLOR_BASE + 1]) for (const l of text(id)) expect(l.length).toBeGreaterThan(0);
+  });
+
+  it('oxygen and the diving helmet say what they do', () => {
+    expect(text(I.OXYGEN)).toContain('Air for a diving helmet');
+    expect(text(I.OXYGEN).some((t) => t.includes('20 seconds'))).toBe(true);
+    const helm = text(I.DIVER_HELM);
+    expect(helm).toContain('Lets you breathe underwater');
+    expect(helm.some((t) => t.includes('oxygen bottle'))).toBe(true);
+  });
+
+  it('every item says what it is, past the name and the kind', () => {
+    const bare = (t: string) => t.startsWith('Hardness ') || t.startsWith('Fuel:') || t.startsWith('Durability:') || t === 'Cannot be dropped' || t.startsWith('Anvil penalty');
+    for (const item of allItems()) {
+      const said = text(item.id).slice(2).filter((t) => !bare(t));
+      expect(said.length, item.name).toBeGreaterThan(0);
+    }
   });
 });

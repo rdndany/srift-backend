@@ -1881,7 +1881,7 @@
   #home .fp .fp-stats li:nth-child(3)::before {
     display: none;
   }
-  #home .fp .fp-links button:nth-child(n + 3):not(.fp-link-market):not(.fp-link-farm) {
+  #home .fp .fp-links button:nth-child(n + 3):not(.fp-link-market):not(.fp-link-farm):not(.fp-link-ranks) {
     display: none;
   }
 }
@@ -2011,6 +2011,10 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 18px;
 }
+#home .fp .fp-ways.one {
+  grid-template-columns: minmax(0, 420px);
+  justify-content: center;
+}
 #home .fp .fp-way-wrap {
   display: flex;
 }
@@ -2116,7 +2120,8 @@
     padding: 56px 18px 24px;
   }
   #home .fp .fp-ways,
-  #home .fp .fp-ways.three {
+  #home .fp .fp-ways.three,
+  #home .fp .fp-ways.one {
     grid-template-columns: minmax(0, 1fr);
     gap: 14px;
   }

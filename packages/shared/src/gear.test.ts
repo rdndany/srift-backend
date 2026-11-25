@@ -172,6 +172,7 @@ describe('what monsters leave', () => {
 
   it('a killed zombie leaves a piece of gear on the ground once the dice say so', () => {
     const s = make('warrior', 7);
+    s.setMode('creative');
     let found = false;
     for (let i = 0; i < 600 && !found; i++) {
       const zombie = s.mobs.spawn('zombie', s.body.x + 3, s.body.y, s.body.z);
@@ -523,6 +524,7 @@ describe('the shops', () => {
       for (const w of pieces) expect(w.price).toBeGreaterThan(gearValue(w.gear!));
     }
     const s = make('warrior');
+    s.setMode('creative');
     s.addCoins(5000);
     const n = NPCS.find((x) => x.id === 'garrick')!;
     s.teleport(n.x, (generator as AdventureWorldGenerator).hubY + 1, n.z + 2, 0, 0);

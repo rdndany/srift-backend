@@ -605,8 +605,8 @@ export const RIGS: Record<MobKind, Part[]> = {
   ],
   chicken: [
     { size: [0.2, 0.3, 0.2], at: [0, 0.7, -0.28], skin: 'chicken_body', front: 'chicken_face', isHead: true },
-    { size: [0.2, 0.08, 0.1], at: [0, 0.68, -0.43], skin: 'chicken_beak' },
-    { size: [0.06, 0.1, 0.06], at: [0, 0.58, -0.4], skin: 'chicken_wattle' },
+    { size: [0.2, 0.08, 0.1], at: [0, -0.02, -0.15], skin: 'chicken_beak', of: 0 },
+    { size: [0.06, 0.1, 0.06], at: [0, -0.12, -0.12], skin: 'chicken_wattle', of: 0 },
     { size: [0.35, 0.35, 0.5], at: [0, 0.45, 0.02], skin: 'chicken_body' },
     { size: [0.06, 0.3, 0.4], at: [-0.22, 0.5, 0.05], skin: 'chicken_body', flap: 0.25 },
     { size: [0.06, 0.3, 0.4], at: [0.22, 0.5, 0.05], skin: 'chicken_body', flap: -0.25 },

@@ -8,11 +8,13 @@ import { Spot } from './fx';
 export type Way = 'single' | 'multi';
 
 /**
- * What PLAY asks, in two steps of one dialog: single player or multiplayer, and (single player only) the game mode.
- * Then the game page, where the character is chosen. `mode` is the badge the player came from, if any (it is lit).
+ * What PLAY asks: single player or multiplayer, then (single player) the game mode.
+ * Survival has its own modes. Island is the only one for now, and it is clicked before the character lobby.
+ * Creative and Hardcore go straight on, and their world is chosen in the lobby.
+ * `mode` is the badge the player came from, if any (it is lit).
  */
 export function WayDialog({ mode, onDone, onClose }: { mode: HomeMode | null; onDone: (way: Way, mode: HomeMode | null) => void; onClose: () => void }) {
-  const [step, setStep] = useState<'way' | 'mode'>('way');
+  const [step, setStep] = useState<'way' | 'mode' | 'survival'>('way');
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -62,6 +64,29 @@ export function WayDialog({ mode, onDone, onClose }: { mode: HomeMode | null; on
                 </Spot>
               </div>
             </>
+          ) : step === 'survival' ? (
+            <>
+              <p className="fp-dlg-kicker">Survival</p>
+              <h2 id="way-title">Choose a survival mode</h2>
+              <div className="fp-ways one">
+                <Spot as="div" className="fp-way-wrap">
+                  <button type="button" className="fp-way fp-tile fp-px" id="pick-survival-isle" onClick={() => onDone('single', 'survival')}>
+                    <i className="fp-tile-art" style={{ '--art': 'url(/art/island-mode-survival.png)' } as CSSProperties} />
+                    <span className="fp-tile-copy">
+                      <small>Water on every side</small>
+                      <strong>Island</strong>
+                      <span>A small island. Days are counted, and you start with nothing.</span>
+                      <em>
+                        Choose <i>&rarr;</i>
+                      </em>
+                    </span>
+                  </button>
+                </Spot>
+              </div>
+              <button type="button" className="fp-dlg-back-btn" id="survival-back" onClick={() => setStep('mode')}>
+                &larr; Back
+              </button>
+            </>
           ) : (
             <>
               <p className="fp-dlg-kicker">Single player</p>
@@ -69,7 +94,7 @@ export function WayDialog({ mode, onDone, onClose }: { mode: HomeMode | null; on
               <div className="fp-ways three">
                 {MODES.map((m) => (
                   <Spot key={m.id} as="div" className="fp-way-wrap">
-                    <button type="button" className={`fp-way fp-tile fp-px ${m.id === mode ? 'lit' : ''}`} data-mode={m.id} id={`pick-mode-${m.id}`} onClick={() => onDone('single', m.id)}>
+                    <button type="button" className={`fp-way fp-tile fp-px ${m.id === mode ? 'lit' : ''}`} data-mode={m.id} id={`pick-mode-${m.id}`} onClick={() => (m.id === 'survival' ? setStep('survival') : onDone('single', m.id))}>
                       <i className="fp-tile-art" style={{ '--art': `url(${MODE_SHOT[m.id]})` } as CSSProperties} />
                       <span className="fp-tile-copy">
                         <small>{m.tagline}</small>

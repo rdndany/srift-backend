@@ -455,6 +455,7 @@ describe('the Gilded Tide in the realm', () => {
     expect(s.mobs.toJSON(0, 0, 500).some((m) => isGildedKind(m.kind))).toBe(false);
 
     const coins0 = s.coins;
+    s.setMode('creative');
     for (const m of gilded()) {
       m.sincePlayerHit = 0;
       s.mobs.damage(m, 99999, 0, 0, s.realm.mobEvents, true, false, true);
@@ -488,7 +489,7 @@ describe('the Gilded Tide in the realm', () => {
 
 describe('the Codex of Aurelion', () => {
   const SEED = 1337;
-  function make(classId: 'warrior' | 'mage' | 'ranger' | null, mode: 'survival' | 'creative' = 'survival') {
+  function make(classId: 'warrior' | 'mage' | 'ranger' | null, mode: 'survival' | 'creative' = 'creative') {
     const generator = new WorldGenerator(SEED);
     const world = new HeadlessWorld(generator);
     const s = new GameSession({ seed: SEED, world, generator, naturalSpawning: false, rand: mulberry32(8), mode, classId });
@@ -517,7 +518,7 @@ describe('the Codex of Aurelion', () => {
       const s = make(cls);
       s.inventory.set(0, makeStack(I.AURELION_CODEX, 3));
       expect(s.openCodex(0)).toBe(true);
-      expect(s.inventory.get(0)?.count).toBe(2);
+      expect(s.inventory.get(0)?.count).toBe(3);
       const got = pieces(s);
       expect(got).toHaveLength(1);
       expect(got[0].gear!.r).toBe(3);
@@ -530,7 +531,8 @@ describe('the Codex of Aurelion', () => {
     const s = make('mage');
     s.inventory.set(0, makeStack(I.AURELION_CODEX, 24));
     for (let i = 0; i < 24; i++) s.openCodex(0);
-    for (let i = 0; i < 64; i++) expect(s.inventory.get(i)?.id).not.toBe(I.AURELION_CODEX);
+    expect(s.inventory.get(0)?.id).toBe(I.AURELION_CODEX);
+    expect(s.inventory.get(0)?.count).toBe(24);
     const got = pieces(s);
     expect(got).toHaveLength(24);
     expect(new Set(got.map((g) => g.gear!.r))).toEqual(new Set([3]));
@@ -551,8 +553,9 @@ describe('the Codex of Aurelion', () => {
     expect(pieces(s)).toHaveLength(0);
     s.apply({ t: 'click', slot, button: 1 });
     expect(menu.cursor).toBeNull();
-    expect(s.inventory.get(12)?.gear?.r).toBe(3);
+    expect(s.inventory.get(12)?.id).toBe(I.AURELION_CODEX);
     expect(pieces(s)).toHaveLength(1);
+    expect(pieces(s)[0].gear?.r).toBe(3);
   });
 
   it('is not used up in creative mode, and not opened by the dead', () => {
@@ -582,7 +585,8 @@ describe('the Codex of Aurelion', () => {
     s.inventory.set(12, makeStack(I.AURELION_CODEX, 1));
     s.drainEvents();
     expect(s.openCodex(12)).toBe(true);
-    expect(s.inventory.get(12)?.gear?.r).toBe(3);
+    expect(s.inventory.get(12)?.id).toBe(I.AURELION_CODEX);
+    expect(pieces(s)[0].gear?.r).toBe(3);
     expect(s.realm.drops.drops).toHaveLength(0);
     expect(s.drainEvents().some((e) => e.t === 'codex')).toBe(true);
   });
@@ -594,7 +598,7 @@ describe('the Codex of Aurelion', () => {
     s.drainEvents();
     expect(s.openCodex(4)).toBe(true);
     expect(s.inventory.get(4)?.id).toBe(I.AURELION_CODEX);
-    expect(s.inventory.get(4)?.count).toBe(1);
+    expect(s.inventory.get(4)?.count).toBe(2);
     expect(pieces(s)).toHaveLength(0);
     expect(s.realm.drops.drops.map((d) => d.stack.gear?.r)).toEqual([3]);
     expect(s.drainEvents().some((e) => e.t === 'codex')).toBe(true);

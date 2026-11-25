@@ -5,6 +5,9 @@ import {
   BED_RED,
   BLOCKS,
   CHUNK_SIZE,
+  CORAL_FAN_RED,
+  CORAL_FAN_YELLOW,
+  BUBBLE_BLOOM,
   DYE_NAMES,
   FLUID_KIND,
   FLUID_WATER,
@@ -305,7 +308,12 @@ function waterFirst(m: MeshData | null): MeshData | null {
 }
 
 /** The plants that grow in the sea (kelp, seagrass, coral fans). The Beyond ids are not fixed, so they are looked up by name. */
-const SEA_PLANTS: ReadonlySet<number> = new Set(['kelp', 'seagrass', 'coral_fan_pink', 'coral_fan_blue'].map((k) => BB[k]).filter((id) => id !== undefined));
+const SEA_PLANTS: ReadonlySet<number> = new Set([
+  ...['kelp', 'seagrass', 'coral_fan_pink', 'coral_fan_blue'].map((k) => BB[k]).filter((id) => id !== undefined),
+  CORAL_FAN_YELLOW,
+  CORAL_FAN_RED,
+  BUBBLE_BLOOM,
+]);
 const isSeaPlant = (id: number): boolean => id !== 0 && FLUID_KIND[id] === 0 && IS_OPAQUE[id] === 0 && BLOCKS[id].shape !== 'cube';
 
 /**

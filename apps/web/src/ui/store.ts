@@ -241,6 +241,12 @@ export interface UiState {
   health: number;
   hunger: number;
   air: number;
+  /** Eyes are in water, so the air bubbles stay up even when the bloom has filled them. */
+  submerged: boolean;
+  /** Seconds left in the open oxygen bottle while the diving helmet is under water. -1 when the bottle is not in use. */
+  bottle: number;
+  /** Spare oxygen items while that bottle is in use. */
+  spare: number;
   /** Experience level and bar fill (0..1). */
   level: number;
   xpProgress: number;
@@ -370,6 +376,9 @@ export const useUi = create<UiState>()(() => ({
   health: 20,
   hunger: 20,
   air: 15,
+  submerged: false,
+  bottle: -1,
+  spare: 0,
   level: 0,
   xpProgress: 0,
   coins: 0,

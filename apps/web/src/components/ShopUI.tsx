@@ -84,6 +84,7 @@ export function ShopWindow({ npc, canGoBack = true }: { npc: NpcDef; canGoBack?:
   const coins = useUi((s) => s.coins);
   useUi((s) => s.version);
   const shopOpen = useUi((s) => s.shopOpen);
+  const mode = useUi((s) => s.mode);
   const myClass = useUi((s) => s.cls)?.id ?? null;
   const myLevel = useUi((s) => s.cls)?.level ?? 0;
   const [tip, setTip] = useState<TipLine[]>([]);
@@ -154,7 +155,7 @@ export function ShopWindow({ npc, canGoBack = true }: { npc: NpcDef; canGoBack?:
           <p className="shop-line" data-testid="shop-line">{shop.line}</p>
           <div className="vendor-list">
             <div className="slot-grid shop-bags" style={{ gridTemplateColumns: 'repeat(9, 52px)' }}>
-              {shop.stock.map((w, i) => {
+              {shop.stock.map((w, i) => ({ w, i })).filter(({ w }) => mode !== 'survival' || (skillBookAbility(w.id) === null && !w.gear)).map(({ w, i }) => {
                 const afford = coins >= w.price;
                 const stack = makeStack(w.id, w.count);
                 if (w.gear) stack.gear = cloneGear(w.gear);

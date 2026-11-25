@@ -221,6 +221,8 @@ export function takeSwing(local: number, incoming: number | undefined): number {
 export class RemoteSession implements ClientSession {
   readonly body = createBody(0, 80, 0);
   readonly vitals = { health: 20, hunger: 20, saturation: 5, air: 15, dead: false };
+  bottleSec = -1;
+  bottleSpare = 0;
   /** The bags worn, mirrored from the server: they decide which of the inventory's slots are open. */
   readonly bags = new Container(BAG_SLOTS);
   readonly inventory = bagInventory(this.bags);
@@ -768,6 +770,8 @@ export class RemoteSession implements ClientSession {
     this.vitals.hunger = y.hunger;
     this.vitals.saturation = y.saturation;
     this.vitals.air = y.air;
+    this.bottleSec = y.ox ?? -1;
+    this.bottleSpare = y.oxn ?? 0;
     this.vitals.dead = y.dead;
     this.xp.level = y.level;
     this.xp.progress = y.xpProgress;

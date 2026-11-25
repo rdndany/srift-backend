@@ -140,13 +140,37 @@ describe('filling the grid from the book', () => {
     expect(m.totalItems()).toBe(8);
   });
 
+  it('clicking the same recipe again adds one more set', () => {
+    const logs = menu([[B.LOG, 5]], 2);
+    const planks = indexOf(B.PLANKS);
+    expect(logs.m.fillRecipe(planks, false)).toBe(true);
+    expect(logs.m.fillRecipe(planks, false)).toBe(true);
+    expect(logs.m.grid.get(0)).toMatchObject({ id: B.LOG, count: 2 });
+    expect(logs.m.result.get(0)).toMatchObject({ id: B.PLANKS, count: 8 });
+    expect(logs.inv.countOf(B.LOG)).toBe(3);
+    // Nothing left to add: the grid stays as it is.
+    const last = menu([[B.LOG, 1]], 2);
+    expect(last.m.fillRecipe(planks, false)).toBe(true);
+    expect(last.m.fillRecipe(planks, false)).toBe(false);
+    expect(last.m.grid.get(0)).toMatchObject({ id: B.LOG, count: 1 });
+
+    const { inv, m } = menu([[B.PLANKS, 8]]);
+    const sticks = indexOf(I.STICK);
+    expect(m.fillRecipe(sticks, false)).toBe(true);
+    expect(m.fillRecipe(sticks, false)).toBe(true);
+    expect(m.grid.get(0)?.count).toBe(2);
+    expect(m.grid.get(3)?.count).toBe(2);
+    expect(m.result.get(0)).toMatchObject({ id: I.STICK, count: 8 });
+    expect(inv.countOf(B.PLANKS)).toBe(4);
+  });
+
   it('shift fills as many crafts as the inventory allows', () => {
     const { inv, m } = menu([[B.PLANKS, 9]]);
     expect(m.fillRecipe(indexOf(I.STICK), true)).toBe(true);
     // 9 planks, two cells: four crafts, one plank left over.
     expect(m.grid.get(0)?.count).toBe(4);
     expect(inv.countOf(B.PLANKS)).toBe(1);
-    // Taking the result pays one craft at a time.
+    // The result is every craft the grid holds: four pairs of planks become sixteen sticks.
     m.shiftClick(m.resultSlot);
     expect(inv.countOf(I.STICK)).toBe(16);
     expect(m.grid.isEmpty()).toBe(true);

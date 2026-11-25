@@ -751,6 +751,14 @@
     text-transform: none;
     color: #bdb2d2;
   }
+  .lb-forget {
+    --edge: linear-gradient(135deg, rgba(255, 150, 150, 0.75), rgba(255, 80, 80, 0.28));
+    --fill: linear-gradient(#4a1824, #240c12);
+    color: #ffd4d4;
+  }
+  .lb-forget small {
+    color: #e7b4b4;
+  }
   .fp-glow.idle {
     animation: none;
   }
@@ -835,6 +843,10 @@
     border-color: var(--ember);
     background: #3b2412;
     color: #fff;
+  }
+  .lb-seg button:disabled {
+    opacity: 0.35;
+    cursor: default;
   }
   .lb-seg button.on + button {
     border-left: 2px solid var(--ember);
@@ -1754,8 +1766,26 @@
       inset 0 0 0 2px color-mix(in srgb, var(--c, #8a5cf5) 50%, #000),
       inset 0 -3px 0 color-mix(in srgb, var(--c, #8a5cf5) 70%, transparent);
   }
-  .lb-slot.lb-card .slot-ico canvas {
+  .lb-slot.lb-card .slot-ico canvas,
+  .lb-slot.lb-card .slot-ico .isle-sun {
     filter: drop-shadow(0 3px 0 rgba(0, 0, 0, 0.55));
+  }
+  /* Island has no level or coins, so the name and day share the icon's center. */
+  .lb-slot.lb-card.isle .slot-copy {
+    grid-column: 2 / -1;
+    grid-row: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: flex-start;
+    align-self: center;
+    gap: 4px;
+    min-width: 0;
+    min-height: 60px;
+  }
+  .lb-slot.lb-card.isle .slot-name,
+  .lb-slot.lb-card.isle .slot-class {
+    align-self: flex-start;
   }
   .lb-slot.lb-card .slot-name {
     grid-area: name;

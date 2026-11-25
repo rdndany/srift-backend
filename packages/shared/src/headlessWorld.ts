@@ -33,6 +33,8 @@ export class HeadlessWorld implements WorldAccess {
 
   /** Called for every block that changes (the server turns these into network messages). */
   onChange: ((x: number, y: number, z: number, id: number) => void) | null = null;
+  /** Called when a chunk is first made or loaded, so a torch standing in water can be put out. */
+  onChunk: ((cx: number, cz: number, data: Uint16Array) => void) | null = null;
 
   constructor(readonly generator: WorldGenerator) {}
 
@@ -42,6 +44,7 @@ export class HeadlessWorld implements WorldAccess {
     if (!c) {
       c = { cx, cz, data: this.generator.generateChunk(cx, cz), modified: false };
       this.chunks.set(key, c);
+      this.onChunk?.(cx, cz, c.data);
     }
     return c;
   }
@@ -123,6 +126,7 @@ export class HeadlessWorld implements WorldAccess {
       if (c.data.length !== CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT) continue;
       if (this.generator.instanceAt(c.cx * CHUNK_SIZE, c.cz * CHUNK_SIZE) >= 0) continue; // a dungeon copy left over from an earlier run
       this.chunks.set(chunkKey(c.cx, c.cz), { cx: c.cx, cz: c.cz, data: c.data, modified: true });
+      this.onChunk?.(c.cx, c.cz, c.data);
     }
   }
 }

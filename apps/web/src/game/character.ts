@@ -257,6 +257,9 @@ function paintFaces(geo: THREE.BufferGeometry, tint: THREE.Color, light: ArrayLi
   attr.needsUpdate = true;
 }
 
+const DIVE_MAT = new THREE.MeshBasicMaterial({ vertexColors: true });
+const DIVE_GLASS = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.62 });
+
 /** The metal that picks out each material's trim: brass on leather and steel, a gem on gold. */
 const ACCENT: Record<ArmorLook, ArmorLook> = { leather: 'gold', gold: 'diamond', iron: 'gold', diamond: 'gold', ember: 'lava', lava: 'lava' };
 
@@ -978,6 +981,48 @@ export class Character {
     return true;
   }
 
+  /**
+   * A diving helmet: a steel box over the head, a glass face behind bars, a valve on the crown and a copper fitting on the left.
+   * The picture it is built from is the barred helm with the side gear.
+   */
+  private wearDiveHelm(head: THREE.Object3D): void {
+    const steel: [number, number, number] = [0.62, 0.66, 0.71];
+    const dark: [number, number, number] = [0.22, 0.26, 0.3];
+    const glass: [number, number, number] = [0.32, 0.74, 0.8];
+    const copper: [number, number, number] = [0.8, 0.46, 0.18];
+    const add = (rgb: [number, number, number], size: [number, number, number], at: [number, number, number], clear = false): void => {
+      const geo = box(size[0], size[1], size[2]);
+      const base = new Float32Array(24 * 3);
+      for (let i = 0; i < 24; i++) {
+        base[i * 3] = rgb[0];
+        base[i * 3 + 1] = rgb[1];
+        base[i * 3 + 2] = rgb[2];
+      }
+      geo.setAttribute('base', new THREE.BufferAttribute(base, 3));
+      const mesh = new THREE.Mesh(geo, clear ? DIVE_GLASS : DIVE_MAT);
+      mesh.position.set(at[0], at[1], at[2]);
+      head.add(mesh);
+      this.armorGroup.push(mesh);
+      this.armorGeos.push(geo);
+    };
+    add(dark, [0.66, 0.07, 0.66], [0, -0.1, 0]);
+    add(steel, [0.66, 0.1, 0.66], [0, 0.4, 0]);
+    add(steel, [0.66, 0.46, 0.1], [0, 0.14, 0.28]);
+    add(steel, [0.1, 0.46, 0.52], [-0.28, 0.14, 0.02]);
+    add(steel, [0.08, 0.46, 0.48], [0.26, 0.14, 0.02]);
+    add(dark, [0.5, 0.08, 0.08], [0, 0.3, -0.28]);
+    add(dark, [0.5, 0.08, 0.08], [0, 0.02, -0.28]);
+    add(dark, [0.06, 0.24, 0.08], [-0.22, 0.16, -0.28]);
+    add(dark, [0.06, 0.24, 0.08], [0.22, 0.16, -0.28]);
+    add(glass, [0.36, 0.2, 0.02], [0, 0.16, -0.3], true);
+    for (const x of [-0.12, -0.04, 0.04, 0.12]) add(dark, [0.028, 0.22, 0.04], [x, 0.16, -0.33]);
+    add(steel, [0.14, 0.05, 0.14], [0, 0.47, 0]);
+    add(copper, [0.07, 0.05, 0.07], [0, 0.52, 0]);
+    add(copper, [0.16, 0.2, 0.16], [0.4, 0.18, 0.02]);
+    add(copper, [0.08, 0.08, 0.08], [0.48, 0.3, 0.02]);
+    add(dark, [0.05, 0.08, 0.08], [0.32, 0.16, -0.14]);
+  }
+
   /** Put armor on: item ids for [helmet, chestplate, leggings, boots], 0 for nothing. */
   setArmor(ids: readonly number[]): void {
     this.wantedArmor = ids;
@@ -998,7 +1043,15 @@ export class Character {
     this.armorGlowGeos = [];
 
     // (The clothes of a class are not plate: they are drawn by their own rig, see `syncOutfits`.)
-    const material = (i: number): ArmorLook | null => (ids[i] && !getItem(ids[i]).armor?.outfit ? (getItem(ids[i]).armor?.set === 'hollow_king' ? 'ember' : (getItem(ids[i]).armor?.material ?? null)) : null);
+    const diver = ids[0] === I.DIVER_HELM;
+    const material = (i: number): ArmorLook | null =>
+      i === 0 && diver
+        ? null
+        : ids[i] && !getItem(ids[i]).armor?.outfit
+          ? getItem(ids[i]).armor?.set === 'hollow_king'
+            ? 'ember'
+            : (getItem(ids[i]).armor?.material ?? null)
+          : null;
 
     const piece = (parent: THREE.Object3D, w: number, h: number, d: number, y: number, mat: ArmorLook, faceHole = false, x = 0, tone: ArmorTone = 'plate'): void => {
       const geo = box(w, h, d);
@@ -1035,9 +1088,10 @@ export class Character {
       this.repaintSkin();
       this.skinTex.needsUpdate = true;
     }
-    this.helmedBy = helmet;
+    this.helmedBy = diver ? 'iron' : helmet;
     this.fitLookBits();
-    if (helmet) {
+    if (diver) this.wearDiveHelm(head);
+    else if (helmet) {
       const gem = ACCENT[helmet];
       // The skull is a little smaller than a cube of plate, and the helm is built up from it in steps: a band at the brow, a stepped crown, a guard behind the neck.
       // The face stays open, forehead to chin: a cap over the top of the head, a shell over the back and a plate over each ear.

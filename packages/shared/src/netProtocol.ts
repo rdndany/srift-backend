@@ -141,6 +141,10 @@ export interface SelfView {
   hunger: number;
   saturation: number;
   air: number;
+  /** Seconds left in the open oxygen bottle. Left out when the diving helmet is not breathing from one. */
+  ox?: number;
+  /** Spare oxygen items while that bottle is open. */
+  oxn?: number;
   dead: boolean;
   /** Seconds of the Poison status effect left. Left out when there is none. */
   poison?: number;

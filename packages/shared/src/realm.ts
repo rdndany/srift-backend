@@ -1,5 +1,5 @@
 import { B, BLOCKS, FALLS, IS_LEAVES, IS_LOG, SOUL_WARD_HEIGHT, SOUL_WARD_RADIUS, chestId, chestInfo, chestPartnerPos, doorId, doorInfo, doorKind, isAnvil, isChest, signInfo } from './blocks';
-import { WORLD_HEIGHT } from './chunk';
+import { CHUNK_SIZE, WORLD_HEIGHT, blockIndex } from './chunk';
 import { LOOT_TABLES, positionRand, rollChest, spawnerKind } from './loot';
 import { PLAYER_HEIGHT, PLAYER_WIDTH, bodyOverlapsBlock, type Body, type Solid } from './physics';
 import { mobSolid, mobTouch } from './mobSolids';
@@ -10,7 +10,7 @@ import { XpOrbWorld } from './xpOrbs';
 import { BOBBER_LEASH, FishingWorld, type FishingEvents } from './fishing';
 import type { WorldAccess } from './headlessWorld';
 import type { LandService } from './landService';
-import { BOTTLE_XP_MAX, BOTTLE_XP_MIN, blockDrops, getItem, toolId } from './items';
+import { BOTTLE_XP_MAX, BOTTLE_XP_MIN, I, blockDrops, getItem, skillBookAbility, toolId } from './items';
 import { makeStack, type ItemStack } from './inventory';
 import { ChestMenu } from './menu';
 import { EffectField } from './abilityEffects';
@@ -29,7 +29,7 @@ import type { DungeonView } from './dungeonView';
 import { BossBrain, type BossArenaDef, type BossTarget, type BossView, type BossWorld } from './boss';
 import { jewelDrop, jewelKind } from './jewels';
 import type { DummyStation, NpcStation } from './quests';
-import { canStayAt } from './plants';
+import { canStayAt, isBubbleBloom, isSeaPlant, isTorch } from './plants';
 import { isRail, railRemoved } from './rails';
 import { VEHICLE_ITEM, VehicleWorld, type Vehicle, type VehicleKind } from './vehicles';
 import { FluidSim, isFluid } from './fluids';
@@ -41,6 +41,7 @@ import { RedstoneSim } from './redstone';
 import type { SessionEvent } from './sessionProtocol';
 import type { WorldState } from './save';
 import { Weather } from './weather';
+import { IsleDirector, IsleWorldGenerator, type IsleSim } from './isle';
 import { folkFromJSON, folkToJSON, makeRecord, professionFor, villagerVariant, type VillagerRecord } from './villagerFolk';
 import { restock } from './trading';
 import { SAFE_BUFFER, WorldGenerator } from './worldgen';
@@ -219,6 +220,8 @@ export class Realm {
 
   /** Day phase: 0 = sunrise, 0.25 = noon, 0.5 = sunset, 0.75 = midnight. */
   time = 0.2;
+  /** Isle survival only. Every other world leaves this empty, and the clock never asks it. */
+  isle: IsleDirector | null = null;
   naturalSpawning: boolean;
   villagers: boolean;
   /** The rifts of this world (null: none). */
@@ -338,8 +341,11 @@ export class Realm {
     this.vehicles = new VehicleWorld(this.world.physicsReader);
     this.blockEntities.loot = (x, y, z) => {
       const name = this.generator.lootAt(x, y, z);
-      return name ? rollChest(LOOT_TABLES[name], positionRand(this.seed, x, y, z)) : null;
+      if (!name) return null;
+      // Survival keeps the plain contents. A creative player still finds the rarity gear.
+      return rollChest(LOOT_TABLES[name], positionRand(this.seed, x, y, z), this.players.some((p) => p.mode === 'creative'));
     };
+    if (this.generator.kind === 'isle') this.isle = new IsleDirector(this.isleSim());
 
     this.mobEvents = {
       hurtPlayer: (amount, kx, kz, source, target, effect) => {
@@ -363,6 +369,8 @@ export class Realm {
         }
       },
       drop: (d, x, y, z, owner) => {
+        // A skill book or a Codex (it opens into epic gear) is not part of survival.
+        if (!this.creativeLoot(owner) && (d.id === I.AURELION_CODEX || skillBookAbility(d.id) !== null)) return;
         const a = this.rand() * Math.PI * 2;
         this.drops.spawn(makeStack(d.id, d.count), x, y, z, Math.cos(a) * 1.2, 3, Math.sin(a) * 1.2, 0.5, owner, this.shareKill(owner));
       },
@@ -374,12 +382,16 @@ export class Realm {
       // A monster may leave a skill book (any of the twelve, for any class, known or not) and, separately, a bag and a jewel.
       loot: (mob, x, y, z) => {
         const owner = mob.killedBy ?? undefined;
-        for (const found of [skillBookDrop(mob.kind, this.rand), bagDrop(mob.kind, this.rand), jewelDrop(mob.kind, this.rand)]) {
-          if (found === null) continue;
+        const fancy = this.creativeLoot(owner);
+        const found = fancy
+          ? [skillBookDrop(mob.kind, this.rand), bagDrop(mob.kind, this.rand), jewelDrop(mob.kind, this.rand)]
+          : [bagDrop(mob.kind, this.rand), jewelDrop(mob.kind, this.rand)];
+        for (const item of found) {
+          if (item === null) continue;
           const a = this.rand() * Math.PI * 2;
-          this.drops.spawn(makeStack(found, 1), x, y, z, Math.cos(a) * 1.2, 3, Math.sin(a) * 1.2, 0.5, owner, this.shareKill(owner));
+          this.drops.spawn(makeStack(item, 1), x, y, z, Math.cos(a) * 1.2, 3, Math.sin(a) * 1.2, 0.5, owner, this.shareKill(owner));
           // A jewel has a sound of its own. A kill's jewel is heard by the player it belongs to, and by their party when they share it.
-          const jewel = jewelKind(found);
+          const jewel = jewelKind(item);
           if (jewel) {
             const hear = owner != null ? this.players.filter((p) => this.maySeeDrop(p, owner, this.shareKill(owner))) : this.players;
             for (const p of hear) {
@@ -389,12 +401,14 @@ export class Realm {
           }
         }
         if (mob.def.boss) this.bossLoot(mob, x, y, z);
-        if (mob.elite) this.eliteLoot(x, y, z, owner);
-        // ...and sometimes a piece of gear with a rarity, a level and bonus stats (see gear.ts).
-        const piece = gearDrop(mob.kind, this.rand);
-        if (piece) {
-          const a = this.rand() * Math.PI * 2;
-          this.drops.spawn(piece, x, y, z, Math.cos(a) * 1.2, 3, Math.sin(a) * 1.2, 0.5, owner, this.shareKill(owner));
+        if (fancy && mob.elite) this.eliteLoot(x, y, z, owner);
+        // Survival does not find uncommon, rare or epic gear.
+        if (fancy) {
+          const piece = gearDrop(mob.kind, this.rand);
+          if (piece) {
+            const a = this.rand() * Math.PI * 2;
+            this.drops.spawn(piece, x, y, z, Math.cos(a) * 1.2, 3, Math.sin(a) * 1.2, 0.5, owner, this.shareKill(owner));
+          }
         }
       },
       // A kill counts for every player nearby (a party shares its kills, as in the old MMOs).
@@ -439,6 +453,8 @@ export class Realm {
   /** Once every player in the world has been in bed long enough, it is morning and the weather clears. */
   private skipNightIfAllAsleep(): void {
     if (!this.allowSleep) return;
+    // The black moon on an isle does not let a bed skip the night. Every other world is unchanged.
+    if (this.isle?.blackMoon(this.time)) return;
     let sleepers = 0;
     for (const p of this.players) {
       if (p.spectating || p.screen === 'dead') continue;
@@ -582,6 +598,8 @@ export class Realm {
       yaw: p.yaw,
       pitch: p.pitch,
       ref: p,
+      held: p.inventory.get(p.selected)?.id,
+      offhand: p.offhand.get(0)?.id,
     }));
     if (view.length === 0) return;
     this.updateFalling(dt);
@@ -589,7 +607,7 @@ export class Realm {
     const daylight = this.daylight;
     this.mobs.update(
       dt,
-      { world: this.world.physicsReader, player: view[0], players: view, daylight, rand: this.rand, safe: (x, z) => this.generator.safeFromMonsters(x, z), ward: (x, y, z) => this.wardAt(x, y, z) },
+      { world: this.world.physicsReader, player: view[0], players: view, daylight, rand: this.rand, safe: (x, z) => this.generator.safeFromMonsters(x, z), ward: (x, y, z) => this.wardAt(x, y, z), keepAnimals: this.generator.kind === 'isle' },
       this.mobEvents,
     );
     this.effects.update(dt, this.mobs);
@@ -994,6 +1012,13 @@ export class Realm {
     }
   }
 
+  /** Uncommon, rare and epic gear, skill books and the Codex belong to creative. Survival does not find them. */
+  private creativeLoot(owner?: unknown): boolean {
+    const who = owner != null ? this.players.find((p) => p === owner) : undefined;
+    if (who) return who.mode === 'creative';
+    return this.players.some((p) => p.mode === 'creative');
+  }
+
   /** At the start (the world has just been loaded): no copy is in use, so wipe whatever a crash left in them. */
   private sweepCopies(): void {
     for (let slot = 0; slot < this.generator.instanceCount(); slot++) {
@@ -1225,12 +1250,14 @@ export class Realm {
         const def = RIFT_GRADE_DEFS[grade].reward;
         const rand = this.rand;
         const level = def.gearLevel[0] + Math.floor(rand() * (def.gearLevel[1] - def.gearLevel[0] + 1));
-        const piece = randomGear(level, pickRarity(def.gearRarity, rand), p.cls?.classId, rand);
         p.addXp(def.xp);
         p.addCoins(def.coins, true);
-        p.giveOrDrop(piece);
+        if (p.mode !== 'survival') {
+          const piece = randomGear(level, pickRarity(def.gearRarity, rand), p.cls?.classId, rand);
+          p.giveOrDrop(piece);
+        }
         if (rand() < def.tome) p.giveOrDrop(randomEnchantedBook(rand));
-        p.emit({ t: 'toast', text: rank === 1 && helpers > 1 ? `${RIFT_GRADE_DEFS[grade].name}: you fought the best! +${def.xp} xp, +${def.coins} coins and a piece of gear` : `${RIFT_GRADE_DEFS[grade].name}: +${def.xp} xp, +${def.coins} coins and a piece of gear` });
+        p.emit({ t: 'toast', text: rank === 1 && helpers > 1 ? `${RIFT_GRADE_DEFS[grade].name}: you fought the best! +${def.xp} xp, +${def.coins} coins` : `${RIFT_GRADE_DEFS[grade].name}: +${def.xp} xp, +${def.coins} coins` });
       },
     };
   }
@@ -1258,7 +1285,7 @@ export class Realm {
       spots.push({ x: bx, y: g + 1, z: bz, dir });
     }
     for (let i = 0; i < 2; i++) {
-      const slots = rollChest(table, this.rand);
+      const slots = rollChest(table, this.rand, this.players.some((p) => p.mode === 'creative'));
       const spot = spots[i];
       if (!spot) {
         for (const s of slots) if (s) this.drops.spawn(s, x, y + 0.5, z, (this.rand() - 0.5) * 2, 4, (this.rand() - 0.5) * 2, 0.5);
@@ -1331,6 +1358,7 @@ export class Realm {
     const slot = this.generator.instanceAt(mob.body.x, mob.body.z);
     for (const p of this.players) {
       if (p.screen === 'dead' || p.spectating || this.copyAt(p) !== slot) continue;
+      if (p.mode === 'survival') continue;
       const piece = randomGear(7 + Math.floor(this.rand() * 3), pickRarity([0, 62, 38], this.rand), p.cls?.classId, this.rand);
       const a = this.rand() * Math.PI * 2;
       this.drops.spawn(piece, x, y + 0.5, z, Math.cos(a) * 1.6, 4, Math.sin(a) * 1.6, 0.5, p);
@@ -1355,7 +1383,7 @@ export class Realm {
     const cx = Math.floor(x);
     const cz = Math.floor(z);
     const cy = Math.floor(y);
-    const slots = rollChest(LOOT_TABLES.hollow_king, this.rand);
+    const slots = rollChest(LOOT_TABLES.hollow_king, this.rand, this.players.some((p) => p.mode === 'creative'));
     const ring: { dx: number; dz: number }[] = [];
     for (let dx = -6; dx <= 6; dx++) for (let dz = -6; dz <= 6; dz++) if (Math.max(Math.abs(dx), Math.abs(dz)) >= 3) ring.push({ dx, dz });
     ring.sort((a, b) => a.dx * a.dx + a.dz * a.dz - (b.dx * b.dx + b.dz * b.dz) || a.dx - b.dx || a.dz - b.dz);
@@ -1719,6 +1747,64 @@ export class Realm {
   /** Advance the day clock. `speed` < 1 slows it, like the original's pause. */
   advanceClock(dt: number, speed = 1): void {
     this.time = (this.time + (dt * speed) / DAY_LENGTH_SECONDS) % 1;
+    this.isle?.onClock(this.time);
+  }
+
+  /** Day number and the latest isle notice. Null unless this world is an isle. */
+  isleInfo(): { day: number; note: string | null; blackMoon: boolean } | null {
+    if (!this.isle) return null;
+    return { day: this.isle.day, note: this.isle.line, blackMoon: this.isle.blackMoon(this.time) };
+  }
+
+  /** Keep a day that was saved on the character when the world record is behind it. */
+  keepIsleDay(day: number): void {
+    this.isle?.adopt(day);
+  }
+
+  /** The island's sea was thinned. The next save remembers it, so planted kelp is not pulled up later. */
+  markIsleSea(): void {
+    this.isle?.keepSparse();
+  }
+
+  private isleSim(): IsleSim {
+    const fish = [I.RAW_COD, I.COOKED_COD, I.RAW_SALMON, I.COOKED_SALMON];
+    return {
+      seed: this.seed,
+      rand: () => this.rand(),
+      getBlock: (x, y, z) => this.world.getBlock(x, y, z),
+      setBlock: (x, y, z, id) => {
+        const ok = this.world.setBlock(x, y, z, id);
+        if (ok) this.blockChanged(x, y, z);
+        return ok;
+      },
+      spawn: (kind, x, y, z) => {
+        this.mobs.spawn(kind, x, y, z);
+      },
+      count: (kind, x, z, r) => {
+        let n = 0;
+        for (const m of this.mobs.mobs) if (!m.dead && m.kind === kind && Math.hypot(m.body.x - x, m.body.z - z) <= r) n++;
+        return n;
+      },
+      clearDrowned: (x, z, r) => {
+        const list = this.mobs.mobs;
+        for (let i = list.length - 1; i >= 0; i--) {
+          const m = list[i];
+          if (m.kind === 'drowned' && Math.hypot(m.body.x - x, m.body.z - z) <= r) list.splice(i, 1);
+        }
+      },
+      say: (text) => {
+        for (const p of this.players) p.emit({ t: 'toast', text });
+      },
+      noteChest: (x, y, z) => {
+        if (this.generator instanceof IsleWorldGenerator) this.generator.noteChest(x, y, z);
+      },
+      forgetChest: (x, y, z) => {
+        if (this.generator instanceof IsleWorldGenerator) this.generator.forgetChest(x, y, z);
+      },
+      chestRolled: (x, y, z) => this.blockEntities.wasRolled(x, y, z),
+      discardChest: (x, y, z) => this.blockEntities.discardChest(x, y, z),
+      hasFish: () => this.players.some((p) => fish.some((id) => p.inventory.countOf(id) > 0)),
+    };
   }
 
   // ---- world edits ---------------------------------------------------------
@@ -1758,6 +1844,36 @@ export class Realm {
     this.redstone.notify(x, y, z);
   }
 
+  /** A loaded chunk: a torch left standing in water is put out. */
+  soakChunk(cx: number, cz: number, data: Uint16Array): void {
+    const ox = cx * CHUNK_SIZE;
+    const oz = cz * CHUNK_SIZE;
+    const at = (x: number, y: number, z: number): number => {
+      const lx = x - ox;
+      const lz = z - oz;
+      if (y >= 0 && y < WORLD_HEIGHT && lx >= 0 && lx < CHUNK_SIZE && lz >= 0 && lz < CHUNK_SIZE) return data[blockIndex(lx, y, lz)]!;
+      return this.world.getBlock(x, y, z);
+    };
+    for (let y = 1; y < WORLD_HEIGHT; y++) {
+      for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+        for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+          const id = data[blockIndex(lx, y, lz)]!;
+          const x = ox + lx;
+          const z = oz + lz;
+          if (!isTorch(id)) continue;
+          const wet =
+            isFluid(at(x + 1, y, z)) ||
+            isFluid(at(x - 1, y, z)) ||
+            isFluid(at(x, y, z + 1)) ||
+            isFluid(at(x, y, z - 1)) ||
+            isFluid(at(x, y + 1, z)) ||
+            isFluid(at(x, y - 1, z));
+          if (wet) this.fluids.notify(x, y, z);
+        }
+      }
+    }
+  }
+
   /** Everything that can stand on a pressure plate. */
   private *pressers(): Iterable<{ x: number; y: number; z: number; item: boolean }> {
     for (const p of this.players) if (!p.spectating && p.screen !== 'dead' && !p.riding) yield { x: p.body.x, y: p.body.y, z: p.body.z, item: false };
@@ -1783,10 +1899,14 @@ export class Realm {
         // What is on somebody's land is not knocked off by a change made on the other side of its edge.
         if (this.land?.fluidBlocked(x, y, z, nx, ny, nz)) continue;
         const def = BLOCKS[id];
-        this.world.setBlock(nx, ny, nz, B.AIR);
+        // A sea plant leaves water behind, so the hole under it does not stay dry. A bloom is not picked up.
+        const sea = isSeaPlant(id);
+        const bloom = isBubbleBloom(id);
+        this.world.setBlock(nx, ny, nz, sea ? B.WATER : B.AIR);
         this.emitNear(nx, ny, nz, { t: 'burst', id, x: nx, y: ny, z: nz, count: 6 });
         const contents = this.takeBlock(nx, ny, nz, id);
-        if (withDrops) {
+        if (sea) this.blockChanged(nx, ny, nz);
+        if (withDrops && !bloom) {
           for (const s of contents) this.drops.spawnAtBlock(s, nx, ny, nz);
           for (const d of blockDrops(def, null, this.rand)) this.drops.spawnAtBlock(makeStack(d.id, d.count), nx, ny, nz);
         }
@@ -2040,6 +2160,7 @@ export class Realm {
   loadState(w: WorldState, opts: { weather?: boolean } = {}): void {
     this.time = w.time;
     this.prevTime = w.time;
+    this.isle?.restore(w.isle, w.time);
     if (w.villagers != null) {
       const saved = folkFromJSON(w.villagers);
       this.restockEpoch = saved.epoch;
@@ -2078,6 +2199,7 @@ export class Realm {
     const vehicles = rigs.length > 0 ? { vehicles: rigs } : {};
     const rs = this.redstone.toJSON();
     const redstone = rs.buttons.length + rs.plates.length > 0 ? { redstone: rs } : {};
-    return { v: 1, time: this.time, weather: plain(this.weather.toJSON()), blockEntities: plain(this.blockEntities.toJSON()), ...villagers, ...vehicles, ...redstone };
+    const isle = this.isle ? { isle: this.isle.save(this.time) } : {};
+    return { v: 1, time: this.time, weather: plain(this.weather.toJSON()), blockEntities: plain(this.blockEntities.toJSON()), ...villagers, ...vehicles, ...redstone, ...isle };
   }
 }

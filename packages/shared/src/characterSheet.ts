@@ -219,6 +219,11 @@ export function newCharacterSheet(classId: ClassId): CharacterSheet {
   outfitItems(classId).forEach((id, slot) => armor.set(slot, makeStack(id, 1)));
   return sheetOfSave({ v: 1, x: 0, y: 0, z: 0, yaw: 0, pitch: 0, mode: 'survival', selected: 0, inv: inv.toJSON(), vitals: null, mobs: [], armor: armor.toJSON(), offhand: offhand.toJSON(), cls: { v: 1, id: classId, lvl: 1, xp: 0, unlocked: [] }, of: true }, classId);
 }
+
+/** A character with no class and nothing in its bags. Island survival starts this way. */
+export function blankCharacterSheet(): CharacterSheet {
+  return sheetOfSave({ v: 1, x: 0, y: 0, z: 0, yaw: 0, pitch: 0, mode: 'survival', selected: 0, inv: [], vitals: null, mobs: [] }, null);
+}
 /**
  * What the lobby shows of a character on its slot, and what it needs to answer "which of my characters has this?": the level,
  * the coins, when it was saved and how many of each item it carries (worn, pack and bags together; the Stash is not counted).

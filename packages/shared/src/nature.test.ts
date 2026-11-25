@@ -722,6 +722,72 @@ describe('climbing out of the water', () => {
     for (let i = 0; i < 60 * 6; i++) stepPlayer(w, b, { ...idleInput, forward: 1, jump: true, yaw: -Math.PI / 2 }, 1 / 60);
     expect(b.x).toBeLessThan(1);
   });
+
+  it.each([
+    ['pig', 0.9, 0.9, 3.4],
+    ['fox', 0.6, 0.7, 4.6],
+    ['chicken', 0.4, 0.7, 2.8],
+    ['rabbit', 0.4, 0.5, 3.2],
+    ['chick', 0.2, 0.35, 2.8],
+  ])('a %s climbs a corner of the shore', (_name, width, height, speed) => {
+    const corner = (bank: number): BlockReader => ({
+      getBlock: (x, y, z) => (y <= 0 ? B.STONE : x >= 1 && z >= 1 ? (y < bank ? B.STONE : B.AIR) : y <= 3 ? B.WATER : B.AIR),
+    });
+    for (const bank of [4, 5]) {
+      const w = corner(bank);
+      const b = createBody(0.15, 1.6, 0.15);
+      b.width = width;
+      b.height = height;
+      // Facing the corner, the way an animal swims for the nearest dry cell.
+      const yaw = Math.atan2(-1, -1);
+      for (let i = 0; i < 60 * 6; i++) stepPlayer(w, b, { ...idleInput, forward: 1, jump: true, speed, yaw }, 1 / 60);
+      expect(b.x, `bank ${bank} x=${b.x.toFixed(2)} z=${b.z.toFixed(2)} y=${b.y.toFixed(2)}`).toBeGreaterThan(1.05);
+      expect(b.z, `bank ${bank} z`).toBeGreaterThan(1.05);
+      expect(b.inWater, `bank ${bank} water`).toBe(false);
+    }
+  });
+
+  it.each([
+    ['pig', 0.9, 0.9, 3.4],
+    ['fox', 0.6, 0.7, 4.6],
+    ['chicken', 0.4, 0.7, 2.8],
+    ['rabbit', 0.4, 0.5, 3.2],
+    ['chick', 0.2, 0.35, 2.8],
+  ])('a %s already draped on the lip steps up out of the water', (_name, width, height, speed) => {
+    for (const bank of [4, 5]) {
+      const w = pool(bank);
+      // Leading edge already inside the bank, feet still in the surface water. Rising in place used to
+      // hit the face and drop them back.
+      const b = createBody(1 - width / 2 + 0.06, 3.15, 0.5);
+      b.width = width;
+      b.height = height;
+      for (let i = 0; i < 60 * 3; i++) stepPlayer(w, b, { ...idleInput, forward: 1, jump: true, speed, yaw: -Math.PI / 2 }, 1 / 60);
+      expect(b.x, `bank ${bank} x=${b.x.toFixed(2)} y=${b.y.toFixed(2)}`).toBeGreaterThan(1.05);
+      expect(b.y, `bank ${bank} y`).toBeGreaterThanOrEqual(bank - 0.05);
+      expect(b.inWater, `bank ${bank} water`).toBe(false);
+    }
+  });
+
+  it.each([
+    ['pig', 0.9, 0.9, 3.4],
+    ['fox', 0.6, 0.7, 4.6],
+    ['chicken', 0.4, 0.7, 2.8],
+    ['rabbit', 0.4, 0.5, 3.2],
+    ['chick', 0.2, 0.35, 2.8],
+  ])('a %s climbs out of the water onto the shore', (_name, width, height, speed) => {
+    for (const bank of [4, 5]) {
+      for (const startX of [-1.2, 1 - width / 2 - 0.02]) {
+        const w = pool(bank);
+        const b = createBody(startX, 1.6, 0.5);
+        b.width = width;
+        b.height = height;
+        for (let i = 0; i < 60 * 6; i++) stepPlayer(w, b, { ...idleInput, forward: 1, jump: true, speed, yaw: -Math.PI / 2 }, 1 / 60);
+        expect(b.x, `bank ${bank} from ${startX.toFixed(2)} x=${b.x.toFixed(2)} y=${b.y.toFixed(2)}`).toBeGreaterThan(1.05);
+        expect(b.y, `bank ${bank} y`).toBeGreaterThanOrEqual(bank - 0.05);
+        expect(b.inWater, `bank ${bank} water`).toBe(false);
+      }
+    }
+  });
 });
 
 describe('rails', () => {

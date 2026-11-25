@@ -144,6 +144,7 @@ describe('when the Hollow King falls', () => {
     for (let i = 0; i < 40; i++) s.tick(idle());
     const king = realm.mobs.mobs.find((m) => m.kind === 'hollow_king')!;
     const before = realm.drops.drops.length;
+    s.setMode('creative');
     realm.mobs.damage(king, 99999, 0, 0, realm.mobEvents, true, false, true);
     expect(king.dead).toBe(true);
 

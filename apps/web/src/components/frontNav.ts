@@ -32,6 +32,10 @@ export const goToken = (): void => location.assign(siteUrl(TOKEN_PATH));
 export const SHOP_PATH = '/shop';
 export const goShop = (): void => location.assign(siteUrl(SHOP_PATH));
 
+/** The leaderboards: Survival Island days, and realm character level. */
+export const RANKS_PATH = '/leaderboards';
+export const goRanks = (): void => location.assign(siteUrl(RANKS_PATH));
+
 /** The front page at a part of it, from anywhere (from the game's host the part goes in the address). */
 export function frontUrl(id?: string): string {
   const base = siteUrl('/');

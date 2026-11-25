@@ -103,6 +103,10 @@ export interface AimTarget {
 export interface ClientSession {
   readonly body: Body;
   readonly vitals: { health: number; hunger: number; saturation: number; air: number; dead: boolean };
+  /** Seconds left in the open oxygen bottle while the diving helmet is under water. -1 when the bottle is not in use. */
+  bottleSec: number;
+  /** Spare oxygen items while that bottle is in use. */
+  bottleSpare: number;
   readonly inventory: Container;
   /** The bags worn (see bags.ts): the room of each is in `inventory`, after the backpack. */
   readonly bags: Container;

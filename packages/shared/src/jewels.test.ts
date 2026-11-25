@@ -918,7 +918,7 @@ describe('crafting with the button, for every recipe', () => {
     const s = make('warrior');
     s.openScreen('crafting');
     const m = s.menu as CraftingMenu;
-    m.grid.set(0, makeStack(B.LOG, 3));
+    m.grid.set(0, makeStack(B.LOG, 1));
     m.recalc();
     expect(m.result.get(0)).toMatchObject({ id: B.PLANKS, count: 4 });
     expect(m.craftReady()).toMatchObject({ id: B.PLANKS });
@@ -928,12 +928,12 @@ describe('crafting with the button, for every recipe', () => {
     expect(s.drainEvents().some((e) => e.t === 'forgeStart' && e.craft)).toBe(true);
     // While it works: the items are still in the grid, nothing to take, nothing to start again.
     expect(m.forging?.duration).toBe(CRAFT_TIME);
-    expect(m.grid.get(0)?.count).toBe(3);
+    expect(m.grid.get(0)?.count).toBe(1);
     expect(m.result.get(0)).toBeNull();
     expect(m.craftReady()).toBeNull();
     for (let t = 0; t < CRAFT_TIME + 0.2; t += 1 / 20) s.tick(idle());
     expect(m.forging).toBeNull();
-    expect(m.grid.get(0)?.count).toBe(2);
+    expect(m.grid.get(0)).toBeNull();
     expect(m.hasMade).toBe(true);
     expect(m.result.get(0)).toMatchObject({ id: B.PLANKS, count: 4 });
     const ev = s.drainEvents();
@@ -945,8 +945,32 @@ describe('crafting with the button, for every recipe', () => {
     s.apply({ t: 'click', slot: m.resultSlot, button: 0 });
     expect(m.cursor).toMatchObject({ id: B.PLANKS, count: 4 });
     expect(m.hasMade).toBe(false);
-    // The items left in the grid make a new preview.
-    expect(m.result.get(0)).toMatchObject({ id: B.PLANKS, count: 4 });
+    expect(m.result.get(0)).toBeNull();
+  });
+
+  it('two logs in the grid make eight planks, and a smaller stack limits a recipe', () => {
+    const s = make('warrior');
+    s.openScreen('crafting');
+    const m = s.menu as CraftingMenu;
+    m.grid.set(0, makeStack(B.LOG, 2));
+    m.recalc();
+    expect(m.result.get(0)).toMatchObject({ id: B.PLANKS, count: 8 });
+    expect(m.startForge(() => 0)).toBe(true);
+    m.stepForge(CRAFT_TIME + 0.1);
+    expect(m.grid.get(0)).toBeNull();
+    expect(m.result.get(0)).toMatchObject({ id: B.PLANKS, count: 8 });
+
+    const s2 = make('warrior');
+    s2.openScreen('inventory');
+    const sticks = s2.menu as CraftingMenu;
+    sticks.grid.set(0, makeStack(B.PLANKS, 3));
+    sticks.grid.set(2, makeStack(B.PLANKS, 1));
+    sticks.recalc();
+    expect(sticks.result.get(0)).toMatchObject({ id: I.STICK, count: 4 });
+    sticks.click(sticks.resultSlot, 0);
+    expect(sticks.cursor).toMatchObject({ id: I.STICK, count: 4 });
+    expect(sticks.grid.get(0)?.count).toBe(2);
+    expect(sticks.grid.get(2)).toBeNull();
   });
 
   it('shift on the button crafts as many as the items allow, in one go', () => {

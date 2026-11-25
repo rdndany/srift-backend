@@ -9,6 +9,7 @@ import { ARMOR_MATERIALS, ARMOR_SLOTS, OUTFIT_CLASSES, armorDef, hollowKingArmor
 import { HK, HK_ARMOR, HK_BLADE_STATS, HK_CROSSBOW_STATS, HK_ITEM_NAMES, HK_NECKLACE_STATS, HK_RING_STATS, HK_STAFF_STATS } from './hollowKingData';
 import {
   B,
+  BUBBLE_BLOOM,
   BED_RED,
   BLOCKS,
   BUILDING_ITEM,
@@ -237,7 +238,14 @@ export const I = {
   SPORE_JAR: 614,
   BEAR_CLAW: 615,
   GILDED_SCALE: 616,
+  /** Worn on the head. Under water it breathes from oxygen in the inventory. */
+  DIVER_HELM: 621,
+  /** One bottle of air for the diving helmet. Stacks like an apple. */
+  OXYGEN: 622,
 } as const;
+
+/** Seconds of air one oxygen item gives the diving helmet. */
+export const OXYGEN_SECONDS = 20;
 
 /** The classes a skill book can be for (the same ids as `ClassId`, written out so that this file need not import classes). */
 type BookClass = 'warrior' | 'mage' | 'ranger';
@@ -815,6 +823,8 @@ add({ id: I.SEALED_COFFER, name: 'sealed_coffer', tile: tileIndex('sealed_coffer
 add({ id: I.SPORE_JAR, name: 'spore_jar', tile: tileIndex('spore_jar'), maxStack: 64, undroppable: true, kind: 'Quest item' });
 add({ id: I.BEAR_CLAW, name: 'bear_claw', tile: tileIndex('bear_claw'), maxStack: 64, undroppable: true, kind: 'Quest item' });
 add({ id: I.GILDED_SCALE, name: 'gilded_scale', tile: tileIndex('gilded_scale'), maxStack: 64, undroppable: true, kind: 'Quest item' });
+add({ id: I.DIVER_HELM, name: 'diving_helmet', tile: tileIndex('diver_helm'), maxStack: 1, kind: 'Equipment', armor: armorDef(0, 'iron') });
+add({ id: I.OXYGEN, name: 'oxygen', tile: tileIndex('oxygen'), maxStack: 64, kind: 'Item' });
 add({ id: I.JEWEL_DAWN, name: 'jewel_of_dawn', tile: tileIndex('jewel_dawn'), maxStack: 64, kind: 'Jewel' });
 add({ id: I.JEWEL_RIFT, name: 'jewel_of_the_rift', tile: tileIndex('jewel_rift'), maxStack: 64, kind: 'Jewel' });
 add({ id: I.JEWEL_BLOOM, name: 'jewel_of_bloom', tile: tileIndex('jewel_bloom'), maxStack: 64, kind: 'Jewel' });
@@ -1100,6 +1110,7 @@ function baseDrop(block: BlockDef, rand: () => number): Drop | null {
       return n > 0 ? { id: I.STICK, count: n } : null;
     }
     case B.GLASS:
+    case BUBBLE_BLOOM:
     case B.AIR:
     case B.WATER:
     case B.LAVA:

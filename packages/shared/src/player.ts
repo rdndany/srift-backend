@@ -53,7 +53,7 @@ import { BAG_SLOTS, bagInventory, strandedSlots } from './bags';
 import { depositMatching, organizeContainer, organizeInventory } from './organize';
 import { formatEmberTime, EMBER_CAST, EMBER_COOLDOWN, EMBER_MOVE_LIMIT } from './emberstone';import { MOUNTS, MOUNT_BITE, MOUNT_BLOCK_TEXT, MOUNT_HOWL, MOUNT_CAST, MOUNT_MOVE_LIMIT, MOUNT_STEP_HEIGHT, MOUNTED_EYE, RIDE_CHECK, RIDE_GRACE, mountBlocker, mountDef, rideEnclosed, mountSpeedText, type MountId, type MountView } from './mounts';
 import { Container, HOTBAR_SLOTS, canMerge, cloneStack, makeStack, maxStackOf, type ItemStack } from './inventory';
-import { I, PEARL_TRIP_DAMAGE, accessoryOfItem, bagSlotsOf, bedItemColor, companionOfItem, wingOfItem, blockDrops, breakTime, canHarvest, dyeColor, getItem, harvestHint, holdsInOffhand, prefersOffhand, isUndroppable, mountOfItem, outfitItems, outfitSetFits, outfitSetOfItem, silkKeeps, skillBookAbility, usedOnBlock, type ItemDef, type ItemUse, type WeaponDef } from './items';
+import { I, OXYGEN_SECONDS, PEARL_TRIP_DAMAGE, accessoryOfItem, bagSlotsOf, bedItemColor, companionOfItem, wingOfItem, blockDrops, breakTime, canHarvest, dyeColor, getItem, harvestHint, holdsInOffhand, prefersOffhand, isUndroppable, mountOfItem, outfitItems, outfitSetFits, outfitSetOfItem, silkKeeps, skillBookAbility, usedOnBlock, type ItemDef, type ItemUse, type WeaponDef } from './items';
 import { AnvilMenu, ChestMenu, CraftingMenu, EnchantMenu, CreativeMenu, FurnaceMenu, GrindstoneMenu, TradeMenu, type Menu } from './menu';
 import { tooltipName } from './tooltip';
 import { ARMOR_STAND_POSES, ARROW_GRAVITY, WOOL_REGROW, arrowSpeed, rayAabb, type Arrow, type Mob, type MobEffect, type MobEffects, type MobKind, type MobManager } from './mobs';
@@ -65,7 +65,7 @@ export const SLAM_WIND = 0.2;
 export const SLAM_IMPACT = 0.4;
 /** A Shield Bash: seconds the figure takes to draw the shield back, drive it forward and come out of it (others see it from `bashAge`). */
 export const BASH_ANIM = 0.5;
-import { canStayAt, growColumn, growFruit, growVine, isTillable, isYoungCrop, lookDir, placementFor, placesUpper, ripeCrop, stemFruit } from './plants';
+import { canStayAt, growColumn, growFruit, growVine, isBubbleBloom, isKelp, isSeaPlant, isTillable, isYoungCrop, lookDir, placementFor, placesUpper, ripeCrop, stemFruit } from './plants';
 import { seatDrop } from './shapes';
 import { FLUID_KIND, FLUID_WATER, isFluidSource } from './fluids';
 import { IS_LIQUID, IS_LOG, IS_SOLID, cakeId, cakeInfo } from './blocks';
@@ -383,6 +383,16 @@ export class Player implements EffectOwner {
   private fireTimer = 0.5;
   private burnTimer = 0;
   private peakY: number;
+  /** Seconds left in the oxygen bottle the diving helmet already opened. */
+  private oxygenLeft = 0;
+  /** The helmet, or a bubble column, is filling the lungs this step. */
+  private helmBreath = false;
+  /** Seconds stood in a bubble column toward the next bottles the bloom fills. */
+  private bloomFill = 0;
+  /** Seconds left in the open bottle while the diving helmet is under water. -1 when the bottle is not in use. */
+  bottleSec = -1;
+  /** Spare oxygen items while the bottle is in use. */
+  bottleSpare = 0;
   private lastHealth: number;
   private breakKey = '';
   private hitTimer = 0;
@@ -1447,8 +1457,9 @@ export class Player implements EffectOwner {
 
     this.puff(x, y, z, id, false);
     this.realm.emitNear(x, y, z, { t: 'sound', sound: def.sound, action: 'break', vol: 1 });
-    // Ice leaves water behind (the original needs silk touch to keep it).
-    this.world.setBlock(x, y, z, id === B.ICE && !kept && this.world.getBlock(x, y - 1, z) !== B.AIR ? B.WATER : B.AIR);
+    // Ice leaves water behind (the original needs silk touch to keep it). A sea plant does too, so the sea closes over the stalk.
+    const flood = isSeaPlant(id) || (id === B.ICE && !kept && this.world.getBlock(x, y - 1, z) !== B.AIR);
+    this.world.setBlock(x, y, z, flood ? B.WATER : B.AIR);
     const contents = this.realm.takeBlock(x, y, z, id);
 
     if (this.mode === 'survival') {
@@ -1563,7 +1574,7 @@ export class Player implements EffectOwner {
       used = world.setBlock(t.x, t.y, t.z, Math.min(ripeCrop(t.id), t.id + 1 + Math.floor(rand() * 3)));
     } else if (stemFruit(t.id) && growFruit(world, t.x, t.y, t.z, t.id, rand)) {
       used = true;
-    } else if ((t.id === B.CACTUS || t.id === B.SUGAR_CANE) && growColumn(world, t.x, t.y, t.z, t.id)) {
+    } else if ((t.id === B.CACTUS || t.id === B.SUGAR_CANE || isKelp(t.id)) && growColumn(world, t.x, t.y, t.z, t.id)) {
       used = true;
     } else if ((t.id === B.CAVE_VINES || t.id === B.CAVE_VINES_BERRIES) && growVine(world, t.x, t.y, t.z, t.id)) {
       used = true;
@@ -3052,7 +3063,7 @@ export class Player implements EffectOwner {
    * False when the character cannot open one (then the book stays).
    */
   private spillCodex(): boolean {
-    if (this.vitals.dead || this.spectating || this.sleeping) return false;
+    if (this.vitals.dead || this.spectating || this.sleeping || this.mode === 'survival') return false;
     this.dropFromPlayer(this.codexPiece(), 2);
     this.codexOpened(-1);
     return true;
@@ -3067,11 +3078,11 @@ export class Player implements EffectOwner {
     const stack = this.inventory.get(index);
     if (!stack || stack.id !== I.AURELION_CODEX) return false;
     if (this.vitals.dead || this.spectating || this.sleeping) return true;
-    const piece = this.codexPiece();
     if (this.mode === 'survival') {
-      stack.count -= 1;
-      if (stack.count <= 0) this.inventory.set(index, null);
+      this.emit({ t: 'toast', text: 'Survival does not use this.' });
+      return true;
     }
+    const piece = this.codexPiece();
     const landed = this.placeOrDrop(piece, index);
     this.codexOpened(landed);
     this.emit({ t: 'inv' });
@@ -4899,6 +4910,7 @@ export class Player implements EffectOwner {
     this.accessories.loadJSON(p.accessories);
     this.sanitizeAccessories();
     this.selected = Math.max(0, Math.min(HOTBAR_SLOTS - 1, p.selected));
+    this.oxygenLeft = typeof p.ox === 'number' && p.ox > 0 ? Math.min(OXYGEN_SECONDS, p.ox) : 0;
     this.peakY = this.body.y;
     this.lastHealth = this.vitals.health;
     this.ach.loadJSON(p.ach);
@@ -4935,8 +4947,8 @@ export class Player implements EffectOwner {
       if (this.quests) {
         // A new Adventure character wakes in the wilds with a compass and a quest to find the village; the rest is earned.
         this.beginAdventure();
-      } else {
-        // The starter items first: they own hotbar slots 2 and 3, the class kit takes the free ones around them.
+      } else if (this.realm.generator.kind !== 'isle') {
+        // Island survival starts with nothing. Every other survival world still gets the map, the Emberstone and the class kit.
         this.grantStarterItems();
         this.grantClassKit();
       }
@@ -4952,6 +4964,7 @@ export class Player implements EffectOwner {
     const plain = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
     // Saved mid-sleep, you wake up beside the bed.
     const at = this.sleeping ? (this.bedExit(this.sleeping) ?? this.body) : this.body;
+    const isleDay = this.realm.isleInfo()?.day;
     return {
       v: 1,
       x: at.x,
@@ -4964,12 +4977,14 @@ export class Player implements EffectOwner {
       inv: plain(this.inventory.toJSON()),
       ...(this.bags.isEmpty() ? {} : { bags: plain(this.bags.toJSON()) }),
       vitals: plain(this.vitals.toJSON()),
-      mobs: plain(this.mobs.toJSON(this.body.x, this.body.z, 28)),
+      mobs: plain(this.mobs.toJSON(this.body.x, this.body.z, this.realm.generator.kind === 'isle' ? 4096 : 28, this.realm.generator.kind === 'isle' ? 96 : 48)),
       xp: this.xp.toJSON(),
       ...(this.coins > 0 ? { coins: this.coins } : {}),
       armor: plain(this.armor.toJSON()),
       offhand: plain(this.offhand.toJSON()),
       ...(this.spawnPoint ? { spawn: { ...this.spawnPoint } } : {}),
+      ...(this.oxygenLeft > 0 ? { ox: this.oxygenLeft } : {}),
+      ...(isleDay != null ? { dy: isleDay } : {}),
       ...(this.emberCooldown > 0 ? { hs: Math.ceil(this.emberCooldown) } : {}),
       ...(this.mountSlot.get(0) ? { mountSlot: plain(this.mountSlot.toJSON()) } : {}),
       ...(this.outfitSlot.get(0) ? { outfitSlot: plain(this.outfitSlot.toJSON()) } : {}),
@@ -4989,11 +5004,82 @@ export class Player implements EffectOwner {
 
   private vitalsCtx() {
     return {
-      eyeInWater: this.body.eyeInWater && !this.body.eyeInLava,
+      eyeInWater: this.body.eyeInWater && !this.body.eyeInLava && !this.helmBreath,
       invulnerable: this.invulnerable,
       hard: this.hardcore,
       respiration: levelOf(this.armor.get(0), ENCH.RESPIRATION),
     };
+  }
+
+  /** A diving helmet burns one oxygen item every 20 seconds. A bubble column refills air and burns nothing. */
+  private refreshBreath(): void {
+    const eyes = this.body.eyeInWater && !this.body.eyeInLava;
+    this.bottleSec = -1;
+    this.bottleSpare = 0;
+    if (!eyes || this.invulnerable) {
+      this.helmBreath = false;
+      this.bloomFill = 0;
+      return;
+    }
+    if (this.inBubbleColumn()) {
+      this.helmBreath = true;
+      this.fillFromBloom(STEP);
+      this.showBottle();
+      return;
+    }
+    this.bloomFill = 0;
+    if (this.armor.get(0)?.id !== I.DIVER_HELM) {
+      this.helmBreath = false;
+      return;
+    }
+    if (this.oxygenLeft <= 0) {
+      if (!this.inventory.remove(I.OXYGEN, 1)) {
+        this.helmBreath = false;
+        this.vitals.air = 0;
+        return;
+      }
+      this.oxygenLeft = OXYGEN_SECONDS;
+      this.emit({ t: 'inv' });
+    }
+    this.oxygenLeft = Math.max(0, this.oxygenLeft - STEP);
+    this.helmBreath = true;
+    this.showBottle();
+  }
+
+  /** The open bottle, so the air row can show it draining. Hidden once the last bottle is empty. */
+  private showBottle(): void {
+    if (this.armor.get(0)?.id !== I.DIVER_HELM) return;
+    const spare = this.inventory.countOf(I.OXYGEN);
+    if (this.oxygenLeft <= 0 && spare <= 0) return;
+    this.bottleSec = this.oxygenLeft;
+    this.bottleSpare = spare;
+  }
+
+  /** Glass carried into a bubble column becomes oxygen. The plant stands in for the kelp of the recipe. */
+  private fillFromBloom(dt: number): void {
+    this.bloomFill = Math.min(3, this.bloomFill + dt);
+    if (this.bloomFill < 3) return;
+    if (this.inventory.countOf(B.GLASS) < 1) return;
+    const made = makeStack(I.OXYGEN, 4);
+    if (!this.inventory.canFit(made)) return;
+    this.bloomFill = 0;
+    this.inventory.remove(B.GLASS, 1);
+    this.inventory.collect(made);
+    this.emit({ t: 'inv' });
+    this.emit({ t: 'toast', text: 'The bloom fills four bottles.' });
+  }
+
+  /** True when a bubble bloom is in this column, under the head, with only water and sea plants between. */
+  private inBubbleColumn(): boolean {
+    const x = Math.floor(this.body.x);
+    const z = Math.floor(this.body.z);
+    let y = Math.floor(this.body.y + 1.6);
+    for (let i = 0; i < 24 && y > 0; i++, y--) {
+      const id = this.world.getBlock(x, y, z);
+      if (isBubbleBloom(id)) return true;
+      if (IS_SOLID[id] === 1) return false;
+    }
+    return false;
   }
 
   private soundUnderfoot() {
@@ -5184,6 +5270,7 @@ export class Player implements EffectOwner {
 
   /** One fixed physics step, with fall damage, exhaustion and footsteps. */
   simulateStep(f: InputFrame): void {
+    this.refreshBreath();
     // Cooldowns and the resource run on the fixed step the server controls, never on anything a client reports.
     if (this.cls && !this.vitals.dead) this.cls.tick(STEP);
     this.syncOffhandBonus();
@@ -5526,7 +5613,10 @@ export class Player implements EffectOwner {
     if (reward.xp > 0) {
       this.addXp(reward.xp);
     }
-    for (const it of rewardItems(reward, this.cls?.classId ?? null)) this.collectOrDrop(makeStack(it.id, it.count));
+    for (const it of rewardItems(reward, this.cls?.classId ?? null)) {
+      if (this.mode === 'survival' && skillBookAbility(it.id) !== null) continue;
+      this.collectOrDrop(makeStack(it.id, it.count));
+    }
     this.addCoins(rewardCoins(reward), true);
     this.achAdd('quests');
     this.emit({ t: 'quest', what: 'done', text: `Quest complete: ${q.name}` });
@@ -5544,6 +5634,7 @@ export class Player implements EffectOwner {
     if (c.a === 'buy') {
       const ware = shop.stock[c.i];
       if (!ware) return;
+      if (this.mode === 'survival' && (skillBookAbility(ware.id) !== null || (ware.gear && ware.gear.r > 0))) return;
       // As many purchases as asked, as long as coins and room last (the first one must go through).
       let bought = 0;
       for (let k = 0; k < c.n; k++) {

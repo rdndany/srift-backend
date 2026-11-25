@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { blockBrowserKey, exitPageFullscreen, fullscreenNow, isTypingTarget, keyboardLockApi, requestPageFullscreen, shouldEnterFullscreen, shouldRestoreWindow, wantKeyboardLock, type FullscreenHost } from './keyGuard';
+import { blockBrowserKey, exitPageFullscreen, fullscreenNow, isTypingTarget, keyboardLockAction, keyboardLockApi, mouseAfterFullscreen, requestPageFullscreen, shouldEnterFullscreen, shouldRestoreWindow, unlockKeyboardForKey, wantKeyboardLock, type FullscreenHost } from './keyGuard';
 
 describe('keys kept from the browser while playing', () => {
   const block = (code: string, over: Partial<{ playing: boolean; cancelable: boolean; typing: boolean }> = {}) =>
@@ -94,6 +94,22 @@ describe('fullscreen for a visit', () => {
 });
 
 describe('keyboard lock', () => {
+  it('keeps the lock through the Escape that pauses, and drops it before F11 leaves fullscreen', () => {
+    expect(keyboardLockAction(true, true)).toBe('lock');
+    expect(keyboardLockAction(false, true)).toBe('hold');
+    expect(keyboardLockAction(false, false)).toBe('unlock');
+    expect(unlockKeyboardForKey('F11', true)).toBe(true);
+    expect(unlockKeyboardForKey('F11', false)).toBe(false);
+    expect(unlockKeyboardForKey('Escape', true)).toBe(false);
+  });
+
+  it('gives the mouse up when fullscreen ends, including when the browser already dropped it in silence', () => {
+    expect(mouseAfterFullscreen(true, true, true)).toBe('keep');
+    expect(mouseAfterFullscreen(false, true, true)).toBe('release');
+    expect(mouseAfterFullscreen(false, false, true)).toBe('reset');
+    expect(mouseAfterFullscreen(false, false, false)).toBe('keep');
+  });
+
   it('is wanted only in fullscreen, while playing, with the tab in front', () => {
     expect(wantKeyboardLock(true, true, true, false)).toBe(true);
     expect(wantKeyboardLock(true, false, true, false)).toBe(false);

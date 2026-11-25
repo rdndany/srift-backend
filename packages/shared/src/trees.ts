@@ -22,8 +22,11 @@ export interface TreeBlock {
   leaf: boolean;
 }
 
-/** Seconds a sapling needs, on average, before it grows into a tree. */
-export const SAPLING_GROW_SECONDS = 80;
+/**
+ * Mean seconds before a sapling becomes a tree.
+ * Minecraft grows one on 1 of every 7 random ticks, about eight minutes.
+ */
+export const SAPLING_GROW_SECONDS = (4096 / 60) * 7;
 
 const LOG: Record<TreeKind, number> = {
   oak: B.LOG,

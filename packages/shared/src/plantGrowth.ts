@@ -1,6 +1,6 @@
 import { B, GROVE } from './blocks';
 import { CHUNK_SIZE } from './chunk';
-import { COLUMN_GROW_SECONDS, CROP_STAGE_SECONDS, growColumn, growFruit, growVine } from './plants';
+import { BAMBOO_GROW_SECONDS, CANE_GROW_SECONDS, FRUIT_GROW_SECONDS, cropGrowthSeconds, growColumn, growFruit, growVine, isKelp } from './plants';
 import { SAPLING_GROW_SECONDS, growTree, isSapling, type TreeEditor } from './trees';
 
 export interface PlantChunk {
@@ -22,9 +22,16 @@ const FIRE = 6;
 
 let growth: Uint8Array | null = null;
 
+/** Cave vines keep the pace they had. Seeds and saplings follow Minecraft's random tick. */
+const VINE_GROW_SECONDS = 45;
+
+function due(dt: number, mean: number, rand: () => number): boolean {
+  return rand() < 1 - Math.exp(-dt / mean);
+}
+
 function growthKind(id: number): number {
   if (id === B.FIRE) return FIRE;
-  if (id === B.CACTUS || id === B.SUGAR_CANE || id === GROVE.bamboo) return COLUMN;
+  if (id === B.CACTUS || id === B.SUGAR_CANE || id === GROVE.bamboo || isKelp(id)) return COLUMN;
   // An azalea is a sapling to bone meal, but it does not grow into a tree by itself (nor turn into another block).
   if (id === GROVE.azalea || id === B.FLOWERING_AZALEA) return NONE;
   if (isSapling(id)) return SAPLING;
@@ -55,13 +62,10 @@ function growthTable(): Uint8Array {
 
 /**
  * Random growth of crops, cactus, sugar cane and saplings. Call every couple of seconds with the elapsed time.
- * Returns how many plants advanced. Shared by the browser world and the headless/server world.
+ * Returns how many plants advanced. The browser and the server both use this, so every mode waits the same.
  * onFire hears about every fire block found on the way (fires saved in a chunk start burning again).
  */
 export function growPlants(chunks: Iterable<PlantChunk>, world: TreeEditor, dt: number, rand: () => number = Math.random, onFire?: (x: number, y: number, z: number) => void): number {
-  const p = 1 - Math.exp(-dt / CROP_STAGE_SECONDS);
-  const pTree = 1 - Math.exp(-dt / SAPLING_GROW_SECONDS);
-  const pColumn = 1 - Math.exp(-dt / COLUMN_GROW_SECONDS);
   const kinds = growthTable();
   let grown = 0;
   const pending: [number, number, number, number][] = [];
@@ -83,14 +87,15 @@ export function growPlants(chunks: Iterable<PlantChunk>, world: TreeEditor, dt: 
       if (kind === FIRE) {
         if (onFire) onFire(x, y, z);
       } else if (kind === COLUMN) {
-        if (rand() < pColumn) columns.push([x, y, z, id]);
+        const mean = id === GROVE.bamboo ? BAMBOO_GROW_SECONDS : CANE_GROW_SECONDS;
+        if (due(dt, mean, rand)) columns.push([x, y, z, id]);
       } else if (kind === SAPLING) {
-        if (rand() < pTree) saplings.push([x, y, z]);
+        if (due(dt, SAPLING_GROW_SECONDS, rand)) saplings.push([x, y, z]);
       } else if (kind === RIPE_STEM) {
-        if (rand() < p) fruits.push([x, y, z, id]);
+        if (due(dt, FRUIT_GROW_SECONDS, rand)) fruits.push([x, y, z, id]);
       } else if (kind === VINE) {
-        if (rand() < p) vines.push([x, y, z, id]);
-      } else if (rand() < p) {
+        if (due(dt, VINE_GROW_SECONDS, rand)) vines.push([x, y, z, id]);
+      } else if (due(dt, cropGrowthSeconds(world, x, y, z, id), rand)) {
         pending.push([x, y, z, id + 1]);
       }
     }

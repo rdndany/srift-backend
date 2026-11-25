@@ -40,6 +40,7 @@ export * from './castle';
 export * from './party';
 export * from './adventure';
 export * from './squareWorld';
+export * from './isle';
 export * from './showcaseWorld';
 export * from './castleWorld';
 export * from './rails';

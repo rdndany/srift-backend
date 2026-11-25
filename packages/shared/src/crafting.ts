@@ -1,7 +1,7 @@
 import { B, BB, BEYOND, BUILD_MATERIALS, CONNECT, DYE_NAMES, DRESS, GROVE, JOINERY, LOG_BLOCKS, woolColor, woolId, terracottaOf, TOOL_KINDS, TOOL_MATERIALS, campfireId, gateId, idByName, ladderId, MASONRY, slabId, stairId, trapdoorId, type ToolKind, type ToolMaterial } from './blocks';
 import { ARMOR_MATERIALS, type ArmorMaterial } from './armor';
 import { BEYOND_SHAPES } from './beyondBlocks';
-import { I, armorId, bagId, bedItemId, companionItemId, dyeId, necklaceId, ringId, toolId, wingItemId } from './items';
+import { I, armorId, bagId, bedItemId, companionItemId, dyeId, getItem, necklaceId, ringId, toolId, wingItemId } from './items';
 import { ACCESSORY_MATERIALS } from './accessories';
 import type { ItemStack } from './inventory';
 
@@ -297,6 +297,9 @@ const ARMOR_PATTERNS: string[][] = [['MMM', 'M M'], ['M M', 'MMM', 'MMM'], ['MMM
 for (const material of ARMOR_MATERIALS) {
   ARMOR_PATTERNS.forEach((pattern, slotIndex) => shaped(armorId(slotIndex, material), 1, pattern, { M: ARMOR_PIECE[material] }));
 }
+// A diving helmet and the air it burns. Both are made from what an island gives you: iron, sand smelted to glass, and kelp.
+shaped(I.DIVER_HELM, 1, ['I I', 'IGI'], { I: I.IRON_INGOT, G: B.GLASS });
+shaped(I.OXYGEN, 4, ['K', 'G'], { K: BB.kelp, G: B.GLASS });
 // Rings and necklaces, of the same materials as the armor. A ring is four pieces of the material around a thread; a necklace is a loop of four strings with one piece of
 // the material hanging from it. Both are made at the crafting table.
 for (const material of ACCESSORY_MATERIALS) {
@@ -409,6 +412,18 @@ function matchShaped(r: Recipe, c: { cells: number[]; w: number; h: number }, mi
     }
   }
   return true;
+}
+
+/**
+ * How many times the grid can make this recipe. Each filled cell is one ingredient, so two logs in the
+ * plank cell make two crafts (eight planks). The result stays within one stack.
+ */
+export function craftMultiplier(grid: (ItemStack | null)[], recipe: Recipe): number {
+  const counts = grid.filter((s): s is ItemStack => !!s).map((s) => s.count);
+  if (counts.length === 0) return 0;
+  const room = Math.floor(getItem(recipe.result.id).maxStack / recipe.result.count);
+  if (room < 1) return 0;
+  return Math.min(...counts, room);
 }
 
 /** Finds the recipe for a crafting grid (row-major, `null` = empty). */

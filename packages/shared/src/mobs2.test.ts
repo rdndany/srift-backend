@@ -530,33 +530,44 @@ describe('who spawns where', () => {
     expect(sky.kinds.has('slime')).toBe(false);
   });
 
-  it('squid in deep water, drowned in it after dark, none in a puddle', () => {
-    const sea: BlockReader = { getBlock: (x, y) => (y <= 10 ? B.STONE : y <= 30 ? B.WATER : B.AIR) };
-    const player = { x: 0.5, y: 31, z: 0.5 };
+  it('squid in deep water, drowned on the shore after dark, none in a puddle', () => {
+    // Open sea on the west, a grass bank on the east. The bank top sits at the waterline.
+    const sea: BlockReader = { getBlock: (x, y) => (y <= 10 ? B.STONE : x >= 0 ? (y <= 30 ? B.GRASS : B.AIR) : y <= 30 ? B.WATER : B.AIR) };
+    const player = { x: 2.5, y: 31, z: 0.5 };
     const run = (daylight: number, world: BlockReader) => {
       const rand = mulberry32(3);
       const mgr = new MobManager(rand);
       const sp = new MobSpawner();
       const kinds = new Set<MobKind>();
-      for (let i = 0; i < 300; i++) {
+      const drowned: { x: number; y: number; z: number }[] = [];
+      for (let i = 0; i < 500; i++) {
         mgr.mobs.length = 0;
-        for (const m of sp.update(1, mgr, { world, player, daylight, rand })) kinds.add(m.kind);
+        for (const m of sp.update(1, mgr, { world, player, daylight, rand })) {
+          kinds.add(m.kind);
+          if (m.kind === 'drowned') drowned.push({ x: m.body.x, y: m.body.y, z: m.body.z });
+        }
       }
-      return kinds;
+      return { kinds, drowned };
     };
     const day = run(1, sea);
-    expect(day.has('squid')).toBe(true);
-    expect(day.has('cod') || day.has('salmon')).toBe(true);
-    expect(day.has('drowned')).toBe(false);
+    expect(day.kinds.has('squid')).toBe(true);
+    expect(day.kinds.has('cod') || day.kinds.has('salmon')).toBe(true);
+    expect(day.kinds.has('drowned')).toBe(false);
     const night = run(0, sea);
-    expect(night.has('squid')).toBe(true);
-    expect(night.has('drowned')).toBe(true);
-    for (const k of ['zombie', 'skeleton', 'creeper', 'spider', 'cow', 'pig', 'sheep'] as const) expect(night.has(k), k).toBe(false);
+    expect(night.kinds.has('squid')).toBe(true);
+    expect(night.drowned.length).toBeGreaterThan(0);
+    for (const d of night.drowned) {
+      const bx = Math.floor(d.x);
+      const by = Math.floor(d.y);
+      expect(sea.getBlock(bx, by, Math.floor(d.z))).toBe(B.AIR);
+      expect(sea.getBlock(bx, by - 1, Math.floor(d.z))).toBe(B.GRASS);
+    }
+    for (const k of ['cow', 'pig', 'sheep'] as const) expect(night.kinds.has(k), k).toBe(false);
 
     const puddle: BlockReader = { getBlock: (x, y) => (y <= 10 ? B.STONE : y <= 11 ? B.WATER : B.AIR) };
     const dry = run(0, puddle);
-    expect(dry.has('squid')).toBe(false);
-    expect(dry.has('drowned')).toBe(false);
+    expect(dry.kinds.has('squid')).toBe(false);
+    expect(dry.kinds.has('drowned')).toBe(false);
   });
 
   it('bats only in dark, covered air', () => {
@@ -582,6 +593,19 @@ describe('leaving the water', () => {
     h.run(14);
     expect(m.body.x, kind).toBeGreaterThan(1);
     expect(m.body.y, kind).toBeGreaterThanOrEqual(4.9);
+  });
+
+  it('a pig or chicken that swims into the sea comes back onto the bank', () => {
+    const sea: BlockReader = { getBlock: (x, y) => (y <= 0 ? B.STONE : x >= 0 ? (y < 5 ? B.STONE : B.AIR) : y <= 4 ? B.WATER : B.AIR) };
+    const h = harness({ world: sea, invulnerable: true });
+    h.player.x = 30;
+    const pig = h.mgr.spawn('pig', -4.5, 2, 0.5);
+    const chicken = h.mgr.spawn('chicken', -4.5, 2, 3.5);
+    h.run(25);
+    for (const m of [pig, chicken]) {
+      expect(m.body.x, m.kind).toBeGreaterThan(0);
+      expect(m.body.y, m.kind).toBeGreaterThanOrEqual(4.9);
+    }
   });
 
   it('a wandering pig or sheep also finds its way out of a pond', () => {

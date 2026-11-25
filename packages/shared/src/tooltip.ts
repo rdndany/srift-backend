@@ -12,6 +12,7 @@ import { forgeHint, jewelDef, jewelKind } from './jewels';
 import { HK_LORE, HK_NAMES, isHollowKingItem } from './hollowKingData';
 import { BOTTLE_XP_MAX, BOTTLE_XP_MIN, I, PEARL_TRIP_DAMAGE, bagSlotsOf, getItem, isUndroppable, companionOfItem, wingOfItem, accessoryOfItem, mountOfItem, outfitSetOfItem, skillBookAbility, type ItemKind } from './items';
 import { MOUNT_CAST, mountDef, mountSpeedText } from './mounts';
+import { itemAbout } from './itemAbout';
 import { abilityCost, castCost, scaled } from './tuning';
 
 /**
@@ -393,6 +394,12 @@ export function tooltipLines(stack: ItemStack | null, viewerClass?: ClassId | nu
     if (item.storesEnchants) lines.push({ text: 'At an anvil, put a piece with this tome to move its glyphs onto it', color: 'dim' });
   }
 
+  // A short line about what it is, when nothing above has already said. The diving helmet lists its armor and still needs to say that it breathes.
+  const about = itemAbout(stack.id);
+  if (about.length > 0 && (stack.id === I.DIVER_HELM || lines.slice(2).every((l) => isBareStat(l.text)))) {
+    lines.splice(stack.id === I.DIVER_HELM ? 2 : lines.length, 0, ...about);
+  }
+
   if (isUndroppable(stack.id)) lines.push({ text: 'Cannot be dropped', color: 'dim' });
 
   if (stack.rc) lines.push({ text: `Anvil penalty: +${stack.rc} levels`, color: 'dim' });
@@ -402,6 +409,11 @@ export function tooltipLines(stack: ItemStack | null, viewerClass?: ClassId | nu
     lines.push({ text: `Durability: ${left} / ${item.durability}`, color: stack.damage > 0 && left / item.durability < 0.2 ? 'warn' : 'dim' });
   }
   return lines;
+}
+
+/** Hardness, fuel and the like: numbers, not an explanation of what the item is. */
+function isBareStat(text: string): boolean {
+  return text.startsWith('Hardness ') || text.startsWith('Fuel:') || text.startsWith('Durability:') || text === 'Cannot be dropped' || text.startsWith('Anvil penalty');
 }
 
 /** One line of text, for places that show only a name (a villager's offer). */

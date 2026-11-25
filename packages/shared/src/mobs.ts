@@ -5,7 +5,7 @@ import { isLavaId } from './fluids';
 import { makeStack, type ItemStack } from './inventory';
 import { I, ITEMS, type Drop } from './items';
 import { findPath, type PathNode } from './pathfinding';
-import { createBody, stepPlayer, type BlockReader, type Body, type MoveInput, type Solid } from './physics';
+import { collides, createBody, stepPlayer, type BlockReader, type Body, type MoveInput, type Solid } from './physics';
 import { MOB_SOLID_BOXES } from './mobSolidsData';
 import { raycast } from './raycast';
 import type { VillagerState } from './trading';
@@ -917,6 +917,8 @@ const COOKED: Record<number, number> = { [I.RAW_MEAT]: I.COOKED_MEAT, [I.MUTTON]
 
 const PLAYER_KILL_WINDOW = 5;
 const MAX_STEP = 0.05;
+/** Past this, an island animal waits where it is. Closer than the distance at which a low view unloads its chunk. */
+const ANIMAL_HOLD = 96;
 /** A hunting enderman blinks to a player only when they are farther than this (never while fighting). */
 const ENDERMAN_TELEPORT_RANGE = 16;
 /** By day a villager stays within this many blocks of home. */
@@ -1111,6 +1113,9 @@ export interface MobPlayer {
   pitch?: number;
   /** Opaque handle for the owner (the realm maps it back to a player). */
   ref?: unknown;
+  /** Item in the main hand, and in the off hand. An animal follows the food it is bred with. */
+  held?: number;
+  offhand?: number;
 }
 
 export interface MobEvents {
@@ -1153,6 +1158,11 @@ export interface MobEnv {
   safe?: (x: number, z: number) => boolean;
   /** A ward (a soul lantern) around this spot: where it hangs, or null. A monster inside one walks away from it and will not go for a player inside one. */
   ward?: (x: number, y: number, z: number) => { x: number; z: number } | null;
+  /**
+   * Animals stay when everyone is far away (an island, where a swim into the ocean would otherwise delete the herd).
+   * Past {@link ANIMAL_HOLD} they also stop moving, so a chunk that has unloaded (and reads as solid) cannot shove them.
+   */
+  keepAnimals?: boolean;
 }
 
 export class Arrow {
@@ -1924,11 +1934,13 @@ export class MobManager {
       env.player = this.threatTarget(m, players) ?? nearestPlayer(players, m.body.x, m.body.z);
       const dist = Math.hypot(m.body.x - env.player.x, m.body.z - env.player.z);
       if (this.pastLeash(m, env.player, dist)) this.breakLeash(m);
-      // Despawn far away mobs.
-      if (!m.bound && !m.def.boss && ((dist > 110 && !m.def.persistent) || (m.def.hostile && dist > 64 && env.rand() < dt * 0.15))) {
+      // A monster far from everyone is gone. An animal on an island stays, so a swim into the ocean does not erase the herd.
+      const animalStays = !!env.keepAnimals && !m.def.hostile;
+      if (!m.bound && !m.def.boss && !animalStays && ((dist > 110 && !m.def.persistent) || (m.def.hostile && dist > 64 && env.rand() < dt * 0.15))) {
         this.mobs.splice(i, 1);
         continue;
       }
+      if (animalStays && dist > ANIMAL_HOLD) continue;
       // An enderman that never found shade by day wanders off once the player is not close.
       if (m.kind === 'enderman' && !m.aggro && env.daylight > 0.75 && m.openSky && dist > 24 && env.rand() < dt * 0.3) {
         this.mobs.splice(i, 1);
@@ -2062,6 +2074,10 @@ export class MobManager {
       cmd.accel = undefined;
     }
 
+    // A chest or a trunk is solid, but a mob can be saved or born with its feet inside one and then never
+    // get out. Stand it on the nearest clear cell.
+    if (!m.dead) this.stepOut(m, env);
+
     const px = b.x;
     const pz = b.z;
     // Players are solid: a monster stops at their edge instead of walking into them.
@@ -2077,6 +2093,37 @@ export class MobManager {
     const moved = Math.hypot(b.x - px, b.z - pz);
     m.speedNow = moved / dt;
     m.walkPhase += moved * 3.2;
+  }
+
+  /** Feet inside a solid block (a chest, a log, a leaf): move to the nearest cell the body fits in. */
+  private stepOut(m: Mob, env: MobEnv): void {
+    const b = m.body;
+    const w = m.width;
+    const h = m.height;
+    // A hair off the floor, so standing on a block is not "inside" it.
+    if (!collides(env.world, b.x, b.y + 0.08, b.z, w, Math.max(0.2, h - 0.15))) return;
+    const fx = Math.floor(b.x);
+    const fy = Math.floor(b.y);
+    const fz = Math.floor(b.z);
+    const tries: readonly (readonly [number, number, number])[] = [
+      [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1],
+      [1, 0, 1], [1, 0, -1], [-1, 0, 1], [-1, 0, -1],
+      [0, 1, 0], [1, 1, 0], [-1, 1, 0], [0, 1, 1], [0, 1, -1],
+      [2, 0, 0], [-2, 0, 0], [0, 0, 2], [0, 0, -2],
+    ];
+    for (const [dx, dy, dz] of tries) {
+      const nx = fx + dx + 0.5;
+      const ny = fy + dy;
+      const nz = fz + dz + 0.5;
+      if (collides(env.world, nx, ny + 0.08, nz, w, Math.max(0.2, h - 0.15))) continue;
+      b.x = nx;
+      b.y = ny;
+      b.z = nz;
+      b.vx = 0;
+      b.vy = 0;
+      b.vz = 0;
+      return;
+    }
   }
 
   /** The players near a monster, as things it cannot walk through (undefined when none is close). */
@@ -2389,6 +2436,9 @@ export class MobManager {
       m.tank = null;
     }
 
+    // A land animal that has walked into the water swims for the nearest shore, or back to where it was born.
+    if (!m.def.hostile && m.body.inWater && this.wadeAshore(m, env)) return;
+
     if (m.kind === 'villager') {
       this.thinkVillager(m, env, events, dt);
       return;
@@ -2412,6 +2462,7 @@ export class MobManager {
     if (!canTarget) {
       if (m.fuse >= 0) m.fuse = -1;
       if (m.love > 0 && this.seekMate(m, env)) return;
+      if (this.tempt(m, env)) return;
       m.path = null;
       // A charge that lost its target is called off.
       if (m.phase !== 0) {
@@ -2465,6 +2516,39 @@ export class MobManager {
       if (!o.guard || o.dead || o.aggro || Math.abs(o.body.y - m.body.y) > 3) continue;
       if (Math.hypot(o.body.x - m.body.x, o.body.z - m.body.z) <= GUARD_CALL) o.aggro = true;
     }
+  }
+
+  /** The food this animal is bred with, held in either hand. */
+  private holdingFood(p: MobPlayer, food: number): boolean {
+    return p.held === food || p.offhand === food;
+  }
+
+  /**
+   * A farm animal walks up to a player who is holding its food, and stops short of them.
+   * It will not step into water or off a cliff to get there.
+   */
+  private tempt(m: Mob, env: MobEnv): boolean {
+    const food = BREED_FOOD[m.kind];
+    if (food === undefined || m.def.aquatic) return false;
+    const players = env.players && env.players.length > 0 ? env.players : [env.player];
+    let best: MobPlayer | null = null;
+    let bestD = 10;
+    for (const p of players) {
+      if (!p.alive || !this.holdingFood(p, food)) continue;
+      if (Math.abs(p.y - m.body.y) > 4) continue;
+      const d = Math.hypot(p.x - m.body.x, p.z - m.body.z);
+      if (d < bestD) {
+        best = p;
+        bestD = d;
+      }
+    }
+    if (!best) return false;
+    const yaw = Math.atan2(-(best.x - m.body.x), -(best.z - m.body.z));
+    m.yaw = yaw;
+    if (bestD < 2.2) return true;
+    if (this.waterAhead(m, env, yaw) || this.cliffAhead(m, env, yaw)) return true;
+    this.walkTo(m, env, best.x, best.z, best.y, m.def.speed);
+    return true;
   }
 
   /** An animal in love walks to the closest mate of its kind. Returns whether it is on its way. */
@@ -2579,6 +2663,51 @@ export class MobManager {
     if (b.onGround && (wantsUp || this.blockedAhead(m, env, dx, dz))) m.cmd.jump = true;
     if (b.inWater) m.cmd.jump = true;
     return false;
+  }
+
+  /** Swim for dry ground. The shore within reach wins; otherwise the animal heads back to where it was born. */
+  private wadeAshore(m: Mob, env: MobEnv): boolean {
+    const shore = this.nearestLand(env.world, m.body.x, m.body.y, m.body.z);
+    if (shore) {
+      this.walkTo(m, env, shore.x + 0.5, shore.z + 0.5, shore.y, m.def.runSpeed || m.def.speed);
+      return true;
+    }
+    if (Math.hypot(m.spawnX - m.body.x, m.spawnZ - m.body.z) > 1.5) {
+      this.walkTo(m, env, m.spawnX, m.spawnZ, m.body.y, m.def.runSpeed || m.def.speed);
+    } else m.cmd.jump = true;
+    return true;
+  }
+
+  /** The closest dry cell a mob can stand on, within a short swim of (x, y, z). */
+  private nearestLand(world: BlockReader, x: number, y: number, z: number): { x: number; y: number; z: number } | null {
+    const fx = Math.floor(x);
+    const fy = Math.floor(y);
+    const fz = Math.floor(z);
+    let best: { x: number; y: number; z: number } | null = null;
+    let bestD = Infinity;
+    for (let rad = 1; rad <= 12; rad++) {
+      let found = false;
+      for (let dz = -rad; dz <= rad; dz++) {
+        for (let dx = -rad; dx <= rad; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dz)) !== rad) continue;
+          const sx = fx + dx;
+          const sz = fz + dz;
+          for (let dy = 6; dy >= -3; dy--) {
+            const sy = fy + dy;
+            if (!standingOn(world, sx, sy, sz)) continue;
+            const d = dx * dx + dz * dz + dy * dy;
+            if (d < bestD) {
+              bestD = d;
+              best = { x: sx, y: sy, z: sz };
+              found = true;
+            }
+            break;
+          }
+        }
+      }
+      if (found) return best;
+    }
+    return null;
   }
 
   /** True when the next step off dry ground is water, so a land mob turns back at the shore. */
@@ -3963,7 +4092,24 @@ export class MobSpawner {
     return null;
   }
 
-  /** Squid, fish and dolphins in deep water, drowned in it after dark. Axolotls prefer a cave pool. */
+  /** Dry ground next to this water. Drowned are born here, not in the water itself. */
+  private shoreBeside(world: BlockReader, x: number, z: number, surface: number): { x: number; y: number; z: number } | null {
+    for (let rad = 1; rad <= 4; rad++) {
+      for (let dz = -rad; dz <= rad; dz++) {
+        for (let dx = -rad; dx <= rad; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dz)) !== rad) continue;
+          const sx = x + dx;
+          const sz = z + dz;
+          for (const y of [surface + 1, surface, surface + 2]) {
+            if (standingOn(world, sx, y, sz)) return { x: sx, y, z: sz };
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  /** Squid, fish and dolphins in deep water. Drowned come ashore beside it after dark. Axolotls prefer a cave pool. */
   private trySpawnWater(manager: MobManager, env: SpawnEnv): Mob[] {
     const { world, player, rand } = env;
     const ang = rand() * Math.PI * 2;
@@ -3975,7 +4121,10 @@ export class MobSpawner {
     const exposed = isExposedToSky(world, x + 0.5, water.surface, z + 0.5);
     if (exposed && rand() < 0.65 && env.daylight < 0.45 && manager.countKind('drowned', player.x, player.z, 64) < DROWNED_CAP) {
       if (nearLight(world, x, water.surface, z, 4) || env.noMonsters?.(x, z)) return [];
-      return [manager.spawn('drowned', x + 0.5, water.surface - 1, z + 0.5)];
+      const shore = this.shoreBeside(world, x, z, water.surface);
+      if (shore && !nearLight(world, shore.x, shore.y, shore.z, 4) && !env.noMonsters?.(shore.x, shore.z, shore.y)) {
+        return [manager.spawn('drowned', shore.x + 0.5, shore.y, shore.z + 0.5)];
+      }
     }
     const swimming = WATER_KINDS.reduce((n, k) => n + manager.countKind(k, player.x, player.z, 64), 0);
     if (swimming >= WATER_CAP) return [];

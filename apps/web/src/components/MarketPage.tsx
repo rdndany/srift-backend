@@ -35,7 +35,7 @@ import { Blocks } from './BlockCube';
 import { ItemPicture } from './CharacterSheet';
 import { ClickSparks, Embers, Reveal, useFrontMotion } from './fx';
 import { lobbyUrl } from '../game/route';
-import { SCROLL_KEY, goBeyond, goToken, goFarm, goShop } from './frontNav';
+import { SCROLL_KEY, goBeyond, goToken, goFarm, goShop, goRanks } from './frontNav';
 import { ART } from './homeAssets';
 import { Tip } from './ItemView';
 import { CoinIcon } from './ShopUI';
@@ -343,6 +343,7 @@ export function MarketPage() {
             <button onClick={() => toFront('site-features')}>Classes</button>
             <button onClick={() => toFront('l-expansions')}>Expansions</button>
             <button className="fp-link-farm" onClick={goFarm}>Farm</button>
+            <button className="fp-link-ranks" onClick={goRanks}>Ranks</button>
             <button className="fp-link-market" aria-current="page" onClick={() => scrollTo('mk-top')}>
               Market
             </button>

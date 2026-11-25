@@ -12,6 +12,8 @@ export interface RoomStore {
   getJson(key: string): unknown | null;
   setJson(key: string, value: unknown): void;
   deleteJson(key: string): void;
+  /** Every JSON record whose key starts with `prefix` (the realm's `player:` saves, for the level board). */
+  listJson(prefix: string): { key: string; value: unknown }[];
   /** Write several records as one: all of them are kept or none (an item that moves between a player and a stash must not be lost or made twice). */
   setJsonBatch?(entries: [key: string, value: unknown][]): void;
 }
@@ -48,6 +50,19 @@ export class MemoryRoomStore implements RoomStore {
 
   deleteJson(key: string): void {
     this.kv.delete(key);
+  }
+
+  listJson(prefix: string): { key: string; value: unknown }[] {
+    const out: { key: string; value: unknown }[] = [];
+    for (const [key, raw] of this.kv) {
+      if (!key.startsWith(prefix)) continue;
+      try {
+        out.push({ key, value: JSON.parse(raw) as unknown });
+      } catch {
+        /* a record that is not JSON is skipped */
+      }
+    }
+    return out;
   }
 
   setJsonBatch(entries: [string, unknown][]): void {
@@ -119,6 +134,20 @@ export class SqliteRoomStore implements RoomStore {
 
   deleteJson(key: string): void {
     this.db.prepare('DELETE FROM room_kv WHERE key = ?').run(key);
+  }
+
+  listJson(prefix: string): { key: string; value: unknown }[] {
+    const like = `${prefix.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    const rows = this.db.prepare(`SELECT key, value FROM room_kv WHERE key LIKE ? ESCAPE '\\'`).all(like) as unknown as { key: string; value: string }[];
+    const out: { key: string; value: unknown }[] = [];
+    for (const row of rows) {
+      try {
+        out.push({ key: row.key, value: JSON.parse(row.value) as unknown });
+      } catch {
+        /* a record that is not JSON is skipped */
+      }
+    }
+    return out;
   }
 
   setJsonBatch(entries: [string, unknown][]): void {

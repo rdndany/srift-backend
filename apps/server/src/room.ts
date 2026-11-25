@@ -424,6 +424,7 @@ export class GameRoom {
     const generator = makeGenerator(this.seed, this.kind);
     this.world = new HeadlessWorld(generator);
     this.realm = new Realm({ seed: this.seed, world: this.world, generator, naturalSpawning: opts.naturalSpawning ?? true, rifts: opts.rifts ?? opts.naturalSpawning ?? true, invasions: opts.invasions ?? false, clock: opts.clock, rand: opts.rand, sleeping: false, auctionStock: false });
+    this.world.onChunk = (cx, cz, data) => this.realm.soakChunk(cx, cz, data);
     if (opts.now) this.realm.clock = opts.now;
     if (opts.store) this.loadWorld(opts.store);
     if (opts.store) this.realm.auctions.load(opts.store.getJson(this.auctionKey));
@@ -2433,6 +2434,7 @@ export class GameRoom {
       hunger: p.vitals.hunger,
       saturation: p.vitals.saturation,
       air: p.vitals.air,
+      ...(p.bottleSec >= 0 ? { ox: round(p.bottleSec), oxn: p.bottleSpare } : {}),
       dead: p.vitals.dead,
       ...(p.poison > 0.05 ? { poison: round(p.poison) } : {}),
       ...(p.moveMul < 1 ? { mv: round(p.moveMul) } : {}),

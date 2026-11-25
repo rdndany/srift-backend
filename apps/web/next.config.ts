@@ -47,6 +47,7 @@ const config: NextConfig = {
       { source: '/beyond', has: PLAY, destination: `${SITE_ORIGIN}/beyond`, permanent: false },
       { source: '/token', has: PLAY, destination: `${SITE_ORIGIN}/token`, permanent: false },
       { source: '/shop', has: PLAY, destination: `${SITE_ORIGIN}/shop`, permanent: false },
+      { source: '/leaderboards', has: PLAY, destination: `${SITE_ORIGIN}/leaderboards`, permanent: false },
       { source: '/classes/:path*', has: PLAY, destination: `${SITE_ORIGIN}/classes/:path*`, permanent: false },
       { source: '/welcome', has: PLAY, destination: SITE_ORIGIN, permanent: false },
       // ...and the game on the game's.

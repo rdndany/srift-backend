@@ -1,4 +1,4 @@
-import { blockBrowserKey, fullscreenNow, isTypingTarget, keyboardLockApi, wantKeyboardLock } from './keyGuard';
+import { blockBrowserKey, fullscreenNow, isTypingTarget, keyboardLockAction, keyboardLockApi, mouseAfterFullscreen, unlockKeyboardForKey, wantKeyboardLock } from './keyGuard';
 
 export class Input {
   readonly keys = new Set<string>();
@@ -24,6 +24,8 @@ export class Input {
   private wantLock = false;
   /** When Escape was pressed. A later unlock is the pause screen; one the browser caused on its own is not. */
   private escapeAt = -1e9;
+  /** Escape is down. The keyboard lock stays until it comes up, so this tap does not also leave fullscreen. */
+  private escapeDown = false;
 
   /** All listeners are removed when `signal` aborts. */
   constructor(
@@ -46,12 +48,15 @@ export class Input {
       this.pitch = Math.max(-lim, Math.min(lim, this.pitch));
     });
     on('keydown', (e) => {
+      // Drop the lock before F11 leaves fullscreen. Doing it afterwards leaves Escape captured.
+      if (unlockKeyboardForKey(e.code, fullscreenNow(document))) this.dropKeyboardLock();
       if (!this.locked) return;
       const typing = this.typing(e);
       if (blockBrowserKey(true, e.code, e.cancelable, typing)) e.preventDefault();
       if (typing) return;
       // With the keyboard locked, the browser no longer lets Escape go of the mouse. The pause screen is that release.
       if (e.code === 'Escape' && !e.repeat) {
+        this.escapeDown = true;
         this.escapeAt = performance.now();
         if (document.pointerLockElement) document.exitPointerLock();
       }
@@ -60,6 +65,10 @@ export class Input {
       this.keys.add(e.code);
     });
     on('keyup', (e) => {
+      if (e.code === 'Escape') {
+        this.escapeDown = false;
+        this.syncKeyboard();
+      }
       if (this.locked && blockBrowserKey(true, e.code, e.cancelable, this.typing(e))) e.preventDefault();
       this.keys.delete(e.code);
     });
@@ -101,6 +110,7 @@ export class Input {
     window.addEventListener(
       'blur',
       () => {
+        this.escapeDown = false;
         this.releaseAll();
         this.syncKeyboard();
       },
@@ -116,8 +126,33 @@ export class Input {
 
   /** Fullscreen ended: drop every held key, because the browser may have swallowed the matching key-up. */
   private onFullscreen(): void {
-    if (!fullscreenNow(document)) this.releaseAll();
+    const full = fullscreenNow(document);
+    if (!full) {
+      this.releaseAll();
+      this.escapeDown = false;
+    }
+    // The browser drops the mouse when the window comes back, and sometimes never says so. Escape then
+    // does nothing, because the game still believes it has the mouse. Ask for the drop, or admit it happened.
+    const mouse = mouseAfterFullscreen(full, document.pointerLockElement != null, this.locked);
+    if (mouse === 'release') document.exitPointerLock();
+    else if (mouse === 'reset') {
+      this.locked = false;
+      document.dispatchEvent(new Event('pointerlockchange'));
+    }
     this.syncKeyboard();
+  }
+
+  /** Give every key back, including Escape. */
+  private dropKeyboardLock(): void {
+    this.wantLock = false;
+    this.escapeDown = false;
+    const kb = keyboardLockApi(navigator);
+    if (!kb) return;
+    try {
+      kb.unlock();
+    } catch {
+      // Already free.
+    }
   }
 
   /**
@@ -128,8 +163,10 @@ export class Input {
     const kb = keyboardLockApi(navigator);
     if (!kb) return;
     const want = wantKeyboardLock(this.locked, fullscreenNow(document), document.hasFocus(), document.hidden);
-    this.wantLock = want;
-    if (!want) {
+    const action = keyboardLockAction(want, this.escapeDown);
+    this.wantLock = action === 'lock';
+    if (action === 'hold') return;
+    if (action === 'unlock') {
       try {
         kb.unlock();
       } catch {

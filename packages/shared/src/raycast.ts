@@ -1,5 +1,6 @@
 import { BLOCKS, IS_LIQUID } from './blocks';
 import type { BlockReader } from './physics';
+import { isBubbleBloom, isSeaPlant } from './plants';
 import { meshBoxes, seatDrop, seatedBox } from './shapes';
 
 export interface RayHit {
@@ -147,7 +148,7 @@ export function raycast(
   });
   for (let i = 0; i < 256; i++) {
     const id = world.getBlock(x, y, z);
-    if (id !== 0 && (liquids || !IS_LIQUID[id])) {
+    if (id !== 0 && (liquids || !IS_LIQUID[id] || (isSeaPlant(id) && !isBubbleBloom(id)))) {
       // A cube on a short block fills upward from that block's top, not from the top of the cell below.
       const drop = seatDrop(id, (dy) => world.getBlock(x, y - dy, z));
       if (drop > 0) {

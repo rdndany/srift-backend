@@ -231,7 +231,7 @@ export type LootTableName = keyof typeof LOOT_TABLES;
  * Roll a chest's 27 slots. The stacks land in random slots, not packed from the top, as in the
  * original.
  */
-export function rollChest(table: LootTable, rand: () => number): (ItemStack | null)[] {
+export function rollChest(table: LootTable, rand: () => number, gear = true): (ItemStack | null)[] {
   const slots: (ItemStack | null)[] = Array.from({ length: 27 }, () => null);
   const total = table.entries.reduce((a, x) => a + x.weight, 0);
   const rolls = table.rolls[0] + Math.floor(rand() * (table.rolls[1] - table.rolls[0] + 1));
@@ -257,9 +257,9 @@ export function rollChest(table: LootTable, rand: () => number): (ItemStack | nu
       }
     }
   }
-  // Some chests also hold a piece of gear (any class: it is rolled for one of them).
+  // Some chests also hold a piece of gear (any class: it is rolled for one of them). Survival leaves that out.
   const g = table.gear;
-  if (g && rand() < g.chance) {
+  if (gear && g && rand() < g.chance) {
     const level = g.level[0] + Math.floor(rand() * (g.level[1] - g.level[0] + 1));
     const piece = randomGear(level, pickRarity(g.rarity, rand), undefined, rand);
     const free: number[] = [];

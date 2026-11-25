@@ -2,6 +2,7 @@ import { B, BLOCK_COUNT } from './blocks';
 import { CHUNK_SIZE, WORLD_HEIGHT } from './chunk';
 import { MAX_COINS } from './economy';
 import { EMBER_COOLDOWN } from './emberstone';
+import { OXYGEN_SECONDS } from './items';
 
 /**
  * Save formats. Pure TypeScript with no browser APIs, so the same code validates saves in the
@@ -40,6 +41,10 @@ export interface PlayerSave {
   mobs: unknown;
   /** Experience: { l: level, p: points into the level }. Absent in older saves. */
   xp?: unknown;
+  /** Seconds left in the open oxygen bottle. Absent when none is open. */
+  ox?: number;
+  /** Isle survival: the day this character had reached. Absent in every other world. */
+  dy?: number;
   /** Coins carried (absent: none). */
   coins?: number;
   /** Worn armor: four stacks like the inventory's. Absent in older saves. */
@@ -93,6 +98,8 @@ export interface WorldState {
   /** Minecarts and boats: kind, position and heading. */
   vehicles?: unknown;
   redstone?: unknown;
+  /** Isle survival: the day count and the morning roll. Absent in every other world. */
+  isle?: unknown;
 }
 
 const isObject = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
@@ -134,6 +141,8 @@ export function parsePlayerSave(raw: unknown): PlayerSave | null {
     mobs: raw.mobs ?? null,
     ...(raw.xp != null ? { xp: raw.xp } : {}),
     ...(typeof raw.coins === 'number' && Number.isFinite(raw.coins) && raw.coins > 0 ? { coins: Math.min(MAX_COINS, Math.floor(raw.coins)) } : {}),
+    ...(typeof raw.ox === 'number' && Number.isFinite(raw.ox) && raw.ox > 0 ? { ox: Math.min(OXYGEN_SECONDS, raw.ox) } : {}),
+    ...(Number.isInteger(raw.dy) && (raw.dy as number) >= 1 ? { dy: raw.dy as number } : {}),
     ...(Number.isInteger(raw.es) && (raw.es as number) > 0 ? { es: raw.es as number } : {}),
     ...(raw.armor != null ? { armor: raw.armor } : {}),
     ...(raw.offhand != null ? { offhand: raw.offhand } : {}),
@@ -168,6 +177,7 @@ export function parseWorldState(raw: unknown): WorldState | null {
     ...(raw.villagers != null ? { villagers: raw.villagers } : {}),
     ...(Array.isArray(raw.vehicles) ? { vehicles: raw.vehicles } : {}),
     ...(raw.redstone && typeof raw.redstone === 'object' ? { redstone: raw.redstone } : {}),
+    ...(isObject(raw.isle) ? { isle: raw.isle } : {}),
   };
 }
 
