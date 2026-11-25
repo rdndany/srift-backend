@@ -33,6 +33,7 @@ import {
   IS_LIQUID,
   IS_SOLID,
   isWaterBlock,
+  fluidSurface,
   isBubbleBloom,
   isSeaPlant,
   parseIsleSave,
@@ -1394,6 +1395,31 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     };
   };
 
+  /**
+   * The camera is in the water, or still on the sheet. A source fills 14/16 of its cell, so the eyes
+   * are often in the air block above it while the body is in the pool and the surface cuts the view.
+   */
+  function viewInWater(): boolean {
+    if (body.inLava === true || body.eyeInLava === true) return false;
+    const x = Math.floor(camera.position.x);
+    const y = Math.floor(camera.position.y);
+    const z = Math.floor(camera.position.z);
+    if (isWaterBlock(world.getBlock(x, y, z))) return true;
+    const below = world.getBlock(x, y - 1, z);
+    if (isWaterBlock(below) && camera.position.y <= y - 1 + fluidSurface(below) / 16 + 0.45) return true;
+    if (body.inWater !== true) return false;
+    const fx = Math.floor(body.x);
+    const fz = Math.floor(body.z);
+    const fy = Math.floor(body.y);
+    let sheet = -1;
+    for (let i = 0; i < 5; i++) {
+      const id = world.getBlock(fx, fy + i, fz);
+      if (!isWaterBlock(id)) break;
+      sheet = fy + i + fluidSurface(id) / 16;
+    }
+    return sheet >= 0 && camera.position.y <= sheet + 0.45;
+  }
+
   /** A frame, and its measure for the admin bar. */
   function tick(now: number): void {
     if (stopped) return;
@@ -1600,7 +1626,9 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     /** How far the land is still drawn. Mobs stop at the same line, so they do not hang in the sky past it. */
     let drawnFar = fogFar;
     const light = sky.lighting;
-    if (body.eyeInWater) {
+    const underWater = viewInWater();
+    world.setInWater(underWater);
+    if (body.eyeInLava === true || underWater) {
       const lava = body.eyeInLava === true;
       if (lava) {
         seaShafts = 0;

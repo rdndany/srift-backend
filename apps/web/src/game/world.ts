@@ -472,6 +472,11 @@ export class World implements WorldAccess {
     this.materials.setFog(color, near, far, zenith);
   }
 
+  /** The eyes are under water: the water faces are dropped, and the fog is the water. */
+  setInWater(on: boolean): void {
+    this.materials.setInWater(on);
+  }
+
   refreshStats(): WorldStats {
     this.stats.loaded = this.chunks.size;
     let meshed = 0;

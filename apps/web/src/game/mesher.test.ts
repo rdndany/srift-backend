@@ -128,7 +128,8 @@ describe('mesher', () => {
     const r = meshChunk(p);
     expect(r.opaque).toBeNull();
     // The surface is cut where its shore sides change: the two ends and the strip between them (the flags the shader draws foam by).
-    expect(quads(r.translucent)).toBe(8);
+    // No underside: a pool has no face seen from below.
+    expect(quads(r.translucent)).toBe(7);
     // A source's surface sits 2/16 below the block top.
     const ys = Array.from(r.translucent!.positions).filter((_, i) => i % 3 === 1);
     expect(Math.max(...ys)).toBeCloseTo(4 - 2 / 16, 5);
@@ -219,20 +220,20 @@ describe('mesher', () => {
     const stack = emptyRegion();
     stack[regionIndex(5, 10, 5)] = B.WATER;
     stack[regionIndex(5, 11, 5)] = B.WATER;
-    // Two cubes of water on top of each other: 5 faces each, minus the shared pair, plus nothing.
-    expect(quads(meshChunk(stack).translucent)).toBe(10);
+    // Two cubes of water on top of each other: the shared pair is gone, and so is the underside.
+    expect(quads(meshChunk(stack).translucent)).toBe(9);
 
     const level = emptyRegion();
     level[regionIndex(5, 10, 5)] = B.WATER;
     level[regionIndex(6, 10, 5)] = B.WATER;
-    // Same height: the faces between them vanish (the surface is two quads: each cell has its own shore sides).
-    expect(quads(meshChunk(level).translucent)).toBe(7);
+    // Same height: the faces between them vanish, and there is no underside.
+    expect(quads(meshChunk(level).translucent)).toBe(6);
 
     const step = emptyRegion();
     step[regionIndex(5, 10, 5)] = B.WATER;
     step[regionIndex(6, 10, 5)] = B.WATER_7;
-    // The tall one shows a side above the short one's surface; the short one's side is hidden.
-    expect(quads(meshChunk(step).translucent)).toBe(11);
+    // No wall between the two heights, and neither has an underside. Two tops and three outer sides each.
+    expect(quads(meshChunk(step).translucent)).toBe(8);
   });
 
   it('tells water where its shore is and a floor how deep the water over it is', () => {
@@ -316,6 +317,45 @@ describe('mesher', () => {
     const water = quads(meshChunk(p).translucent);
     // Only the three real blocks of water are drawn: five faces each at most, none for the plants.
     expect(water).toBeLessThanOrEqual(3 * 5);
+  });
+
+  it('hides the side of water standing higher than the pool, with air between', () => {
+    const p = emptyRegion();
+    p[regionIndex(6, 10, 5)] = B.WATER;
+    p[regionIndex(5, 12, 5)] = B.WATER;
+    const r = meshChunk(p);
+    let lip = 0;
+    eachQuad(r.translucent!, (verts) => {
+      const xs = verts.map((v) => r.translucent!.positions[v * 3]!);
+      const ys = verts.map((v) => r.translucent!.positions[v * 3 + 1]!);
+      if (Math.max(...ys) - Math.min(...ys) < 0.01 || Math.min(...ys) < 11.9) return;
+      const x0 = Math.min(...xs);
+      const x1 = Math.max(...xs);
+      if (x0 > 5.9 && x1 < 6.1) lip++;
+    });
+    expect(lip).toBe(0);
+  });
+
+  it('hides the side of a taller pool where it stands in shorter water', () => {
+    const p = emptyRegion();
+    p[regionIndex(5, 10, 5)] = B.WATER;
+    p[regionIndex(5, 11, 5)] = B.WATER;
+    p[regionIndex(6, 10, 5)] = B.WATER;
+    const r = meshChunk(p);
+    let lip = 0;
+    let outer = 0;
+    eachQuad(r.translucent!, (verts) => {
+      const xs = verts.map((v) => r.translucent!.positions[v * 3]!);
+      const ys = verts.map((v) => r.translucent!.positions[v * 3 + 1]!);
+      if (Math.max(...ys) - Math.min(...ys) < 0.01 || Math.min(...ys) < 10.9) return;
+      const x0 = Math.min(...xs);
+      const x1 = Math.max(...xs);
+      if (x0 > 5.9 && x1 < 6.1) lip++;
+      if (x0 > 4.9 && x1 < 5.1) outer++;
+    });
+    // The face toward the lower water is gone. The face toward open air is still there.
+    expect(lip).toBe(0);
+    expect(outer).toBe(1);
   });
 
   it('hides the water faces that would touch ice or glass', () => {
@@ -442,7 +482,7 @@ describe('mesher', () => {
     const r = meshChunk(p);
     expect(r.translucent).toBeNull();
     const ys = Array.from(r.opaque!.positions).filter((_, i) => i % 3 === 1);
-    expect(Math.max(...ys)).toBeCloseTo(10 + 5 / 16, 5);
+    expect(Math.max(...ys)).toBeCloseTo(10 + 4 / 16, 5);
   });
 
   it('lays rails flat on the floor of their cell', () => {

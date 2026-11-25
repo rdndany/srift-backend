@@ -401,6 +401,15 @@ export function meshChunk(region: Uint16Array, tint?: Uint8Array): MeshResult {
   // Ice and glass lie in the water without cutting it: the water faces that would touch them are not drawn.
   const coversWater = (nid: number): boolean => nid !== 0 && FLUID_KIND[nid] === 0 && IS_OPAQUE[nid] === 0 && BLOCKS[nid].shape === 'cube' && BLOCKS[nid].render === 'translucent';
   const watery = (x: number, y: number, z: number): boolean => y >= 0 && FLUID_KIND[blockAt(x, y, z)] === FLUID_WATER;
+  /** Water in this column under the cell, with only air between. A side above that water is inside the pool. */
+  const waterUnder = (x: number, y: number, z: number): boolean => {
+    for (let yy = y - 1; yy >= 0 && y - yy <= 32; yy--) {
+      const id = blockAt(x, yy, z);
+      if (FLUID_KIND[id] === FLUID_WATER) return true;
+      if (id !== 0 && (IS_OPAQUE[id] === 1 || BLOCKS[id].solid)) return false;
+    }
+    return false;
+  };
   const lightAt = (x: number, y: number, z: number): number => {
     if (y >= litHeight) return 0xf0;
     if (y < 0) return 0;
@@ -480,15 +489,21 @@ export function meshChunk(region: Uint16Array, tint?: Uint8Array): MeshResult {
           // A side between two heights of the same water starts where the lower one ends, so the shared part is one body.
           let lift = 0;
           if (fluid !== 0) {
+            // The underside of water is never a face: from below, and from inside the pool, there is no sheet.
+            if (fluid === FLUID_WATER && face.kind === 'bottom') continue;
             const surf = surfaceOf(seen, x, y, z, id);
             if (FLUID_KIND[nid] === fluid) {
-              // The same fluid on top or underneath hides the face; beside it, only the step shows.
-              if (face.kind !== 'side') continue;
+              // Water is one body: the wall where a taller block meets a shorter one is inside the pool, so it is not a face.
+              // Lava still shows that step.
+              if (fluid === FLUID_WATER || face.kind !== 'side') continue;
               const nSurf = surfaceOf(seen, nx, ny, nz, nid);
               if (nSurf >= surf) continue;
               drop = 16 - surf;
               lift = nSurf;
             } else if (fluid === FLUID_WATER && coversWater(nid)) continue;
+            // The side of a higher pool faces the air above shorter water, however many blocks of air
+            // are in between. That sheet is inside the water, so it is not drawn.
+            else if (fluid === FLUID_WATER && face.kind === 'side' && waterUnder(nx, ny, nz)) continue;
             else drop = 16 - surf;
           } else if (nid === id && def.cullSame && seat === 0 && !seatOf(nx, ny, nz)) continue;
           // Ice meets the water with no side of its own. A side that faces the air is the edge of the sheet, and stays.

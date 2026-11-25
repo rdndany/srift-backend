@@ -119,6 +119,7 @@ uniform float uTime;
 ${FOG_GLSL}
 uniform float uAlphaTest;
 uniform float uOpacity;
+uniform float uInWater;
 uniform sampler2D uPalette;
 uniform vec3 uBaseGrass;
 uniform vec3 uBaseWater;
@@ -435,6 +436,9 @@ ${HERO_TILES.map((n) => {
   float wdepth = 0.0;
   if (ti > ${WATER_DEPTH_FLAG - 0.5}) {
     water = true;
+    // Under the surface the water is the fog, not a stack of block faces. The sheet also goes the
+    // moment the camera slips under it: the eyes are often still in the air cell above the water.
+    if (uInWater > 0.5 || (abs(n.y) > 0.5 && cameraPosition.y < vWorld.y - 0.02)) discard;
     float k = ti - ${WATER_DEPTH_FLAG}.0;
     wdepth = floor(k / ${WATER_DEPTH_STRIDE}.0);
     ti = ${TINT_WATER_BASE}.0 + k - ${WATER_DEPTH_STRIDE}.0 * wdepth;
@@ -778,6 +782,7 @@ export function createChunkMaterials(atlas: Atlas): ChunkMaterials {
     uBaseWater: { value: linear(WATER_BASE) },
     uDay: { value: 1 },
     uTime: { value: 0 },
+    uInWater: { value: 0 },
     uWind: { value: 1 },
     uBlockLook: { value: BLOCK_LOOK },
     uFogColor: { value: new THREE.Color(0x8fc4ff) },
@@ -848,6 +853,9 @@ export function createChunkMaterials(atlas: Atlas): ChunkMaterials {
     },
     setTime(v) {
       shared.uTime.value = v;
+    },
+    setInWater(on: boolean) {
+      shared.uInWater.value = on ? 1 : 0;
     },
     setFog(color, near, far, zenith = color) {
       shared.uFogColor.value.copy(color);

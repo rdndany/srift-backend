@@ -192,8 +192,79 @@ describe('flowing water', () => {
     l.put(0, 1, 0, B.LAVA);
     l.sim.update(0.3);
     expect(l.get(1, 1, 0)).toBe(B.AIR);
-    l.sim.update(1);
+    l.sim.update(1.3); // lava waits thirty ticks, a second and a half
     expect(l.get(1, 1, 0)).toBe(B.LAVA_1);
+  });
+
+  it('runs toward a drop within four blocks, and ignores one further off', () => {
+    const near = rig();
+    near.cells.set('4,0,0', B.AIR);
+    near.put(0, 1, 0, B.WATER);
+    near.sim.settle();
+    expect(isWaterId(near.get(1, 1, 0)), 'toward the drop').toBe(true);
+    expect(isWaterId(near.get(4, 0, 0)), 'down the drop').toBe(true);
+    expect(near.get(-1, 1, 0), 'away from the drop').toBe(B.AIR);
+    expect(near.get(0, 1, 1), 'beside the run').toBe(B.AIR);
+
+    const far = rig();
+    far.cells.set('6,0,0', B.AIR);
+    far.put(0, 1, 0, B.WATER);
+    far.sim.settle();
+    expect(isWaterId(far.get(1, 1, 0))).toBe(true);
+    expect(isWaterId(far.get(-1, 1, 0)), 'the drop is past the search, so the water still spreads').toBe(true);
+  });
+
+  it('pours straight down on the first tick, and a wide lip pushes outward as well', () => {
+    const one = rig();
+    one.put(0, 3, 0, B.WATER);
+    one.sim.update(0.3);
+    expect(one.get(0, 2, 0)).toBe(B.WATER_FALL);
+    expect(one.get(1, 3, 0)).toBe(B.AIR);
+
+    const wide = rig();
+    wide.put(0, 3, 0, B.WATER);
+    wide.put(1, 3, 0, B.WATER);
+    wide.put(-1, 3, 0, B.WATER);
+    wide.put(0, 3, 1, B.WATER);
+    wide.sim.update(0.3);
+    expect(wide.get(0, 2, 0)).toBe(B.WATER_FALL);
+    expect(isWaterId(wide.get(0, 3, -1)), 'three sources beside the lip').toBe(true);
+  });
+
+  it('lets the sea pour into a hole dug under it', () => {
+    const r = rig();
+    for (let x = -2; x <= 2; x++) {
+      for (let z = -2; z <= 2; z++) {
+        r.cells.set(`${x},2,${z}`, B.STONE);
+        r.cells.set(`${x},3,${z}`, B.WATER);
+      }
+    }
+    // A shaft under the sea: the same sources fall into it.
+    r.cells.set('0,2,0', B.AIR);
+    r.cells.set('0,1,0', B.AIR);
+    r.sim.notify(0, 2, 0);
+    r.sim.settle();
+    expect(isWaterId(r.get(0, 2, 0))).toBe(true);
+    expect(isWaterId(r.get(0, 1, 0))).toBe(true);
+    expect(r.get(1, 3, 0), 'the rest of the sea stays put').toBe(B.WATER);
+  });
+
+  it('fills a block broken under water before the next tick', () => {
+    const r = rig();
+    r.cells.set('0,2,0', B.STONE);
+    r.put(0, 3, 0, B.WATER);
+    r.sim.settle();
+    r.cells.set('0,2,0', B.AIR);
+    r.sim.notify(0, 2, 0);
+    expect(isWaterId(r.get(0, 2, 0))).toBe(true);
+
+    const side = rig();
+    side.cells.set('0,1,0', B.STONE);
+    side.host.setBlock(1, 1, 0, B.WATER);
+    side.cells.set('0,1,0', B.AIR);
+    side.sim.notify(0, 1, 0);
+    expect(isWaterId(side.get(0, 1, 0))).toBe(true);
+    expect(side.get(-1, 1, 0), 'the water that just arrived has not flowed on yet').toBe(B.AIR);
   });
 });
 
