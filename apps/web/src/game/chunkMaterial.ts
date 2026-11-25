@@ -518,18 +518,16 @@ ${HERO_TILES.map((n) => {
     // depth classes are kept small, so the blocks of the sea floor do not show through as squares.
     float deep = mix(0.9, 1.0, wdepth / 3.0);
     deep *= mix(0.7, 1.0, smoothstep(0.0, 0.6, edgeD));
-    // Under rock (little sky): the water is clearer and teal instead of a deep navy, which in the dark was one flat blue square.
-    float cave = 1.0 - smoothstep(0.15, 0.75, vLight.g);
-    vec3 body = mix(vec3(0.46, 0.64, 0.68), mix(vec3(0.15, 0.24, 0.4), vec3(0.3, 0.52, 0.62), cave), deep);
+    vec3 body = mix(vec3(0.46, 0.64, 0.68), vec3(0.12, 0.22, 0.38), deep);
     tex.rgb *= body;
-    // A slow drifting dapple through the whole body (in 3D, so the sides and the top of a pool all have it and no face is a plain tile).
-    if (cave > 0.0) {
-      float dap = wnoise3(vWorld * vec3(1.6, 2.2, 1.6) + vec3(tm * 0.25, -tm * 0.18, tm * 0.2)) * 0.6 + wnoise3(vWorld * 3.7 + vec3(-tm * 0.3, tm * 0.2, 4.0)) * 0.4;
-      tex.rgb *= 1.0 + cave * (dap - 0.5) * 0.9;
-    }
+    // A slight movement in the colour. It stays around the same brightness, so a dark pool is not painted lighter.
+    float dap = wnoise3(vWorld * vec3(1.6, 2.2, 1.6) + vec3(tm * 0.25, -tm * 0.18, tm * 0.2));
+    tex.rgb *= 0.94 + 0.12 * dap;
     // The light sinks into the swells: troughs a little darker, crests a little brighter.
     tex.rgb *= 1.0 + wh * 0.03 * top;
-    tex.rgb += vec3(0.0, 0.035, 0.03) * smoothstep(0.7, 1.4, wh) * top * (0.4 + 0.6 * deep);
+
+    // Sky on this water: the sun or the moon actually reaches the block. A torch is block light and does not make a sky.
+    float skyReach = smoothstep(0.04, 0.4, vLight.g);
 
     // The sky in the mirror: a flat surface shows the sky only at a grazing look, a rippled one a little sooner.
     float cosT = clamp(dot(V, nw), 0.0, 1.0);
@@ -537,17 +535,16 @@ ${HERO_TILES.map((n) => {
     vec3 R = reflect(-V, nw);
     R.y = abs(R.y);
     vec3 mirror = mix(uSkyReflect, skyAtSoft(normalize(R)), 0.75);
-    // (No sky to mirror under rock.)
-    tex.rgb = mix(tex.rgb, mirror * 0.8, fres * 0.7 * (1.0 - 0.85 * cave));
+    tex.rgb = mix(tex.rgb, mirror * 0.8, fres * 0.55 * skyReach);
     // See-through everywhere, sea and cave the same: a side is a face of water, and the cave shows through it.
     alpha = mix(0.45, 0.62, deep);
-    alpha = mix(alpha, 0.82, fres);
+    alpha = mix(alpha, 0.82, fres * skyReach);
 
     // (No foam line along the shore: any bright band there flickers and shows the edges of the blocks. The shore is only a lighter, greener shallow, see edgeD above.)
 
-    // Glints: a hard shine where the swells mirror the sun and a broad soft glow around it.
+    // Glints: a hard shine where the swells mirror the sun or the moon.
     float sp = max(dot(R, uLightDir), 0.0);
-    tex.rgb += uSun * (pow(sp, 40.0) * 1.0 + pow(sp, 14.0) * 0.1) * uGlint * top * (1.0 - cave);
+    tex.rgb += uSun * (pow(sp, 40.0) * 1.0 + pow(sp, 14.0) * 0.1) * uGlint * top * skyReach;
 
     // From underneath, the surface is the bright ceiling of the sea: ripples, and the sun breaking through them.
     if (cameraPosition.y < vWorld.y && top > 0.5) {
@@ -559,11 +556,10 @@ ${HERO_TILES.map((n) => {
       float gaze = pow(max(dot(normalize(-V), sunW), 0.0), 26.0);
       vec3 deepCol = vec3(0.04, 0.16, 0.32);
       vec3 litCol = vec3(0.62, 0.86, 1.0);
-      vec3 col = mix(deepCol, litCol, 0.28 + 0.72 * up);
+      vec3 col = mix(deepCol, litCol, (0.28 + 0.72 * up) * skyReach);
       col *= 0.78 + 0.4 * wh;
-      vec3 sunCol = max(uSun, vec3(0.75, 0.88, 1.0));
-      col += sunCol * broad * 0.55 * sunUp * uGlint;
-      col += vec3(1.0, 0.96, 0.82) * (hit * 1.5 + gaze * 1.15) * sunUp * uGlint;
+      col += uSun * broad * 0.55 * sunUp * uGlint * skyReach;
+      col += vec3(1.0, 0.96, 0.82) * (hit * 1.5 + gaze * 1.15) * sunUp * uGlint * skyReach;
       tex.rgb = col;
       // Close under the surface, and looking up, the sky shows through. Deeper, the ceiling closes over.
       float below = max(vWorld.y - cameraPosition.y, 0.0);
@@ -628,10 +624,10 @@ ${HERO_TILES.map((n) => {
     // The light under the surface is the blue of the water itself. The block keeps its own colour, only seen through that blue,
     // and the blue deepens as more water sits over it.
     float dep = clamp((vExtra - 1.0) / 3.0, 0.0, 1.0);
-    rgb *= mix(vec3(0.72, 0.86, 1.14), vec3(0.42, 0.62, 1.02), dep);
-    // Sunlight through the ripples: a moving net of bright lines, gone once the water overhead has swallowed the sun.
+    rgb *= mix(vec3(0.62, 0.78, 0.96), vec3(0.32, 0.48, 0.72), dep);
+    // Sunlight through the ripples: only where the sky reaches this block. A cave with no sun or moon stays dark.
     float cau = caustic(vWorld.xz * 0.16, uTime * 0.4);
-    float sunHere = clamp(uGlint, 0.0, 1.0) * clamp(max(uSun.r, max(uSun.g, uSun.b)) * 2.0, 0.0, 1.0);
+    float sunHere = smoothstep(0.04, 0.4, vLight.g) * clamp(uGlint, 0.0, 1.0);
     rgb += vec3(0.62, 0.84, 1.08) * cau * sunHere * (1.0 - dep * 0.85) * max(n.y, 0.18) * 0.9;
   }
   // Glass stays clear face-on and picks up a cool reflection where you look along it.
@@ -722,6 +718,8 @@ export interface ChunkMaterials {
   setDay(v: number): void;
   /** Seconds, for the flicker of fire. */
   setTime(v: number): void;
+  /** The camera is under water: the faces of the water blocks are not drawn. */
+  setInWater(on: boolean): void;
   /** `zenith` is the colour overhead that the fog fades into when looking up (the sky dome's top); flat fog without it. */
   setFog(color: THREE.Color, near: number, far: number, zenith?: THREE.Color): void;
   /**
