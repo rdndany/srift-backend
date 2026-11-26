@@ -47,6 +47,8 @@ export interface FxFrame {
   dusk: number;
   /** 1 in full daylight, 0 at night. */
   day: number;
+  /** Isle black-moon night. The moon is a black disc and throws no rays. */
+  blackMoon?: boolean;
   /** 1 well underground (no sun, no grading of the weather), 0 in the open. */
   underground: number;
   /** 0..1, how overcast. */
@@ -227,9 +229,9 @@ uniform float uOcclude;
 uniform sampler2D uMap;
 
 void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth, out vec4 outputColor) {
-  // Depth packs the whole view into 0..1, so a far block is almost 1, the same as the empty sky.
-  // Compare real distance instead: the sky is the far plane, and anything nearer than the disc is a block.
-  float dist = -getViewZ(depth);
+  // This effect is drawn after the water warp, so it does not carry the depth flag. The argument
+  // above stays at the far plane. Read the buffer: a mountain in front of the sun hides the rays.
+  float dist = -getViewZ(readDepth(uv));
   if (uAmount < 0.001 || dist < uOcclude) {
     outputColor = vec4(0.0);
     return;
@@ -243,7 +245,7 @@ class WaterShafts extends Effect {
     super('SeaRays', SEA_RAYS, {
       blendFunction: BlendFunction.SCREEN,
       // No DEPTH flag. The pass sorts depth effects first, and the water warp would then erase these rays.
-      // The depth value is still passed in, because an earlier effect in the pass already asks for it.
+      // The shader reads the depth buffer itself, so a mountain still hides the rays.
       uniforms: new Map<string, THREE.Uniform>([
         ['uAmount', new THREE.Uniform(0)],
         ['uOcclude', new THREE.Uniform(280)],
@@ -516,7 +518,9 @@ export class PostFx {
       const facing = sstep(0.15, 0.7, this.tmpA.dot(this.tmpB));
       const through = frame.underwater ? (frame.overhead ?? 1) : 1;
       const strength = useMoon
-        ? facing * open * (1 - frame.rain) * night * 0.18 * through
+        ? frame.blackMoon
+          ? 0
+          : facing * open * (1 - frame.rain) * night * 0.18 * through
         : frame.underwater
           ? facing * (1 - frame.rain) * (0.3 + 0.7 * frame.dusk) * frame.day * through
           : facing * open * (1 - frame.rain) * (0.3 + 0.7 * frame.dusk) * frame.day;
@@ -524,7 +528,10 @@ export class PostFx {
       mat.exposure = (useMoon ? 0.35 : 0.9) * strength;
       mat.weight = useMoon ? 0.14 : 0.45;
       mat.decay = useMoon ? 0.8 : 0.93;
-      if (frame.underwater) {
+      // The warp keeps replacing the picture for a moment after the eyes leave the water, and it
+      // erases rays drawn before it. Keep the rays on the later pass until that warp is gone.
+      const sea = frame.underwater || (frame.warp ?? 0) > 0.001;
+      if (sea) {
         // The library blend sits before the water warp, which would erase it. Draw the real disc
         // into the ray picture, and put that picture on after the warp.
         const show = frame.warm === true || strength > 0.02;
@@ -558,7 +565,11 @@ export class PostFx {
       const nightAmt = 1 - frame.day;
       this.light.copy(LIGHT_DAY).lerp(LIGHT_NIGHT, nightAmt).lerp(LIGHT_DUSK, frame.dusk);
       this.shadow.copy(SHADOW_DAY).lerp(SHADOW_NIGHT, nightAmt).lerp(SHADOW_DUSK, frame.dusk);
-      const amount = (0.55 + 0.45 * frame.dusk) * (1 - 0.7 * frame.underground) * (1 - 0.6 * frame.rain);
+      let amount = (0.55 + 0.45 * frame.dusk) * (1 - 0.7 * frame.underground) * (1 - 0.6 * frame.rain);
+      if (frame.blackMoon) {
+        this.shadow.setScalar(0);
+        amount *= 0.25;
+      }
       this.grade!.set(this.shadow, this.light, amount, 1.06 + 0.14 * frame.dusk);
     }
     this.distanceBlur!.set(frame.fogNear, frame.fogFar);

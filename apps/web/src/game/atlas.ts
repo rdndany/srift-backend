@@ -1213,8 +1213,22 @@ DYE_NAMES.forEach((n, i) => {
   PAINTERS[`wool_${n}`] = woolPainter(DYE_RGB[i] as RGB);
 });
 PAINTERS.water = (x, y) => {
-  const j = (vnoise(x, y, 4, 201) - 0.5) * 30 + (vnoise(x, y, 2, 202) - 0.5) * 14;
-  return [40 + j * 0.5, 92 + j * 0.9, 206 + j * 0.7, 175];
+  // Flowing crests, the way a block of water reads from the shore: thin light lines on a blue ground.
+  // Whole waves, so the tile meets itself and a sea is one pattern instead of a grid of frames.
+  const u = (x + 0.5) / 16;
+  const v = (y + 0.5) / 16;
+  const ridge = (p: number): number => {
+    const a = Math.max(0, Math.sin(p));
+    return a * a * a * a;
+  };
+  const lines =
+    ridge((u * 2.0 + v * 3.0) * Math.PI * 2) +
+    ridge((u * 3.0 - v * 2.0) * Math.PI * 2 + 1.1) * 0.85 +
+    ridge((u - v * 4.0) * Math.PI * 2 + 2.4) * 0.55;
+  const crest = Math.min(1, lines * 1.35);
+  const grain = (vnoise(x, y, 2, 201) - 0.5) * 8;
+  const lift = crest * 72;
+  return [22 + lift * 0.2 + grain, 62 + lift * 0.95 + grain, 146 + lift * 0.38 + grain * 0.45, 128 + crest * 58];
 };
 PAINTERS.ice = (x, y, r) => {
   const streak = vnoise(x, y, 8, 211);

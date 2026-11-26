@@ -625,6 +625,7 @@ export class Realm {
           quiet: (p) => this.generator.instanceAt(p.x, p.z) >= 0,
           wildlife: (x, z) => this.generator.wildlifeAt(x, z),
           noMonsters: (x, z, y) => this.generator.safeFromMonsters(x, z, SAFE_BUFFER) || this.wardAt(x, y, z, 2) !== null,
+          keepHerd: this.generator.kind === 'isle',
         });
         this.updateSpawners(dt, living);
       }
@@ -1791,6 +1792,15 @@ export class Realm {
           const m = list[i];
           if (m.kind === 'drowned' && Math.hypot(m.body.x - x, m.body.z - z) <= r) list.splice(i, 1);
         }
+      },
+      trim: (kind, x, z, r, keep) => {
+        const list = this.mobs.mobs;
+        const hit = list
+          .map((m, i) => ({ m, i }))
+          .filter(({ m }) => m.kind === kind && !m.dead && Math.hypot(m.body.x - x, m.body.z - z) <= r)
+          .sort((a, b) => Math.hypot(a.m.body.x - x, a.m.body.z - z) - Math.hypot(b.m.body.x - x, b.m.body.z - z));
+        const drop = new Set(hit.slice(keep).map(({ i }) => i));
+        for (let i = list.length - 1; i >= 0; i--) if (drop.has(i)) list.splice(i, 1);
       },
       say: (text) => {
         for (const p of this.players) p.emit({ t: 'toast', text });

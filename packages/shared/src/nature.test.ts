@@ -718,6 +718,29 @@ describe('climbing out of the water', () => {
     expect(b.inWater).toBe(true);
   });
 
+  it('a stair in the water is swum, not a teleport up the steps', () => {
+    // Floor, then water, and a stair of full blocks rising one, two, then three.
+    const stair: BlockReader = {
+      getBlock: (x, y) => {
+        if (y <= 0) return B.STONE;
+        if (x >= 2 && y <= x - 1) return B.STONE;
+        if (y <= 4) return B.WATER;
+        return B.AIR;
+      },
+    };
+    const b = createBody(0.5, 1, 0.5);
+    let prev = b.y;
+    let biggest = 0;
+    for (let i = 0; i < 60 * 4; i++) {
+      stepPlayer(stair, b, { ...idleInput, forward: 1, jump: true, yaw: -Math.PI / 2 }, 1 / 60);
+      biggest = Math.max(biggest, b.y - prev);
+      prev = b.y;
+    }
+    // One frame may step onto the next block. It must not throw the body up the whole stair.
+    expect(biggest).toBeLessThan(1.2);
+    expect(b.y).toBeGreaterThan(1.2);
+  });
+
   it('a wall that is too high is not climbed', () => {
     const w = pool(8);
     const b = createBody(-2.5, 1, 0.5);

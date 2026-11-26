@@ -659,6 +659,95 @@
     color: #d6cce8;
     text-shadow: 0 1px 8px #000;
   }
+  .isle-slider {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .isle-slide {
+    position: relative;
+    display: flex;
+    align-items: center;
+    min-height: 72px;
+    padding: 4px 36px;
+    overflow: hidden;
+  }
+  .isle-slide.has-art {
+    height: 168px;
+    min-height: 168px;
+    padding: 0;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+  }
+  .isle-slide:not(.has-art) p {
+    padding-right: 4px;
+  }
+  .isle-slide i {
+    position: absolute;
+    inset: 0;
+    background: var(--art) center / cover no-repeat;
+  }
+  .isle-nav {
+    position: absolute;
+    top: 50%;
+    z-index: 1;
+    width: 28px;
+    height: 36px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    transform: translateY(-50%);
+    background: rgba(7, 4, 14, 0.45);
+    color: #fff;
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .isle-nav.prev {
+    left: 0;
+  }
+  .isle-nav.next {
+    right: 0;
+  }
+  .isle-nav:hover {
+    background: rgba(7, 4, 14, 0.72);
+  }
+  .isle-slider p {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin: 0;
+  }
+  .isle-slider b {
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #fff;
+    text-shadow: 0 1px 8px #000;
+  }
+  .isle-slider small {
+    font-family: var(--body);
+    font-size: 12px;
+    line-height: 1.4;
+    color: #e4dcf2;
+    text-shadow: 0 1px 8px #000;
+  }
+  .isle-dots {
+    display: flex;
+    gap: 6px;
+  }
+  .isle-dots button {
+    width: 7px;
+    height: 7px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.35);
+    cursor: pointer;
+  }
+  .isle-dots button.on {
+    background: #fff;
+  }
   .gp-ctrl-row {
     display: flex;
     flex-wrap: wrap;

@@ -82,6 +82,15 @@ export interface LobbyChoice {
 }
 /** The one character of island survival, kept on this device and never mixed with a multiplayer hero. */
 const ISLE_HERO = 'solrift-isle-hero';
+/** What island survival shows in the lobby, one at a time. A slide keeps its picture once one is given. */
+const ISLE_FEATURES: { title: string; text: string; art: string }[] = [
+  { title: 'The island', text: 'Water on every side. You start with nothing, and each day is counted.', art: '/art/survival-island-intro.webp' },
+  { title: 'Black moon', text: 'Every fourth night the moon is black and gives no light. A torch is all that shows the way, and the drowned walk onto the sand.', art: '/art/survival-island-black-moon.webp' },
+  { title: 'Washed-up crate', text: 'A crate can wash onto the sand at dawn. What is inside is yours.', art: '/art/survival-island-crate.webp' },
+  { title: 'Drowned', text: 'From the fifth day, drowned can walk onto the sand.', art: '/art/survival-island-drowned.webp' },
+  { title: 'Treasure map', text: 'A map can point to treasure buried under the sand, or to a wreck on the seabed.', art: '/art/survival-island-map.webp' },
+  { title: 'Ghost ship', text: 'From the eighth day, a ship can stand offshore through the night. It is gone by morning.', art: '/art/survival-island-ship.webp' },
+];
 function readIsleHero(): { name: string; look: number } | null {
   if (typeof localStorage === 'undefined') return null;
   try {
@@ -333,6 +342,8 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
   const [worlds, setWorlds] = useState<SavedWorld[] | null>(null);
   /** Days survived on the one island, once its save has been read. */
   const [isleDay, setIsleDay] = useState<number | null>(null);
+  const [isleSlide, setIsleSlide] = useState(0);
+  const islePause = useRef(false);
   const [removing, setRemoving] = useState<number | null>(null);
   const [worldError, setWorldError] = useState<string | null>(null);
 
@@ -375,6 +386,14 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
   const characterId = hasCharacter ? account.id : null;
 
   useEffect(() => init(), [init]);
+
+  useEffect(() => {
+    if (!island) return;
+    const id = window.setInterval(() => {
+      if (!islePause.current) setIsleSlide((n) => (n + 1) % ISLE_FEATURES.length);
+    }, 5500);
+    return () => window.clearInterval(id);
+  }, [island]);
 
   // A guest starts from what this tab remembers (or a random name).
   useEffect(() => {
@@ -717,6 +736,8 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
 
   const info = modeInfo(mode);
   const over = latest?.player.gameOver === true;
+  /** Island survival keeps one island. While Continue is there, Play would start a second one. */
+  const islandContinue = way === 'single' && island && !!latest && !creating;
   const label = starting ? 'One moment...' : creating ? (working ? 'Creating...' : who === 'wallet' && armed ? `Yes, create ${cleaned} for good` : 'Create') : 'Play';
   /** The one big button (and Enter): CREATE while the character is being made, PLAY once it exists. */
   const primary = () => (creating ? void create() : playNow());
@@ -766,7 +787,8 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
         e.preventDefault();
         walk(e.key === 'ArrowDown' ? 1 : -1);
       } else if (e.key === 'Enter' && !(t && ['BUTTON', 'SUMMARY', 'A'].includes(t.tagName)) && !working && !deleting) {
-        primary();
+        if (islandContinue && latest) void start({ kind: 'single', seed: latest.seed, mode, world: 'isle' });
+        else primary();
       }
     };
     window.addEventListener('keydown', onKey);
@@ -1131,13 +1153,46 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
               </p>
             )}
           </div>
+          {island && (() => {
+            const slide = ISLE_FEATURES[isleSlide]!;
+            return (
+            <div className="isle-slider" onMouseEnter={() => { islePause.current = true; }} onMouseLeave={() => { islePause.current = false; }}>
+              <div className={`isle-slide ${slide.art ? 'has-art' : ''}`}>
+                {slide.art && <i style={{ '--art': `url(${slide.art})` } as CSSProperties} />}
+                <button type="button" className="isle-nav prev" aria-label="Previous feature" onClick={() => setIsleSlide((n) => (n + ISLE_FEATURES.length - 1) % ISLE_FEATURES.length)}>
+                  &lsaquo;
+                </button>
+                <button type="button" className="isle-nav next" aria-label="Next feature" onClick={() => setIsleSlide((n) => (n + 1) % ISLE_FEATURES.length)}>
+                  &rsaquo;
+                </button>
+                {!slide.art && (
+                  <p>
+                    <b>{slide.title}</b>
+                    <small>{slide.text}</small>
+                  </p>
+                )}
+              </div>
+              {slide.art && (
+                <p>
+                  <b>{slide.title}</b>
+                  <small>{slide.text}</small>
+                </p>
+              )}
+              <div className="isle-dots">
+                {ISLE_FEATURES.map((f, i) => (
+                  <button key={f.title} type="button" className={i === isleSlide ? 'on' : ''} aria-label={f.title} aria-pressed={i === isleSlide} onClick={() => setIsleSlide(i)} />
+                ))}
+              </div>
+            </div>
+            );
+          })()}
           {way === 'multi' && <RealmAbout />}
           <p className="gp-keys" aria-label="Keys">
             <span>
               <kbd>Esc</kbd> Back
             </span>
             <span>
-              <kbd>Enter</kbd> {creating ? 'Create' : 'Play'}
+              <kbd>Enter</kbd> {creating ? 'Create' : islandContinue ? 'Continue' : 'Play'}
             </span>
             {canWalk && (
               <span>
@@ -1446,6 +1501,7 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
           )}
 
           <div className="gp-go-row">
+            {(!island || blocker) && (
             <span className="gp-ready" id="dest-sub">
               {blocker ? (
                 <em className="lb-need">{blocker}</em>
@@ -1455,12 +1511,13 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
                   <span>
                     <b>{shownName}</b>
                     <small>
-                      {island ? `Day ${isleDay ?? 1}` : shownDef ? shownDef.name : 'Adventurer'} &middot; {island ? 'Nothing carried' : who === 'guest' ? 'Guest' : 'Wallet'}
+                      {shownDef ? shownDef.name : 'Adventurer'} &middot; {who === 'guest' ? 'Guest' : 'Wallet'}
                     </small>
                   </span>
                 </>
               )}
             </span>
+            )}
             {way === 'single' && island && latest && !creating && (
               <button type="button" className="lb-continue fp-ghost fp-px lb-forget" disabled={working || blocker !== null} onClick={() => void forgetIsle()}>
                 <span>
@@ -1477,6 +1534,7 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
                 </span>
               </button>
             )}
+            {!islandContinue && (
             <span className={`fp-glow ${blocker || starting ? 'idle' : ''}`}>
               <button type="button" id="play-go" className="fp-play fp-px" data-way={way} data-step={creating ? 'create' : 'play'} title={creating && blocker ? blocker : undefined} disabled={starting || working || (creating && blocker !== null) || (blocker !== null && who === 'wallet' && !signedIn)} onClick={primary}>
                 <span>
@@ -1485,6 +1543,7 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
                 </span>
               </button>
             </span>
+            )}
           </div>
         </div>
       </footer>

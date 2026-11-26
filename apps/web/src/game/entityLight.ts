@@ -7,12 +7,10 @@ import type { TorchGlow } from './torchGlow';
  * blocks do: the colour of the light follows the sky (gold at dusk, silver-blue by the moon), they go dim in caves,
  * glow orange next to torches, and each face is shaded by where the sun or moon is.
  *
+ * A body has no light of its own. In the dark it is as dark as the blocks, and a torch is what shows it.
  * It costs a handful of arithmetic operations per entity per frame; no extra draw calls and no shader changes.
  */
 const TORCH = new THREE.Color(1.0, 0.62, 0.28);
-const WHITE = new THREE.Color(1, 1, 1);
-/** The dark unlit blocks keep (the terrain shader's sky floor). A body in a cave goes this dim, not a quarter of daylight. */
-const CAVE = 0.035;
 
 interface HeldSpot {
   x: number;
@@ -41,8 +39,9 @@ export class EntityLight {
   readonly dir = new THREE.Vector3(0, 1, 0);
   /** 0..1: how strongly that light picks out the faces that look at it. */
   share = 0;
-  private readonly raw = new THREE.Color();
   private readonly tmp = new THREE.Color();
+  /** The light a face keeps with no sky and no torch. Same floor as the blocks. */
+  private fill = 0.035;
   /** Torches and lanterns people are carrying, copied so the list can be rebuilt next frame. */
   private readonly held: HeldSpot[] = Array.from({ length: 4 }, () => ({ x: 0, y: 0, z: 0, r: 0, g: 0, b: 0, range: 0 }));
   private heldCount = 0;
@@ -55,12 +54,16 @@ export class EntityLight {
   /** Call once a frame, after the sky has updated. */
   update(sky: Sky): void {
     const L = sky.lighting;
-    this.raw.copy(L.ambient).add(this.tmp.copy(L.sun).multiplyScalar(1.2));
-    const m = Math.max(this.raw.r, this.raw.g, this.raw.b, 0.001);
-    // Keep the hue of the light but wash it half way out, so mobs read as lit, not dyed.
-    this.base.copy(this.raw).multiplyScalar(1 / m).lerp(WHITE, 0.45).multiplyScalar(0.5 + 0.5 * sky.brightness);
+    // The same light the blocks get. Nothing is added back, so a body in the dark stays dark.
+    const skyAmt = Math.pow(Math.min(1, Math.max(0, sky.brightness)), 1.45);
+    this.fill = L.fill;
+    this.base.copy(L.ambient).add(this.tmp.copy(L.sun).multiplyScalar(1.2)).multiplyScalar(skyAmt);
+    this.base.r += L.fill;
+    this.base.g += L.fill;
+    this.base.b += L.fill;
     this.dir.copy(sky.lightDir);
-    this.share = Math.min(1, L.sun.g * 2) * (sky.sunHeight > 0 ? 1 : 0.5);
+    const sun = Math.max(L.sun.r, L.sun.g, L.sun.b);
+    this.share = Math.min(1, sun) * (sky.sunHeight > 0 ? 1 : 0.5);
   }
 
   /** The carried torches and lanterns lighting the world this frame. Bodies read them on the next pass. */
@@ -85,7 +88,8 @@ export class EntityLight {
     // A solid block above the head shuts out the sky, the same as it does for the blocks. Depth used to stop at
     // about a quarter of daylight, so a person stayed bright in a cave whose walls were black.
     const covered = sy >= y + 1;
-    out.copy(this.base).multiplyScalar(covered ? CAVE : 1);
+    if (covered) out.setRGB(this.fill, this.fill, this.fill);
+    else out.copy(this.base);
     const t = this.torches ? this.torches.lightAt(x, y + 1, z) : 0;
     if (t > 0) {
       out.r += TORCH.r * t * 0.8;
@@ -104,9 +108,9 @@ export class EntityLight {
       out.g += s.g * w;
       out.b += s.b * w;
     }
-    out.r = Math.min(1.12, Math.max(CAVE, out.r));
-    out.g = Math.min(1.12, Math.max(CAVE, out.g));
-    out.b = Math.min(1.12, Math.max(CAVE, out.b));
+    out.r = Math.min(1.35, out.r);
+    out.g = Math.min(1.35, out.g);
+    out.b = Math.min(1.35, out.b);
     return out;
   }
 

@@ -232,9 +232,11 @@ function moveAxis(world: BlockReader, b: Body, axis: Axis, delta: number, sneakG
     }
 
     // Walking into something low (a slab, a stair, a bed): step up onto it, if there is room above.
-    if (axis !== 'y' && grounded && !hit(b.x, py + stepHeight, b.z)) {
-      b.y = py + stepHeight * (1 - furthestFree((t) => !hit(b.x, py + stepHeight * (1 - t), b.z)));
-      b.onGround = true;
+    // In water a full block is a step too, so a stair is climbed by swimming onto it, not by a jump that throws the body up.
+    const rise = axis === 'y' ? 0 : b.inWater && b.inLava !== true ? Math.max(stepHeight, 1.01) : grounded ? stepHeight : 0;
+    if (rise > 0 && !hit(b.x, py + rise, b.z)) {
+      b.y = py + rise * (1 - furthestFree((t) => !hit(b.x, py + rise * (1 - t), b.z)));
+      if (grounded) b.onGround = true;
       continue;
     }
 
@@ -309,6 +311,8 @@ function climbShore(world: BlockReader, b: Body, dirX: number, dirZ: number): bo
     top++;
   }
   if (top === limit || top - b.y > 2.05 || top <= b.y + 0.05) return false;
+  // One block is a step. Swimming onto it is the move; placing the body on top would teleport it.
+  if (top - b.y <= 1.05) return false;
   const spots: ReadonlyArray<readonly [number, number]> = [
     [ax + 0.5, az + 0.5],
     [b.x + dirX * (w * 0.5 + 0.08), b.z + dirZ * (w * 0.5 + 0.08)],
@@ -415,9 +419,14 @@ export function stepPlayer(world: BlockReader, b: Body, input: MoveInput, dt: nu
       if (!placed) {
         const px = b.x + dirX * 0.12;
         const pz = b.z + dirZ * 0.12;
-        if (collides(world, px, b.y, pz, b.width, b.height) && !collides(world, px, b.y + 1.5, pz, b.width, b.height)) {
-          b.vy = Math.max(b.vy, thick ? 8 : 9.6);
-        }
+        const w = b.width ?? PLAYER_WIDTH;
+        const h = b.height ?? PLAYER_HEIGHT;
+        // A lip taller than one block (the shore) needs a push, or a swimmer bobs at the surface
+        // and never reaches it. A single step does not: that push was throwing the body up the stair.
+        const into = collides(world, px, b.y, pz, w, h);
+        const aboveStep = collides(world, px, b.y + 0.9, pz, w, h);
+        const tooHigh = collides(world, px, b.y + 2.1, pz, w, h);
+        if (into && aboveStep && !tooHigh) b.vy = Math.max(b.vy, thick ? 8 : 9.6);
       }
     }
   } else {

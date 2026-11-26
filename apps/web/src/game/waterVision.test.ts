@@ -14,33 +14,29 @@ const ocean: WaterSample = {
 };
 
 describe('eyeAdjust', () => {
-  it('starts shut, is partly open at five seconds, and finishes at thirty', () => {
+  it('stays shut for five seconds, then opens on the square curve, full at thirty', () => {
     expect(eyeAdjust(0)).toBe(0);
-    expect(eyeAdjust(5)).toBeCloseTo(0.45);
+    expect(eyeAdjust(5)).toBe(0);
+    expect(eyeAdjust(17.5)).toBeCloseTo(0.25);
     expect(eyeAdjust(30)).toBe(1);
-    expect(eyeAdjust(5)).toBeGreaterThan(eyeAdjust(1));
-    expect(eyeAdjust(30)).toBeGreaterThan(eyeAdjust(5));
+    expect(eyeAdjust(30)).toBeGreaterThan(eyeAdjust(10));
   });
 });
 
 describe('WaterVision', () => {
   const step = (v: WaterVision, over: Partial<WaterSample>, dt = 0.05): ReturnType<WaterVision['step']> => v.step({ ...ocean, ...over, dt });
 
-  it('is hazier the moment the eyes go under, then sees further', () => {
+  it('keeps the land view, short at first and opening over thirty seconds', () => {
     const v = new WaterVision();
-    const entered = step(v, {}, 0.05);
-    expect(entered.blend).toBeGreaterThan(0.5);
-    expect(entered.far).toBeLessThan(40);
-    expect(entered.far).toBeGreaterThan(16);
-    expect(entered.fovScale).toBeLessThan(0.95);
-    for (let i = 0; i < 100; i++) step(v, {}, 0.05);
-    const five = step(v, {}, 0);
-    expect(five.far).toBeGreaterThan(entered.far);
-    for (let i = 0; i < 500; i++) step(v, {}, 0.05);
-    const full = step(v, {}, 0);
-    expect(full.adjusted).toBe(1);
-    expect(full.far).toBeGreaterThan(five.far);
-    expect(full.fovScale).toBeCloseTo(0.9);
+    const entered = step(v, { depth: 1 }, 0.05);
+    expect(entered.blend).toBe(1);
+    expect(entered.far).toBeCloseTo(96 * 0.65);
+    expect(entered.near).toBeCloseTo(entered.far * 0.55);
+    expect(entered.fovScale).toBe(1);
+    for (let i = 0; i < 600; i++) step(v, { depth: 1 }, 0.05);
+    const later = step(v, { depth: 32 }, 0);
+    expect(later.far).toBeCloseTo(96);
+    expect(later.fovScale).toBe(1);
   });
 
   it('keeps a swamp shorter than open water after the eyes have adjusted', () => {
@@ -81,6 +77,7 @@ describe('WaterVision', () => {
     expect(bottom.light).toBeLessThan(surface.light);
     expect(bottom.fog[2]).toBeLessThan(surface.fog[2]);
     expect(bottom.far).toBeCloseTo(surface.far);
+    expect(bottom.fovScale).toBeCloseTo(surface.fovScale);
   });
 
   it('clears the fog at once for night vision, and restores the lens on the way out', () => {
@@ -93,7 +90,7 @@ describe('WaterVision', () => {
     expect(out.blend).toBe(0);
     expect(out.fovScale).toBe(1);
     const again = step(v, { clear: false }, 0.05);
-    expect(again.far).toBeLessThan(40);
+    expect(again.far).toBeLessThan(clear.far);
   });
 
   it('rolls the view while sprint-swimming and lets it fall back', () => {

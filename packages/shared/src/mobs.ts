@@ -1971,7 +1971,7 @@ export class MobManager {
       this.environment(m, env, events, dt);
     }
 
-    this.breed(events, baseEnv.rand);
+    this.breed(events, baseEnv);
     if (this.clouds.length > 0) this.stepClouds(dt, players, events);
 
     for (let i = this.arrows.length - 1; i >= 0; i--) {
@@ -1991,7 +1991,8 @@ export class MobManager {
   }
 
   /** Two grown animals of a kind that are in love and close together have a baby between them. */
-  private breed(events: MobEvents, rand: () => number): void {
+  private breed(events: MobEvents, env: MobEnv): void {
+    const rand = env.rand;
     for (let i = 0; i < this.mobs.length; i++) {
       const a = this.mobs[i];
       if (a.love <= 0 || a.dead || a.baby) continue;
@@ -2001,6 +2002,8 @@ export class MobManager {
         if (Math.hypot(a.body.x - b.body.x, a.body.z - b.body.z) > MATE_REACH || Math.abs(a.body.y - b.body.y) > 1.5) continue;
         a.love = b.love = 0;
         a.breedCooldown = b.breedCooldown = BREED_COOLDOWN;
+        // An island is a small pasture. A kind that is already full does not have another baby.
+        if (env.keepAnimals && this.countKind(a.kind, a.body.x, a.body.z, 96) >= ISLE_HERD) continue;
         const x = (a.body.x + b.body.x) / 2;
         const z = (a.body.z + b.body.z) / 2;
         const y = Math.max(a.body.y, b.body.y);
@@ -3909,9 +3912,13 @@ export interface SpawnEnv {
   noMonsters?: (x: number, z: number, y?: number) => boolean;
   /** The animals of the land here, most common first (the World Beyond's biomes each have their own); null leaves it to the ground. */
   wildlife?: (x: number, z: number) => readonly MobKind[] | null;
+  /** An island. Farm animals are not born from the day spawner; the island places its own small flock. */
+  keepHerd?: boolean;
 }
 
 export const PASSIVE_CAP = 10;
+/** How many of one kind an island keeps. The day spawner does not add animals there, and a crowd already saved is thinned to this. */
+export const ISLE_HERD = 4;
 export const HOSTILE_CAP = 16;
 const SQUID_CAP = 5;
 const WATER_CAP = 8;
@@ -3982,7 +3989,7 @@ export class MobSpawner {
     for (const player of list) {
       if (env.quiet?.(player)) continue;
       const penv: SpawnEnv = { ...env, player };
-      if (env.daylight > 0.55 && manager.countNear(player.x, player.z, 64, false) < PASSIVE_CAP) {
+      if (!env.keepHerd && env.daylight > 0.55 && manager.countNear(player.x, player.z, 64, false) < PASSIVE_CAP) {
         out.push(...this.trySpawn(manager, penv, false));
       }
       if (manager.countNear(player.x, player.z, 64, true) < HOSTILE_CAP && rand() < 0.8) {

@@ -12,10 +12,14 @@ export interface AmbientEnv {
   rain: number;
   /** In the Hollow Deep: its own dark ambience (dungeonAmbience.ts) takes over, so the music, the birds and the cave drones are left out. */
   dungeon?: boolean;
+  /** Isle black-moon night. The piano stops and a low, uneasy bed takes its place. */
+  blackMoon?: boolean;
 }
 
 const ROOTS = [48, 50, 53, 55, 57]; // C2 D2 F2 G2 A2 (midi)
 const SCALE = [0, 2, 4, 7, 9]; // major pentatonic: nothing ever sounds wrong
+/** Phrygian: the flat second is what makes a single note feel wrong. */
+const DREAD = [0, 1, 3, 5, 7, 8, 10];
 
 const midi = (n: number): number => 440 * Math.pow(2, (n - 69) / 12);
 const rnd = (a: number, b: number): number => a + Math.random() * (b - a);
@@ -39,6 +43,9 @@ export class Ambience {
   private nextMusic = rnd(25, 50);
   private nextBird = rnd(4, 12);
   private nextCave = rnd(25, 60);
+  private nextDread = rnd(4, 9);
+  /** The black-moon bed. Silent until that night, then it fades in. */
+  private readonly dread: GainNode;
   /** 0..1 user setting. */
   musicVolume = 0.5;
   private playingUntil = 0;
@@ -60,6 +67,10 @@ export class Ambience {
     this.music.connect(musicDest);
     this.music.connect(this.conv);
     this.conv.connect(this.wet).connect(musicDest);
+    this.dread = ctx.createGain();
+    this.dread.gain.value = 0;
+    this.dread.connect(musicDest);
+    this.startDread();
   }
 
   /** A synthetic hall, when one was not prepared while the world was loading. */
@@ -77,13 +88,23 @@ export class Ambience {
   }
 
   update(dt: number, env: AmbientEnv): void {
-    this.music.gain.setTargetAtTime(env.dungeon ? 0 : 0.3 * this.musicVolume, this.ctx.currentTime, 0.2);
+    const dread = !!env.blackMoon && !env.dungeon;
+    this.music.gain.setTargetAtTime(env.dungeon || dread ? 0 : 0.3 * this.musicVolume, this.ctx.currentTime, 0.8);
+    this.dread.gain.setTargetAtTime(dread ? 0.85 * this.musicVolume : 0, this.ctx.currentTime, 1.6);
 
-    if (this.musicVolume > 0.01 && !this.musicPlaying && !env.dungeon) {
+    if (this.musicVolume > 0.01 && !this.musicPlaying && !env.dungeon && !dread) {
       this.nextMusic -= dt;
       if (this.nextMusic <= 0) {
         this.nextMusic = rnd(70, 200);
         this.playPiece();
+      }
+    }
+
+    if (dread && this.musicVolume > 0.01) {
+      this.nextDread -= dt;
+      if (this.nextDread <= 0) {
+        this.nextDread = rnd(7, 16);
+        this.dreadNote();
       }
     }
 
@@ -101,6 +122,93 @@ export class Ambience {
         this.nextCave = rnd(40, 110);
         this.cave();
       }
+    }
+  }
+
+  /**
+   * A low chord that never resolves, and a slow breath of air. It runs for the whole session and
+   * stays silent until a black-moon night opens its gain.
+   */
+  private startDread(): void {
+    const ctx = this.ctx;
+    const bed = ctx.createGain();
+    bed.gain.value = 0.2;
+    bed.connect(this.dread);
+    const tone = (freq: number, type: OscillatorType, level: number, wobble = 0) => {
+      const o = ctx.createOscillator();
+      o.type = type;
+      o.frequency.value = freq;
+      const g = ctx.createGain();
+      g.gain.value = level;
+      o.connect(g).connect(bed);
+      o.start();
+      if (wobble > 0) {
+        const lfo = ctx.createOscillator();
+        lfo.frequency.value = 0.04 + Math.random() * 0.05;
+        const depth = ctx.createGain();
+        depth.gain.value = wobble;
+        lfo.connect(depth).connect(o.frequency);
+        lfo.start();
+      }
+    };
+    // A low fifth, and a note a semitone off it, so the two beats never settle.
+    tone(55, 'sine', 0.5, 0.15);
+    tone(82.4, 'sine', 0.16);
+    tone(58.3, 'sine', 0.28, 0.35);
+    tone(110, 'triangle', 0.045, 0.2);
+
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise;
+    src.loop = true;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 180;
+    filter.Q.value = 0.6;
+    const air = ctx.createGain();
+    air.gain.value = 0.05;
+    const breath = ctx.createOscillator();
+    breath.frequency.value = 0.06;
+    const breathDepth = ctx.createGain();
+    breathDepth.gain.value = 0.035;
+    breath.connect(breathDepth).connect(air.gain);
+    src.connect(filter).connect(air).connect(bed);
+    src.start();
+    breath.start();
+  }
+
+  /** One long, quiet note from the uneasy scale. Sometimes a second note a semitone away. */
+  private dreadNote(): void {
+    const ctx = this.ctx;
+    const at = ctx.currentTime + 0.05;
+    const root = 36 + DREAD[Math.floor(Math.random() * DREAD.length)];
+    const octave = Math.random() < 0.35 ? 12 : Math.random() < 0.15 ? 24 : 0;
+    this.glass(midi(root + octave), at, rnd(0.04, 0.07), rnd(4.5, 8));
+    if (Math.random() < 0.45) this.glass(midi(root + octave + (Math.random() < 0.5 ? 1 : 6)), at + rnd(0.2, 0.8), rnd(0.025, 0.045), rnd(5, 9));
+  }
+
+  /** A thin, slightly bent tone. It goes to the black-moon bed, so it fades with that night. */
+  private glass(freq: number, at: number, gain: number, decay: number): void {
+    const ctx = this.ctx;
+    const out = ctx.createGain();
+    out.gain.setValueAtTime(0.0001, at);
+    out.gain.exponentialRampToValueAtTime(gain, at + 0.08);
+    out.gain.exponentialRampToValueAtTime(0.0001, at + decay);
+    out.connect(this.dread);
+    const body = ctx.createOscillator();
+    body.type = 'sine';
+    body.frequency.setValueAtTime(freq, at);
+    body.frequency.linearRampToValueAtTime(freq * rnd(0.985, 1.012), at + decay);
+    const over = ctx.createOscillator();
+    over.type = 'triangle';
+    over.frequency.value = freq * 2.01;
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.18, at);
+    og.gain.exponentialRampToValueAtTime(0.0005, at + decay * 0.4);
+    body.connect(out);
+    over.connect(og).connect(out);
+    for (const o of [body, over]) {
+      o.start(at);
+      o.stop(at + decay + 0.05);
     }
   }
 

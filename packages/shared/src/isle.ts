@@ -3,8 +3,9 @@ import { B, BB, BUBBLE_BLOOM, CORAL_FAN_RED, CORAL_FAN_YELLOW, IS_SOLID, chestId
 import type { LootTableName } from './loot';
 import { CHUNK_SIZE, CHUNK_VOLUME, SEA_LEVEL, WORLD_HEIGHT, blockIndex } from './chunk';
 import { FLUID_KIND, FLUID_WATER } from './fluids';
-import { nearLight, type MobKind } from './mobs';
+import { ISLE_HERD, nearLight, type MobKind } from './mobs';
 import { hash2, mulberry32 } from './noise';
+import { sunHeight } from './daylight';
 import { treeBlocks } from './trees';
 
 /**
@@ -64,16 +65,39 @@ export interface IsleSave {
   tide: number;
 }
 
-/** Most seeds keep a pig and a chicken. Every fifth seed keeps only the pig. */
-export function isleFlock(seed: number): ('pig' | 'chicken')[] {
-  const flock: ('pig' | 'chicken')[] = ['pig'];
-  if (((seed >>> 0) % 5) !== 0) flock.push('chicken');
-  return flock;
+const ISLE_ANIMALS = ['pig', 'chicken', 'sheep'] as const;
+type IsleAnimal = (typeof ISLE_ANIMALS)[number];
+
+/** Where each island animal stands, so the two that are chosen do not share a block. */
+const ISLE_ANIMAL_SPOT: Record<IsleAnimal, readonly [number, number]> = {
+  pig: [-1.5, 0.5],
+  chicken: [2.5, -1.5],
+  sheep: [0.5, 2.5],
+};
+
+/** Two of the three island animals. The same seed always keeps the same pair. */
+export function isleFlock(seed: number): [IsleAnimal, IsleAnimal] {
+  const kinds: IsleAnimal[] = [...ISLE_ANIMALS];
+  const n = seed >>> 0;
+  kinds.splice(n % 3, 1);
+  if (((n >>> 2) & 1) === 1) kinds.reverse();
+  return [kinds[0]!, kinds[1]!];
 }
 
-/** The night that ends day 4, then every fourth night. The moon gives no light. */
+/** The night a clock time belongs to. The moon rises just before sunset, so that first appearance is still this day. */
+function moonNight(day: number, time: number): number {
+  return time > 0.25 ? day : day - 1;
+}
+
+/**
+ * The night that ends day 4, then every fourth night. It starts the moment the moon appears and lasts
+ * until that moon has left the sky, including the fade after the clock wraps to the next morning.
+ * The moon gives no light. `0.03` is the sun height where the moon disc has faded out.
+ */
 export function isleBlackMoon(day: number, time: number): boolean {
-  return day >= 4 && day % 4 === 0 && time >= NIGHT_START && time <= NIGHT_END;
+  if (sunHeight(time) >= 0.03) return false;
+  const night = moonNight(day, time);
+  return night >= 4 && night % 4 === 0;
 }
 
 /**
@@ -159,6 +183,8 @@ export interface IsleSim {
   spawn(kind: MobKind, x: number, y: number, z: number): void;
   count(kind: MobKind, x: number, z: number, r: number): number;
   clearDrowned(x: number, z: number, r: number): void;
+  /** Leave at most `keep` of this kind inside the radius. The nearest stay. */
+  trim(kind: MobKind, x: number, z: number, r: number, keep: number): void;
   say(text: string): void;
   noteChest(x: number, y: number, z: number): void;
   forgetChest(x: number, y: number, z: number): void;
@@ -273,8 +299,11 @@ export class IsleDirector {
   private ensure(): void {
     if (this.ensured) return;
     this.ensured = true;
-    if (this.sim.count('pig', 0, 0, 24) === 0) this.sim.spawn('pig', -1.5, SEA_LEVEL + 1, 0.5);
-    if (isleFlock(this.sim.seed).includes('chicken') && this.sim.count('chicken', 0, 0, 24) === 0) this.sim.spawn('chicken', 2.5, SEA_LEVEL + 1, -1.5);
+    for (const kind of isleFlock(this.sim.seed)) {
+      if (this.sim.count(kind, 0, 0, 96) > 0) continue;
+      const [x, z] = ISLE_ANIMAL_SPOT[kind];
+      this.sim.spawn(kind, x, SEA_LEVEL + 1, z);
+    }
     if (this.sim.count('cod', 0, 0, 30) < 2) {
       this.sim.spawn('cod', 12.5, SEA_LEVEL - 0.4, 3.5);
       this.sim.spawn('cod', -11.5, SEA_LEVEL - 0.4, -5.5);
@@ -289,11 +318,20 @@ export class IsleDirector {
    * the one for today. A crowd left by that bug is sent back. Three is the whole band.
    */
   private settleTide(time: number): void {
+    this.settleHerd();
     const n = this.sim.count('drowned', 0, 0, 48);
     const here = n > 0;
     if (n > 3) this.sim.clearDrowned(0, 0, 48);
     if (this.today === 'sharks' && here) this.placed = true;
-    if (here && isleBlackMoon(this.day, time)) this.tideDay = this.day;
+    if (here && isleBlackMoon(this.day, time)) this.tideDay = moonNight(this.day, time);
+  }
+
+  /**
+   * The day spawner used to drop groups of pigs and chickens whenever the player was out on the
+   * water, and they never left, so a visit could find a herd of twenty. Four of a kind is the flock.
+   */
+  private settleHerd(): void {
+    for (const kind of ['pig', 'chicken', 'cow', 'sheep', 'rabbit', 'horse'] as const) this.sim.trim(kind, 0, 0, 96, ISLE_HERD);
   }
 
   /** The chest the morning map is pointing at: the one under the sand, or the wreck once that one is dug. */
@@ -334,8 +372,9 @@ export class IsleDirector {
   }
 
   private night(time: number): void {
-    if (!isleBlackMoon(this.day, time) || this.tideDay === this.day) return;
-    this.tideDay = this.day;
+    const night = moonNight(this.day, time);
+    if (!isleBlackMoon(this.day, time) || this.tideDay === night) return;
+    this.tideDay = night;
     this.tell('The moon is black. The drowned walk onto the sand.');
     this.spawnBand();
   }

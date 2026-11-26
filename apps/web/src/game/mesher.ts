@@ -538,7 +538,10 @@ export function meshChunk(region: Uint16Array, tint?: Uint8Array): MeshResult {
           if (fluid === FLUID_WATER) {
             let below = 1;
             while (below < 8 && y - below >= 0 && watery(x, y - below, z)) below++;
-            tintIdx = packWaterDepth(tint ? waterTint(tint[z * CHUNK_SIZE + x]) : TINT_WATER_BASE + 4, waterDepthClass(below));
+            const base = tint ? waterTint(tint[z * CHUNK_SIZE + x]) : TINT_WATER_BASE + 4;
+            // The surface does not carry the depth. A deeper block beside a shallow one was a different colour,
+            // so the sea broke into squares. The depth still colours the sides.
+            tintIdx = packWaterDepth(base, face.kind === 'top' ? 0 : waterDepthClass(below));
           } else if (tint && (IS_TINTED_LEAVES[id] === 1 || (id === B.GRASS && face.kind !== 'bottom'))) tintIdx = grassTint(tint[z * CHUNK_SIZE + x]);
 
           // Per-corner ambient occlusion and smooth light (sky + block).
@@ -618,19 +621,15 @@ export function meshChunk(region: Uint16Array, tint?: Uint8Array): MeshResult {
             const heights = face.corners.map((cc) => (face.kind === 'side' && cc[1] === 0 ? floor : fluidCorner(x + cc[0], y, z + cc[2], fluid)));
             const topH = heights.filter((_, i) => face.kind === 'top' || face.corners[i][1] === 1);
             if (Math.max(...topH) - Math.min(...topH) > 1 / 32) {
-              pushQuad(
-                builder,
-                face.corners.map((cc, i) => {
-                  const u = i === 1 || i === 2 ? 1 : 0;
-                  const v = i >= 2 ? 1 : 0;
-                  return [x + cc[0], y + heights[i], z + cc[2], u, v];
-                }),
-                tile + extra * TILE_EXTRA,
-                face.shade,
-                skyV[0],
-                blkV[0],
-                tintIdx,
-              );
+              const sloped = face.corners.map((cc, i) => {
+                const u = i === 1 || i === 2 ? 1 : 0;
+                const v = i >= 2 ? 1 : 0;
+                return [x + cc[0], y + heights[i], z + cc[2], u, v] as [number, number, number, number, number];
+              });
+              pushQuad(builder, sloped, tile + extra * TILE_EXTRA, face.shade, skyV[0], blkV[0], tintIdx);
+              if (fluid === FLUID_WATER && face.kind === 'top') {
+                pushQuad(builder, [sloped[0], sloped[3], sloped[2], sloped[1]], tile + 2 * TILE_EXTRA, face.shade, skyV[0], blkV[0], tintIdx);
+              }
               continue;
             }
           }
@@ -647,6 +646,9 @@ export function meshChunk(region: Uint16Array, tint?: Uint8Array): MeshResult {
             tmask[j * S + i] = tintIdx + extra * 256 + lift * 4096;
           } else {
             emitQuad(builder, face, n, i, j, 1, 1, S, T, tile + extra * TILE_EXTRA, drop, aoV, skyV, blkV, tintIdx, -seat, lift);
+            if (fluid === FLUID_WATER && face.kind === 'top') {
+              emitQuad(builder, face, n, i, j, 1, 1, S, T, tile + 2 * TILE_EXTRA, drop, aoV, skyV, blkV, tintIdx, -seat, lift, true);
+            }
           }
         }
       }
@@ -678,7 +680,11 @@ export function meshChunk(region: Uint16Array, tint?: Uint8Array): MeshResult {
           aoV[0] = aoV[1] = aoV[2] = aoV[3] = ao;
           skyV[0] = skyV[1] = skyV[2] = skyV[3] = sky;
           blkV[0] = blkV[1] = blkV[2] = blkV[3] = blk;
-          emitQuad(translucent ? translucentB : opaqueB, face, n, i, j, w, h, S, T, tile + ((tk >> 8) & 15) * TILE_EXTRA, drop, aoV, skyV, blkV, tk & 255, 0, tk >> 12);
+          const sheet = (tk >> 8) & 15;
+          emitQuad(translucent ? translucentB : opaqueB, face, n, i, j, w, h, S, T, tile + sheet * TILE_EXTRA, drop, aoV, skyV, blkV, tk & 255, 0, tk >> 12);
+          if (face.kind === 'top' && sheet === 1) {
+            emitQuad(translucentB, face, n, i, j, w, h, S, T, tile + 2 * TILE_EXTRA, drop, aoV, skyV, blkV, tk & 255, 0, tk >> 12, true);
+          }
           i += w;
         }
       }
@@ -773,7 +779,19 @@ export function meshChunk(region: Uint16Array, tint?: Uint8Array): MeshResult {
           pushQuad(opaqueB, [[x, fy + rise(0, 1), z + 1, u(0), w(0)], [x + 1, fy + rise(1, 1), z + 1, u(1), w(0)], [x + 1, fy + rise(1, 0), z, u(1), w(1)], [x, fy + rise(0, 0), z, u(0), w(1)]], tile, 0.95, sky, blk);
         } else if (def.shape === 'cross') {
           const tt = tint && IS_TINTED_PLANT[id] === 1 ? grassTint(tint[z * CHUNK_SIZE + x]) : 0;
-          emitCluster(opaqueB, x, y, z, tile, sky, blk, tt);
+          // Kelp and its kin: how many blocks of sea sit over this piece. From the air only the tips show.
+          let plantTile = tile;
+          if (SEA_PLANTS.has(id)) {
+            let above = 0;
+            for (let i = 1; i < 32; i++) {
+              const up = blockAt(x, y + i, z);
+              if (!(FLUID_KIND[up] === FLUID_WATER || SEA_PLANTS.has(up))) break;
+              above++;
+            }
+            const sunk = above <= 0 ? 5 : above === 1 ? 6 : above <= 3 ? 7 : 8;
+            plantTile = tile + sunk * TILE_EXTRA;
+          }
+          emitCluster(opaqueB, x, y, z, plantTile, sky, blk, tt);
         } else if (def.shape === 'crop') {
           emitPlane(opaqueB, x + 0.25, y, z, x + 0.25, y, z + 1, 1, tile, sky, blk);
           emitPlane(opaqueB, x + 0.75, y, z, x + 0.75, y, z + 1, 1, tile, sky, blk);
@@ -1186,6 +1204,7 @@ function emitQuad(
   tint = 0,
   yBias = 0,
   lift = 0,
+  flip = false,
 ): void {
   origin[f.nAxis] = n + (f.nSign > 0 ? 1 : 0);
   origin[f.sAxis] = f.sSign > 0 ? i0 : S - i0;
@@ -1219,7 +1238,10 @@ function emitQuad(
   }
 
   const v = b.vertexCount;
-  if (ao[0] + ao[2] > ao[1] + ao[3]) {
+  if (flip) {
+    // The same sheet, facing down, so it can be seen from under the water.
+    b.indices.push6(v, v + 3, v + 2, v, v + 2, v + 1);
+  } else if (ao[0] + ao[2] > ao[1] + ao[3]) {
     b.indices.push6(v, v + 1, v + 2, v, v + 2, v + 3);
   } else {
     b.indices.push6(v + 1, v + 2, v + 3, v + 1, v + 3, v);

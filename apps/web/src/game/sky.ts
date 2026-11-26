@@ -66,20 +66,15 @@ function moonTexture(): THREE.CanvasTexture {
   return pixelTexture(c);
 }
 
-/** The same square moon, drawn only as a bright rim, so a black-moon night is not a black block in the sky. */
+/** A black square. A thin dark edge is all that marks it on a black sky. It gives off no light. */
 function eclipseTexture(): THREE.CanvasTexture {
   const c = document.createElement('canvas');
   c.width = c.height = 16;
   const g = c.getContext('2d')!;
-  for (let y = 1; y < 15; y++) {
-    for (let x = 1; x < 15; x++) {
-      const edge = Math.min(x - 1, y - 1, 14 - x, 14 - y);
-      if (edge > 1) continue;
-      const rim = edge === 0 ? [255, 246, 220] : [176, 198, 228];
-      g.fillStyle = `rgb(${rim[0]},${rim[1]},${rim[2]})`;
-      g.fillRect(x, y, 1, 1);
-    }
-  }
+  g.fillStyle = 'rgb(48, 8, 12)';
+  g.fillRect(1, 1, 14, 14);
+  g.fillStyle = '#000000';
+  g.fillRect(2, 2, 12, 12);
   return pixelTexture(c);
 }
 
@@ -206,7 +201,7 @@ export class Sky {
   rain = 0;
   dim = 0;
   flash = 0;
-  /** Isle black-moon night: a bright rim in the sky, and no moonlight on the land. Every other world leaves this off. */
+  /** Isle black-moon night: a black disc, and no moonlight or rays. Every other world leaves this off. */
   blackMoon = false;
   /** The colour of the sky at the horizon, which fog and the background share. */
   readonly color = new THREE.Color(DAY_SKY);
@@ -228,6 +223,7 @@ export class Sky {
     skyReflect: new THREE.Color(DAY_SKY),
     glint: 0,
     wind: 1,
+    fill: 0.035,
   };
   readonly group = new THREE.Group();
 
@@ -251,6 +247,8 @@ export class Sky {
   private stars: THREE.Points;
   private starMat: THREE.PointsMaterial;
   private clouds: THREE.Mesh;
+  /** The water surface carried out to the horizon while the eyes are under it. */
+  private farSurface: THREE.Mesh;
   private cloudMat: THREE.ShaderMaterial;
   private cloudKey = '';
   private readonly textures: THREE.Texture[] = [];
@@ -259,6 +257,12 @@ export class Sky {
   private moonWasBlack = false;
   private readonly tmp = new THREE.Color();
   private horizonOverride = new THREE.Color();
+  /** Cuts the sun and the moon off at the horizon, so the disc never sits in the water. */
+  private readonly horizonClip = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  /** World height of that cut. Fragments of the discs below it are dropped. */
+  private readonly clipY = { value: 0 };
+  /** The compiled disc shaders. The cut is written here each frame, sun and moon both. */
+  private readonly clipShaders: { uniforms: { uClipY: { value: number } } }[] = [];
   private hasOverride = false;
   private darkness = 0;
   /** The eyes are under water. The horizon is the water; overhead, the real sky still shows. */
@@ -314,6 +318,25 @@ export class Sky {
         }),
       );
       m.renderOrder = order;
+      const mat = m.material as THREE.MeshBasicMaterial;
+      mat.clippingPlanes = [this.horizonClip];
+      const clipY = this.clipY;
+      const clipShaders = this.clipShaders;
+      mat.customProgramCacheKey = () => 'horizon-clip';
+      mat.onBeforeCompile = (shader) => {
+        shader.uniforms.uClipY = clipY;
+        clipShaders.push(shader as { uniforms: { uClipY: { value: number } } });
+        shader.vertexShader = shader.vertexShader
+          .replace('#include <common>', '#include <common>\nvarying float vClipY;')
+          .replace(
+            '#include <project_vertex>',
+            `#include <project_vertex>
+            vClipY = (modelMatrix * vec4(transformed, 1.0)).y;`,
+          );
+        shader.fragmentShader = shader.fragmentShader
+          .replace('#include <common>', '#include <common>\nvarying float vClipY;\nuniform float uClipY;')
+          .replace('#include <dithering_fragment>', 'if (vClipY < uClipY) discard;\n#include <dithering_fragment>');
+      };
       return m;
     };
     this.sunGlow = quad(560, glowTex, -12, true);
@@ -348,6 +371,29 @@ export class Sky {
       fog: false,
       depthWrite: false,
     });
+    // The same cut as the sun and the moon. Under water that line is the surface, so no star sits in the water.
+    this.starMat.clippingPlanes = [this.horizonClip];
+    this.starMat.customProgramCacheKey = () => 'horizon-clip-stars';
+    const clipY = this.clipY;
+    const clipShaders = this.clipShaders;
+    this.starMat.onBeforeCompile = (shader) => {
+      shader.uniforms.uClipY = clipY;
+      clipShaders.push(shader as { uniforms: { uClipY: { value: number } } });
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying float vClipY;')
+        .replace(
+          '#include <project_vertex>',
+          `#include <project_vertex>
+          vClipY = (modelMatrix * vec4(transformed, 1.0)).y;`,
+        );
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying float vClipY;\nuniform float uClipY;')
+        .replace(
+          '#include <clipping_planes_fragment>',
+          `#include <clipping_planes_fragment>
+          if (vClipY < uClipY) discard;`,
+        );
+    };
     this.stars = new THREE.Points(g, this.starMat);
     this.stars.renderOrder = -11;
     this.stars.frustumCulled = false;
@@ -371,6 +417,27 @@ export class Sky {
     this.clouds.frustumCulled = false;
     this.clouds.renderOrder = -5;
     this.group.add(this.clouds);
+
+    // While the eyes are under the water, the surface continues to the horizon. Without it the sky
+    // shows as an empty band between the horizon and the water that is actually drawn.
+    const farSurface = new THREE.Mesh(
+      new THREE.PlaneGeometry(4000, 4000),
+      new THREE.MeshBasicMaterial({
+        color: 0x06243f,
+        side: THREE.BackSide,
+        fog: false,
+        // No depth: the sun sits beyond this plane, and writing depth would hide it. The land is drawn after and covers it.
+        depthWrite: false,
+        depthTest: false,
+      }),
+    );
+    farSurface.geometry.rotateX(-Math.PI / 2);
+    farSurface.frustumCulled = false;
+    farSurface.visible = false;
+    // Before the land, so the blocks cover it. The empty band past the loaded water is all it has to fill.
+    farSurface.renderOrder = -1;
+    this.farSurface = farSurface;
+    this.group.add(farSurface);
   }
 
   /** The colour at the top of the dome as drawn (fog uses it to fade into the sky when looking up). */
@@ -398,30 +465,38 @@ export class Sky {
     this.moonGlow.visible = show;
     this.stars.visible = show;
     this.clouds.visible = show && this.cloudsWanted;
+    const farMat = this.farSurface.material as THREE.MeshBasicMaterial;
+    farMat.color.copy(this.horizonOverride);
+    this.farSurface.visible = underwater && this.farSurface.position.y > 0.05;
     this.applyDome();
     this.veilThroughWater();
+    // Under water the discs stay up at the surface. A deeper dive is further from them, so they draw smaller,
+    // and they never follow the eyes down into the water. Above water they stay full size.
+    const depth = Math.max(0, this.farSurface.position.y);
+    const fit = this.submerged ? Math.max(0.42, 1 / (1 + depth / 55)) : 1;
+    for (const m of [this.sun, this.moon, this.sunGlow, this.moonGlow]) m.scale.setScalar(fit);
+    if (this.submerged) {
+      this.clouds.renderOrder = -8;
+      this.sunGlow.renderOrder = -3;
+      this.moonGlow.renderOrder = -3;
+      this.sun.renderOrder = -2;
+      this.moon.renderOrder = -2;
+    } else this.clouds.renderOrder = -5;
   }
 
-  /** Sun, moon, stars and clouds dim with the water overhead, a little per block. The discs shrink too, so a deep dive does not leave a huge sun following the camera. */
+  /** Sun, moon, stars and clouds dim a little with the water overhead. Size is set in setView. */
   private veilThroughWater(): void {
     if (!this.submerged) return;
     const t = Math.min(1, Math.max(0, this.skyOpen));
-    const disc = 0.22 + 0.78 * t;
-    for (const m of [this.sun, this.moon, this.sunGlow, this.moonGlow]) m.scale.setScalar(disc);
-    // Clouds sit in front of the discs in the air. Under water the sun and the moon stay above them.
-    this.sunGlow.renderOrder = -4;
-    this.moonGlow.renderOrder = -4;
-    this.sun.renderOrder = -3;
-    this.moon.renderOrder = -3;
-    (this.sun.material as THREE.MeshBasicMaterial).opacity *= t;
-    (this.sunGlow.material as THREE.MeshBasicMaterial).opacity *= t;
-    (this.moon.material as THREE.MeshBasicMaterial).opacity *= t;
-    (this.moonGlow.material as THREE.MeshBasicMaterial).opacity *= t;
-    this.starMat.opacity *= t;
+    const hold = 0.82 + 0.18 * t;
+    (this.sun.material as THREE.MeshBasicMaterial).opacity *= hold;
+    (this.sunGlow.material as THREE.MeshBasicMaterial).opacity *= hold;
+    (this.moon.material as THREE.MeshBasicMaterial).opacity *= hold;
+    (this.moonGlow.material as THREE.MeshBasicMaterial).opacity *= hold;
+    this.starMat.opacity *= hold;
     const clouds = this.cloudMat.uniforms.uOpacity;
-    clouds.value = (clouds.value as number) * t;
-    this.cloudMat.uniforms.uScale.value = disc;
-    (this.cloudMat.uniforms.uColor.value as THREE.Color).lerp(this.horizonOverride, 1 - t);
+    clouds.value = (clouds.value as number) * hold;
+    (this.cloudMat.uniforms.uColor.value as THREE.Color).lerp(this.horizonOverride, (1 - t) * 0.35);
   }
 
   /** Underground the horizon follows the (darkened) fog and the upper sky fades to black. */
@@ -441,7 +516,11 @@ export class Sky {
     }
   }
 
-  update(camera: THREE.Camera): void {
+  update(camera: THREE.Camera, horizonY = camera.position.y): void {
+    // Above water the disc ends at the horizon. Under water it ends at the surface, so the part of it below the water is not drawn.
+    this.horizonClip.constant = -horizonY;
+    this.clipY.value = horizonY;
+    for (const shader of this.clipShaders) shader.uniforms.uClipY.value = horizonY;
     const a = this.time * Math.PI * 2;
     const sunHeight = sunHeightAt(this.time);
     this.sunHeight = sunHeight;
@@ -453,12 +532,19 @@ export class Sky {
     this.lightHeight = this.lightDir.y;
 
     this.group.position.copy(camera.position);
+    // The surface sits above the eyes. Carried out to the horizon, so no sky shows between them.
+    const lift = horizonY - camera.position.y;
+    this.farSurface.position.set(0, lift, 0);
+    this.farSurface.visible = lift > 0.05;
     const dist = 300;
-    this.sun.position.set(Math.cos(a) * dist, sunHeight * dist, 40);
-    this.moon.position.set(-Math.cos(a) * dist, -sunHeight * dist, -40);
+    // While the eyes are under, the sun and the moon stay at the same height above the water.
+    // They do not sink with the camera, so the disc is cut on the surface the way it is in the air.
+    const rise = Math.max(0, lift);
+    this.sun.position.set(Math.cos(a) * dist, rise + sunHeight * dist, 40);
+    this.moon.position.set(-Math.cos(a) * dist, rise - sunHeight * dist, -40);
     this.sunGlow.position.copy(this.sun.position).multiplyScalar(0.99);
     this.moonGlow.position.copy(this.moon.position).multiplyScalar(0.99);
-    // Full size in the air, and behind the clouds. Under water `veilThroughWater` shrinks these and lifts them in front.
+    // Full size here. Under water `setView` draws them smaller, and in front of the clouds.
     this.sunGlow.renderOrder = -12;
     this.moonGlow.renderOrder = -12;
     this.sun.renderOrder = -10;
@@ -502,6 +588,18 @@ export class Sky {
     L.skyReflect.copy(this.color).lerp(this.zenith, 0.45);
     L.glint = Math.max(sunUp, moonLit * 0.6);
     L.wind = 0.8 + this.rain * 1.4;
+    L.fill = 0.035;
+    // No moon and no sun. The sky, the ground and the clouds stay dark unless a torch is burning.
+    if (this.blackMoon) {
+      this.color.multiplyScalar(0.16);
+      this.zenith.multiplyScalar(0.08);
+      L.ambient.multiplyScalar(0.05);
+      L.sun.setScalar(0);
+      L.glow.setScalar(0);
+      L.glint = 0;
+      L.fill = 0.006;
+      L.skyReflect.copy(this.color);
+    }
 
     this.applyDome();
 
@@ -521,8 +619,8 @@ export class Sky {
     sg.opacity = clear * horizonFade * (0.2 + 0.5 * duskAmt);
     const mg = this.moonGlow.material as THREE.MeshBasicMaterial;
     const moonFade = clear * smoothstep(-0.03, 0.12, -sunHeight);
-    mg.color.setRGB(this.blackMoon ? 1 : 0.5, this.blackMoon ? 0.92 : 0.6, this.blackMoon ? 0.72 : 0.85);
-    mg.opacity = moonFade * (this.blackMoon ? 0.06 : 0.03);
+    mg.color.setRGB(0.5, 0.6, 0.85);
+    mg.opacity = this.blackMoon ? 0 : moonFade * 0.03;
     this.starMat.opacity = (1 - smoothstep(-0.2, 0.05, sunHeight)) * clear;
 
     this.updateClouds(camera, dayAmt, duskAmt);
@@ -549,6 +647,7 @@ export class Sky {
     c.multiplyScalar(0.22 + 0.78 * Math.min(1, this.brightness * 1.25));
     c.lerp(this.tmp.setRGB(0.5, 0.52, 0.57).multiplyScalar(0.3 + 0.7 * this.brightness), this.rain * 0.75);
     if (this.flash > 0) c.lerp(this.tmp.setRGB(1, 1, 1), this.flash * 0.7);
+    if (this.blackMoon) c.multiplyScalar(0.14);
     this.cloudMat.uniforms.uOpacity.value = 0.9 * (1 - this.darkness);
     this.cloudMat.uniforms.uScale.value = 1;
   }

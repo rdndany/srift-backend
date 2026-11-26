@@ -190,8 +190,6 @@ function waterColumn(world: { getBlock(x: number, y: number, z: number): number 
   return { depth: Math.max(0, iy - y), surface: iy, open: true };
 }
 
-const seaLight = new THREE.Color();
-
 const BIOME_NAMES = ['ocean', 'beach', 'plains', 'forest', 'desert', 'snow', 'mountain'];
 
 /** "143 blocks NE" for an offset (north is -z, as on the F3 screen of the original). */
@@ -275,6 +273,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   const icons = new ItemIcons(atlas.canvas);
   // Multisampling keeps the hard block edges and the texture-aliased far terrain from crawling.
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: !params.has('noaa'), powerPreference: 'high-performance' });
+  renderer.localClippingEnabled = true;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight, false);
   // A frame is many renders (shadow maps, the world, the effects, the hand): the counts are of all of them, started over each frame.
@@ -538,8 +537,8 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
         naturalSpawning: !params.has('nomobs'),
         /** Rifts come with the monsters (and `?norifts` keeps them away). */
         rifts: !params.has('nomobs') && !params.has('norifts'),
-        /** The Gilded Tide every half hour (`?noinvasions` or `?nomobs` keeps it away). */
-        invasions: !params.has('nomobs') && !params.has('noinvasions'),
+        /** The Gilded Tide is the multiplayer realm's. A world played on this device does not have it. */
+        invasions: false,
         /** ?villagers brings the villages' people back into a ?nomobs world. */
         villagers: !params.has('nomobs') || params.has('villagers'),
       });
@@ -1411,28 +1410,48 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   };
 
   /**
-   * The camera is in the water, or still on the sheet. A source fills 14/16 of its cell, so the eyes
-   * are often in the air block above it while the body is in the pool and the surface cuts the view.
+   * The height of the water surface in this column, or -1 when there is no water here.
+   * The open top of a pool sits below the top of its block, so the eyes leave as they clear that surface.
    */
+  function waterSheetY(x: number, y: number, z: number): number {
+    const column = (cx: number, cy: number, cz: number): number => {
+      if (!isWaterBlock(world.getBlock(cx, cy, cz)) && !cellCountsAsWater(world, cx, cy, cz)) return -1;
+      let top = cy;
+      let id = world.getBlock(cx, cy, cz);
+      for (let i = 1; i < 24; i++) {
+        const above = world.getBlock(cx, cy + i, cz);
+        if (!isWaterBlock(above)) break;
+        top = cy + i;
+        id = above;
+      }
+      if (!isWaterBlock(id)) return -1;
+      return top + fluidSurface(id) / 16;
+    };
+    let sheet = column(x, y, z);
+    if (sheet < 0) sheet = column(x, y - 1, z);
+    if (sheet < 0) {
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        sheet = Math.max(sheet, column(x + dx, y, z + dz));
+      }
+    }
+    return sheet;
+  }
+
+  /** The water surface over the eyes this frame, or -1 when they are not under it. */
+  let eyeWaterSheet = -1;
+
+  /** The eyes are under the water. Once they clear the surface, the world is the world above water. */
   function viewInWater(): boolean {
+    eyeWaterSheet = -1;
     if (body.inLava === true || body.eyeInLava === true) return false;
     const x = Math.floor(camera.position.x);
     const y = Math.floor(camera.position.y);
     const z = Math.floor(camera.position.z);
-    if (cellCountsAsWater(world, x, y, z)) return true;
-    const below = world.getBlock(x, y - 1, z);
-    if (isWaterBlock(below) && camera.position.y <= y - 1 + fluidSurface(below) / 16 + 0.45) return true;
-    if (body.inWater !== true) return false;
-    const fx = Math.floor(body.x);
-    const fz = Math.floor(body.z);
-    const fy = Math.floor(body.y);
-    let sheet = -1;
-    for (let i = 0; i < 5; i++) {
-      const id = world.getBlock(fx, fy + i, fz);
-      if (!isWaterBlock(id)) break;
-      sheet = fy + i + fluidSurface(id) / 16;
-    }
-    return sheet >= 0 && camera.position.y <= sheet + 0.45;
+    let sheet = waterSheetY(x, y, z);
+    if (sheet < 0 && body.inWater === true) sheet = waterSheetY(Math.floor(body.x), Math.floor(body.y), Math.floor(body.z));
+    if (sheet < 0 || camera.position.y > sheet + 0.02) return false;
+    eyeWaterSheet = sheet;
+    return true;
   }
 
   /** A frame, and its measure for the admin bar. */
@@ -1652,7 +1671,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     // (The World Beyond's skies: an eternal night under a sky that gives little light.)
     sky.dim = beyond ? Math.min(0.92, 1 - (1 - weather.darkness) * beyond.feel.light) : weather.darkness;
     sky.flash = weather.flash;
-    sky.update(camera);
+    sky.update(camera, eyesUnder && eyeWaterSheet >= 0 ? eyeWaterSheet : camera.position.y);
     const fogFar = world.renderDistance * 16;
     const fogScale = (1 - 0.35 * weather.rain) * (beyond ? 1 - 0.8 * beyond.feel.fog : 1);
     /** How far the land is still drawn. Mobs stop at the same line, so they do not hang in the sky past it. */
@@ -1686,7 +1705,13 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
         // Same light as outside: bright at noon, dim at night, and a little darker with every block down.
         // A block overhead does not recolour the water.
         const sunk = waterLook.light;
-        seaFog.multiplyScalar((0.34 + 0.8 * outdoors) * (0.42 + 0.58 * sunk));
+        // The same light as on land, only a little lower, and lower still the deeper you are.
+        // A separate blue here made the ocean floor a different picture the moment the eyes went under.
+        const keep = 0.72 + 0.28 * sunk;
+        // The blue follows the light that is shining. Noon keeps the full colour. A low sun or a moon
+        // leaves it dim, and a black moon shines nothing, so only a little blue remains to see by.
+        const shining = sky.blackMoon ? outdoors * 0.2 : outdoors;
+        seaFog.multiplyScalar((0.16 + 0.98 * shining) * keep);
         const skyOpen = waterLook.sky;
         seaZenith.copy(sky.zenith).lerp(seaFog, 1 - skyOpen);
         world.setFog(seaFog, near, far, seaZenith);
@@ -1696,11 +1721,15 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
         drawnFar = far;
         scene.background = seaFog;
         sky.setView(seaFog, 0, true, skyOpen);
-        seaLight.setRGB(0.24, 0.42, 0.68);
-        light.ambient.lerp(seaLight, 0.55);
-        light.ambient.multiplyScalar(0.45 + 0.55 * sunk);
-        light.sun.multiplyScalar((0.3 + 0.7 * outdoors) * (0.25 + 0.75 * waterLook.sky));
-        light.glow.multiplyScalar((0.25 + 0.75 * sky.day) * (0.2 + 0.8 * waterLook.sky));
+        light.ambient.multiplyScalar(keep);
+        light.sun.multiplyScalar(keep);
+        light.glow.multiplyScalar(keep);
+        if (sky.blackMoon) {
+          light.ambient.multiplyScalar(0.4);
+          light.sun.multiplyScalar(0.25);
+          light.glow.multiplyScalar(0.2);
+          light.fill = 0.016;
+        }
         seaShafts = waterHere.open && sky.day > 0.04 ? sky.day * (1 - weather.rain * 0.5) * waterLook.sky : 0;
     } else {
       seaShafts = 0;
@@ -1991,6 +2020,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
         dt,
         dusk: sky.dusk,
         day: sky.day,
+        blackMoon: sky.blackMoon,
         underground: caveDark,
         rain: weather.rain,
         underwater: eyesUnder,
@@ -2123,7 +2153,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     if (beyond) audio.setBed(caveDark > 0.6 ? 'cave' : beyond.feel.bed, 1, shelter);
     audio.setCave(caveDark);
     const inDungeon = KIND === 'adventure' && instanceFootprint(body.x, body.z) !== null;
-    audio.ambient(0.1, { underground: covered && roof - body.y > 6, day: sky.brightness, rain: weather.rain, dungeon: inDungeon });
+    audio.ambient(0.1, { underground: covered && roof - body.y > 6, day: sky.brightness, rain: weather.rain, dungeon: inDungeon, blackMoon: sky.blackMoon });
     audio.dungeonAmbient(0.1, senseDungeon(inDungeon));
   }
 

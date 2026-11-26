@@ -1150,7 +1150,7 @@ export class MobRenderer {
     this.time += dt;
     this.newViews = 0;
     const seen = new Set<number>();
-    const light = 0.55 + 0.45 * brightness;
+    const light = Math.pow(Math.min(1, Math.max(0, brightness)), 1.45);
     // The land is gone into the fog by `reach`. A mob drawn past that is a bright dot in an empty sky, and building
     // its model (the expensive part) can wait until it is close enough to see.
     const reach2 = reach * reach;

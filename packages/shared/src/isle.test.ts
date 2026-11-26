@@ -13,16 +13,28 @@ const at = (gen: { generateChunk(cx: number, cz: number): Uint16Array }, x: numb
 };
 
 describe('isle rules', () => {
-  it('keeps a pig, and a chicken on most seeds', () => {
-    expect(isleFlock(0)).toEqual(['pig']);
-    expect(isleFlock(5)).toEqual(['pig']);
-    expect(isleFlock(1)).toEqual(['pig', 'chicken']);
+  it('keeps two of the three animals, and the same pair for a seed', () => {
+    const kinds = ['pig', 'chicken', 'sheep'];
+    for (const seed of [0, 1, 2, 5, 9]) {
+      const flock = isleFlock(seed);
+      expect(flock).toHaveLength(2);
+      expect(new Set(flock).size).toBe(2);
+      expect(flock.every((k) => kinds.includes(k))).toBe(true);
+      expect(isleFlock(seed)).toEqual(flock);
+    }
+    expect(new Set([0, 1, 2].map((s) => isleFlock(s).join()))).toHaveLength(3);
   });
 
   it('darkens the moon on the night that ends day 4, then every fourth night', () => {
+    expect(isleBlackMoon(4, 0.496)).toBe(true);
+    expect(isleBlackMoon(4, 0.49)).toBe(false);
     expect(isleBlackMoon(4, 0.75)).toBe(true);
     expect(isleBlackMoon(8, 0.6)).toBe(true);
+    expect(isleBlackMoon(4, 0.99)).toBe(true);
+    expect(isleBlackMoon(5, 0.002)).toBe(true);
     expect(isleBlackMoon(4, 0.3)).toBe(false);
+    expect(isleBlackMoon(4, 0.002)).toBe(false);
+    expect(isleBlackMoon(5, 0.02)).toBe(false);
     expect(isleBlackMoon(3, 0.75)).toBe(false);
     expect(isleBlackMoon(5, 0.75)).toBe(false);
   });
@@ -289,6 +301,14 @@ describe('isle days and events', () => {
       clearDrowned: (x, z, r) => {
         for (let i = mobs.length - 1; i >= 0; i--) if (mobs[i].kind === 'drowned' && Math.hypot(mobs[i].x - x, mobs[i].z - z) <= r) mobs.splice(i, 1);
       },
+      trim: (kind, x, z, r, keep) => {
+        const hit = mobs
+          .map((m, i) => ({ m, i }))
+          .filter(({ m }) => m.kind === kind && Math.hypot(m.x - x, m.z - z) <= r)
+          .sort((a, b) => Math.hypot(a.m.x - x, a.m.z - z) - Math.hypot(b.m.x - x, b.m.z - z));
+        const drop = new Set(hit.slice(keep).map(({ i }) => i));
+        for (let i = mobs.length - 1; i >= 0; i--) if (drop.has(i)) mobs.splice(i, 1);
+      },
       say: (text) => said.push(text),
       noteChest: (x, y, z) => gen.noteChest(x, y, z),
       forgetChest: (x, y, z) => gen.forgetChest(x, y, z),
@@ -299,12 +319,22 @@ describe('isle days and events', () => {
     return { gen, world, mobs, said, director: new IsleDirector(sim) };
   }
 
+  it('thins a crowd of pigs and chickens down to four of each', () => {
+    const { mobs, director } = harness();
+    for (let i = 0; i < 20; i++) mobs.push({ kind: 'pig', x: i * 0.2, y: 1, z: 0 });
+    for (let i = 0; i < 15; i++) mobs.push({ kind: 'chicken', x: 0, y: 1, z: i * 0.2 });
+    director.onClock(0.2);
+    expect(mobs.filter((m) => m.kind === 'pig')).toHaveLength(4);
+    expect(mobs.filter((m) => m.kind === 'chicken')).toHaveLength(4);
+  });
+
   it('starts on the grass with animals and can wash a crate ashore', () => {
     const { world, mobs, said, director } = harness();
     director.onClock(0.2);
     expect(director.day).toBe(1);
-    expect(mobs.some((m) => m.kind === 'pig')).toBe(true);
-    expect(mobs.some((m) => m.kind === 'chicken')).toBe(true);
+    const flock = isleFlock(3);
+    expect(flock.every((k) => mobs.some((m) => m.kind === k))).toBe(true);
+    expect(mobs.filter((m) => flock.includes(m.kind as (typeof flock)[number]))).toHaveLength(2);
     expect(mobs.some((m) => m.kind === 'cod')).toBe(true);
     expect(isChest(world.getBlock(ISLE_BEACH[1]![0], SEA_LEVEL + 1, ISLE_BEACH[1]![1]))).toBe(true);
     expect(said[0]).toContain('crate');
