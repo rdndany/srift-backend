@@ -223,6 +223,8 @@ export class RemoteSession implements ClientSession {
   readonly vitals = { health: 20, hunger: 20, saturation: 5, air: 15, dead: false };
   bottleSec = -1;
   bottleSpare = 0;
+  /** The server does not send Night Vision yet, so online eyes stay ordinary underwater. */
+  waterSight = 0;
   /** The bags worn, mirrored from the server: they decide which of the inventory's slots are open. */
   readonly bags = new Container(BAG_SLOTS);
   readonly inventory = bagInventory(this.bags);

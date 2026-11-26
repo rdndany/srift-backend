@@ -107,6 +107,8 @@ export interface ClientSession {
   bottleSec: number;
   /** Spare oxygen items while that bottle is in use. */
   bottleSpare: number;
+  /** Seconds of clear sight left underwater (Night Vision or Conduit Power). 0 when the eyes are ordinary. */
+  readonly waterSight: number;
   readonly inventory: Container;
   /** The bags worn (see bags.ts): the room of each is in `inventory`, after the backpack. */
   readonly bags: Container;
@@ -161,7 +163,7 @@ export interface ClientSession {
   readonly spectating: boolean;
   readonly weather: { kind: WeatherKind; rain: number; storm: number; flash: number; readonly darkness: number };
   readonly generator: {
-    columnAt(x: number, z: number): { biome: number; height: number };
+    columnAt(x: number, z: number): { biome: number; height: number; t?: number };
     nearestVillage(x: number, z: number): { x: number; z: number } | null;
     caveKindAt(x: number, y: number, z: number): 'plain' | 'lush' | 'dripstone' | 'deep_dark';
     zoneAt(x: number, y: number, z: number): string | null;

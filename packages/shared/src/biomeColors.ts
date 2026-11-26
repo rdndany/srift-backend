@@ -55,11 +55,11 @@ export function swampColor(t: number): RGB {
 }
 
 /** Colour of water: grey-blue where it is cold, turquoise where it is warm; murky in a swamp, clear in a warm sea, pale where frozen. */
-export function waterColor(t: number, kind = WATER_KIND_PLAIN): RGB {
+export function waterColor(t?: number, kind = WATER_KIND_PLAIN): RGB {
   const cold: RGB = [70, 92, 200];
   const mild: RGB = [40, 90, 205];
   const warm: RGB = [28, 168, 226];
-  const heat = Number.isFinite(t) ? clamp01(t) : 0.5;
+  const heat = t !== undefined && Number.isFinite(t) ? clamp01(t) : 0.5;
   const plain = heat < 0.5 ? lerp(cold, mild, heat * 2) : lerp(mild, warm, (heat - 0.5) * 2);
   // The kinds are only a tint on the same blue: they meet along the border of two biomes (a river runs into a swamp lake, a cold sea into
   // a warm one), and one block there must not turn from blue to teal or green. So each leans on the plain water and shifts it a little.
