@@ -638,7 +638,7 @@ ${HERO_TILES.map((n) => {
   float lum = dot(rgb, vec3(0.299, 0.587, 0.114));
   rgb = mix(vec3(lum), rgb, 1.0 + 0.2 * uBlockLook + 0.3 * sunTerm * smoothstep(0.0, 0.12, uSun.r));
 
-  // ---- fog. In the air it is a light veil (the distance is a blur, see postfx). Under water it is the sea. ----
+  // ---- fog: the colour of the sky in this direction, so far hills melt into it ----
   // Distance at the fragment, not at the corners. A hillside is one big face: the corner distance
   // interpolated across it punches a hard polygon out of the hill, on land and under water.
   float eyeDist = length(cameraPosition - vWorld);
@@ -646,10 +646,9 @@ ${HERO_TILES.map((n) => {
   // Golden haze: light scatters in the air towards the sun, so far land on that side melts into warm gold.
   float scat = pow(max(dot(-V, uSunDir), 0.0), 5.0);
   rgb += uGlow * scat * smoothstep(uFogNear * 0.25, uFogFar, eyeDist) * 0.55 * (1.0 - fog);
-  // In the air the distance is a blur (see postfx), so the colour is only a veil.
-  // Under water the fog is the sea: far things, and the empty water, dissolve into it completely.
-  float fogCover = uInWater > 0.5 ? 1.0 : 0.22;
-  rgb = mix(rgb, skyAt(-V), fog * fogCover);
+  // Full cover, on land and under water. A light veil leaves the chunk edge as a solid shape, so
+  // land that has not loaded yet reads as a hole and a chunk that arrives pops in.
+  rgb = mix(rgb, skyAt(-V), fog);
   gl_FragColor = vec4(rgb, alpha * uOpacity);
   #include <colorspace_fragment>
 }

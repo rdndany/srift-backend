@@ -234,6 +234,10 @@ export class Sky {
   get sunMesh(): THREE.Mesh {
     return this.sun;
   }
+  /** The moon's disc. At night the same ray pass uses this instead of the sun. */
+  get moonMesh(): THREE.Mesh {
+    return this.moon;
+  }
   /** 1 at golden hour (the sun low, up or down), 0 otherwise; and 0..1 for how much daylight there is. Set by `update`. */
   dusk = 0;
   day = 1;
@@ -304,7 +308,9 @@ export class Sky {
       return m;
     };
     this.sunGlow = quad(560, glowTex, -12, true);
-    this.moonGlow = quad(240, glowTex, -12, true);
+    // A tight edge only. The light around the moon is the ray pass, and a big copy of this
+    // texture draws as rings.
+    this.moonGlow = quad(72, glowTex, -12, true);
     this.sun = quad(84, sunTex, -10);
     this.moon = quad(60, moonTex, -10);
     this.group.add(this.sunGlow, this.moonGlow, this.sun, this.moon);
@@ -383,6 +389,20 @@ export class Sky {
     this.stars.visible = show;
     this.clouds.visible = show && this.cloudsWanted;
     this.applyDome();
+    this.veilThroughWater();
+  }
+
+  /** Sun, moon and stars dim with the water overhead, a little per block, instead of vanishing at a line. */
+  private veilThroughWater(): void {
+    if (!this.submerged) return;
+    const t = Math.min(1, Math.max(0, this.skyOpen));
+    (this.sun.material as THREE.MeshBasicMaterial).opacity *= t;
+    (this.sunGlow.material as THREE.MeshBasicMaterial).opacity *= t;
+    (this.moon.material as THREE.MeshBasicMaterial).opacity *= t;
+    (this.moonGlow.material as THREE.MeshBasicMaterial).opacity *= t;
+    this.starMat.opacity *= t;
+    const clouds = this.cloudMat.uniforms.uOpacity;
+    clouds.value = (clouds.value as number) * (0.25 + 0.75 * t);
   }
 
   /** Underground the horizon follows the (darkened) fog and the upper sky fades to black. */
@@ -475,7 +495,7 @@ export class Sky {
     const mg = this.moonGlow.material as THREE.MeshBasicMaterial;
     const moonFade = clear * smoothstep(-0.03, 0.12, -sunHeight);
     mg.color.setRGB(this.blackMoon ? 1 : 0.5, this.blackMoon ? 0.92 : 0.6, this.blackMoon ? 0.72 : 0.85);
-    mg.opacity = moonFade * (this.blackMoon ? 0.7 : 0.35);
+    mg.opacity = moonFade * (this.blackMoon ? 0.06 : 0.03);
     this.starMat.opacity = (1 - smoothstep(-0.2, 0.05, sunHeight)) * clear;
 
     this.updateClouds(camera, dayAmt, duskAmt);

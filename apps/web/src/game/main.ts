@@ -567,7 +567,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   /** Daylight seen through open water. Bright on purpose: a dark blue is crushed to black by the picture passes. */
   const seaSun = new THREE.Color(0x7ecfff);
   scene.add(sky.group);
-  const postfx = new PostFx(renderer, scene, camera, sky.sunMesh);
+  const postfx = new PostFx(renderer, scene, camera, sky.sunMesh, sky.moonMesh);
   const fxWanted: FxFlags = ((): FxFlags => {
     const all = (on: boolean): FxFlags => ({ ao: on, glow: on, grade: on, rays: on, menuBlur: on });
     if (params.has('nopostfx')) return all(false);
@@ -1674,9 +1674,10 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
         const openDay = sky.day * (1 - weather.rain * 0.45) * (waterHere.open ? 1 : 0.5);
         seaFog.lerp(seaSun, openDay * 0.2 * (0.35 + 0.65 * waterLook.sky));
         seaFog.lerp(sky.color, (1 - k) * sky.day);
-        // Same light as outside: bright at noon, dim at night, and never dropped to black.
-        seaFog.multiplyScalar((waterHere.open ? 0.34 : 0.2) + 0.8 * outdoors);
-        const skyOpen = Math.min(1, (waterHere.open ? 0.55 : 0.22) + 0.4 * waterLook.sky);
+        // Same light as outside: bright at noon, dim at night, and a little darker with every block down.
+        const sunk = waterLook.light;
+        seaFog.multiplyScalar(((waterHere.open ? 0.34 : 0.2) + 0.8 * outdoors) * (0.42 + 0.58 * sunk));
+        const skyOpen = waterHere.open ? waterLook.sky : Math.min(0.16, waterLook.sky);
         seaZenith.copy(sky.zenith).lerp(seaFog, 1 - skyOpen);
         world.setFog(seaFog, near, far, seaZenith);
         distanceFog.color.copy(seaFog);
@@ -1687,9 +1688,10 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
         sky.setView(seaFog, 0, true, skyOpen);
         seaLight.setRGB(0.24, 0.42, 0.68);
         light.ambient.lerp(seaLight, 0.55);
-        light.sun.multiplyScalar(0.3 + 0.7 * outdoors);
-        light.glow.multiplyScalar(0.25 + 0.75 * sky.day);
-        seaShafts = waterHere.open && sky.day > 0.04 ? sky.day * (1 - weather.rain * 0.5) : 0;
+        light.ambient.multiplyScalar(0.45 + 0.55 * sunk);
+        light.sun.multiplyScalar((0.3 + 0.7 * outdoors) * (0.25 + 0.75 * waterLook.sky));
+        light.glow.multiplyScalar((0.25 + 0.75 * sky.day) * (0.2 + 0.8 * waterLook.sky));
+        seaShafts = waterHere.open && sky.day > 0.04 ? sky.day * (1 - weather.rain * 0.5) * waterLook.sky : 0;
     } else {
       seaShafts = 0;
       const sy = world.surfaceY(Math.floor(camera.position.x), Math.floor(camera.position.z));
@@ -1985,6 +1987,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
         surfaceY: seaSurface,
         shafts: seaShafts,
         warp: waterLook.distort,
+        overhead: eyesUnder ? waterLook.sky : 1,
         fogNear: distanceFog.near,
         fogFar: distanceFog.far,
         sunDir: sky.lightDir,

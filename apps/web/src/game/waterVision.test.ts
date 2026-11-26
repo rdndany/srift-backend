@@ -57,21 +57,30 @@ describe('WaterVision', () => {
     const v = new WaterVision();
     for (let i = 0; i < 120; i++) step(v, { depth: 20 }, 0.05);
     const look = step(v, { depth: 20 }, 0);
-    expect(look.fog[0]).toBeGreaterThan(0.09);
-    expect(look.fog[1]).toBeGreaterThan(0.26);
-    expect(look.fog[2]).toBeGreaterThan(0.5);
-    expect(look.light).toBeGreaterThan(0.5);
+    expect(look.fog[0]).toBeGreaterThan(0.04);
+    expect(look.fog[1]).toBeGreaterThan(0.1);
+    expect(look.fog[2]).toBeGreaterThan(0.25);
+    expect(look.light).toBeGreaterThan(0.2);
   });
 
-  it('goes dark as the camera sinks, and hides the sky away from the surface', () => {
+  it('darkens a little with every block, and eases instead of dropping at once', () => {
     const v = new WaterVision();
     for (let i = 0; i < 120; i++) step(v, { depth: 1 }, 0.05);
-    const shallow = step(v, { depth: 1 }, 0);
-    const deep = step(v, { depth: 20 }, 0);
-    expect(deep.light).toBeLessThan(shallow.light);
-    expect(deep.sky).toBeLessThan(0.15);
-    expect(shallow.sky).toBeGreaterThan(0.4);
-    expect(deep.fog[2]).toBeLessThan(shallow.fog[2]);
+    const surface = step(v, { depth: 1 }, 0);
+    const mid = step(v, { depth: 8 }, 0);
+    const lower = step(v, { depth: 16 }, 0);
+    const bottom = step(v, { depth: 32 }, 0);
+    expect(surface.sky).toBeGreaterThan(0.9);
+    expect(mid.sky).toBeLessThan(surface.sky);
+    expect(mid.sky).toBeGreaterThan(0.6);
+    expect(lower.sky).toBeLessThan(mid.sky);
+    expect(lower.sky).toBeGreaterThan(0.35);
+    expect(bottom.sky).toBeLessThan(lower.sky);
+    expect(bottom.sky).toBeGreaterThan(0.12);
+    expect(lower.sky - bottom.sky).toBeLessThan(surface.sky - mid.sky);
+    expect(bottom.light).toBeLessThan(surface.light);
+    expect(bottom.fog[2]).toBeLessThan(surface.fog[2]);
+    expect(bottom.far).toBeCloseTo(surface.far);
   });
 
   it('clears the fog at once for night vision, and restores the lens on the way out', () => {

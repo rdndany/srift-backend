@@ -64,6 +64,8 @@ export interface FxFrame {
   warm?: boolean;
   /** 0..1, how hard the picture wobbles. Water sets it; air leaves it at 0. */
   warp?: number;
+  /** 1 in the air. Under water, how much sky is still overhead: 1 at the surface, fading with depth. */
+  overhead?: number;
   /** Where the distance haze starts and ends, in blocks. The blur follows this. */
   fogNear: number;
   fogFar: number;
@@ -330,6 +332,7 @@ export class PostFx {
     private readonly scene: THREE.Scene,
     private readonly camera: THREE.PerspectiveCamera,
     private readonly sun: THREE.Mesh,
+    private readonly moon: THREE.Mesh,
   ) {}
 
   /** True while the picture goes through the passes (any part is on). */
@@ -452,19 +455,26 @@ export class PostFx {
     const open = 1 - frame.underground;
 
     if (f.rays) {
-      // The sun must be in front of the camera and up; the shafts are strongest when it is low.
-      this.sun.getWorldPosition(this.tmpA).sub(this.camera.position).normalize();
+      // By day the shafts come from the sun. At night the same pass uses the moon, but the
+      // light dies close to the disc: the moon does not throw rays the way the sun does.
+      const night = 1 - frame.day;
+      const useMoon = night > frame.day;
+      const source = useMoon ? this.moon : this.sun;
+      if (this.rays!.lightSource !== source) this.rays!.lightSource = source;
+      source.getWorldPosition(this.tmpA).sub(this.camera.position).normalize();
       this.camera.getWorldDirection(this.tmpB);
       const facing = sstep(0.15, 0.7, this.tmpA.dot(this.tmpB));
-      // Above water the shafts belong to a low sun. Under water they come off the sun whenever it is in front of you.
-      const strength = frame.underwater
-        ? facing * frame.day
-        : facing * open * (1 - frame.rain) * (0.3 + 0.7 * frame.dusk) * frame.day;
+      const through = frame.underwater ? (frame.overhead ?? 1) : 1;
+      const strength = useMoon
+        ? facing * open * (1 - frame.rain) * night * 0.18 * through
+        : frame.underwater
+          ? facing * frame.day * through
+          : facing * open * (1 - frame.rain) * (0.3 + 0.7 * frame.dusk) * frame.day;
       this.showRays(frame.warm === true || strength > 0.02);
       const mat = this.rays!.godRaysMaterial;
-      mat.exposure = (frame.underwater ? 1.35 : 0.9) * strength;
-      mat.weight = frame.underwater ? 0.72 : 0.45;
-      mat.decay = frame.underwater ? 0.965 : 0.93;
+      mat.exposure = (useMoon ? 0.35 : frame.underwater ? 1.35 : 0.9) * strength;
+      mat.weight = useMoon ? 0.14 : frame.underwater ? 0.72 : 0.45;
+      mat.decay = useMoon ? 0.8 : frame.underwater ? 0.965 : 0.93;
     }
 
     const shaftAmt = frame.underwater ? frame.shafts : 0;

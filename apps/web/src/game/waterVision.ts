@@ -118,19 +118,22 @@ export class WaterVision {
     const entry = s.murky ? 18 : 28;
     const far = s.clear ? span : entry + (span - entry) * adjusted;
     const near = Math.max(0.8, far * (s.clear ? 0.35 : 0.12 + 0.2 * adjusted));
-    const deep = Math.min(1, Math.max(0, s.depth) / 22);
+    // One block of water takes a little light. The first blocks are almost the surface, and the
+    // drop eases the deeper you already are, so it never snaps to dark.
+    const length = s.clear ? 26 : s.murky ? 12 : 18;
+    const down = Math.exp(-Math.max(0, s.depth) / length);
+    const deep = 1 - down;
     const roof = s.open ? 1 : 0.55;
-    const dim = 0.7 + 0.3 * (1 - 0.55 * deep) * roof * (s.clear ? 1 : 0.85 + 0.15 * adjusted);
+    const dim = (0.32 + 0.5 * down) * roof * (s.clear ? 1 : 0.75 + 0.25 * adjusted);
     const fog: [number, number, number] = [
-      Math.max(0.10, s.color[0] / 255 * dim),
-      Math.max(0.28, s.color[1] / 255 * dim),
-      Math.max(0.55, s.color[2] / 255 * dim),
+      Math.max(0.02, s.color[0] / 255 * dim),
+      Math.max(0.06, s.color[1] / 255 * dim),
+      Math.max(0.14, s.color[2] / 255 * dim),
     ];
-    const atSurface = Math.exp(-Math.max(0, s.depth - 0.4) / 2.2);
-    const sky = Math.min(1, (s.open ? atSurface : 0.12) * (s.clear ? 1 : 0.55 + 0.45 * adjusted) + (s.clear && s.open ? 0.35 : 0));
+    const sky = s.open ? down : Math.min(0.14, 0.08 * down);
     const light = s.clear
-      ? Math.max(0.82, 0.55 + 0.45 * (1 - deep) * roof)
-      : Math.max(0.55, (0.5 + 0.5 * (1 - deep)) * roof * (0.7 + 0.3 * adjusted));
+      ? Math.max(0.4, 0.22 + 0.6 * down * roof)
+      : Math.max(0.16, (0.15 + 0.7 * down) * roof * (0.65 + 0.35 * adjusted));
     return {
       blend: this.blend,
       adjusted,
