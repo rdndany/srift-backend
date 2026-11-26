@@ -81,7 +81,7 @@ export const EXPANSIONS: readonly Expansion[] = [
       { kind: 'feature', name: 'The Gilded Tide', blurb: 'On the hour and at half past, golden creatures hide all over the land: shy imps, hounds, drakes and a rare colossus, never in packs and never near you. Find them for the Codex of Aurelion, which opens into one piece of Epic gear.', playable: true },
       { kind: 'feature', name: 'Rifts', blurb: 'A tear opens in the world with a beam of light over it: beat its waves and its warden, and everyone who helped is paid. A rift that is left alone collapses.', playable: true },
       { kind: 'feature', name: 'Wings and free flight', blurb: 'Craft six kinds of wings in two tiers. Worn, they hit harder, soften blows and quicken your step, and a double tap of Space takes you into the air. They unfold, beat, bank in turns and fold again, each in the manner of your class.', playable: true },
-      { kind: 'feature', name: 'Achievements', blurb: 'Tiered achievements for dungeons, bosses and more, counted by the server and kept with your character.', playable: true },
+      { kind: 'feature', name: 'Achievements', blurb: 'Tiered achievements for dungeons, bosses and more, counted by the server and kept with your wallet. A new character cannot win them again.', playable: true },
     ],
   },
   {

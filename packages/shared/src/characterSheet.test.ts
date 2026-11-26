@@ -103,4 +103,13 @@ describe('achievements on the sheet', () => {
     const rubbish = sheetOfSave({ ...mage().savePlayer(), ach: { s: { kills: 'many' }, d: [5, 'nope'] } as never }, 'mage');
     expect(rubbish.ach.done).toEqual([]);
   });
+
+  it('reads an island save as the island list', () => {
+    const save = { ...mage().savePlayer(), ach: { s: { days: 8, kills: 500 }, d: ['isle-day-2', 'lvl-5', 'kill-25'] } };
+    const sheet = sheetOfSave(save, null, undefined, 'isle');
+    expect(sheet.ach.done).toEqual(expect.arrayContaining(['isle-day-2', 'isle-day-5', 'isle-day-8']));
+    expect(sheet.ach.done).not.toContain('lvl-5');
+    expect(sheet.ach.done).not.toContain('kill-25');
+    expect(sheet.ach.stats.days).toBe(8);
+  });
 });

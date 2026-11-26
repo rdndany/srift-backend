@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { ACHIEVEMENTS, ACH_CATEGORIES, ACH_TIERS, CLASSES, HOTBAR_SLOTS, MAX_LEVEL, STASH_SLOTS, STASHKEEPER, NPCS, bagRoom, briefOfSheet, getItem, tooltipLines, type AchCategory, type CharacterSheet as Sheet, type CharacterBrief, type ItemStack, type StashView, type TipLine, type WornPlace } from '@solrift/shared';
+import { ACH_CATEGORIES, ACH_TIERS, CLASSES, HOTBAR_SLOTS, MAX_LEVEL, STASH_SLOTS, STASHKEEPER, NPCS, achievementsFor, bagRoom, briefOfSheet, getItem, tooltipLines, type AchBoard, type AchCategory, type CharacterSheet as Sheet, type CharacterBrief, type ItemStack, type StashView, type TipLine, type WornPlace } from '@solrift/shared';
 import { lobbyIcons } from '../game/lobbyIcons';
 import { useToken } from '../token/store';
 import { Tip } from './ItemView';
@@ -111,21 +111,24 @@ type Tab = 'carried' | 'ach' | 'stash';
  * It is the list the game shows (L, then Achievements), read from the character's save. With a token live on the server each
  * tier also says what it pays.
  */
-function AchievementsTab({ ach }: { ach: Sheet['ach'] }) {
+function AchievementsTab({ ach, board }: { ach: Sheet['ach']; board: AchBoard }) {
+  const deeds = achievementsFor(board);
   const done = useMemo(() => new Set(ach.done), [ach]);
-  const pays = useToken((s) => (s.info?.live ? s.info.tiers : null));
+  const pays = useToken((s) => (board === 'realm' && s.info?.live ? s.info.tiers : null));
   const loadInfo = useToken((s) => s.loadInfo);
   useEffect(() => {
+    if (board !== 'realm') return;
     void loadInfo();
-  }, [loadInfo]);
-  const won = ACHIEVEMENTS.filter((a) => done.has(a.id)).length;
+  }, [loadInfo, board]);
+  const won = deeds.filter((a) => done.has(a.id)).length;
   return (
-    <div className="cs-tab" role="tabpanel" id="cs-achtab" data-testid="cs-ach">
+    <div className="cs-tab" role="tabpanel" id="cs-achtab" data-testid="cs-ach" data-board={board}>
       <p className="cs-note cs-ach-total" id="cs-ach-total">
-        <b>{won}</b> of {ACHIEVEMENTS.length} won
+        <b>{won}</b> of {deeds.length} won
       </p>
       {(Object.keys(ACH_CATEGORIES) as AchCategory[]).map((cat) => {
-        const list = ACHIEVEMENTS.filter((a) => a.category === cat);
+        const list = deeds.filter((a) => a.category === cat);
+        if (list.length === 0) return null;
         return (
           <Section key={cat} title={ACH_CATEGORIES[cat].name} note={`${list.filter((a) => done.has(a.id)).length}/${list.length}`}>
             <ul className="cs-ach-list">
@@ -184,7 +187,7 @@ function Section({ title, note, id, children }: { title: string; note?: string; 
  * `sheet` is undefined while it is being read, null when there is none. `stash` is undefined while it is being read, null when it cannot be (not shown without
  * `showStash`: single player has no Stash).
  */
-export function CharacterSheet({ sheet, source, empty, stash, showStash, briefs = [], characters = [], selfId = null, hand = null }: { sheet: Sheet | null | undefined; source: string; empty: string; stash?: StashView | null; showStash?: boolean; briefs?: CharacterBrief[]; characters?: { id: string; displayName: string }[]; selfId?: string | null; hand?: Hand | null }) {
+export function CharacterSheet({ sheet, source, empty, stash, showStash, briefs = [], characters = [], selfId = null, hand = null, board = 'realm', day }: { sheet: Sheet | null | undefined; source: string; empty: string; stash?: StashView | null; showStash?: boolean; briefs?: CharacterBrief[]; characters?: { id: string; displayName: string }[]; selfId?: string | null; hand?: Hand | null; board?: AchBoard; day?: number }) {
   const [query, setQuery] = useState('');
   const [sorted, setSorted] = useState(false);
   const find = query.trim().toLowerCase();
@@ -339,16 +342,23 @@ export function CharacterSheet({ sheet, source, empty, stash, showStash, briefs 
 
   return (
     <div className="cs" id="char-sheet" data-state="ready" style={{ '--c': color } as CSSProperties} onMouseLeave={hide}>
-      {!showStash && <p className="cs-source">{source}</p>}
+      {board !== 'isle' && !showStash && <p className="cs-source">{source}</p>}
 
-      <div className="cs-head">
-        <div className="cs-level" data-level={sheet.level} title={sheet.cls ? 'Class level' : 'Experience level'}>
-          <small>Level</small>
-          <b>{sheet.level}</b>
-        </div>
+      <div className={`cs-head${board === 'isle' ? ' cs-head-isle' : ''}`}>
+        {board === 'isle' ? (
+          <div className="cs-level cs-day" data-day={day ?? 1} title="Days on the island">
+            <small>Day</small>
+            <b>{day ?? 1}</b>
+          </div>
+        ) : (
+          <div className="cs-level" data-level={sheet.level} title={sheet.cls ? 'Class level' : 'Experience level'}>
+            <small>Level</small>
+            <b>{sheet.level}</b>
+          </div>
+        )}
         <div className="cs-bars">
-          {sheet.cls && <Bar id="class-xp" label={`${CLASSES[sheet.cls.id].name} XP`} value={sheet.cls.next === 0 ? 1 : sheet.cls.xp} max={sheet.cls.next === 0 ? 1 : sheet.cls.next} text={sheet.cls.next === 0 ? 'Max' : `${sheet.cls.xp} / ${sheet.cls.next}`} tone={`linear-gradient(90deg, color-mix(in srgb, ${color} 55%, #000), ${color})`} glow={`color-mix(in srgb, ${color} 70%, transparent)`} />}
-          <Bar id="xp" label={`Experience ${sheet.xp.level}`} value={sheet.xp.level >= MAX_LEVEL ? 1 : sheet.xp.points} max={sheet.xp.level >= MAX_LEVEL ? 1 : sheet.xp.next} text={sheet.xp.level >= MAX_LEVEL ? 'Max' : `${sheet.xp.points} / ${sheet.xp.next}`} tone={sheet.xp.level >= MAX_LEVEL ? 'linear-gradient(90deg, #6a6a6a, #cfcfcf)' : 'linear-gradient(90deg, #2f8f2f, #7bff3a)'} glow={sheet.xp.level >= MAX_LEVEL ? 'rgba(210, 210, 210, 0.5)' : 'rgba(123, 255, 58, 0.6)'} />
+          {board === 'realm' && sheet.cls && <Bar id="class-xp" label={`${CLASSES[sheet.cls.id].name} XP`} value={sheet.cls.next === 0 ? 1 : sheet.cls.xp} max={sheet.cls.next === 0 ? 1 : sheet.cls.next} text={sheet.cls.next === 0 ? 'Max' : `${sheet.cls.xp} / ${sheet.cls.next}`} tone={`linear-gradient(90deg, color-mix(in srgb, ${color} 55%, #000), ${color})`} glow={`color-mix(in srgb, ${color} 70%, transparent)`} />}
+          {board === 'realm' && <Bar id="xp" label={`Experience ${sheet.xp.level}`} value={sheet.xp.level >= MAX_LEVEL ? 1 : sheet.xp.points} max={sheet.xp.level >= MAX_LEVEL ? 1 : sheet.xp.next} text={sheet.xp.level >= MAX_LEVEL ? 'Max' : `${sheet.xp.points} / ${sheet.xp.next}`} tone={sheet.xp.level >= MAX_LEVEL ? 'linear-gradient(90deg, #6a6a6a, #cfcfcf)' : 'linear-gradient(90deg, #2f8f2f, #7bff3a)'} glow={sheet.xp.level >= MAX_LEVEL ? 'rgba(210, 210, 210, 0.5)' : 'rgba(123, 255, 58, 0.6)'} />}
           <Bar id="health" label="Health" value={sheet.health} max={sheet.maxHealth} text={`${sheet.health} / ${sheet.maxHealth}`} tone="linear-gradient(90deg, #8f1b1b, #ff4a4a)" glow="rgba(255, 74, 74, 0.6)" />
           <Bar id="food" label="Food" value={sheet.hunger} max={sheet.maxHunger} text={`${sheet.hunger} / ${sheet.maxHunger}`} tone="linear-gradient(90deg, #a35a14, #ffb04a)" glow="rgba(255, 176, 74, 0.6)" />
         </div>
@@ -372,7 +382,7 @@ export function CharacterSheet({ sheet, source, empty, stash, showStash, briefs 
               <path d="M4 2h4v2H7v1H5V4H4z" fill="rgba(0,0,0,0.42)" />
             </svg>
             <span>Achievements</span>
-            <b>{sheet.ach.done.length}/{ACHIEVEMENTS.length}</b>
+            <b>{achievementsFor(board).filter((a) => sheet.ach.done.includes(a.id)).length}/{achievementsFor(board).length}</b>
           </button>
           {showStash && (
             <button type="button" role="tab" id="cs-tab-stash" aria-selected={current === 'stash'} tabIndex={current === 'stash' ? 0 : -1} onClick={() => setTab('stash')} title="Shared by all the characters of this wallet">
@@ -439,7 +449,7 @@ export function CharacterSheet({ sheet, source, empty, stash, showStash, briefs 
           </p>
         </div>
       ) : current === 'ach' ? (
-        <AchievementsTab ach={sheet.ach} />
+        <AchievementsTab ach={sheet.ach} board={board} />
       ) : (
         <div className="cs-tab" role="tabpanel" id="cs-stashtab">
           <StashPanel stash={stash} used={stashUsed} sorted={sorted} onSort={setSorted} show={show} hide={hide} viewer={viewer} hand={hand} carry={carry?.token ?? null} place={place} lift={lift} aim={(x, y) => setGhost({ x, y })} />

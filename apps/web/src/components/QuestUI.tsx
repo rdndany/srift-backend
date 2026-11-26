@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ACHIEVEMENTS, ACH_CATEGORIES, ACH_TIERS, AUCTIONEER, BOUNTY_TIERS, BOUNTY_TIER_NAME, QUESTS, RIFT_GRADE_DEFS, formatCoins, getItem, makeStack, npcById, questById, rewardCoins, rewardItems, shopOf, skillBookAbility, tooltipName, zoneDef, type AchCategory, type DungeonView, type QuestDef, type QuestLog } from '@solrift/shared';
+import { ACH_CATEGORIES, ACH_TIERS, AUCTIONEER, BOUNTY_TIERS, BOUNTY_TIER_NAME, QUESTS, RIFT_GRADE_DEFS, achievementsFor, formatCoins, getItem, makeStack, npcById, questById, rewardCoins, rewardItems, shopOf, skillBookAbility, tooltipName, zoneDef, type AchCategory, type DungeonView, type QuestDef, type QuestLog } from '@solrift/shared';
 import './achievements.css';
 import { useUi, type RiftHud } from '../ui/store';
 import { useToken } from '../token/store';
@@ -289,26 +289,30 @@ function ZoneBanner() {
 
 /** The achievements: by category, each with its tier and how far you are. */
 function AchievementList() {
+  const board = useUi((s) => s.achBoard);
+  const list = achievementsFor(board);
   const ach = useUi((s) => s.ach);
   const done = new Set(ach.done);
-  // With a token on the server each tier shows what it pays ("Gold +40"); without one, just the tier.
-  const pays = useToken((s) => (s.info?.live ? s.info.tiers : null));
+  const wonCount = list.filter((a) => done.has(a.id)).length;
+  // Realm deeds can pay. Island deeds are kept on that save and are not part of the token.
+  const pays = useToken((s) => (board === 'realm' && s.info?.live ? s.info.tiers : null));
   const loadInfo = useToken((s) => s.loadInfo);
   useEffect(() => {
     void loadInfo();
   }, [loadInfo]);
+  const cats = (Object.keys(ACH_CATEGORIES) as AchCategory[]).filter((cat) => list.some((a) => a.category === cat));
   return (
     <div className="ach-list" data-testid="ach-list">
       <div className="ach-total">
-        {done.size}/{ACHIEVEMENTS.length} won
+        {wonCount}/{list.length} won
       </div>
-      {(Object.keys(ACH_CATEGORIES) as AchCategory[]).map((cat) => (
+      {cats.map((cat) => (
         <div key={cat} className="ach-cat">
           <h4>
             <span>{ACH_CATEGORIES[cat].name}</span>
             <em>{ACH_CATEGORIES[cat].blurb}</em>
           </h4>
-          {ACHIEVEMENTS.filter((a) => a.category === cat).map((a) => {
+          {list.filter((a) => a.category === cat).map((a) => {
             const now = Math.min(a.goal, Math.floor(ach.stats[a.stat] ?? 0));
             const won = done.has(a.id);
             return (
@@ -403,6 +407,8 @@ function QuestLogPanel() {
   const [pick, setPick] = useState<string | null>(null);
   const [tab, setTab] = useState<'quests' | 'ach' | 'bounties'>('quests');
   const bounties = useUi((s) => s.bounties);
+  const isle = useUi((s) => s.achBoard === 'isle');
+  const view = isle ? 'ach' : tab;
   if (!open || !api) return null;
 
   const known = QUESTS.filter((q) => log.status(q.id) !== 'locked' && log.status(q.id) !== 'available');
@@ -415,29 +421,33 @@ function QuestLogPanel() {
   return (
     <div id="quest-log" data-testid="quest-log" onContextMenu={(e) => e.preventDefault()}>
       <div className="log-card">
-        <div className="title">Quest Log</div>
+        <div className="title">{isle ? 'Achievements' : 'Quest Log'}</div>
         <button className="wow-close" onClick={() => api.toggleQuestLog(false)} aria-label="Close">
           &times;
         </button>
-        <div className="log-head">
-          <span className="log-count">
-            {log.active.size} active
-          </span>
-        </div>
-        <div className="log-tabs" role="tablist">
-          <button role="tab" aria-selected={tab === 'quests'} className={tab === 'quests' ? 'sel' : ''} onClick={() => setTab('quests')}>
-            Quests
-          </button>
-          <button role="tab" aria-selected={tab === 'ach'} className={tab === 'ach' ? 'sel' : ''} onClick={() => setTab('ach')} data-testid="ach-tab">
-            Achievements
-          </button>
-          <button role="tab" aria-selected={tab === 'bounties'} className={tab === 'bounties' ? 'sel' : ''} onClick={() => setTab('bounties')} data-testid="bounty-tab">
-            Daily{bounties ? ` ${bounties.rows.filter((r) => r.done).length}/${bounties.rows.length}` : ''}
-          </button>
-        </div>
-        {tab === 'ach' ? <AchievementList /> : null}
-        {tab === 'bounties' ? <BountyList /> : null}
-        <div className="log-cols" style={tab !== 'quests' ? { display: 'none' } : undefined}>
+        {isle ? null : (
+          <div className="log-head">
+            <span className="log-count">
+              {log.active.size} active
+            </span>
+          </div>
+        )}
+        {isle ? null : (
+          <div className="log-tabs" role="tablist">
+            <button role="tab" aria-selected={view === 'quests'} className={view === 'quests' ? 'sel' : ''} onClick={() => setTab('quests')}>
+              Quests
+            </button>
+            <button role="tab" aria-selected={view === 'ach'} className={view === 'ach' ? 'sel' : ''} onClick={() => setTab('ach')} data-testid="ach-tab">
+              Achievements
+            </button>
+            <button role="tab" aria-selected={view === 'bounties'} className={view === 'bounties' ? 'sel' : ''} onClick={() => setTab('bounties')} data-testid="bounty-tab">
+              Daily{bounties ? ` ${bounties.rows.filter((r) => r.done).length}/${bounties.rows.length}` : ''}
+            </button>
+          </div>
+        )}
+        {view === 'ach' ? <AchievementList /> : null}
+        {view === 'bounties' ? <BountyList /> : null}
+        <div className="log-cols" style={view !== 'quests' ? { display: 'none' } : undefined}>
           <div className="log-list">
             {shown.length === 0 ? <p className="log-empty">No active quests. Talk to the people of the village.</p> : null}
             {chapters.map((ch) => (
@@ -503,12 +513,19 @@ function QuestLogPanel() {
   );
 }
 
-/** Everything the Adventure mode adds to the screen. Draws nothing in the other worlds. */
+/** Adventure adds the quests. The island adds its own achievement log. A rift is told of in any world. */
 export function QuestUI() {
   const adventure = useUi((s) => s.adventure);
+  const isle = useUi((s) => s.achBoard === 'isle');
   const rift = useUi((s) => !!s.rift || s.warmHud);
-  // (Only the tracker is shown outside Adventure, and only for a rift.)
-  if (!adventure) return rift ? <QuestTracker /> : null;
+  if (!adventure) {
+    return (
+      <>
+        {rift ? <QuestTracker /> : null}
+        {isle ? <QuestLogPanel /> : null}
+      </>
+    );
+  }
   return (
     <>
       <QuestTracker />

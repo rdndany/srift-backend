@@ -1,5 +1,5 @@
 import { abilitiesOf, parseClassSave } from './abilities';
-import { AchievementBook, type AchievementView } from './achievements';
+import { AchievementBook, type AchBoard, type AchievementView } from './achievements';
 import { BAG_SLOTS, bagInventory, bagOf } from './bags';
 import { CLASSES, CLASS_LEVELS, computeStats, offhandModifier, isClassId, type ClassId, type ClassStats, type StatModifier } from './classes';
 import { Experience, xpToNext } from './experience';
@@ -105,8 +105,8 @@ export function lobbyStats(sheet: CharacterSheet): ClassStats | null {
   return { ...stats, maxHealth: Math.max(1, Math.min(200, Math.round((sheet.maxHealth + gearHp) * 100) / 100)) };
 }
 
-/** Read a saved character into a sheet. `classId` is the class the account knows (the save's own record is the fallback). */
-export function sheetOfSave(save: PlayerSave, classId: ClassId | null = null): CharacterSheet {
+/** Read a saved character into a sheet. `classId` is the class the account knows (the save's own record is the fallback). `deeds` is the wallet's achievements, which outlive any one character. `board` is which list those deeds belong to (the island save is not the realm list). */
+export function sheetOfSave(save: PlayerSave, classId: ClassId | null = null, deeds?: unknown, board: AchBoard = 'realm'): CharacterSheet {
   const xp = new Experience();
   xp.loadJSON(save.xp);
 
@@ -167,7 +167,9 @@ export function sheetOfSave(save: PlayerSave, classId: ClassId | null = null): C
   for (const c of [inv, armor, offhand, mount, outfit, companion, wings, jewelry, bagsC]) itemCount += c.totalItems();
 
   const book = new AchievementBook();
+  book.board = board;
   book.loadJSON(save.ach);
+  if (deeds && board === 'realm') book.adopt(deeds);
 
   return {
     level: cs ? cs.lvl : xp.level,

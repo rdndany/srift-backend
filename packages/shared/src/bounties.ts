@@ -12,8 +12,8 @@ export type BountyTier = 'easy' | 'medium' | 'hard';
 export const BOUNTY_TIERS: readonly BountyTier[] = ['easy', 'medium', 'hard'];
 export const BOUNTY_TIER_NAME: Record<BountyTier, string> = { easy: 'Easy', medium: 'Medium', hard: 'Hard' };
 
-/** What a bounty may count: the deeds, but not the level (a level is reached, not done today). */
-export type BountyStat = Exclude<AchStat, 'level' | 'quests'>;
+/** What a bounty may count: the realm deeds, but not the level (a level is reached, not done today) and not the island. */
+export type BountyStat = 'kills' | 'elites' | 'bosses' | 'dungeons' | 'coins' | 'minutes';
 
 export interface BountyDef {
   readonly id: string;

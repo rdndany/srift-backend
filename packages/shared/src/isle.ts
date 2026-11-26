@@ -191,6 +191,8 @@ export interface IsleSim {
   chestRolled(x: number, y: number, z: number): boolean;
   discardChest(x: number, y: number, z: number): void;
   hasFish(): boolean;
+  /** A deed the island's achievements count: a crate, a map, a ship, a black moon, or drowned coming ashore. */
+  note?(what: 'crate' | 'map' | 'ship' | 'moon' | 'tide'): void;
 }
 
 /** Days, the black moon, and the morning roll. The realm calls it only for an isle world. */
@@ -357,17 +359,21 @@ export class IsleDirector {
     if (this.today === 'crate' && this.placeCrate()) {
       this.placed = true;
       this.tell('A crate has washed onto the sand.');
+      this.sim.note?.('crate');
     } else if (this.today === 'sharks') {
       this.spawnRing();
       this.placed = true;
       this.tell('Drowned come onto the sand.');
+      this.sim.note?.('tide');
     } else if (this.today === 'map' && this.placeMap()) {
       this.placed = true;
       this.map = true;
+      this.sim.note?.('map');
     } else if (this.today === 'ghost' && time >= NIGHT_START && time <= NIGHT_END && this.placeGhost()) {
       this.placed = true;
       this.crewShip();
       this.tell('A ship stands offshore. It will be gone by morning.');
+      this.sim.note?.('ship');
     }
   }
 
@@ -376,6 +382,7 @@ export class IsleDirector {
     if (!isleBlackMoon(this.day, time) || this.tideDay === night) return;
     this.tideDay = night;
     this.tell('The moon is black. The drowned walk onto the sand.');
+    this.sim.note?.('moon');
     this.spawnBand();
   }
 

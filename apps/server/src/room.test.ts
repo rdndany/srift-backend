@@ -694,6 +694,30 @@ describe('persistence', () => {
     ).toContain(`2,${y},2,${B.PLANKS}`);
   });
 
+  it('keeps achievements on the wallet, so a new character cannot win them again', () => {
+    const store = new MemoryRoomStore();
+    const one = fresh(store);
+    const first = new Client(one);
+    const id1 = one.join(first.conn, 'ann', 'acct-1', null, 'warrior', 'wallet-w');
+    const hero = one.player(id1!)!;
+    hero.achAdd('kills', 25);
+    expect(hero.ach.has('kill-25')).toBe(true);
+    one.leave(id1!);
+    one.stop();
+
+    const two = fresh(store);
+    const second = new Client(two);
+    const id2 = two.join(second.conn, 'bob', 'acct-2', null, 'mage', 'wallet-w');
+    const next = two.player(id2!)!;
+    expect(next.ach.has('kill-25')).toBe(true);
+    expect(next.ach.get('kills')).toBe(25);
+    expect(second.messages.some((m) => m.t === 'events' && m.events.some((e) => e.t === 'achievement'))).toBe(false);
+    next.drainEvents();
+    next.achAdd('kills');
+    expect(next.drainEvents().some((e) => e.t === 'achievement')).toBe(false);
+    expect(next.ach.get('kills')).toBe(26);
+  });
+
   it('does not store guests, and a different seed is a different world', () => {
     const store = new MemoryRoomStore();
     const one = fresh(store);

@@ -285,6 +285,8 @@ export interface RouterOptions {
   saveOf?: (accountId: string) => PlayerSave | null;
   /** What a wallet's Stash holds (shared by its characters), for the lobby. */
   stashOf?: (wallet: string) => StashView;
+  /** The achievements kept on the wallet (they survive deleting a character). */
+  deedsOf?: (wallet: string) => unknown;
 }
 
 /** Returns a handler that serves `/auth/*`. It returns false when the URL is not an auth route. */
@@ -333,7 +335,8 @@ export function createAuthRouter(auth: AuthService, opts: RouterOptions) {
             /* a record from a newer game version: no brief */
           }
         }
-        json(res, 200, { sheet: save ? sheetOfSave(save, account.class) : null, stash: opts.stashOf?.(account.wallet) ?? null, briefs });
+        const deeds = opts.deedsOf?.(account.wallet) ?? null;
+        json(res, 200, { sheet: save ? sheetOfSave(save, account.class, deeds) : null, stash: opts.stashOf?.(account.wallet) ?? null, briefs });
         return true;
       }
       if (req.method !== 'POST') throw new AuthError(405, 'method not allowed');

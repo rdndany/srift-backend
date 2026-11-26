@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ACHIEVEMENTS, ACH_TIERS, AchievementBook, type AchStat } from './achievements';
+import { ACHIEVEMENTS, ACH_TIERS, AchievementBook, achievementsFor, type AchStat } from './achievements';
 import { CLASS_LEVELS } from './classes';
 
 describe('achievements', () => {
@@ -57,5 +57,58 @@ describe('achievements', () => {
 
   it('an empty book saves as nothing', () => {
     expect(Object.keys(new AchievementBook().toJSON())).toHaveLength(0);
+  });
+
+  it('keeps the island and the realm on separate boards', () => {
+    const realm = new AchievementBook();
+    const isle = new AchievementBook();
+    isle.board = 'isle';
+    expect(achievementsFor('realm').every((a) => a.board === 'realm')).toBe(true);
+    expect(achievementsFor('isle').every((a) => a.board === 'isle')).toBe(true);
+    expect(achievementsFor('isle').length).toBeGreaterThan(0);
+    expect(realm.add('kills', 100).map((a) => a.id)).toContain('kill-25');
+    expect(isle.add('kills', 100)).toEqual([]);
+    expect(isle.reach('days', 8).map((a) => a.id)).toEqual(['isle-day-2', 'isle-day-5', 'isle-day-8']);
+    expect(realm.reach('days', 32)).toEqual([]);
+    expect(isle.add('drowned').map((a) => a.id)).toEqual(['isle-drown-1']);
+    expect(isle.rewardTotal).toBe(0);
+
+    const kept = new AchievementBook();
+    kept.board = 'isle';
+    kept.loadJSON({ s: { days: 5, kills: 500 }, d: ['lvl-5', 'isle-day-2', 'nope'] });
+    expect(kept.has('isle-day-2')).toBe(true);
+    expect(kept.has('isle-day-5')).toBe(true);
+    expect(kept.has('lvl-5')).toBe(false);
+    expect(kept.has('kill-25')).toBe(false);
+
+    const realmSave = new AchievementBook();
+    realmSave.loadJSON({ s: { days: 32, moons: 4 }, d: ['isle-moon-1', 'lvl-5'] });
+    expect(realmSave.has('isle-moon-1')).toBe(false);
+    expect(realmSave.has('lvl-5')).toBe(true);
+    expect(realmSave.has('isle-day-32')).toBe(false);
+  });
+
+  it('keeps a wallet\'s deeds on the next character, and does not award them again', () => {
+    const first = new AchievementBook();
+    first.add('kills', 25);
+    first.reach('level', 10);
+    const next = new AchievementBook();
+    next.adopt(first.toJSON());
+    expect(next.has('kill-25')).toBe(true);
+    expect(next.has('lvl-5')).toBe(true);
+    expect(next.has('lvl-10')).toBe(true);
+    expect(next.add('kills')).toEqual([]);
+    expect(next.get('kills')).toBe(26);
+    const behind = new AchievementBook();
+    behind.add('kills', 10);
+    behind.adopt(next.toJSON());
+    expect(behind.get('kills')).toBe(26);
+    expect(behind.has('kill-25')).toBe(true);
+    const isle = new AchievementBook();
+    isle.board = 'isle';
+    isle.adopt(first.toJSON());
+    expect(isle.has('kill-25')).toBe(false);
+    expect(isle.has('lvl-5')).toBe(false);
+    expect(isle.get('kills')).toBe(0);
   });
 });

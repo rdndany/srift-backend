@@ -2,6 +2,7 @@ import {
   ATTACK_ANIM,
   BOSS_ANIM,
   BASH_ANIM,
+  AchievementBook,
   HeadlessWorld,
   Player,
   Realm,
@@ -862,7 +863,28 @@ export class GameRoom {
     for (const m of this.members.values()) attempt(`player ${m.name}`, () => this.savePlayer(m));
   }
 
+  /** The wallet's achievements. A deleted character does not take them with it. */
+  private achKey(wallet: string): string {
+    return `ach:${wallet}`;
+  }
+
+  /** The deeds this wallet has already won (null when it has none). */
+  walletDeeds(wallet: string): unknown {
+    return this.opts.store?.getJson(this.achKey(wallet)) ?? null;
+  }
+
+  /**
+   * The wallet's record and this character's record become one: the higher counts, and every deed either has won.
+   * Written back at once, so a second character of the wallet cannot win the same deed.
+   */
+  private keepWalletAch(player: Player, wallet: string | null): void {
+    if (!wallet || !this.opts.store || player.ach.board !== 'realm') return;
+    player.ach.adopt(this.opts.store.getJson(this.achKey(wallet)));
+    this.opts.store.setJson(this.achKey(wallet), player.ach.toJSON());
+  }
+
   private savePlayer(m: Member): void {
+    this.keepWalletAch(m.player, m.wallet);
     if (m.key && this.opts.store) this.opts.store.setJson(`player:${m.key}`, m.player.savePlayer());
   }
 
@@ -901,6 +923,8 @@ export class GameRoom {
     if (stashOwner) this.realm.stashes.load(stashOwner, this.opts.store!.getJson(`stash:${stashOwner}`));
     const saved = key ? parsePlayerSave(this.opts.store!.getJson(`player:${key}`)) : null;
     if (saved) player.loadPlayer(saved);
+    // After the character's own save, so a brand-new character still inherits what the wallet already won.
+    this.keepWalletAch(player, stashOwner);
     // Creative mode is a cheat: a character saved in it (an admin who logged out with admin mode on) comes back in the server's own mode.
     const startMode = this.opts.mode ?? 'survival';
     if (!this.opts.cheats && player.mode !== startMode) player.setMode(startMode);
@@ -923,6 +947,7 @@ export class GameRoom {
     this.presence(m, true);
     player.drainEvents();
     player.syncQuests(); // the log was among the events just thrown away
+    player.syncAch(); // the wallet's deeds, including those this character's own save did not have
     this.sendState(m);
     return id;
   }
@@ -2354,6 +2379,13 @@ export class GameRoom {
       if (e.t !== 'achievement' && e.t !== 'clear') continue;
       // Standing near a boss while others kill it earns nothing: only a player who landed a hit lately is paid for a clear.
       if (e.t === 'clear' && !engaged()) continue;
+      // The wallet already won this deed (this character, or one that was deleted). It is not paid again.
+      if (e.t === 'achievement' && m.wallet) {
+        const prior = new AchievementBook();
+        prior.adopt(this.walletDeeds(m.wallet));
+        this.keepWalletAch(m.player, m.wallet);
+        if (prior.has(e.id)) continue;
+      }
       const pay = e.t === 'achievement' ? this.opts.onAchievement : this.opts.onClear;
       if (!pay) continue;
       let paid = 0;

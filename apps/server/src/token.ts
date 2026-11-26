@@ -305,7 +305,7 @@ export class TokenService {
     if (!this.live) return 0;
     try {
       const a = ACHIEVEMENT_BY_ID.get(achievementId);
-      if (!a) return 0;
+      if (!a || a.board !== 'realm') return 0;
       const amount = ACH_TIERS[a.tier].reward;
       if (!this.roomFor(wallet, amount)) return 0;
       return this.repo.insertReward({ wallet, accountId, ref: achievementId, amount, now: this.now() }) ? amount : 0;

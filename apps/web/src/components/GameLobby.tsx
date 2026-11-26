@@ -614,7 +614,7 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
   }, [hasCharacter, characterId, way, sheetGen]);
   const sheetWorld = clash ?? latest;
   const accountClass = account?.class ?? null;
-  const localSheet = useMemo(() => (sheetWorld ? sheetOfSave(sheetWorld.player, island ? null : accountClass) : null), [sheetWorld, accountClass, island]);
+  const localSheet = useMemo(() => (sheetWorld ? sheetOfSave(sheetWorld.player, island ? null : accountClass, undefined, island ? 'isle' : 'realm') : null), [sheetWorld, accountClass, island]);
   /** What is known of the character from its saved worlds (a guest keeps none); null: nothing saved yet. */
   const savedSheet: SheetData | null | undefined = way === 'multi' ? (who === 'guest' ? null : realmSheet) : worlds === null ? undefined : localSheet;
   /** A character that has never been played carries what its class starts a survival world with: shown, so that the bags are seen before PLAY. */
@@ -1206,7 +1206,7 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
         <div className="gp-spacer">{way === 'multi' && signedIn && account && <RealmChat hero={account.id} />}</div>
 
         {/* ---------------------------------------------------- about the character (right) */}
-        <aside className="gp-hero" id="gp-hero" ref={heroRef} style={{ '--c': viewDef?.color ?? '#8a5cf5' } as CSSProperties}>
+        <aside className={`gp-hero${island ? ' is-isle' : ''}`} id="gp-hero" ref={heroRef} style={{ '--c': viewDef?.color ?? '#8a5cf5' } as CSSProperties}>
           {showFigure && (
             <>
               {creating ? (
@@ -1216,26 +1216,39 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
                 </>
               ) : (
                 <>
-                  <h1 id="gp-name">
-                    <span id="char-name-fixed">{shownName}</span>
-                  </h1>
-                  <p className="gp-sub">
-                    {shownDef && <ItemSprite id={shownDef.startingWeapon} size={22} />}
-                    <span id="char-class-fixed" data-class={shownClass ?? ''}>
-                      {shownDef ? shownDef.name : island ? `Day ${isleDay ?? 1}` : 'None (before classes)'}
-                    </span>
-                    <em>{island ? 'Island' : who === 'guest' ? 'Guest' : 'Wallet'}</em>
-                    {sheet && (
-                      <span className="gp-coins" id="char-coins" data-coins={sheet.coins} title={CURRENCY.name}>
-                        <CoinIcon size={20} />
-                        <b>{formatCoins(sheet.coins)}</b>
-                      </span>
-                    )}
-                  </p>
+                  {island ? (
+                    <div className="gp-isle-top">
+                      <h1 id="gp-name">
+                        <span id="char-name-fixed">{shownName}</span>
+                      </h1>
+                      <em className="gp-isle-tag">Island</em>
+                    </div>
+                  ) : (
+                    <>
+                      <h1 id="gp-name">
+                        <span id="char-name-fixed">{shownName}</span>
+                      </h1>
+                      <p className="gp-sub">
+                        {shownDef && <ItemSprite id={shownDef.startingWeapon} size={22} />}
+                        <span id="char-class-fixed" data-class={shownClass ?? ''}>
+                          {shownDef ? shownDef.name : 'None (before classes)'}
+                        </span>
+                        <em>{who === 'guest' ? 'Guest' : 'Wallet'}</em>
+                        {sheet && (
+                          <span className="gp-coins" id="char-coins" data-coins={sheet.coins} title={CURRENCY.name}>
+                            <CoinIcon size={20} />
+                            <b>{formatCoins(sheet.coins)}</b>
+                          </span>
+                        )}
+                      </p>
+                    </>
+                  )}
                   <LobbyDesk active={way === 'multi' && who === 'wallet' && signedIn && !creating} heroId={account?.id ?? null} reload={() => setSheetGen((n) => n + 1)}>
                     {(hand) => (
                       <CharacterSheet
                         sheet={sheet}
+                        board={island ? 'isle' : 'realm'}
+                        day={island ? (isleDay ?? 1) : undefined}
                         stash={realmStash}
                         showStash={way === 'multi' && who === 'wallet'}
                         briefs={briefs}
@@ -1387,8 +1400,8 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
               {who === 'wallet' && creating && (
                 <p className="lb-note warn" id="permanent-note">
                   {armed
-                    ? `Last chance: "${cleaned}" the ${def?.name} can never be changed, renamed or given another class. The only way to start over is to delete the character, which erases all its progress.`
-                    : 'A wallet character is permanent: its name, look and class cannot be edited later. You can only delete it, and that erases all its progress.'}
+                    ? `Last chance: "${cleaned}" the ${def?.name} can never be changed, renamed or given another class. Deleting the character erases its progress. Achievements stay on the wallet, and a new character cannot win them again.`
+                    : 'A wallet character is permanent: its name, look and class cannot be edited later. Deleting it erases its progress. Achievements stay on the wallet, and a new character cannot win them again.'}
                 </p>
               )}
               {error && creating && (
@@ -1577,7 +1590,7 @@ export function GameLobby({ onEnter }: { onEnter: (target: PlayTarget) => void }
                 </small>
               </div>
             </div>
-            <p>This erases this character for good, with all its progress: the realm progress, its cloud worlds, and every world it saved on this device. Your other characters are not touched. This cannot be undone.</p>
+            <p>This erases this character for good, with its progress: the realm progress, its cloud worlds, and every world it saved on this device. Achievements stay on the wallet, so a new character already has them and cannot win them again. Your other characters are not touched. This cannot be undone.</p>
             <label htmlFor="delete-confirm">
               Type <b>{account.displayName}</b> to confirm
             </label>

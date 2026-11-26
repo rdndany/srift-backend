@@ -833,7 +833,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
       // The windows of the store's own flags, in the games that have them (nothing else about the game changes: only the flags).
       const s = useUi.getState();
       document.documentElement.dataset.uiWarm = '1';
-      useUi.setState({ warmMenu: null, questLogOpen: s.adventure, codexOpen: !!s.codex, socialOpen: !!remote, partyOpen: !!remote && s.adventure });
+      useUi.setState({ warmMenu: null, questLogOpen: s.adventure || s.achBoard === 'isle', codexOpen: !!s.codex, socialOpen: !!remote, partyOpen: !!remote && s.adventure });
       return;
     }
     const tabs = ['inventory', 'attributes', 'crafting', 'spells'] as const;
@@ -1070,6 +1070,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
 
   useUi.setState({
     adventure: KIND === 'adventure',
+    achBoard: KIND === 'isle' ? 'isle' : 'realm',
     map: mapData,
     mapUp: false,
     questLogOpen: false,
@@ -2455,7 +2456,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     atlas.dispose();
     postfx.dispose();
     renderer.dispose();
-    useUi.setState({ api: null, screen: 'none', adventure: false, codex: null, codexOpen: false, beyondNotes: [], questLogOpen: false, partyOpen: false, socialOpen: false, social: null, inspect: null, target: null, mobTarget: null, playerMenu: null, voiceLive: false, voiceOn: false, voiceMuted: [], signEdit: null, trade: null, tradeAsk: null, duelAsk: null, duelCount: null, dueling: false, invTab: 'inventory', mount: { mount: 0, pick: 0, cd: [0, 0] }, cls: null, party: [], partyInvite: null, dialogNpc: null, shopOpen: false, auction: null, stash: null, zone: null, questNotes: [], map: null, mapUp: false, poison: 0, foodSick: 0 });
+    useUi.setState({ api: null, screen: 'none', adventure: false, achBoard: 'realm', codex: null, codexOpen: false, beyondNotes: [], questLogOpen: false, partyOpen: false, socialOpen: false, social: null, inspect: null, target: null, mobTarget: null, playerMenu: null, voiceLive: false, voiceOn: false, voiceMuted: [], signEdit: null, trade: null, tradeAsk: null, duelAsk: null, duelCount: null, dueling: false, invTab: 'inventory', mount: { mount: 0, pick: 0, cd: [0, 0] }, cls: null, party: [], partyInvite: null, dialogNpc: null, shopOpen: false, auction: null, stash: null, zone: null, questNotes: [], map: null, mapUp: false, poison: 0, foodSick: 0 });
     mapData.dispose();
     mapSheet.dispose();
     useUi.getState().quests.loadJSON(null);

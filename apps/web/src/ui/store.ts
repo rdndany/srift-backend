@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { QuestLog, type MobKind, type BountyView, type BossView, type RiftView, type DungeonView, type AttrKey, type AuctionCommand, type AuctionView, type StashCommand, type StashView, type ClassView, type Container, type CreativeAmount, type GearRoll, type GearSpec, type ClassId, type StatusView, type MountView, type InspectView, type SocialAction, type SocialView, type DuelAct, type TradeAct, type TradeView, type Menu, type MenuKind, type PartyAction, type PartyMemberView, type QuestLogJSON, type RecipeBook } from '@solrift/shared';
+import { QuestLog, type AchBoard, type MobKind, type BountyView, type BossView, type RiftView, type DungeonView, type AttrKey, type AuctionCommand, type AuctionView, type StashCommand, type StashView, type ClassView, type Container, type CreativeAmount, type GearRoll, type GearSpec, type ClassId, type StatusView, type MountView, type InspectView, type SocialAction, type SocialView, type DuelAct, type TradeAct, type TradeView, type Menu, type MenuKind, type PartyAction, type PartyMemberView, type QuestLogJSON, type RecipeBook } from '@solrift/shared';
 import type { LandClaimView, LandDetail, LandPreview, LandPublicConfig, Perms } from '@solrift/shared';
 import type { ItemIcons } from '../game/icons';
 import type { MapData } from '../game/mapData';
@@ -271,6 +271,8 @@ export interface UiState {
   recipeToast: { icons: number[]; stamp: number } | null;
   /** Adventure mode: the quest log (a copy of the one the session keeps), a counter for re-reads, and what is on screen. */
   adventure: boolean;
+  /** Which achievement list the quest log shows. The island is its own list. */
+  achBoard: AchBoard;
   quests: QuestLog;
   questsVersion: number;
   dialogNpc: string | null;
@@ -395,6 +397,7 @@ export const useUi = create<UiState>()(() => ({
   burning: false,
   recipeToast: null,
   adventure: false,
+  achBoard: 'realm',
   quests: new QuestLog(),
   questsVersion: 0,
   dialogNpc: null,

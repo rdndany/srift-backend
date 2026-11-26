@@ -1749,6 +1749,10 @@ export class Realm {
   advanceClock(dt: number, speed = 1): void {
     this.time = (this.time + (dt * speed) / DAY_LENGTH_SECONDS) % 1;
     this.isle?.onClock(this.time);
+    const day = this.isle?.day ?? 0;
+    if (day > 0) {
+      for (const p of this.players) if (p.ach.board === 'isle' && p.ach.get('days') < day) p.achReach('days', day);
+    }
   }
 
   /** Day number and the latest isle notice. Null unless this world is an isle. */
@@ -1814,6 +1818,10 @@ export class Realm {
       chestRolled: (x, y, z) => this.blockEntities.wasRolled(x, y, z),
       discardChest: (x, y, z) => this.blockEntities.discardChest(x, y, z),
       hasFish: () => this.players.some((p) => fish.some((id) => p.inventory.countOf(id) > 0)),
+      note: (what) => {
+        const stat = what === 'crate' ? 'crates' : what === 'map' ? 'maps' : what === 'ship' ? 'ships' : what === 'moon' ? 'moons' : 'tides';
+        for (const p of this.players) p.achAdd(stat);
+      },
     };
   }
 

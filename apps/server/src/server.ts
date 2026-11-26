@@ -125,6 +125,7 @@ export function createGameServer(opts: GameServerOptions): GameServer {
     isPlaying: (accountId) => room.hasAccount(accountId),
     saveOf: (accountId) => room.characterSave(accountId),
     stashOf: (wallet) => room.stashOf(wallet),
+    deedsOf: (wallet) => room.walletDeeds(wallet),
   });
 
   const cloud = new CloudService(repo.cloud, opts.cloud);

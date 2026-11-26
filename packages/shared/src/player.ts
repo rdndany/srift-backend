@@ -451,6 +451,7 @@ export class Player implements EffectOwner {
     const spawn = this.mode === 'survival' ? realm.nextStart() : realm.nextSpawn();
     this.body = createBody(spawn.x, spawn.y, spawn.z);
     this.quests = realm.generator.kind === 'adventure' ? new QuestLog() : null;
+    this.ach.board = realm.generator.kind === 'isle' ? 'isle' : 'realm';
     this.syncQuests();
     this.rider = { body: this.body, input: { forward: 0, fx: 0, fz: -1 } };
     this.cls = opts.classId ? new ClassState(opts.classId) : null;
@@ -2621,6 +2622,7 @@ export class Player implements EffectOwner {
       this.drops.spawn(c.stack, b.x, sy, b.z, (dx * 0.92) / T, (ty - sy) / T + 10 * T, (dz * 0.92) / T, 0.45);
       this.realm.awardXp(catchXp(this.rand), body.x, body.y + 0.5, body.z);
       this.fishEvent('catch', b.x, b.y, b.z);
+      if (c.kind === 'fish' && this.ach.board === 'isle') this.achAdd('fish');
       wear = ROD_WEAR.catch;
     } else if (b.state === 'hooked' && b.hook && !b.hook.dead) {
       pullMob(b.hook, body.x, body.y, body.z);
@@ -4496,6 +4498,7 @@ export class Player implements EffectOwner {
   achAdd(stat: AchStat, n = 1): void {
     if (this.spectating) return;
     this.achWon(this.ach.add(stat, n));
+    if (this.ach.board === 'isle') return;
     this.bountyDone(this.bounty.add(dayOf(this.realm.clock()), stat, n));
     this.bountyDirty = true;
   }
@@ -4526,8 +4529,21 @@ export class Player implements EffectOwner {
     this.emit({ t: 'ach', view: this.ach.view() });
   }
 
+  /** A count that only goes up (the day on the island). The log is told even when no deed was won, so the bar moves. */
+  achReach(stat: AchStat, value: number): void {
+    if (this.spectating) return;
+    const before = this.ach.get(stat);
+    const won = this.ach.reach(stat, value);
+    if (won.length > 0) this.achWon(won);
+    else if (this.ach.get(stat) !== before) this.syncAch();
+  }
+
   /** A monster was slain near the player (see Realm's `killed` hook). */
   achKill(mob: { kind: string; elite?: boolean; def: { hostile: boolean; boss?: boolean } }): void {
+    if (this.ach.board === 'isle') {
+      if (mob.kind === 'drowned') this.achAdd('drowned');
+      return;
+    }
     if (!mob.def.hostile && !mob.def.boss) return;
     this.achAdd('kills');
     if (mob.elite) this.achAdd('elites');
@@ -4538,9 +4554,9 @@ export class Player implements EffectOwner {
     }
   }
 
-  /** Level and playing time, once a second. */
+  /** Level and playing time, once a second. The island has its own deeds, counted where they happen. */
   private updateAch(dt: number): void {
-    if (this.spectating || this.vitals.dead) return;
+    if (this.spectating || this.vitals.dead || this.ach.board === 'isle') return;
     this.achSeconds += dt;
     if (this.achSeconds >= 60) {
       const m = Math.floor(this.achSeconds / 60);

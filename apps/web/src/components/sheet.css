@@ -103,6 +103,17 @@
   color: #fff;
   text-shadow: 0 2px 0 #000;
 }
+.cs-head-isle {
+  align-items: center;
+}
+.cs-head-isle .cs-bar {
+  grid-template-columns: 58px minmax(0, 1fr) 52px;
+}
+.cs-day {
+  border-color: rgba(255, 174, 61, 0.75);
+  background: radial-gradient(circle at 50% 28%, rgba(255, 150, 48, 0.42), rgba(8, 5, 16, 0.9));
+  box-shadow: 0 0 18px rgba(255, 120, 40, 0.32);
+}
 .cs-bars {
   flex: 1;
   min-width: 0;

@@ -261,8 +261,11 @@ function GameplayTab({ s }: { s: Settings }) {
 
 function ControlsTab() {
   const s = useSettings();
+  const adventure = useUi((st) => st.adventure);
+  const isle = useUi((st) => st.achBoard === 'isle');
   const talk = voiceKeyLabel(s.voiceKey);
-  const rows: readonly (readonly [readonly string[], string])[] = [...CONTROLS, [[talk], s.pushToTalk ? 'Push to talk (online)' : 'Microphone (online)']];
+  const log: readonly [readonly string[], string] | null = adventure ? [['L'], 'Quest log'] : isle ? [['L'], 'Achievements'] : null;
+  const rows: readonly (readonly [readonly string[], string])[] = [...CONTROLS, ...(log ? [log] : []), [[talk], s.pushToTalk ? 'Push to talk (online)' : 'Microphone (online)']];
   return (
     <section className="ps-group">
       <dl className="ps-keys">

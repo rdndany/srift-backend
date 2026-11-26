@@ -1,6 +1,6 @@
 'use client';
 
-import { ACHIEVEMENTS, ACH_CATEGORIES, ACH_TIERS, ACH_TIER_ORDER, B, GAME_VERSION, type AchCategory } from '@solrift/shared';
+import { ACH_CATEGORIES, ACH_TIERS, ACH_TIER_ORDER, B, GAME_VERSION, achievementsFor, type AchCategory } from '@solrift/shared';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { AccountPanel } from './AccountPanel';
 import { Blocks } from './BlockCube';
@@ -17,6 +17,9 @@ import './front.css';
 import './classPage.css';
 import './tokenPage.css';
 import './responsive.css';
+
+/** The token pays the multiplayer deeds. Island survival keeps its own list, and it is not paid. */
+const REALM_DEEDS = achievementsFor('realm');
 
 /** Goes to a part of the front page (its menu leads there too). */
 const toFront = (id: string | null) => {
@@ -302,26 +305,26 @@ export function TokenPage() {
             <Blocks ids={[B.GOLD_ORE, B.DIAMOND_ORE, B.EMERALD_ORE]} />
           </Reveal>
           <p className="tk-lead">
-            {ACHIEVEMENTS.length} achievements to win, from reaching level 5 to clearing the Hollow Deep twenty times. Each is won once per character, is kept with the character, pays once per wallet, and shows up in the game (open the quest log with L). Its tier decides the reward: Bronze for a first step, Mythic for a feat few will do.
+            {REALM_DEEDS.length} achievements to win, from reaching level 5 to clearing the Hollow Deep twenty times. Each is won once per character, is kept with the character, pays once per wallet, and shows up in the game (open the quest log with L). Its tier decides the reward: Bronze for a first step, Mythic for a feat few will do.
           </p>
           <div className="tk-tiers">
             {ACH_TIER_ORDER.map((t) => (
               <span key={t} className={`tk-tier ${t}`}>
                 {ACH_TIERS[t].name}
-                <small>{ACHIEVEMENTS.filter((a) => a.tier === t).length}</small>
+                <small>{REALM_DEEDS.filter((a) => a.tier === t).length}</small>
                 {live && info && <small className="tk-pays">+{info.tiers[t].toLocaleString()}</small>}
               </span>
             ))}
           </div>
           <div className="tk-achs">
-            {(Object.keys(ACH_CATEGORIES) as AchCategory[]).map((cat, i) => (
+            {(Object.keys(ACH_CATEGORIES) as AchCategory[]).filter((cat) => REALM_DEEDS.some((a) => a.category === cat)).map((cat, i) => (
               <Reveal key={cat} delay={i * 0.04} className="tk-achcat">
                 <h3>
                   {ACH_CATEGORIES[cat].name}
                   <em>{ACH_CATEGORIES[cat].blurb}</em>
                 </h3>
                 <ul>
-                  {ACHIEVEMENTS.filter((a) => a.category === cat).map((a) => (
+                  {REALM_DEEDS.filter((a) => a.category === cat).map((a) => (
                     <li key={a.id} className={a.tier}>
                       <div>
                         <b>{a.name}</b>

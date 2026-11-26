@@ -1,14 +1,22 @@
 /**
- * Achievements: a list of deeds (reach a level, slay a number of monsters, bring down a boss, clear a dungeon ...), each
- * with a goal and a tier. A character keeps a count for every kind of deed and the list of the achievements it has won; the
- * server counts, the client only shows. The tier is what a deed will pay in $SOLRIFT once the token is live (see `ACH_TIERS`):
- * until then an achievement is won, kept with the character, and shown, and nothing is paid out.
+ * Achievements: a list of deeds, each with a goal and a tier. A character keeps a count for every kind of deed and the
+ * list of the achievements it has won. The realm board is the multiplayer world (levels, Dawnwatch, the Hollow Deep); the
+ * server counts those and the tier is what a deed will pay in $SOLRIFT once the token is live (see `ACH_TIERS`). The isle
+ * board is survival on the island, kept on that world's own save. An isle deed never wins a realm achievement, and a
+ * realm deed never wins an isle one.
  */
 
-/** The things that are counted. */
-export type AchStat = 'level' | 'kills' | 'elites' | 'bosses' | 'dungeons' | 'quests' | 'coins' | 'minutes';
+/** Which list a deed belongs to. A book only awards and keeps the board it was opened for. */
+export type AchBoard = 'realm' | 'isle';
 
-export type AchCategory = 'level' | 'slayer' | 'boss' | 'dungeon' | 'quest' | 'wealth' | 'time';
+/** The things that are counted. The isle stats are only used by the island board. */
+export type AchStat =
+  | 'level' | 'kills' | 'elites' | 'bosses' | 'dungeons' | 'quests' | 'coins' | 'minutes'
+  | 'days' | 'moons' | 'crates' | 'maps' | 'ships' | 'tides' | 'drowned' | 'fish';
+
+export type AchCategory =
+  | 'level' | 'slayer' | 'boss' | 'dungeon' | 'quest' | 'wealth' | 'time'
+  | 'survive' | 'omen' | 'sea' | 'hunt' | 'living';
 
 /** How big the reward is meant to be, from a first step to a feat that few will do. */
 export type AchTier = 'bronze' | 'silver' | 'gold' | 'mythic';
@@ -36,6 +44,8 @@ export interface AchievementDef {
   readonly name: string;
   /** What to do, as a sentence. */
   readonly text: string;
+  /** Realm deeds are the multiplayer world. Isle deeds are survival on the island. */
+  readonly board: AchBoard;
   readonly category: AchCategory;
   readonly stat: AchStat;
   /** The count the stat has to reach. */
@@ -51,9 +61,14 @@ export const ACH_CATEGORIES: Record<AchCategory, { name: string; blurb: string }
   quest: { name: 'Quests', blurb: 'Help the people of Dawnwatch.' },
   wealth: { name: 'Fortune', blurb: 'Earn Auren.' },
   time: { name: 'Time', blurb: 'Stay a while in the rift.' },
+  survive: { name: 'Days', blurb: 'Stay alive on the island.' },
+  omen: { name: 'The Moon', blurb: 'Nights when the moon gives no light.' },
+  sea: { name: 'The Sea', blurb: 'What the water brings to the sand.' },
+  hunt: { name: 'The Drowned', blurb: 'What walks out of the water.' },
+  living: { name: 'The Catch', blurb: 'Food from the sea around the island.' },
 };
 
-const A = (id: string, name: string, category: AchCategory, stat: AchStat, goal: number, tier: AchTier, text: string): AchievementDef => ({ id, name, text, category, stat, goal, tier });
+const A = (id: string, name: string, category: AchCategory, stat: AchStat, goal: number, tier: AchTier, text: string, board: AchBoard = 'realm'): AchievementDef => ({ id, name, text, board, category, stat, goal, tier });
 
 export const ACHIEVEMENTS: readonly AchievementDef[] = [
   // ---- levels (the class level, or the experience level of a hero without a class) ----
@@ -100,12 +115,50 @@ export const ACHIEVEMENTS: readonly AchievementDef[] = [
   A('time-10', 'A Regular', 'time', 'minutes', 600, 'silver', 'Play for 10 hours.'),
   A('time-50', 'Dedicated', 'time', 'minutes', 3000, 'gold', 'Play for 50 hours.'),
   A('time-200', 'Citizen of the Rift', 'time', 'minutes', 12000, 'mythic', 'Play for 200 hours.'),
+
+  // ---- the island (survival). These never pay, and a realm book cannot win them. ----
+  A('isle-day-2', 'First Dawn', 'survive', 'days', 2, 'bronze', 'Live to see the second day.', 'isle'),
+  A('isle-day-5', 'Five Days', 'survive', 'days', 5, 'bronze', 'Survive 5 days on the island.', 'isle'),
+  A('isle-day-8', 'The Ship\'s Week', 'survive', 'days', 8, 'silver', 'Survive 8 days. From this day a ship can stand offshore.', 'isle'),
+  A('isle-day-16', 'A Fortnight', 'survive', 'days', 16, 'gold', 'Survive 16 days on the island.', 'isle'),
+  A('isle-day-32', 'A Month Ashore', 'survive', 'days', 32, 'mythic', 'Survive 32 days on the island.', 'isle'),
+
+  A('isle-moon-1', 'Black Moon', 'omen', 'moons', 1, 'silver', 'Endure a night when the moon is black and gives no light.', 'isle'),
+  A('isle-moon-4', 'Four Dark Nights', 'omen', 'moons', 4, 'gold', 'Endure 4 black moons.', 'isle'),
+
+  A('isle-crate-1', 'Beachcomber', 'sea', 'crates', 1, 'bronze', 'A crate washes onto the sand.', 'isle'),
+  A('isle-crate-5', 'What the Tide Brings', 'sea', 'crates', 5, 'silver', 'Five crates wash onto the sand.', 'isle'),
+
+  A('isle-map-1', 'The Chart', 'sea', 'maps', 1, 'silver', 'A map points to treasure buried under the sand, or to a wreck.', 'isle'),
+  A('isle-map-3', 'Three Charts', 'sea', 'maps', 3, 'gold', 'Three maps are given to you by the sea.', 'isle'),
+
+  A('isle-ship-1', 'Night Ship', 'sea', 'ships', 1, 'silver', 'A ship stands offshore through the night, and is gone by morning.', 'isle'),
+  A('isle-ship-3', 'Ghost Harbour', 'sea', 'ships', 3, 'gold', 'See 3 ships stand offshore.', 'isle'),
+
+  A('isle-tide-1', 'Onto the Sand', 'hunt', 'tides', 1, 'bronze', 'Drowned walk onto the sand.', 'isle'),
+  A('isle-tide-5', 'They Keep Coming', 'hunt', 'tides', 5, 'silver', 'Drowned come onto the sand 5 times.', 'isle'),
+
+  A('isle-drown-1', 'First of the Drowned', 'hunt', 'drowned', 1, 'bronze', 'Slay a drowned.', 'isle'),
+  A('isle-drown-15', 'Tidebreaker', 'hunt', 'drowned', 15, 'silver', 'Slay 15 drowned.', 'isle'),
+  A('isle-drown-60', 'Bane of the Shore', 'hunt', 'drowned', 60, 'gold', 'Slay 60 drowned.', 'isle'),
+
+  A('isle-fish-1', 'A Bite', 'living', 'fish', 1, 'bronze', 'Catch a fish.', 'isle'),
+  A('isle-fish-10', 'Fed by the Sea', 'living', 'fish', 10, 'silver', 'Catch 10 fish.', 'isle'),
+  A('isle-fish-40', 'Old Salt', 'living', 'fish', 40, 'gold', 'Catch 40 fish.', 'isle'),
 ];
+
+/** The deeds of one board. The website and the token page use the realm list. The island log uses the isle list. */
+export function achievementsFor(board: AchBoard): readonly AchievementDef[] {
+  return ACHIEVEMENTS.filter((a) => a.board === board);
+}
 
 export const ACHIEVEMENT_BY_ID: ReadonlyMap<string, AchievementDef> = new Map(ACHIEVEMENTS.map((a) => [a.id, a]));
 
 /** The stats as a record (every one, from zero). */
-const ZERO = (): Record<AchStat, number> => ({ level: 0, kills: 0, elites: 0, bosses: 0, dungeons: 0, quests: 0, coins: 0, minutes: 0 });
+const ZERO = (): Record<AchStat, number> => ({
+  level: 0, kills: 0, elites: 0, bosses: 0, dungeons: 0, quests: 0, coins: 0, minutes: 0,
+  days: 0, moons: 0, crates: 0, maps: 0, ships: 0, tides: 0, drowned: 0, fish: 0,
+});
 const STATS = Object.keys(ZERO()) as AchStat[];
 
 /** What is saved of a character's achievements: the counts and the ids won. */
@@ -123,13 +176,18 @@ export interface AchievementView {
 }
 
 /** Counts that cannot be believed from a save (a hostile one cannot hand itself every achievement by a huge number). */
-const STAT_CAP: Record<AchStat, number> = { level: 100, kills: 10_000_000, elites: 1_000_000, bosses: 1_000_000, dungeons: 1_000_000, quests: 10_000, coins: 2_000_000_000, minutes: 6_000_000 };
+const STAT_CAP: Record<AchStat, number> = {
+  level: 100, kills: 10_000_000, elites: 1_000_000, bosses: 1_000_000, dungeons: 1_000_000, quests: 10_000, coins: 2_000_000_000, minutes: 6_000_000,
+  days: 100_000, moons: 100_000, crates: 100_000, maps: 100_000, ships: 100_000, tides: 100_000, drowned: 10_000_000, fish: 10_000_000,
+};
 
 /**
  * A character's achievements: the counts of its deeds and the achievements they have won. `add` and `reach` change a count
  * and give back the achievements it just won (so the caller can tell the player).
  */
 export class AchievementBook {
+  /** Realm unless the world is the island. Set before any save is loaded. */
+  board: AchBoard = 'realm';
   private readonly stats = ZERO();
   private readonly won = new Set<string>();
 
@@ -151,7 +209,7 @@ export class AchievementBook {
     let n = 0;
     for (const id of this.won) {
       const a = ACHIEVEMENT_BY_ID.get(id);
-      if (a) n += ACH_TIERS[a.tier].reward;
+      if (a && a.board === 'realm') n += ACH_TIERS[a.tier].reward;
     }
     return n;
   }
@@ -174,7 +232,7 @@ export class AchievementBook {
   private check(stat: AchStat): AchievementDef[] {
     const out: AchievementDef[] = [];
     for (const a of ACHIEVEMENTS) {
-      if (a.stat !== stat || this.won.has(a.id) || this.stats[stat] < a.goal) continue;
+      if (a.board !== this.board || a.stat !== stat || this.won.has(a.id) || this.stats[stat] < a.goal) continue;
       this.won.add(a.id);
       out.push(a);
     }
@@ -203,9 +261,35 @@ export class AchievementBook {
         if (typeof v === 'number' && Number.isFinite(v) && v > 0) this.stats[k] = Math.min(STAT_CAP[k], Math.floor(v));
       }
     }
-    if (Array.isArray(o.d)) for (const id of o.d) if (typeof id === 'string' && ACHIEVEMENT_BY_ID.has(id)) this.won.add(id);
-    // (A new achievement added to the list is won at once by a character that has already done the deed.)
-    for (const a of ACHIEVEMENTS) if (this.stats[a.stat] >= a.goal) this.won.add(a.id);
+    if (Array.isArray(o.d)) {
+      for (const id of o.d) {
+        const a = typeof id === 'string' ? ACHIEVEMENT_BY_ID.get(id) : undefined;
+        if (a && a.board === this.board) this.won.add(a.id);
+      }
+    }
+    // (A new achievement on this board is won at once by a character that has already done the deed.)
+    for (const a of ACHIEVEMENTS) if (a.board === this.board && this.stats[a.stat] >= a.goal) this.won.add(a.id);
+  }
+
+  /**
+   * Fold in the wallet's record. The higher count of each stat is kept, and every deed either side has won stays won.
+   * A new character therefore starts where the wallet left off, and cannot win (or be paid for) the same deed again.
+   * Nothing is announced: these were already won.
+   */
+  adopt(raw: unknown): void {
+    const other = new AchievementBook();
+    other.board = this.board;
+    other.loadJSON(raw);
+    const used = new Set(ACHIEVEMENTS.filter((a) => a.board === this.board).map((a) => a.stat));
+    for (const k of STATS) {
+      if (!used.has(k)) continue;
+      if (other.stats[k] > this.stats[k]) this.stats[k] = other.stats[k];
+    }
+    for (const id of other.won) {
+      const a = ACHIEVEMENT_BY_ID.get(id);
+      if (a && a.board === this.board) this.won.add(id);
+    }
+    for (const a of ACHIEVEMENTS) if (a.board === this.board && this.stats[a.stat] >= a.goal) this.won.add(a.id);
   }
 
   /** Progress towards an achievement, 0..1. */

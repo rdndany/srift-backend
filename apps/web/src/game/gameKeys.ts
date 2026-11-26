@@ -114,7 +114,7 @@ export class KeyActions {
         return;
       }
     }
-    if (input.wasPressed('KeyL') && useUi.getState().adventure) {
+    if (input.wasPressed('KeyL') && (useUi.getState().adventure || useUi.getState().achBoard === 'isle')) {
       toggleQuestLog(true);
       return;
     }
