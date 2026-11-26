@@ -123,17 +123,17 @@ export class WaterVision {
     const length = s.clear ? 26 : s.murky ? 12 : 18;
     const down = Math.exp(-Math.max(0, s.depth) / length);
     const deep = 1 - down;
-    const roof = s.open ? 1 : 0.55;
-    const dim = (0.32 + 0.5 * down) * roof * (s.clear ? 1 : 0.75 + 0.25 * adjusted);
+    const dim = (0.32 + 0.5 * down) * (s.clear ? 1 : 0.75 + 0.25 * adjusted);
     const fog: [number, number, number] = [
       Math.max(0.02, s.color[0] / 255 * dim),
       Math.max(0.06, s.color[1] / 255 * dim),
       Math.max(0.14, s.color[2] / 255 * dim),
     ];
-    const sky = s.open ? down : Math.min(0.14, 0.08 * down);
+    // A block overhead does not push the sky away. Depth does that, one block at a time.
+    const sky = down;
     const light = s.clear
-      ? Math.max(0.4, 0.22 + 0.6 * down * roof)
-      : Math.max(0.16, (0.15 + 0.7 * down) * roof * (0.65 + 0.35 * adjusted));
+      ? Math.max(0.4, 0.22 + 0.6 * down)
+      : Math.max(0.16, (0.15 + 0.7 * down) * (0.65 + 0.35 * adjusted));
     return {
       blend: this.blend,
       adjusted,

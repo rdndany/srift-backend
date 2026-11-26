@@ -32,6 +32,7 @@ import {
   MOUNTS,
   IS_LIQUID,
   IS_SOLID,
+  cellCountsAsWater,
   isWaterBlock,
   fluidSurface,
   Biome,
@@ -162,7 +163,15 @@ function waterColumn(world: { getBlock(x: number, y: number, z: number): number 
       iy++;
       continue;
     }
-    if (IS_SOLID[id] === 1) return { depth: Math.max(0, iy - y), surface: iy, open: false };
+    if (IS_SOLID[id] === 1) {
+      // A plank in the sea is not the surface. If water sits on it, keep going so the colour stays.
+      let above = iy + 1;
+      if (above < WORLD_HEIGHT && through(world.getBlock(ix, above, iz))) {
+        iy = above;
+        continue;
+      }
+      return { depth: Math.max(0, iy - y), surface: iy, open: false };
+    }
     // Air. A stone roof within a few blocks means the sun does not reach this water.
     let gap = 0;
     for (let k = 0; k < 8 && iy + k < WORLD_HEIGHT; k++) {
@@ -1410,7 +1419,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     const x = Math.floor(camera.position.x);
     const y = Math.floor(camera.position.y);
     const z = Math.floor(camera.position.z);
-    if (isWaterBlock(world.getBlock(x, y, z))) return true;
+    if (cellCountsAsWater(world, x, y, z)) return true;
     const below = world.getBlock(x, y - 1, z);
     if (isWaterBlock(below) && camera.position.y <= y - 1 + fluidSurface(below) / 16 + 0.45) return true;
     if (body.inWater !== true) return false;
@@ -1671,13 +1680,14 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
         // more of it near the surface, so looking up finds the sun, the moon and the stars through the water.
         seaFog.setRGB(waterLook.fog[0], waterLook.fog[1], waterLook.fog[2], THREE.SRGBColorSpace);
         const outdoors = Math.max(sky.brightness, sky.day);
-        const openDay = sky.day * (1 - weather.rain * 0.45) * (waterHere.open ? 1 : 0.5);
+        const openDay = sky.day * (1 - weather.rain * 0.45);
         seaFog.lerp(seaSun, openDay * 0.2 * (0.35 + 0.65 * waterLook.sky));
         seaFog.lerp(sky.color, (1 - k) * sky.day);
         // Same light as outside: bright at noon, dim at night, and a little darker with every block down.
+        // A block overhead does not recolour the water.
         const sunk = waterLook.light;
-        seaFog.multiplyScalar(((waterHere.open ? 0.34 : 0.2) + 0.8 * outdoors) * (0.42 + 0.58 * sunk));
-        const skyOpen = waterHere.open ? waterLook.sky : Math.min(0.16, waterLook.sky);
+        seaFog.multiplyScalar((0.34 + 0.8 * outdoors) * (0.42 + 0.58 * sunk));
+        const skyOpen = waterLook.sky;
         seaZenith.copy(sky.zenith).lerp(seaFog, 1 - skyOpen);
         world.setFog(seaFog, near, far, seaZenith);
         distanceFog.color.copy(seaFog);

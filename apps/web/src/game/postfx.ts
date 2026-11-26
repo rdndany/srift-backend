@@ -220,14 +220,17 @@ class SunRays extends GodRaysEffect {
   }
 }
 
-/** The ray picture, put on after the water warp. Blocks keep their depth, so the rays stop on them. Above water this adds nothing. */
+/** The ray picture, put on after the water warp. Blocks in front of the disc hide it. Above water this adds nothing. */
 const SEA_RAYS = /* glsl */ `
 uniform float uAmount;
+uniform float uOcclude;
 uniform sampler2D uMap;
 
 void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth, out vec4 outputColor) {
-  // The sky and the clouds leave the depth clear. A block is closer, and it hides the sun and the rays.
-  if (uAmount < 0.001 || depth < 0.999) {
+  // Depth packs the whole view into 0..1, so a far block is almost 1, the same as the empty sky.
+  // Compare real distance instead: the sky is the far plane, and anything nearer than the disc is a block.
+  float dist = -getViewZ(depth);
+  if (uAmount < 0.001 || dist < uOcclude) {
     outputColor = vec4(0.0);
     return;
   }
@@ -243,13 +246,15 @@ class WaterShafts extends Effect {
       // The depth value is still passed in, because an earlier effect in the pass already asks for it.
       uniforms: new Map<string, THREE.Uniform>([
         ['uAmount', new THREE.Uniform(0)],
+        ['uOcclude', new THREE.Uniform(280)],
         ['uMap', new THREE.Uniform(map)],
       ]),
     });
   }
 
-  setAmount(amount: number): void {
+  setAmount(amount: number, occlude = 280): void {
     this.uniforms.get('uAmount')!.value = amount;
+    this.uniforms.get('uOcclude')!.value = occlude;
   }
 }
 
@@ -505,7 +510,8 @@ export class PostFx {
       const useMoon = night > frame.day;
       const source = useMoon ? this.moon : this.sun;
       if (this.rays!.lightSource !== source) this.rays!.lightSource = source;
-      source.getWorldPosition(this.tmpA).sub(this.camera.position).normalize();
+      const lightDist = source.getWorldPosition(this.tmpA).sub(this.camera.position).length();
+      this.tmpA.normalize();
       this.camera.getWorldDirection(this.tmpB);
       const facing = sstep(0.15, 0.7, this.tmpA.dot(this.tmpB));
       const through = frame.underwater ? (frame.overhead ?? 1) : 1;
@@ -532,7 +538,7 @@ export class PostFx {
         this.showRays(frame.warm === true || strength > 0.02);
         shaftAmt = 0;
       }
-      this.shafts!.setAmount(shaftAmt);
+      this.shafts!.setAmount(shaftAmt, Math.max(1, lightDist - 6));
     }
 
     if (!f.rays) {

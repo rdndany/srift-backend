@@ -1,6 +1,7 @@
 import { B, IS_LIQUID, IS_PARTIAL, IS_SOLID, ladderInfo } from './blocks';
 import { collisionBoxes, isTallShape, seatDrop, seatedBox } from './shapes';
 import { FLUID_KIND, FLUID_WATER, fluidCurrent, isLavaId } from './fluids';
+import { isSeaPlant } from './plants';
 
 export interface BlockReader {
   getBlock(x: number, y: number, z: number): number;
@@ -333,13 +334,14 @@ export function stepPlayer(world: BlockReader, b: Body, input: MoveInput, dt: nu
   const headBlock = world.getBlock(Math.floor(b.x), Math.floor(b.y + 0.9), Math.floor(b.z));
   b.inLava = isLavaId(feetBlock) || isLavaId(hipsBlock) || isLavaId(headBlock);
   b.inWeb = feetBlock === B.COBWEB || hipsBlock === B.COBWEB || headBlock === B.COBWEB;
-  b.inWater = IS_LIQUID[feetBlock] === 1 || b.inLava;
+  b.inWater = IS_LIQUID[feetBlock] === 1 || b.inLava || cellCountsAsWater(world, Math.floor(b.x), Math.floor(b.y + 0.4), Math.floor(b.z));
   // Only the cell the feet are in counts, so climbing ends as the feet reach the top of the ladder.
   const ladderY = Math.floor(b.y + 0.05);
   b.onLadder = ladderInfo(world.getBlock(Math.floor(b.x), ladderY, Math.floor(b.z))) !== null;
   const eye = b.height === undefined ? PLAYER_EYE : b.height * 0.9;
-  const eyeBlock = world.getBlock(Math.floor(b.x), Math.floor(b.y + eye), Math.floor(b.z));
-  b.eyeInWater = IS_LIQUID[eyeBlock] === 1;
+  const eyeY = Math.floor(b.y + eye);
+  const eyeBlock = world.getBlock(Math.floor(b.x), eyeY, Math.floor(b.z));
+  b.eyeInWater = IS_LIQUID[eyeBlock] === 1 || cellCountsAsWater(world, Math.floor(b.x), eyeY, Math.floor(b.z));
   b.eyeInLava = isLavaId(eyeBlock);
 
   const speed = (input.speed ?? (input.sneak ? SNEAK : input.sprint ? SPRINT : WALK)) * (input.speedMul ?? 1);
@@ -612,4 +614,23 @@ function shove(world: BlockReader, b: Body, dx: number, dz: number, push: number
 
 export function isWaterBlock(id: number): boolean {
   return FLUID_KIND[id] === FLUID_WATER;
+}
+
+/**
+ * Water, or kelp, seagrass or a coral fan that the sea still covers. The plant takes the cell, so without
+ * this a swimmer inside a stalk leaves the water: the sky turns to air and the swim stops.
+ */
+export function cellCountsAsWater(world: BlockReader, x: number, y: number, z: number): boolean {
+  const id = world.getBlock(x, y, z);
+  if (FLUID_KIND[id] === FLUID_WATER) return true;
+  if (!isSeaPlant(id)) return false;
+  for (let i = 1; i <= 16; i++) {
+    const above = world.getBlock(x, y + i, z);
+    if (FLUID_KIND[above] === FLUID_WATER) return true;
+    if (!isSeaPlant(above)) break;
+  }
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+    if (FLUID_KIND[world.getBlock(x + dx, y, z + dz)] === FLUID_WATER) return true;
+  }
+  return false;
 }

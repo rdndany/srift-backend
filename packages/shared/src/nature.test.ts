@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   B,
+  BB,
   BLOCKS,
   Biome,
   CHUNK_BYTES,
@@ -15,6 +16,7 @@ import {
   WorldGenerator,
   blockIndex,
   blockDrops,
+  cellCountsAsWater,
   createBody,
   decodeChunk,
   makeStack,
@@ -819,5 +821,26 @@ describe('rails', () => {
     world.setBlock(CX + 2, FLOOR + 5, CZ, B.STONE);
     expect(s.useHeldOn({ x: CX + 2, y: FLOOR + 5, z: CZ, id: B.STONE, nx: -1, ny: 0, nz: 0 })).toBe(false);
     expect(s.inventory.countOf(B.RAIL_X)).toBe(4);
+  });
+});
+
+describe('kelp', () => {
+  const idleInput: MoveInput = { forward: 0, strafe: 0, jump: false, sprint: false, sneak: false, fly: false, flyDown: false, yaw: 0 };
+
+  it('keeps a swimmer in the sea while their eyes are inside a stalk', () => {
+    const sea: BlockReader = { getBlock: (_x, y) => (y < 4 ? B.SAND : y < 8 ? BB.kelp : y < 12 ? B.WATER : B.AIR) };
+    const b = createBody(0.5, 5, 0.5);
+    stepPlayer(sea, b, idleInput, 1 / 60);
+    expect(b.inWater).toBe(true);
+    expect(b.eyeInWater).toBe(true);
+    expect(cellCountsAsWater(sea, 0, 6, 0)).toBe(true);
+  });
+
+  it('does not take a dry stalk for water', () => {
+    const dry: BlockReader = { getBlock: (_x, y) => (y === 5 ? BB.kelp : B.AIR) };
+    const b = createBody(0.5, 5, 0.5);
+    stepPlayer(dry, b, idleInput, 1 / 60);
+    expect(b.eyeInWater).toBe(false);
+    expect(cellCountsAsWater(dry, 0, 5, 0)).toBe(false);
   });
 });

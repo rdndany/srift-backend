@@ -305,6 +305,10 @@ export class Sky {
           fog: false,
           depthWrite: false,
           depthTest: true,
+          // A far block and the disc land on almost the same depth. Bias the disc back so the block wins.
+          polygonOffset: true,
+          polygonOffsetFactor: 4,
+          polygonOffsetUnits: 4,
           transparent: true,
           blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
         }),
