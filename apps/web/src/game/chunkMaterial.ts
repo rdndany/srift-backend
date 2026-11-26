@@ -478,12 +478,9 @@ ${HERO_TILES.map((n) => {
   vec3 V = normalize(toCam);
 
   if (water) {
-    // From the beach the sea is edge-on. The face normal, taken from screen-space derivatives, then
-    // collapses and a whole triangle flips between "top" and "side", which is the flickering polygons.
-    // A level surface barely changes in Y from pixel to pixel; a waterfall side does. Use that.
-    float yGrad = abs(dFdx(vWorld.y)) + abs(dFdy(vWorld.y));
-    float xzGrad = length(dFdx(vWorld).xz) + length(dFdy(vWorld).xz);
-    float top = step(yGrad, max(xzGrad, 1e-4) * 0.35);
+    // The mesher marks the sheet (vExtra). A slope is still the surface: judging it from the screen
+    // turned the joins between blocks into dark bars. A side facing the air stays a side.
+    float top = vExtra > 0.5 ? 1.0 : 0.0;
     // No second sheet between the air and the water. Under the surface the sea is the fog and the sky, not the faces of the blocks.
     if (uInWater > 0.5 || (top > 0.5 && cameraPosition.y < vWorld.y - 0.02)) discard;
     float tm = uTime;
@@ -505,22 +502,8 @@ ${HERO_TILES.map((n) => {
     vec3 nw = normalize(vec3(-wg.x * 0.038, 1.0, -wg.y * 0.038));
     nw = mix(n, nw, top);
 
-    // Where is the shore? The mesher says which sides of this block of water meet land (bits of vExtra).
-    float edgeD = 9.0;
-    if (top > 0.5) {
-      vec2 cp = fract(vWorld.xz);
-      float m = vExtra;
-      if (mod(m, 2.0) > 0.5) edgeD = min(edgeD, cp.x);
-      if (mod(floor(m / 2.0), 2.0) > 0.5) edgeD = min(edgeD, 1.0 - cp.x);
-      if (mod(floor(m / 4.0), 2.0) > 0.5) edgeD = min(edgeD, cp.y);
-      if (mod(floor(m / 8.0), 2.0) > 0.5) edgeD = min(edgeD, 1.0 - cp.y);
-      // The line of the shore wanders, so it is not a ruler along the edge of the blocks.
-      edgeD += (wnoise3(vec3(wp2 * 1.2, 0.0)) - 0.5) * 0.2;
-    }
-
-    // Shallow and the shore stay pale, so the sand reads through. Deep water is a darker blue.
+    // Deep water is a darker blue. The colour does not restart at each block, or the joints show as edges.
     float deep = clamp(wdepth / 3.0, 0.0, 1.0);
-    deep *= mix(0.2, 1.0, smoothstep(0.0, 0.65, edgeD));
     vec3 body = mix(vec3(0.72, 0.9, 0.82), vec3(0.2, 0.4, 0.58), deep);
     tex.rgb *= body;
     // Wide patches, plus the swells: a crest lighter, a trough darker. A sea is not one colour.
@@ -547,8 +530,6 @@ ${HERO_TILES.map((n) => {
     alpha = mix(0.78, 0.94, deep);
     if (top > 0.5) alpha = mix(alpha, 0.97, fres);
     else alpha = mix(0.86, 0.95, deep);
-
-    // (No foam line along the shore: any bright band there flickers and shows the edges of the blocks. The shore is only a lighter, greener shallow, see edgeD above.)
 
     // Glints: a hard shine where the swells mirror the sun or the moon.
     float sp = max(dot(R, uLightDir), 0.0);

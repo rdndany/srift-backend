@@ -127,9 +127,14 @@ describe('mesher', () => {
     for (let x = 2; x < 8; x++) p[regionIndex(x, 3, 2)] = B.WATER;
     const r = meshChunk(p);
     expect(r.opaque).toBeNull();
-    // The surface is cut where its shore sides change: the two ends and the strip between them (the flags the shader draws foam by).
-    // The underside is drawn too, so the body can be seen from below.
-    expect(quads(r.translucent)).toBe(10);
+    // One sheet: the surface is not cut into a quad per block, or the joints show as edges. The underside is drawn too.
+    const tops = r.translucent!.positions;
+    let surface = 0;
+    eachQuad(r.translucent!, (verts) => {
+      const ys = verts.map((v) => tops[v * 3 + 1]!);
+      if (Math.max(...ys) - Math.min(...ys) < 0.01 && Math.max(...ys) > 3.5) surface++;
+    });
+    expect(surface).toBe(1);
     // A source's surface sits 2/16 below the block top.
     const ys = Array.from(r.translucent!.positions).filter((_, i) => i % 3 === 1);
     expect(Math.max(...ys)).toBeCloseTo(4 - 2 / 16, 5);
@@ -226,14 +231,14 @@ describe('mesher', () => {
     const level = emptyRegion();
     level[regionIndex(5, 10, 5)] = B.WATER;
     level[regionIndex(6, 10, 5)] = B.WATER;
-    // Same height: the faces between them vanish. Each cell keeps its underside.
-    expect(quads(meshChunk(level).translucent)).toBe(8);
+    // Same height: the faces between them vanish, and the two tops are one sheet.
+    expect(quads(meshChunk(level).translucent)).toBe(6);
 
     const step = emptyRegion();
     step[regionIndex(5, 10, 5)] = B.WATER;
     step[regionIndex(6, 10, 5)] = B.WATER_7;
-    // The tall side shows the part that rises above the thin one, and each cell has an underside.
-    expect(quads(meshChunk(step).translucent)).toBe(11);
+    // No wall between the tall cell and the thin one. The surface slopes across, and each cell has an underside.
+    expect(quads(meshChunk(step).translucent)).toBe(10);
   });
 
   it('slopes a fluid downhill instead of keeping a cube step', () => {
@@ -268,7 +273,7 @@ describe('mesher', () => {
     expect(lava.mid).toBeGreaterThan(lava.end);
   });
 
-  it('tells water where its shore is and a floor how deep the water over it is', () => {
+  it('keeps a pond one sheet, and tells a floor how deep the water over it is', () => {
     const p = emptyRegion();
     // A pond of 3 x 3 on a stone floor, two deep in the middle.
     for (let x = 4; x <= 6; x++) {
@@ -281,12 +286,10 @@ describe('mesher', () => {
     p[regionIndex(5, 1, 5)] = B.STONE;
     p[regionIndex(5, 2, 5)] = B.WATER;
     const r = meshChunk(p);
-    // Water faces and floor faces are told apart by the tint byte: the water's surface carries its shore as flags above the tile.
+    // The sheet is flagged 1, and nothing higher: no per-block shore mask to cut the pond apart.
     const flags = (m: { tiles: ArrayLike<number> } | null): number[] => Array.from(m!.tiles, (t) => Math.floor(t / TILE_EXTRA));
     const water = flags(r.translucent);
-    expect(Math.max(...water)).toBeLessThanOrEqual(15);
-    // The corner cells meet land on two sides, the middle one on none: so more than one kind of surface exists.
-    expect(new Set(water).size).toBeGreaterThan(2);
+    expect(Math.max(...water)).toBe(1);
     // The opaque floor faces that look at water are flagged 1 + the depth class (1: a block of water; 2: two or three).
     const floor = new Set(flags(r.opaque));
     expect(floor.has(1)).toBe(true);

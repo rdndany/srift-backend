@@ -507,17 +507,13 @@ export function meshChunk(region: Uint16Array, tint?: Uint8Array): MeshResult {
           // A lowered cube does not sit on the cell face, so the neighbour's cell does not cover it.
           if (IS_OPAQUE[nid] && seat === 0 && !seatOf(nx, ny, nz)) continue;
           let drop = 0;
-          // A side between two heights of the same water starts where the lower one ends, so the shared part is one body.
           let lift = 0;
           if (fluid !== 0) {
             const ownTop = surfaceOf(seen, x, y, z, id);
-            if (FLUID_KIND[nid] === fluid) {
-              // The shared face of a column, and a side the neighbour already covers, stay inside the body.
-              if (face.kind !== 'side') continue;
-              const neighborTop = surfaceOf(seen, nx, ny, nz, nid);
-              if (neighborTop >= ownTop) continue;
-              lift = neighborTop;
-            } else if (fluid === FLUID_WATER && coversWater(nid)) continue;
+            // The same fluid is one body. No wall between two cells of it, whatever their heights: the surface
+            // slopes across the join, and a wall there is the dark edge between blocks.
+            if (FLUID_KIND[nid] === fluid) continue;
+            else if (fluid === FLUID_WATER && coversWater(nid)) continue;
             drop = 16 - ownTop;
           } else if (nid === id && def.cullSame && seat === 0 && !seatOf(nx, ny, nz)) continue;
           // Ice meets the water with no side of its own. A side that faces the air is the edge of the sheet, and stays.
@@ -525,20 +521,13 @@ export function meshChunk(region: Uint16Array, tint?: Uint8Array): MeshResult {
           if (face.kind === 'side' && lift + drop >= 16) continue;
 
           const translucent = def.render === 'translucent';
-          const isWater = def.liquid;
-          // Water flags: the top of a surface knows which of its four sides is shore (so the shader can draw foam and shallows along
-          // it); an opaque face under the water knows how deep the water over it is (so the shader can throw caustics on it).
+          const isWater = def.liquid && fluid === FLUID_WATER;
+          // An opaque face under the water knows how deep the water over it is (so the shader can throw caustics on it).
           let extra = 0;
-          if (fluid === FLUID_WATER) {
-            if (face.kind === 'top') {
-              for (let d = 0; d < 4; d++) {
-                const sx = x + SHORE_DX[d];
-                const sz = z + SHORE_DZ[d];
-                // Ice and glass are no shore: the water goes on under them.
-                if (!watery(sx, y, sz) && !coversWater(blockAt(sx, y, sz))) extra |= 1 << d;
-              }
-            }
-          } else if (fluid === 0 && !translucent && watery(nx, ny, nz)) {
+          // A water top is the sheet (flag 1), so a slope is lit as the surface and not as a dark side. Sides stay 0.
+          // A floor under the water still records how deep the water is.
+          if (fluid === FLUID_WATER && face.kind === 'top') extra = 1;
+          else if (fluid === 0 && !translucent && watery(nx, ny, nz)) {
             let up = 1;
             while (up < 8 && watery(nx, ny + up, nz)) up++;
             extra = 1 + waterDepthClass(up);
@@ -582,8 +571,14 @@ export function meshChunk(region: Uint16Array, tint?: Uint8Array): MeshResult {
             const o2 = isOpaque(s2x, s2y, s2z);
             const oc = isOpaque(cx, cy, cz);
 
-            if (isWater) {
+            if (def.liquid) {
               aoV[c] = 3;
+              if (isWater) {
+                // One light for the whole face: a corner beside the bank used to go dark on its own, and that triangle
+                // showed on the surface. The light is the air over the water, the same at every corner, so a flat pool merges.
+                skyV[c] = cSky * 4;
+                blkV[c] = cBlk * 4;
+              }
             } else {
               aoV[c] = o1 && o2 ? 0 : 3 - ((o1 ? 1 : 0) + (o2 ? 1 : 0) + (oc ? 1 : 0));
               // A tilled bed sits in its surroundings: where a full block (grass, stone ...) stands beside it, the soil shades off
@@ -595,12 +590,13 @@ export function meshChunk(region: Uint16Array, tint?: Uint8Array): MeshResult {
                 aoV[c] = Math.max(0, aoV[c] - Math.min(3, (w1 ? 2 : 0) + (w2 ? 2 : 0) + (wc ? 1 : 0)));
               }
             }
-
-            const l1 = o1 ? centerL : lightAt(s1x, s1y, s1z);
-            const l2 = o2 ? centerL : lightAt(s2x, s2y, s2z);
-            const lc = oc || (o1 && o2) ? centerL : lightAt(cx, cy, cz);
-            skyV[c] = cSky + (l1 >> 4) + (l2 >> 4) + (lc >> 4);
-            blkV[c] = cBlk + (l1 & 0xf) + (l2 & 0xf) + (lc & 0xf);
+            if (!isWater) {
+              const l1 = o1 ? centerL : lightAt(s1x, s1y, s1z);
+              const l2 = o2 ? centerL : lightAt(s2x, s2y, s2z);
+              const lc = oc || (o1 && o2) ? centerL : lightAt(cx, cy, cz);
+              skyV[c] = cSky + (l1 >> 4) + (l2 >> 4) + (lc >> 4);
+              blkV[c] = cBlk + (l1 & 0xf) + (l2 & 0xf) + (lc & 0xf);
+            }
           }
 
           const flat =
