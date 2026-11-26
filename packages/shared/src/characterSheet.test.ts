@@ -67,7 +67,7 @@ describe('newCharacterSheet', () => {
   });
 
   it('the numbers follow the off hand and the armor', () => {
-    const base = { v: 1, x: 0, y: 0, z: 0, yaw: 0, pitch: 0, mode: 'survival' as const, selected: 0, inv: [], vitals: null, mobs: [], cls: { v: 1, id: 'mage' as const, lvl: 1, xp: 0, unlocked: [] }, of: true };
+    const base = { v: 1 as const, x: 0, y: 0, z: 0, yaw: 0, pitch: 0, mode: 'survival' as const, selected: 0, inv: [], vitals: null, mobs: [], cls: { v: 1 as const, id: 'mage' as const, lvl: 1, xp: 0, unlocked: [] }, of: true };
     const plain = sheetOfSave(base, 'mage');
     const off = new Container(1);
     off.set(0, makeStack(I.ORB, 1));

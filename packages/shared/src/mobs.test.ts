@@ -334,7 +334,7 @@ describe('animals leaving the water', () => {
     ['rabbit', 5],
     ['cat', 5],
   ] as const)('a %s swims out onto a shore whose top is %i', (kind, lip) => {
-    const h = harness({ world: shore(lip) as ReturnType<typeof flat> });
+    const h = harness({ world: shore(lip) as unknown as ReturnType<typeof flat> });
     h.player.x = 80;
     h.player.z = 0.5;
     const m = h.mgr.spawn(kind, 2.2, 2, 0.5);

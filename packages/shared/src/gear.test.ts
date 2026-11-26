@@ -287,7 +287,7 @@ describe('wearing it', () => {
     expect(s.drainEvents().some((e: SessionEvent) => e.t === 'toast' && e.text === 'Requires level 20.')).toBe(true);
     s.apply({ t: 'inventory' });
     s.apply({ t: 'click', slot: 0, button: 0 });
-    const menu = s.menu as { armorStart: number; cursor: ItemStack | null };
+    const menu = s.menu as unknown as { armorStart: number; cursor: ItemStack | null };
     s.drainEvents();
     s.apply({ t: 'click', slot: menu.armorStart + 1, button: 0 });
     expect(s.armor.get(1)).toBeNull();

@@ -325,7 +325,7 @@ export class Sky {
       mat.customProgramCacheKey = () => 'horizon-clip';
       mat.onBeforeCompile = (shader) => {
         shader.uniforms.uClipY = clipY;
-        clipShaders.push(shader as { uniforms: { uClipY: { value: number } } });
+        clipShaders.push(shader as unknown as { uniforms: { uClipY: { value: number } } });
         shader.vertexShader = shader.vertexShader
           .replace('#include <common>', '#include <common>\nvarying float vClipY;')
           .replace(
@@ -378,7 +378,7 @@ export class Sky {
     const clipShaders = this.clipShaders;
     this.starMat.onBeforeCompile = (shader) => {
       shader.uniforms.uClipY = clipY;
-      clipShaders.push(shader as { uniforms: { uClipY: { value: number } } });
+      clipShaders.push(shader as unknown as { uniforms: { uClipY: { value: number } } });
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', '#include <common>\nvarying float vClipY;')
         .replace(

@@ -211,7 +211,7 @@ describe('the isle world', () => {
     const other = isleDryCave(11, first[0]!.gx, first[0]!.gz);
     const here = isleDryCave(3, first[0]!.gx, first[0]!.gz)!;
     expect(other?.chest.x === here.chest.x && other?.chest.z === here.chest.z).toBe(false);
-    const ores = new Set([B.COAL_ORE, B.IRON_ORE, B.GOLD_ORE, B.DIAMOND_ORE, B.LAPIS_ORE, B.REDSTONE_ORE]);
+    const ores = new Set<number>([B.COAL_ORE, B.IRON_ORE, B.GOLD_ORE, B.DIAMOND_ORE, B.LAPIS_ORE, B.REDSTONE_ORE]);
     for (const spot of first) {
       const cave = isleDryCave(3, spot.gx, spot.gz)!;
       expect(at(gen, cave.spawner.x, cave.spawner.y, cave.spawner.z)).toBe(B.SPAWNER);
