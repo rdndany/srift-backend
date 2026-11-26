@@ -138,13 +138,17 @@ void main() {
 
 const cloudVertex = /* glsl */ `
 attribute float aShade;
+attribute vec3 aCenter;
+uniform float uScale;
 varying float vShade;
 varying float vDist;
 void main() {
   vShade = aShade;
-  vec3 wp = (modelMatrix * vec4(position, 1.0)).xyz;
+  // A whole cloud shrinks around its own middle, so the blocks stay joined.
+  vec3 p = aCenter + (position - aCenter) * uScale;
+  vec3 wp = (modelMatrix * vec4(p, 1.0)).xyz;
   vDist = length(wp.xz - cameraPosition.xz);
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
 }
 `;
 
@@ -300,6 +304,7 @@ export class Sky {
           map: tex,
           fog: false,
           depthWrite: false,
+          depthTest: true,
           transparent: true,
           blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
         }),
@@ -353,6 +358,7 @@ export class Sky {
       uniforms: {
         uColor: { value: new THREE.Color(1, 1, 1) },
         uOpacity: { value: 0.88 },
+        uScale: { value: 1 },
         uFadeNear: { value: CLOUD_R * CLOUD_CELL * 0.55 },
         uFadeFar: { value: CLOUD_R * CLOUD_CELL * 0.97 },
       },
@@ -392,17 +398,26 @@ export class Sky {
     this.veilThroughWater();
   }
 
-  /** Sun, moon and stars dim with the water overhead, a little per block, instead of vanishing at a line. */
+  /** Sun, moon, stars and clouds dim with the water overhead, a little per block. The discs shrink too, so a deep dive does not leave a huge sun following the camera. */
   private veilThroughWater(): void {
     if (!this.submerged) return;
     const t = Math.min(1, Math.max(0, this.skyOpen));
+    const disc = 0.22 + 0.78 * t;
+    for (const m of [this.sun, this.moon, this.sunGlow, this.moonGlow]) m.scale.setScalar(disc);
+    // Clouds sit in front of the discs in the air. Under water the sun and the moon stay above them.
+    this.sunGlow.renderOrder = -4;
+    this.moonGlow.renderOrder = -4;
+    this.sun.renderOrder = -3;
+    this.moon.renderOrder = -3;
     (this.sun.material as THREE.MeshBasicMaterial).opacity *= t;
     (this.sunGlow.material as THREE.MeshBasicMaterial).opacity *= t;
     (this.moon.material as THREE.MeshBasicMaterial).opacity *= t;
     (this.moonGlow.material as THREE.MeshBasicMaterial).opacity *= t;
     this.starMat.opacity *= t;
     const clouds = this.cloudMat.uniforms.uOpacity;
-    clouds.value = (clouds.value as number) * (0.25 + 0.75 * t);
+    clouds.value = (clouds.value as number) * t;
+    this.cloudMat.uniforms.uScale.value = disc;
+    (this.cloudMat.uniforms.uColor.value as THREE.Color).lerp(this.horizonOverride, 1 - t);
   }
 
   /** Underground the horizon follows the (darkened) fog and the upper sky fades to black. */
@@ -439,7 +454,15 @@ export class Sky {
     this.moon.position.set(-Math.cos(a) * dist, -sunHeight * dist, -40);
     this.sunGlow.position.copy(this.sun.position).multiplyScalar(0.99);
     this.moonGlow.position.copy(this.moon.position).multiplyScalar(0.99);
-    for (const m of [this.sun, this.moon, this.sunGlow, this.moonGlow]) m.lookAt(camera.position);
+    // Full size in the air, and behind the clouds. Under water `veilThroughWater` shrinks these and lifts them in front.
+    this.sunGlow.renderOrder = -12;
+    this.moonGlow.renderOrder = -12;
+    this.sun.renderOrder = -10;
+    this.moon.renderOrder = -10;
+    for (const m of [this.sun, this.moon, this.sunGlow, this.moonGlow]) {
+      m.scale.setScalar(1);
+      m.lookAt(camera.position);
+    }
     this.stars.rotation.z = a;
 
     this.brightness = daylightAt(this.time, this.dim);
@@ -508,7 +531,7 @@ export class Sky {
     const thr = 0.585 - 0.17 * coverage;
     const ci0 = Math.floor((camera.position.x - scroll) / CLOUD_CELL);
     const cj0 = Math.floor(camera.position.z / CLOUD_CELL);
-    const key = `${ci0},${cj0},${thr.toFixed(3)}`;
+    const key = `whole,${ci0},${cj0},${thr.toFixed(3)}`;
     if (key !== this.cloudKey) {
       this.cloudKey = key;
       this.buildClouds(ci0, cj0, thr);
@@ -523,6 +546,7 @@ export class Sky {
     c.lerp(this.tmp.setRGB(0.5, 0.52, 0.57).multiplyScalar(0.3 + 0.7 * this.brightness), this.rain * 0.75);
     if (this.flash > 0) c.lerp(this.tmp.setRGB(1, 1, 1), this.flash * 0.7);
     this.cloudMat.uniforms.uOpacity.value = 0.9 * (1 - this.darkness);
+    this.cloudMat.uniforms.uScale.value = 1;
   }
 
   private buildClouds(ci0: number, cj0: number, thr: number): void {
@@ -531,14 +555,46 @@ export class Sky {
     for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) filled[j * n + i] = cloudAt(ci0 - CLOUD_R + i, cj0 - CLOUD_R + j, thr) ? 1 : 0;
     const has = (i: number, j: number): boolean => i >= 0 && j >= 0 && i < n && j < n && filled[j * n + i] === 1;
 
+    // Touching blocks are one cloud. Each cloud has one middle, so it shrinks as a single shape.
+    const comp = new Int16Array(n * n);
+    comp.fill(-1);
+    const mids: number[][] = [];
+    const stack: number[] = [];
+    for (let j = 0; j < n; j++) {
+      for (let i = 0; i < n; i++) {
+        if (!has(i, j) || comp[j * n + i] !== -1) continue;
+        const id = mids.length;
+        let sx = 0;
+        let sz = 0;
+        let count = 0;
+        stack.push(i, j);
+        comp[j * n + i] = id;
+        while (stack.length > 0) {
+          const cj = stack.pop()!;
+          const ci = stack.pop()!;
+          sx += ci;
+          sz += cj;
+          count++;
+          for (const [ni, nj] of [[ci + 1, cj], [ci - 1, cj], [ci, cj + 1], [ci, cj - 1]] as const) {
+            if (!has(ni, nj) || comp[nj * n + ni] !== -1) continue;
+            comp[nj * n + ni] = id;
+            stack.push(ni, nj);
+          }
+        }
+        mids.push([(sx / count + 0.5) * CLOUD_CELL, CLOUD_THICK * 0.5, (sz / count + 0.5) * CLOUD_CELL]);
+      }
+    }
+
     const pos: number[] = [];
     const shade: number[] = [];
+    const center: number[] = [];
     const idx: number[] = [];
-    const quad = (s: number, p: number[][]): void => {
+    const quad = (s: number, mid: number[], p: number[][]): void => {
       const v = pos.length / 3;
       for (const q of p) {
         pos.push(q[0], q[1], q[2]);
         shade.push(s);
+        center.push(mid[0], mid[1], mid[2]);
       }
       idx.push(v, v + 1, v + 2, v, v + 2, v + 3);
     };
@@ -551,17 +607,19 @@ export class Sky {
         const x1 = x0 + S;
         const z0 = j * S;
         const z1 = z0 + S;
-        quad(1, [[x0, H, z1], [x1, H, z1], [x1, H, z0], [x0, H, z0]]);
-        quad(0.74, [[x0, 0, z0], [x1, 0, z0], [x1, 0, z1], [x0, 0, z1]]);
-        if (!has(i + 1, j)) quad(0.9, [[x1, 0, z1], [x1, 0, z0], [x1, H, z0], [x1, H, z1]]);
-        if (!has(i - 1, j)) quad(0.9, [[x0, 0, z0], [x0, 0, z1], [x0, H, z1], [x0, H, z0]]);
-        if (!has(i, j + 1)) quad(0.82, [[x0, 0, z1], [x1, 0, z1], [x1, H, z1], [x0, H, z1]]);
-        if (!has(i, j - 1)) quad(0.82, [[x1, 0, z0], [x0, 0, z0], [x0, H, z0], [x1, H, z0]]);
+        const mid = mids[comp[j * n + i]];
+        quad(1, mid, [[x0, H, z1], [x1, H, z1], [x1, H, z0], [x0, H, z0]]);
+        quad(0.74, mid, [[x0, 0, z0], [x1, 0, z0], [x1, 0, z1], [x0, 0, z1]]);
+        if (!has(i + 1, j)) quad(0.9, mid, [[x1, 0, z1], [x1, 0, z0], [x1, H, z0], [x1, H, z1]]);
+        if (!has(i - 1, j)) quad(0.9, mid, [[x0, 0, z0], [x0, 0, z1], [x0, H, z1], [x0, H, z0]]);
+        if (!has(i, j + 1)) quad(0.82, mid, [[x0, 0, z1], [x1, 0, z1], [x1, H, z1], [x0, H, z1]]);
+        if (!has(i, j - 1)) quad(0.82, mid, [[x1, 0, z0], [x0, 0, z0], [x0, H, z0], [x1, H, z0]]);
       }
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
     g.setAttribute('aShade', new THREE.BufferAttribute(new Float32Array(shade), 1));
+    g.setAttribute('aCenter', new THREE.BufferAttribute(new Float32Array(center), 3));
     g.setIndex(idx);
     this.clouds.geometry.dispose();
     this.clouds.geometry = g;

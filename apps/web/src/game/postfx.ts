@@ -130,15 +130,87 @@ class GradeEffect extends Effect {
 }
 
 /**
- * The shafts of light from the sun. Two things are spared against the library's own: with no shafts to show (the sun behind you, or down)
- * none of its passes run; and the sun's disc, with the depth of the scene that hides it, is drawn at the small size the shafts are made
- * at, not at the full size of the picture to be shrunk straight afterwards.
+ * The shafts of light from the sun. Above water the library copies the scene and draws the disc into it.
+ * Under water that copy hides the disc, so the disc is drawn on its own. Blocks still cover the rays
+ * where the picture is put back on, after the water warp.
  */
+const rayNdc = new THREE.Vector3();
+const rayCenter = new THREE.Vector3();
+const rayClear = new THREE.Color();
+
+interface RayParts {
+  camera: THREE.PerspectiveCamera;
+  lightScene: THREE.Scene;
+  screenPosition: THREE.Vector2;
+  renderTargetLight: THREE.WebGLRenderTarget;
+  renderTargetA: THREE.WebGLRenderTarget;
+  renderTargetB: THREE.WebGLRenderTarget;
+  blurPass: { enabled: boolean; render(renderer: THREE.WebGLRenderer, input: THREE.WebGLRenderTarget, output: THREE.WebGLRenderTarget): void };
+  godRaysPass: { render(renderer: THREE.WebGLRenderer, input: THREE.WebGLRenderTarget, output: THREE.WebGLRenderTarget): void };
+}
+
 class SunRays extends GodRaysEffect {
   paused = false;
+  /** Under water the scene depth is not copied. The real disc is drawn by itself. */
+  throughWater = false;
 
   override update(renderer: THREE.WebGLRenderer, inputBuffer: THREE.WebGLRenderTarget, deltaTime?: number): void {
-    if (!this.paused) super.update(renderer, inputBuffer, deltaTime);
+    if (this.paused) return;
+    const src = this.lightSource;
+    if (!this.throughWater || !src || Array.isArray(src.material)) {
+      super.update(renderer, inputBuffer, deltaTime);
+      return;
+    }
+    const parts = this as unknown as RayParts;
+    const mat = src.material;
+    const parent = src.parent;
+    const matrixAutoUpdate = src.matrixAutoUpdate;
+    const depthTest = mat.depthTest;
+    const opacity = 'opacity' in mat ? mat.opacity : 1;
+    const culled = src.frustumCulled;
+    src.updateWorldMatrix(true, false);
+    src.getWorldPosition(rayCenter);
+    src.matrixAutoUpdate = false;
+    src.matrix.copy(src.matrixWorld);
+    parts.lightScene.add(src);
+    // No scene depth here. Copying it puts the disc behind the far plane and the rays vanish.
+    // Blocks hide the streaks later, where this picture is drawn on top of the view.
+    mat.depthTest = false;
+    mat.depthWrite = false;
+    if ('opacity' in mat) mat.opacity = 1;
+    src.frustumCulled = false;
+    const prev = renderer.getRenderTarget();
+    const prevAlpha = renderer.getClearAlpha();
+    const prevAuto = renderer.autoClear;
+    renderer.getClearColor(rayClear);
+    try {
+      renderer.autoClear = false;
+      renderer.setRenderTarget(parts.renderTargetLight);
+      renderer.setClearColor(0x000000, 0);
+      renderer.clear(true, true, false);
+      renderer.render(parts.lightScene, parts.camera);
+    } finally {
+      mat.depthTest = depthTest;
+      mat.depthWrite = false;
+      if ('opacity' in mat) mat.opacity = opacity;
+      src.frustumCulled = culled;
+      src.matrixAutoUpdate = matrixAutoUpdate;
+      if (parent) parent.add(src);
+      renderer.setClearColor(rayClear, prevAlpha);
+      renderer.autoClear = prevAuto;
+      renderer.setRenderTarget(prev);
+    }
+    rayNdc.copy(rayCenter).project(parts.camera);
+    parts.screenPosition.set(
+      Math.min(Math.max((rayNdc.x + 1) * 0.5, -1), 2),
+      Math.min(Math.max((rayNdc.y + 1) * 0.5, -1), 2),
+    );
+    let from: THREE.WebGLRenderTarget = parts.renderTargetLight;
+    if (parts.blurPass.enabled) {
+      parts.blurPass.render(renderer, parts.renderTargetLight, parts.renderTargetA);
+      from = parts.renderTargetA;
+    }
+    parts.godRaysPass.render(renderer, from, parts.renderTargetB);
   }
 
   override setSize(width: number, height: number): void {
@@ -148,64 +220,36 @@ class SunRays extends GodRaysEffect {
   }
 }
 
-/**
- * Sun rays through the water, drawn from where the sun sits on the screen.
- * The sky writes no depth, so a march through the depth buffer finds nothing when you look up at it.
- */
-const SHAFT_FRAGMENT = /* glsl */ `
+/** The ray picture, put on after the water warp. Blocks keep their depth, so the rays stop on them. Above water this adds nothing. */
+const SEA_RAYS = /* glsl */ `
 uniform float uAmount;
-uniform vec2 uSunUv;
-uniform float uFront;
+uniform sampler2D uMap;
 
-void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
-  if (uAmount < 0.001 || uFront < 0.5) {
+void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth, out vec4 outputColor) {
+  // The sky and the clouds leave the depth clear. A block is closer, and it hides the sun and the rays.
+  if (uAmount < 0.001 || depth < 0.999) {
     outputColor = vec4(0.0);
     return;
   }
-  vec2 d = uv - uSunUv;
-  d.x *= aspect;
-  float r = length(d);
-  float ang = atan(d.y, d.x);
-  float spokes = sin(ang * 8.0 + time * 0.13);
-  spokes += 0.65 * sin(ang * 15.0 - time * 0.09);
-  spokes += 0.4 * sin(ang * 4.0 + time * 0.06);
-  float beam = pow(smoothstep(-0.15, 0.85, spokes), 1.7);
-  float fall = exp(-r * 1.65);
-  float haze = exp(-r * 0.75);
-  float rays = (beam * fall + haze * 0.22 * beam) * uAmount;
-  vec3 col = vec3(1.0, 0.94, 0.72) * rays * 1.7;
-  col += vec3(0.62, 0.82, 1.0) * beam * fall * uAmount * 0.55;
-  outputColor = vec4(col, 1.0);
+  outputColor = texture2D(uMap, uv) * uAmount;
 }
 `;
 
-const shaftSun = new THREE.Vector3();
-const shaftForward = new THREE.Vector3();
-
 class WaterShafts extends Effect {
-  constructor() {
-    super('WaterShafts', SHAFT_FRAGMENT, {
-      blendFunction: BlendFunction.ADD,
+  constructor(map: THREE.Texture) {
+    super('SeaRays', SEA_RAYS, {
+      blendFunction: BlendFunction.SCREEN,
+      // No DEPTH flag. The pass sorts depth effects first, and the water warp would then erase these rays.
+      // The depth value is still passed in, because an earlier effect in the pass already asks for it.
       uniforms: new Map<string, THREE.Uniform>([
         ['uAmount', new THREE.Uniform(0)],
-        ['uSunUv', new THREE.Uniform(new THREE.Vector2(0.5, 0.5))],
-        ['uFront', new THREE.Uniform(0)],
+        ['uMap', new THREE.Uniform(map)],
       ]),
     });
   }
 
-  set(camera: THREE.PerspectiveCamera, amount: number, _surfaceY: number, sunDir: THREE.Vector3): void {
+  setAmount(amount: number): void {
     this.uniforms.get('uAmount')!.value = amount;
-    if (amount < 0.001) {
-      this.uniforms.get('uFront')!.value = 0;
-      return;
-    }
-    camera.updateMatrixWorld();
-    camera.getWorldDirection(shaftForward);
-    this.uniforms.get('uFront')!.value = shaftForward.dot(sunDir) > 0.02 ? 1 : 0;
-    shaftSun.copy(camera.position).addScaledVector(sunDir, 40);
-    shaftSun.project(camera);
-    (this.uniforms.get('uSunUv') as THREE.Uniform<THREE.Vector2>).value.set(shaftSun.x * 0.5 + 0.5, shaftSun.y * 0.5 + 0.5);
   }
 }
 
@@ -391,12 +435,11 @@ export class PostFx {
     const bloom = new Glow({ luminanceThreshold: 0.95, luminanceSmoothing: 0.3, intensity: 0.6, radius: 0.75, mipmapBlur: true, levels: 6 });
     const grade = new GradeEffect();
     const vignette = new VignetteEffect({ offset: 0.45, darkness: 0.42 });
-    const shafts = new WaterShafts();
+    const shafts = new WaterShafts(rays.texture);
     const distanceBlur = new DistanceBlur();
-    // All in one pass, in this order. The distance blur is first, so the shafts and the grade see the softened picture.
-    // Each stays in it when it is switched off (it is only made to add nothing, see `apply`): taking one out
-    // would mean building the pass's shader again, which stops the game for a moment. The water shafts stay in too, and add nothing above water.
-    const fxPass = new EffectPass(camera, distanceBlur, rays, shafts, bloom, grade, vignette);
+    // The water warp in the grade reads the original picture, so anything drawn before it is wiped
+    // while the eyes are under. The sea rays come after the grade, or the water swallows them.
+    const fxPass = new EffectPass(camera, distanceBlur, rays, bloom, grade, vignette, shafts);
     composer.addPass(fxPass);
 
     const blurPass = new KawaseBlurPass({ kernelSize: KernelSize.LARGE, resolutionScale: 0.5 });
@@ -454,6 +497,7 @@ export class PostFx {
     const f = this.flags;
     const open = 1 - frame.underground;
 
+    let shaftAmt = 0;
     if (f.rays) {
       // By day the shafts come from the sun. At night the same pass uses the moon, but the
       // light dies close to the disc: the moon does not throw rays the way the sun does.
@@ -468,17 +512,33 @@ export class PostFx {
       const strength = useMoon
         ? facing * open * (1 - frame.rain) * night * 0.18 * through
         : frame.underwater
-          ? facing * frame.day * through
+          ? facing * (1 - frame.rain) * (0.3 + 0.7 * frame.dusk) * frame.day * through
           : facing * open * (1 - frame.rain) * (0.3 + 0.7 * frame.dusk) * frame.day;
-      this.showRays(frame.warm === true || strength > 0.02);
       const mat = this.rays!.godRaysMaterial;
-      mat.exposure = (useMoon ? 0.35 : frame.underwater ? 1.35 : 0.9) * strength;
-      mat.weight = useMoon ? 0.14 : frame.underwater ? 0.72 : 0.45;
-      mat.decay = useMoon ? 0.8 : frame.underwater ? 0.965 : 0.93;
+      mat.exposure = (useMoon ? 0.35 : 0.9) * strength;
+      mat.weight = useMoon ? 0.14 : 0.45;
+      mat.decay = useMoon ? 0.8 : 0.93;
+      if (frame.underwater) {
+        // The library blend sits before the water warp, which would erase it. Draw the real disc
+        // into the ray picture, and put that picture on after the warp.
+        const show = frame.warm === true || strength > 0.02;
+        this.rays!.throughWater = true;
+        this.rays!.paused = !show;
+        this.rays!.blendMode.opacity.value = 0;
+        this.fxPass!.enabled = true;
+        shaftAmt = show ? 1 : 0;
+      } else {
+        this.rays!.throughWater = false;
+        this.showRays(frame.warm === true || strength > 0.02);
+        shaftAmt = 0;
+      }
+      this.shafts!.setAmount(shaftAmt);
     }
 
-    const shaftAmt = frame.underwater ? frame.shafts : 0;
-    this.shafts!.set(this.camera, shaftAmt, frame.surfaceY, frame.sunDir);
+    if (!f.rays) {
+      this.rays!.throughWater = false;
+      this.shafts!.setAmount(0);
+    }
     if (shaftAmt > 0.001) this.fxPass!.enabled = true;
 
     if (f.glow) {
