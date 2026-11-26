@@ -13,6 +13,20 @@ import { B, BLOCKS, BLOCK_COUNT, IS_SOLID, isMetalFitting } from './blocks';
  * scored by how soon the water could fall again, up to four blocks for water and two for lava.
  * The nearest drop wins, and a flat floor with no drop lets the water go every way. Two sources
  * with a solid floor, or another source, under the gap make a third source.
+ *
+ * A cell holds one block id. Level 0 is a source (WATER, LAVA). Levels 1–7 are flowing water,
+ * thinner as the number rises (WATER_1 … WATER_7). Level 8 is a fall (WATER_FALL), a full column
+ * dropping until it lands. Lava only flows to level 3. A bucket picks up a source and places a
+ * source; flowing water is not a source, so a bucket leaves it.
+ *
+ * The current in a cell points toward lower fluid and toward a hole beside it (`fluidCurrent`).
+ * Bodies and dropped items add that vector to their motion. Still water in a pool has no current.
+ *
+ * A fence, stair, slab, gate, pane, wall or trapdoor can share a cell with a water source
+ * (`isWaterloggable`). Chunks store one id per cell and ids only use 0–4095 of the 16-bit word,
+ * so the spare high bit (0x8000) is the place to mark "this shape also holds a source". Reads
+ * that mask the bit still see the fence; the fluid sim treats the cell as a source. Until that
+ * bit is masked at every raw chunk read, those shapes stay solid and water flows around them.
  */
 
 export const FLUID_NONE = 0;
@@ -85,6 +99,55 @@ export function fluidSurface(id: number): number {
   if (level === FALL) return 16;
   if (FLUID_KIND[id] === FLUID_LAVA) return [14, 11, 7, 4][level] ?? 0;
   return [14, 12, 11, 9, 7, 5, 4, 2][level] ?? 0;
+}
+
+/** How full the surface is, from 0 to 1. A source and a fall are full. */
+function flowHeight(id: number): number {
+  if (FLUID_KIND[id] === FLUID_NONE) return 0;
+  const level = FLUID_LEVEL[id];
+  if (level === 0 || level === FALL) return 1;
+  return amountOf(id) / 8;
+}
+
+/**
+ * The current in one fluid cell. Points sideways toward thinner fluid and toward a drop beside
+ * the cell, and straight down in a fall. A pool of sources returns a zero vector.
+ */
+export function fluidCurrent(
+  getBlock: (x: number, y: number, z: number) => number,
+  x: number,
+  y: number,
+  z: number,
+): { x: number; y: number; z: number } {
+  const id = getBlock(x, y, z);
+  const kind = FLUID_KIND[id];
+  if (kind === FLUID_NONE) return { x: 0, y: 0, z: 0 };
+  const own = flowHeight(id);
+  let sx = 0;
+  let sz = 0;
+  for (const [dx, dz] of HORIZONTAL) {
+    const nid = getBlock(x + dx, y, z + dz);
+    if (FLUID_KIND[nid] === kind) {
+      sx += dx * (own - flowHeight(nid));
+      sz += dz * (own - flowHeight(nid));
+      continue;
+    }
+    if (IS_SOLID[nid]) continue;
+    const below = getBlock(x + dx, y - 1, z + dz);
+    if (FLUID_KIND[below] === kind) {
+      const drop = own - (flowHeight(below) - 0.888);
+      sx += dx * drop;
+      sz += dz * drop;
+    }
+  }
+  return { x: sx, y: FLUID_LEVEL[id] === FALL ? -1 : 0, z: sz };
+}
+
+/** Shapes that can share their cell with a water source. See the note at the top of this file. */
+const WATERLOG_SHAPES = new Set<string>(['fence', 'stair', 'slab', 'gate', 'pane', 'wall', 'trapdoor']);
+
+export function isWaterloggable(id: number): boolean {
+  return WATERLOG_SHAPES.has(BLOCKS[id].shape);
 }
 
 export interface FluidHost {

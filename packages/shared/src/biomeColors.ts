@@ -59,10 +59,11 @@ export function waterColor(t: number, kind = WATER_KIND_PLAIN): RGB {
   const cold: RGB = [70, 92, 200];
   const mild: RGB = [40, 90, 205];
   const warm: RGB = [28, 168, 226];
-  const plain = t < 0.5 ? lerp(cold, mild, t * 2) : lerp(mild, warm, (t - 0.5) * 2);
+  const heat = Number.isFinite(t) ? clamp01(t) : 0.5;
+  const plain = heat < 0.5 ? lerp(cold, mild, heat * 2) : lerp(mild, warm, (heat - 0.5) * 2);
   // The kinds are only a tint on the same blue: they meet along the border of two biomes (a river runs into a swamp lake, a cold sea into
   // a warm one), and one block there must not turn from blue to teal or green. So each leans on the plain water and shifts it a little.
-  if (kind === WATER_KIND_SWAMP) return lerp(plain, lerp([62, 96, 88], [74, 102, 64], clamp01(t)), 0.35);
+  if (kind === WATER_KIND_SWAMP) return lerp(plain, lerp([62, 96, 88], [74, 102, 64], heat), 0.35);
   if (kind === WATER_KIND_WARM) return lerp(plain, [22, 196, 214], 0.3);
   if (kind === WATER_KIND_FROZEN) return lerp(plain, [92, 118, 214], 0.35);
   return plain;

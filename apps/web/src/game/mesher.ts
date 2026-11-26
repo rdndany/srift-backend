@@ -401,14 +401,35 @@ export function meshChunk(region: Uint16Array, tint?: Uint8Array): MeshResult {
   // Ice and glass lie in the water without cutting it: the water faces that would touch them are not drawn.
   const coversWater = (nid: number): boolean => nid !== 0 && FLUID_KIND[nid] === 0 && IS_OPAQUE[nid] === 0 && BLOCKS[nid].shape === 'cube' && BLOCKS[nid].render === 'translucent';
   const watery = (x: number, y: number, z: number): boolean => y >= 0 && FLUID_KIND[blockAt(x, y, z)] === FLUID_WATER;
-  /** Water in this column under the cell, with only air between. A side above that water is inside the pool. */
-  const waterUnder = (x: number, y: number, z: number): boolean => {
-    for (let yy = y - 1; yy >= 0 && y - yy <= 32; yy--) {
-      const id = blockAt(x, yy, z);
-      if (FLUID_KIND[id] === FLUID_WATER) return true;
-      if (id !== 0 && (IS_OPAQUE[id] === 1 || BLOCKS[id].solid)) return false;
+  /**
+   * How high this fluid stands in the cell, from 0 to 1. The same fluid above it fills the cell: a fall is a full column.
+   * A solid block is -1 (it does not pull the surface down). Air is 0.
+   */
+  const fluidOwn = (x: number, y: number, z: number, kind: number): number => {
+    const id = blockAt(x, y, z);
+    if (FLUID_KIND[id] !== kind) return id !== 0 && IS_OPAQUE[id] === 1 ? -1 : 0;
+    const above = y + 1 < WORLD_HEIGHT ? blockAt(x, y + 1, z) : 0;
+    if (FLUID_KIND[above] === kind) return 1;
+    return fluidSurface(id) / 16;
+  };
+  /**
+   * The height of one corner, where four cells meet. A source weighs more than a thin flow, so a still pool stays level
+   * and a flow slopes down toward the thin end. Air is left out, so the lip of a pool is not dragged to the floor.
+   */
+  const fluidCorner = (cx: number, y: number, cz: number, kind: number): number => {
+    let sum = 0;
+    let w = 0;
+    for (const dx of [-1, 0]) {
+      for (const dz of [-1, 0]) {
+        const h = fluidOwn(cx + dx, y, cz + dz, kind);
+        if (h >= 1) return 1;
+        if (h <= 0) continue;
+        const weight = h >= 0.8 ? 10 : 1;
+        sum += h * weight;
+        w += weight;
+      }
     }
-    return false;
+    return w > 0 ? sum / w : 0;
   };
   const lightAt = (x: number, y: number, z: number): number => {
     if (y >= litHeight) return 0xf0;
@@ -489,22 +510,15 @@ export function meshChunk(region: Uint16Array, tint?: Uint8Array): MeshResult {
           // A side between two heights of the same water starts where the lower one ends, so the shared part is one body.
           let lift = 0;
           if (fluid !== 0) {
-            // The underside of water is never a face: from below, and from inside the pool, there is no sheet.
-            if (fluid === FLUID_WATER && face.kind === 'bottom') continue;
-            const surf = surfaceOf(seen, x, y, z, id);
+            const ownTop = surfaceOf(seen, x, y, z, id);
             if (FLUID_KIND[nid] === fluid) {
-              // Water is one body: the wall where a taller block meets a shorter one is inside the pool, so it is not a face.
-              // Lava still shows that step.
-              if (fluid === FLUID_WATER || face.kind !== 'side') continue;
-              const nSurf = surfaceOf(seen, nx, ny, nz, nid);
-              if (nSurf >= surf) continue;
-              drop = 16 - surf;
-              lift = nSurf;
+              // The shared face of a column, and a side the neighbour already covers, stay inside the body.
+              if (face.kind !== 'side') continue;
+              const neighborTop = surfaceOf(seen, nx, ny, nz, nid);
+              if (neighborTop >= ownTop) continue;
+              lift = neighborTop;
             } else if (fluid === FLUID_WATER && coversWater(nid)) continue;
-            // The side of a higher pool faces the air above shorter water, however many blocks of air
-            // are in between. That sheet is inside the water, so it is not drawn.
-            else if (fluid === FLUID_WATER && face.kind === 'side' && waterUnder(nx, ny, nz)) continue;
-            else drop = 16 - surf;
+            drop = 16 - ownTop;
           } else if (nid === id && def.cullSame && seat === 0 && !seatOf(nx, ny, nz)) continue;
           // Ice meets the water with no side of its own. A side that faces the air is the edge of the sheet, and stays.
           else if ((id === B.ICE || id === B.PACKED_ICE) && face.kind === 'side' && FLUID_KIND[nid] === FLUID_WATER) continue;
@@ -601,6 +615,29 @@ export function meshChunk(region: Uint16Array, tint?: Uint8Array): MeshResult {
             blkV[2] === blkV[3];
 
           const builder = translucent ? translucentB : opaqueB;
+          // A fluid is not a cube. Where the flow changes height, the face slopes from corner to corner
+          // instead of staying a flat square. A level pool keeps the flat face, so it can still merge.
+          if (fluid !== 0 && face.kind !== 'bottom') {
+            const floor = face.kind === 'side' ? lift / 16 : 0;
+            const heights = face.corners.map((cc) => (face.kind === 'side' && cc[1] === 0 ? floor : fluidCorner(x + cc[0], y, z + cc[2], fluid)));
+            const topH = heights.filter((_, i) => face.kind === 'top' || face.corners[i][1] === 1);
+            if (Math.max(...topH) - Math.min(...topH) > 1 / 32) {
+              pushQuad(
+                builder,
+                face.corners.map((cc, i) => {
+                  const u = i === 1 || i === 2 ? 1 : 0;
+                  const v = i >= 2 ? 1 : 0;
+                  return [x + cc[0], y + heights[i], z + cc[2], u, v];
+                }),
+                tile + extra * TILE_EXTRA,
+                face.shade,
+                skyV[0],
+                blkV[0],
+                tintIdx,
+              );
+              continue;
+            }
+          }
           // A lowered cube cannot merge with the cubes around it: their faces do not share a plane.
           if (flat && seat === 0) {
             mask[j * S + i] =

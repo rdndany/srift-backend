@@ -195,7 +195,8 @@ export class Sky {
   brightness = 1;
   /** Show or hide the clouds (for pictures taken among them). */
   setCloudsVisible(v: boolean): void {
-    this.clouds.visible = v;
+    this.cloudsWanted = v;
+    this.clouds.visible = v && this.skyShown;
   }
   /** Weather inputs, set by the game each frame: 0..1 rain amount, sky dimming, lightning flash. */
   rain = 0;
@@ -252,6 +253,14 @@ export class Sky {
   private horizonOverride = new THREE.Color();
   private hasOverride = false;
   private darkness = 0;
+  /** The eyes are under water. The horizon is the water; overhead, the real sky still shows. */
+  private submerged = false;
+  /** 0 hides the sun and the stars (lava). Above 0, that much of the real sky remains overhead. */
+  private skyOpen = 0;
+  private cloudsWanted = true;
+  private get skyShown(): boolean {
+    return !this.submerged || this.skyOpen > 0.02;
+  }
 
   constructor() {
     this.domeMat = new THREE.ShaderMaterial({
@@ -356,12 +365,23 @@ export class Sky {
   /**
    * Fit the sky to where the camera is looking from: `fog` is the horizon colour to show (the fog colour, which
    * is darker underground), `dark` how deep underground (0..1) the player is.
+   * Under water the horizon is the water, and `skyOpen` (0..1) is how much of the real sky remains overhead.
+   * Lava passes 0, so the dome closes over. Hiding the dome entirely leaves a black clear.
    */
-  setView(fog: THREE.Color, dark: number, underwater: boolean): void {
+  setView(fog: THREE.Color, dark: number, underwater: boolean, skyOpen = 0): void {
     this.horizonOverride.copy(fog);
     this.hasOverride = true;
     this.darkness = dark;
-    this.group.visible = !underwater;
+    this.submerged = underwater;
+    this.skyOpen = underwater ? skyOpen : 1;
+    this.group.visible = true;
+    const show = this.skyShown;
+    this.sun.visible = show;
+    this.sunGlow.visible = show;
+    this.moon.visible = show;
+    this.moonGlow.visible = show;
+    this.stars.visible = show;
+    this.clouds.visible = show && this.cloudsWanted;
     this.applyDome();
   }
 
@@ -369,8 +389,17 @@ export class Sky {
   private applyDome(): void {
     const u = this.domeMat.uniforms;
     u.uHorizon.value.copy(this.hasOverride ? this.horizonOverride : this.color);
-    u.uZenith.value.copy(this.zenith).multiplyScalar(1 - 0.94 * this.darkness);
-    u.uGlow.value.copy(this.lighting.glow).multiplyScalar(1 - this.darkness);
+    if (this.submerged && this.skyOpen <= 0.02) {
+      u.uZenith.value.copy(this.horizonOverride);
+      (u.uGlow.value as THREE.Color).setScalar(0);
+    } else if (this.submerged) {
+      // Overhead is the real sky, pulled a little toward the water. Looking up still finds the sun, the moon and the stars.
+      u.uZenith.value.copy(this.zenith).lerp(this.horizonOverride, 1 - this.skyOpen);
+      u.uGlow.value.copy(this.lighting.glow).multiplyScalar(this.skyOpen);
+    } else {
+      u.uZenith.value.copy(this.zenith).multiplyScalar(1 - 0.94 * this.darkness);
+      u.uGlow.value.copy(this.lighting.glow).multiplyScalar(1 - this.darkness);
+    }
   }
 
   update(camera: THREE.Camera): void {

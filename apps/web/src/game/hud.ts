@@ -29,8 +29,12 @@ export class Hud {
     this.breakFill.style.width = `${Math.round(p * 100)}%`;
   }
 
-  /** `shade` is the daylight left at this depth: 1 just under the surface, near 0 in the deep. */
-  setUnderwater(v: boolean, lava = false, shade = 1): void {
+  /**
+   * The wash over the picture while the camera is in a fluid. `wash` is the biome's water colour and
+   * how strong the veil is. Lava ignores the colour and paints the screen orange.
+   */
+  setUnderwater(v: boolean, lava = false, wash?: { r: number; g: number; b: number; veil: number }): void {
+    this.underwater.classList.toggle('warp', v && !lava);
     this.underwater.style.display = v ? 'block' : 'none';
     if (!v) return;
     if (lava) {
@@ -39,12 +43,16 @@ export class Hud {
       this.lastVeil = -1;
       return;
     }
-    this.underwater.style.background = '';
-    // Always a blue wash, the same blue as the surface, and a deeper one the further down you are.
-    const veil = Math.round((0.34 + Math.min(0.32, (1 - shade) * 0.4)) * 40) / 40;
-    if (veil === this.lastVeil) return;
-    this.lastVeil = veil;
-    this.underwater.style.opacity = String(veil);
+    const r = Math.round((wash?.r ?? 0.08) * 255);
+    const g = Math.round((wash?.g ?? 0.28) * 255);
+    const b = Math.round((wash?.b ?? 0.62) * 255);
+    const veil = Math.round((wash?.veil ?? 0.4) * 40) / 40;
+    const key = veil + r * 0.001 + g * 0.0001;
+    if (key === this.lastVeil) return;
+    this.lastVeil = key;
+    const edge = Math.min(0.28, 0.08 + veil * 0.35);
+    this.underwater.style.background = `radial-gradient(ellipse at 50% 42%, rgba(${r}, ${g}, ${b}, 0.04) 34%, rgba(${Math.round(r * 0.55)}, ${Math.round(g * 0.62)}, ${Math.round(b * 0.7)}, ${edge}) 100%)`;
+    this.underwater.style.opacity = '1';
   }
 
   /** 0..1 red screen flash after taking damage. */

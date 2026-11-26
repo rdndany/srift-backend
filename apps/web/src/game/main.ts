@@ -34,6 +34,13 @@ import {
   IS_SOLID,
   isWaterBlock,
   fluidSurface,
+  Biome,
+  BEYOND_BIOMES,
+  WATER_KIND_FROZEN,
+  WATER_KIND_PLAIN,
+  WATER_KIND_SWAMP,
+  WATER_KIND_WARM,
+  waterColor,
   isBubbleBloom,
   isSeaPlant,
   parseIsleSave,
@@ -139,6 +146,7 @@ import { makeUiSync } from './uiSync';
 import { TargetPicker } from './targeting';
 import { MobTargetPicker } from './mobTargeting';
 import { ViewFeel, type FeelFrame } from './viewFeel';
+import { WaterVision, murkyClimate } from './waterVision';
 
 
 /** How much water is over the eyes, and whether that column opens to the sky. A plant or a pocket of air under stone is still a cave. */
@@ -173,10 +181,6 @@ function waterColumn(world: { getBlock(x: number, y: number, z: number): number 
   return { depth: Math.max(0, iy - y), surface: iy, open: true };
 }
 
-const SEA_SHALLOW = new THREE.Color(0x1a6ec2);
-const SEA_MID = new THREE.Color(0x0c4e96);
-const SEA_ABYSS = new THREE.Color(0x010308);
-const SEA_UP = new THREE.Color(0xe4f6ff);
 const seaLight = new THREE.Color();
 
 const BIOME_NAMES = ['ocean', 'beach', 'plains', 'forest', 'desert', 'snow', 'mountain'];
@@ -558,9 +562,10 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   /** The water's surface, how much daylight is left at this depth, and how strong the sun shafts are. */
   let seaSurface = 0;
   let seaShafts = 0;
-  let seaShade = 1;
   const seaFog = new THREE.Color();
   const seaZenith = new THREE.Color();
+  /** Daylight seen through open water. Bright on purpose: a dark blue is crushed to black by the picture passes. */
+  const seaSun = new THREE.Color(0x7ecfff);
   scene.add(sky.group);
   const postfx = new PostFx(renderer, scene, camera, sky.sunMesh);
   const fxWanted: FxFlags = ((): FxFlags => {
@@ -694,6 +699,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
   };
   // What the camera does besides looking where the player looks: shakes, dips on a landing, kicks with a blow, leans into a roll, widens in a charge.
   const feel = new ViewFeel();
+  const waterVision = new WaterVision();
   const DUSTY = new Set(['dirt', 'grass', 'sand', 'gravel', 'stone', 'snow']);
   /** Dust under a foot: a puff of the ground's own colour, a few flecks for a step and a cloud for a landing. */
   const footDust = (kind: string, action: string, x: number, y: number, z: number, vol: number): void => {
@@ -1582,9 +1588,26 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     selfView.cameraInHead = !!chasing?.bodyHidden;
     camera.position.set(pose.x, pose.y, pose.z);
     camera.rotation.set(pose.pitch, pose.yaw, 0);
+    // The lens decides from where the camera is, before the shake, so the fog and the field of view share one answer.
+    const eyesUnder = viewInWater();
+    const waterHere = waterColumn(world, camera.position.x, camera.position.y, camera.position.z);
+    const column = session.generator.columnAt(Math.floor(camera.position.x), Math.floor(camera.position.z));
+    const waterKind =
+      column.biome === Biome.SWAMP ? WATER_KIND_SWAMP : column.biome === Biome.WARM_OCEAN ? WATER_KIND_WARM : column.biome === Biome.FROZEN_OCEAN || column.biome === Biome.FROZEN_RIVER ? WATER_KIND_FROZEN : WATER_KIND_PLAIN;
+    const waterLook = waterVision.step({
+      submerged: eyesUnder,
+      depth: eyesUnder ? waterHere.depth : 0,
+      open: waterHere.open,
+      color: waterColor(column.t, waterKind),
+      murky: murkyClimate(beyond ? (BEYOND_BIOMES[beyond.here] ?? null) : null, column.biome === Biome.SWAMP),
+      viewDistance: world.renderDistance * 16,
+      clear: session.waterSight > 0,
+      sprint: eyesUnder && (keys.sprinting || input.mod('ctrl')) && Math.hypot(body.vx, body.vz) > 1.2,
+      dt,
+    });
     // What the view does on top of that (see ViewFeel): first the shake, the dip of a landing and the kick of a blow...
     const classNow = session.classView();
-    const feelNow: FeelFrame = { dt, ready: session.ready, firstPerson: selfView.mode === 0, body, yaw: input.yaw, bowDraw: zoomShown, rush: classNow?.rush, slam: classNow?.slam ?? 0, flying: wingFlight };
+    const feelNow: FeelFrame = { dt, ready: session.ready, firstPerson: selfView.mode === 0, body, yaw: input.yaw, bowDraw: zoomShown, rush: classNow?.rush, slam: classNow?.slam ?? 0, flying: wingFlight, fovScale: waterLook.fovScale, swimRoll: waterLook.roll };
     feel.jolt(camera, feelNow);
     // (the warrior's Charge streaks light past; the ranger's roll has its own look, the wind at the sides)
     rushLines.update(dt, !!classNow?.rush && !classNow.rush.roll, camera);
@@ -1626,13 +1649,9 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     /** How far the land is still drawn. Mobs stop at the same line, so they do not hang in the sky past it. */
     let drawnFar = fogFar;
     const light = sky.lighting;
-    const underWater = viewInWater();
-    world.setInWater(underWater);
-    if (body.eyeInLava === true || underWater) {
-      const lava = body.eyeInLava === true;
-      if (lava) {
+    world.setInWater(eyesUnder || waterLook.blend > 0.02);
+    if (body.eyeInLava === true) {
         seaShafts = 0;
-        seaShade = 0;
         const water = new THREE.Color(0xc2480a);
         world.setFog(water, 0.1, 4);
         distanceFog.color.copy(water);
@@ -1642,45 +1661,37 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
         scene.background = water;
         sky.setView(water, 0, true);
         light.glow.setScalar(0);
-      } else {
-        // Light is swallowed as you go down, the way it is in the sea: bright in the first blocks, then blue, then close to black.
-        const col = waterColumn(world, camera.position.x, camera.position.y, camera.position.z);
-        const sunk = Math.max(0, col.depth);
-        const fall = Math.exp(-Math.max(0, sunk - 1.5) / 14);
-        const lit = Math.max(sky.day, sky.brightness * 0.4);
-        const shade = fall * (col.open ? 1 : 0.35) * (0.22 + 0.78 * lit);
-        seaSurface = col.surface;
-        seaShafts = col.open ? (0.2 + 0.8 * sky.day) * (1 - weather.rain * 0.4) * fall * fall : 0;
-        seaFog.copy(SEA_SHALLOW).lerp(SEA_MID, Math.min(1, sunk / 10)).lerp(SEA_ABYSS, Math.min(1, Math.max(0, sunk - 6) / 28));
-        seaFog.multiplyScalar(0.35 + 0.65 * shade);
-        const up = Math.exp(-Math.max(0, sunk - 1.5) / 26);
-        seaZenith.copy(seaFog).lerp(SEA_UP, up * (0.25 + 0.75 * lit) * (col.open ? 0.9 : 0.08));
-        // How far a block still reads as itself. Depth shortens the view. Night does not: the dark is the light, not a wall a few blocks out.
-        // The far end follows the player's render distance, the same one used on land.
-        const depthReach = Math.exp(-Math.max(0, sunk - 6) / 24);
-        const reach = Math.max(col.open ? 0.45 : 0.22, depthReach * (col.open ? 1 : 0.55));
-        const near = fogFar * 0.32 * reach;
-        const far = Math.max(near + 24, fogFar * 0.9 * reach);
+    } else if (waterLook.blend > 0.02) {
+        // The biome's own water, thick the moment the eyes go under, then drawing back as they adjust.
+        const k = waterLook.blend;
+        const near = waterLook.near;
+        const far = Math.max(near + 8, waterLook.far);
+        seaSurface = waterHere.surface;
+        // The night sky is nearly black. The horizon stays the water, and overhead the real sky remains,
+        // more of it near the surface, so looking up finds the sun, the moon and the stars through the water.
+        seaFog.setRGB(waterLook.fog[0], waterLook.fog[1], waterLook.fog[2], THREE.SRGBColorSpace);
+        const outdoors = Math.max(sky.brightness, sky.day);
+        const openDay = sky.day * (1 - weather.rain * 0.45) * (waterHere.open ? 1 : 0.5);
+        seaFog.lerp(seaSun, openDay * 0.2 * (0.35 + 0.65 * waterLook.sky));
+        seaFog.lerp(sky.color, (1 - k) * sky.day);
+        // Same light as outside: bright at noon, dim at night, and never dropped to black.
+        seaFog.multiplyScalar((waterHere.open ? 0.34 : 0.2) + 0.8 * outdoors);
+        const skyOpen = Math.min(1, (waterHere.open ? 0.55 : 0.22) + 0.4 * waterLook.sky);
+        seaZenith.copy(sky.zenith).lerp(seaFog, 1 - skyOpen);
         world.setFog(seaFog, near, far, seaZenith);
         distanceFog.color.copy(seaFog);
         distanceFog.near = near;
         distanceFog.far = far;
         drawnFar = far;
         scene.background = seaFog;
-        // The sky stays. The horizon takes the colour of the water; the sun, the moon and the clouds are still there above it.
-        sky.setView(seaFog, 0, false);
-        light.ambient.multiplyScalar(shade);
-        light.sun.multiplyScalar(shade);
-        light.glow.multiplyScalar(col.open ? shade * Math.max(sky.day, 0.12) : 0);
-        // Daylight under the surface is the blue of the water, the same blue the surface shows from above.
-        seaLight.copy(SEA_SHALLOW).multiplyScalar(0.55 + 0.45 * shade);
-        light.ambient.lerp(seaLight, 0.72);
-        light.sun.lerp(seaLight, 0.55);
-        seaShade = shade;
-      }
+        sky.setView(seaFog, 0, true, skyOpen);
+        seaLight.setRGB(0.24, 0.42, 0.68);
+        light.ambient.lerp(seaLight, 0.55);
+        light.sun.multiplyScalar(0.3 + 0.7 * outdoors);
+        light.glow.multiplyScalar(0.25 + 0.75 * sky.day);
+        seaShafts = waterHere.open && sky.day > 0.04 ? sky.day * (1 - weather.rain * 0.5) : 0;
     } else {
       seaShafts = 0;
-      seaShade = 1;
       const sy = world.surfaceY(Math.floor(camera.position.x), Math.floor(camera.position.z));
       const under = sy >= 0 && camera.position.y < sy - 2 ? 1 : 0;
       caveDark += (under - caveDark) * Math.min(1, dt * 1.5);
@@ -1714,7 +1725,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
         }
       }
     }
-    hud.setUnderwater(body.eyeInWater, body.eyeInLava === true, seaShade);
+    hud.setUnderwater(body.eyeInLava === true || waterLook.blend > 0.02, body.eyeInLava === true, { r: waterLook.fog[0], g: waterLook.fog[1], b: waterLook.fog[2], veil: waterLook.veil });
     const underEars = body.eyeInWater && body.eyeInLava !== true;
     audio.setUnderwater(underEars, dt, Math.min(1, Math.hypot(body.vx, body.vy, body.vz) / 3.5), underEars ? Math.max(0, seaSurface - camera.position.y) : 0);
     world.setDay(sky.brightness);
@@ -1750,7 +1761,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
       }
     }
     entityLight.update(sky);
-    particles.underwater(dt, camera.position.x, camera.position.y, camera.position.z, body.eyeInWater && body.eyeInLava !== true, (x, y, z) => isWaterBlock(world.getBlock(x, y, z)));
+    particles.underwater(dt, camera.position.x, camera.position.y, camera.position.z, eyesUnder && body.eyeInLava !== true, (x, y, z) => isWaterBlock(world.getBlock(x, y, z)), input.yaw);
     bloomScan -= dt;
     if (bloomScan <= 0) {
       bloomScan = 0.45;
@@ -1962,6 +1973,7 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
     const warmFrame = figureWarm !== null && figureWarmWait-- <= 0;
     if (warmFrame) figureWarm?.begin();
     figureWarm?.show(scene);
+    if (scene.background instanceof THREE.Color) renderer.setClearColor(scene.background, 1);
     if (postfx.on) {
       postfx.render({
         dt,
@@ -1969,9 +1981,12 @@ export async function startGame(opts: StartOptions = {}): Promise<() => void> {
         day: sky.day,
         underground: caveDark,
         rain: weather.rain,
-        underwater: body.eyeInWater,
+        underwater: eyesUnder,
         surfaceY: seaSurface,
         shafts: seaShafts,
+        warp: waterLook.distort,
+        fogNear: distanceFog.near,
+        fogFar: distanceFog.far,
         sunDir: sky.lightDir,
         menu: session.screen !== 'none' || !!figureWarm?.world,
         warm: !!figureWarm?.world,

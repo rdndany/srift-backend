@@ -67,6 +67,7 @@ export class Particles {
   private bnext = 0;
   private bAcc = 0;
   private sAcc = 0;
+  private eAcc = 0;
   private vAcc = 0;
   private bfade: THREE.InstancedBufferAttribute;
   private bkind: THREE.InstancedBufferAttribute;
@@ -388,7 +389,7 @@ export class Particles {
    * (`UNDERWATER`, colour 0.4, 0.4, 0.7, no gravity). A bubble rises (a nudge of 0.002 a tick, then
    * the speed is taken down to 85%) and pops the moment it leaves the water.
    */
-  underwater(dt: number, x: number, y: number, z: number, active: boolean, isWater: (x: number, y: number, z: number) => boolean): void {
+  underwater(dt: number, x: number, y: number, z: number, active: boolean, isWater: (x: number, y: number, z: number) => boolean, yaw = 0): void {
     this.waterAt = isWater;
     if (!active || !isWater(Math.floor(x), Math.floor(y), Math.floor(z))) return;
     this.bAcc = Math.min(0.5, this.bAcc + dt);
@@ -400,6 +401,12 @@ export class Particles {
     while (this.sAcc >= 0.05) {
       this.sAcc -= 0.05;
       this.spawnBubble(x, y, z, true);
+    }
+    // A few bubbles sit out at the edge of the view, where the glass of a mask would catch them.
+    this.eAcc += dt;
+    if (this.eAcc >= 0.28) {
+      this.eAcc = 0;
+      this.spawnRim(x, y, z, yaw);
     }
   }
 
@@ -433,6 +440,25 @@ export class Particles {
     this.bsize[i] = column ? 0.11 + Math.random() * 0.08 : 0.07 + Math.random() * 0.05;
     this.brise[i] = 1;
     this.bkind.setX(i, 0);
+  }
+
+  /** One bubble to the left of the view and one to the right, a block or so in front of the eyes. */
+  private spawnRim(x: number, y: number, z: number, yaw: number): void {
+    const water = this.waterAt;
+    if (!water) return;
+    const fx = -Math.sin(yaw);
+    const fz = -Math.cos(yaw);
+    const rx = Math.cos(yaw);
+    const rz = -Math.sin(yaw);
+    for (const side of [-1, 1]) {
+      const lateral = 0.75 + Math.random() * 0.45;
+      const ahead = 0.9 + Math.random() * 0.5;
+      const px = x + fx * ahead + rx * side * lateral;
+      const py = y + (Math.random() - 0.45) * 0.55;
+      const pz = z + fz * ahead + rz * side * lateral;
+      if (!water(Math.floor(px), Math.floor(py), Math.floor(pz))) continue;
+      this.placeRise(px, py, pz, false);
+    }
   }
 
   private spawnBubble(x: number, y: number, z: number, speck: boolean): void {

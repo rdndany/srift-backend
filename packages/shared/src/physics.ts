@@ -1,6 +1,6 @@
 import { B, IS_LIQUID, IS_PARTIAL, IS_SOLID, ladderInfo } from './blocks';
 import { collisionBoxes, isTallShape, seatDrop, seatedBox } from './shapes';
-import { FLUID_KIND, FLUID_WATER, isLavaId } from './fluids';
+import { FLUID_KIND, FLUID_WATER, fluidCurrent, isLavaId } from './fluids';
 
 export interface BlockReader {
   getBlock(x: number, y: number, z: number): number;
@@ -391,6 +391,14 @@ export function stepPlayer(world: BlockReader, b: Body, input: MoveInput, dt: nu
     targetX *= thick ? 0.25 : 0.55;
     targetZ *= thick ? 0.25 : 0.55;
     accel = thick ? 4 : 6;
+    if (!thick) {
+      // Flowing water pushes with the current. A slope of one level is a gentle drift; a hole beside
+      // the cell pulls harder. A fall drags downward on top of the sink already applied below.
+      const flow = fluidCurrent(world.getBlock.bind(world), Math.floor(b.x), Math.floor(b.y + 0.4), Math.floor(b.z));
+      targetX += flow.x * 3.2;
+      targetZ += flow.z * 3.2;
+      if (flow.y < 0) b.vy -= 6 * dt;
+    }
     b.vy -= (thick ? 5 : 6) * dt;
     if (input.jump) b.vy += (thick ? 14 : 20) * dt;
     b.vy = Math.max(thick ? -1.6 : -3, Math.min(b.vy, thick ? 2.2 : 3.4));

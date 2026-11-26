@@ -1,4 +1,5 @@
 import { IS_OPAQUE, LIGHT_EMIT, MAX_LIGHT } from './blocks';
+import { isWaterId } from './fluids';
 
 /**
  * Voxel light propagation (flood fill), shared by client (meshing) and server.
@@ -54,7 +55,6 @@ function propagate(
     const idx = q[head++ & mask];
     const level = (light[idx] >> shift) & 0xf;
     if (level <= 1) continue;
-    const next = level - 1;
 
     const y = (idx / layer) | 0;
     const rem = idx - y * layer;
@@ -89,6 +89,9 @@ function propagate(
           ni = idx + layer;
       }
       if (IS_OPAQUE[blocks[ni]]) continue;
+      // Water costs one extra level, on top of the step every block already takes.
+      const next = level - (isWaterId(blocks[ni]) ? 2 : 1);
+      if (next < 1) continue;
       if (((light[ni] >> shift) & 0xf) >= next) continue;
       light[ni] = (light[ni] & clear) | (next << shift);
 
@@ -119,8 +122,11 @@ export function computeLight(blocks: Uint16Array, w: number, h: number, d: numbe
     for (let x = 0; x < w; x++) {
       let y = h - 1;
       let idx = (y * d + z) * w + x;
+      // Open sky stays full. Each water block the column passes through takes one level.
+      let sky = MAX_LIGHT;
       while (y >= 0 && !IS_OPAQUE[blocks[idx]]) {
-        light[idx] |= MAX_LIGHT << 4;
+        if (isWaterId(blocks[idx])) sky = sky > 0 ? sky - 1 : 0;
+        light[idx] |= sky << 4;
         y--;
         idx -= layer;
       }

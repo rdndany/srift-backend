@@ -743,7 +743,9 @@ export class IsleWorldGenerator extends WorldGenerator {
 
   override columnAt(wx: number, wz: number): Column {
     const s = surfaceAt(this.seed, wx, wz);
-    return { height: s.y, biome: s.biome };
+    // The same climate the creative overworld uses here, so the sea is that water and not an empty colour.
+    const climate = this.climateAt(wx, wz);
+    return { height: s.y, biome: s.biome, t: Math.round(climate.t * 255) / 255, h: Math.round(climate.h * 255) / 255 };
   }
 
   override findSpawn(): { x: number; y: number; z: number } {

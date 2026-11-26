@@ -19,6 +19,10 @@ export interface FeelFrame {
   slam: number;
   /** Flying on wings. */
   flying?: boolean;
+  /** Share of the normal field of view. Water narrows it to about 0.9. */
+  fovScale?: number;
+  /** Roll, in radians, while sprint-swimming. */
+  swimRoll?: number;
 }
 
 /**
@@ -163,7 +167,8 @@ export class ViewFeel {
     this.runK += ((!f.firstPerson ? Math.max(0, Math.min(1, (Math.hypot(body.vx, body.vz) - 3.5) / 4)) : 0) - this.runK) * Math.min(1, dt * 3);
     const air = Math.hypot(body.vx, body.vy, body.vz);
     this.flyK += ((f.flying && !f.firstPerson ? Math.min(1, air / 7) : 0) - this.flyK) * Math.min(1, dt * 2.5);
-    const fov = this.baseFov + 7 * this.flyK - 9 * f.bowDraw * f.bowDraw + 16 * this.rushK + 4 * this.rollK + 5 * this.runK + slamFov - 3.5 * this.hitK * this.hitK - (!f.firstPerson ? THIRD_PERSON_FOV_TRIM : 0);
+    const fov = (this.baseFov + 7 * this.flyK - 9 * f.bowDraw * f.bowDraw + 16 * this.rushK + 4 * this.rollK + 5 * this.runK + slamFov - 3.5 * this.hitK * this.hitK - (!f.firstPerson ? THIRD_PERSON_FOV_TRIM : 0)) * (f.fovScale ?? 1);
+    if (f.swimRoll) camera.rotation.z += f.swimRoll;
     if (Math.abs(camera.fov - fov) > 0.01) {
       camera.fov = fov;
       camera.updateProjectionMatrix();

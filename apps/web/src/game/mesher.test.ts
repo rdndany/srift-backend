@@ -128,8 +128,8 @@ describe('mesher', () => {
     const r = meshChunk(p);
     expect(r.opaque).toBeNull();
     // The surface is cut where its shore sides change: the two ends and the strip between them (the flags the shader draws foam by).
-    // No underside: a pool has no face seen from below.
-    expect(quads(r.translucent)).toBe(7);
+    // The underside is drawn too, so the body can be seen from below.
+    expect(quads(r.translucent)).toBe(10);
     // A source's surface sits 2/16 below the block top.
     const ys = Array.from(r.translucent!.positions).filter((_, i) => i % 3 === 1);
     expect(Math.max(...ys)).toBeCloseTo(4 - 2 / 16, 5);
@@ -220,20 +220,52 @@ describe('mesher', () => {
     const stack = emptyRegion();
     stack[regionIndex(5, 10, 5)] = B.WATER;
     stack[regionIndex(5, 11, 5)] = B.WATER;
-    // Two cubes of water on top of each other: the shared pair is gone, and so is the underside.
-    expect(quads(meshChunk(stack).translucent)).toBe(9);
+    // Two cubes of water on top of each other: the shared pair is gone. The lower one has an underside.
+    expect(quads(meshChunk(stack).translucent)).toBe(10);
 
     const level = emptyRegion();
     level[regionIndex(5, 10, 5)] = B.WATER;
     level[regionIndex(6, 10, 5)] = B.WATER;
-    // Same height: the faces between them vanish, and there is no underside.
-    expect(quads(meshChunk(level).translucent)).toBe(6);
+    // Same height: the faces between them vanish. Each cell keeps its underside.
+    expect(quads(meshChunk(level).translucent)).toBe(8);
 
     const step = emptyRegion();
     step[regionIndex(5, 10, 5)] = B.WATER;
     step[regionIndex(6, 10, 5)] = B.WATER_7;
-    // No wall between the two heights, and neither has an underside. Two tops and three outer sides each.
-    expect(quads(meshChunk(step).translucent)).toBe(8);
+    // The tall side shows the part that rises above the thin one, and each cell has an underside.
+    expect(quads(meshChunk(step).translucent)).toBe(11);
+  });
+
+  it('slopes a fluid downhill instead of keeping a cube step', () => {
+    const slopeOf = (id: number, thin: number, mesh: 'translucent' | 'opaque'): { far: number; mid: number; end: number } => {
+      const p = emptyRegion();
+      p[regionIndex(5, 10, 5)] = id;
+      p[regionIndex(6, 10, 5)] = thin;
+      const m = meshChunk(p)[mesh]!;
+      let far = 0;
+      let mid = 0;
+      let end = 0;
+      eachQuad(m, (verts) => {
+        const pts = verts.map((v) => corner(m, v));
+        const ys = pts.map((pt) => pt[1]);
+        if (Math.max(...ys) - Math.min(...ys) > 0.4) return;
+        for (const [x, y] of pts) {
+          if (y < 10.05) continue;
+          if (Math.abs(x - 5) < 0.05) far = Math.max(far, y);
+          if (Math.abs(x - 6) < 0.05) mid = Math.max(mid, y);
+          if (Math.abs(x - 7) < 0.05) end = Math.max(end, y);
+        }
+      });
+      return { far, mid, end };
+    };
+    const water = slopeOf(B.WATER, B.WATER_7, 'translucent');
+    expect(water.far).toBeGreaterThan(water.mid);
+    expect(water.mid).toBeGreaterThan(water.end);
+    expect(water.far).toBeCloseTo(10 + 14 / 16, 2);
+    expect(water.end).toBeCloseTo(10 + 2 / 16, 2);
+    const lava = slopeOf(B.LAVA, B.LAVA_3, 'opaque');
+    expect(lava.far).toBeGreaterThan(lava.mid);
+    expect(lava.mid).toBeGreaterThan(lava.end);
   });
 
   it('tells water where its shore is and a floor how deep the water over it is', () => {
@@ -319,7 +351,7 @@ describe('mesher', () => {
     expect(water).toBeLessThanOrEqual(3 * 5);
   });
 
-  it('hides the side of water standing higher than the pool, with air between', () => {
+  it('draws the side of water standing higher than the pool, with air between', () => {
     const p = emptyRegion();
     p[regionIndex(6, 10, 5)] = B.WATER;
     p[regionIndex(5, 12, 5)] = B.WATER;
@@ -333,7 +365,7 @@ describe('mesher', () => {
       const x1 = Math.max(...xs);
       if (x0 > 5.9 && x1 < 6.1) lip++;
     });
-    expect(lip).toBe(0);
+    expect(lip).toBe(1);
   });
 
   it('hides the side of a taller pool where it stands in shorter water', () => {
@@ -353,8 +385,8 @@ describe('mesher', () => {
       if (x0 > 5.9 && x1 < 6.1) lip++;
       if (x0 > 4.9 && x1 < 5.1) outer++;
     });
-    // The face toward the lower water is gone. The face toward open air is still there.
-    expect(lip).toBe(0);
+    // The face toward the lower water is there, and so is the face toward open air.
+    expect(lip).toBe(1);
     expect(outer).toBe(1);
   });
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { B, BB, BUBBLE_BLOOM, CHUNK_SIZE, CHUNK_VOLUME, CORAL_FAN_RED, CORAL_FAN_YELLOW, GameSession, HeadlessWorld, IS_SOLID, Realm, SEA_LEVEL, WorldGenerator, blockIndex, isChest, isWorldKind, makeGenerator, mulberry32, type InputFrame } from './index';
+import { B, BB, BUBBLE_BLOOM, CHUNK_SIZE, CHUNK_VOLUME, CORAL_FAN_RED, CORAL_FAN_YELLOW, GameSession, HeadlessWorld, IS_SOLID, Realm, SEA_LEVEL, WorldGenerator, blockIndex, isChest, isWorldKind, makeGenerator, mulberry32, waterColor, type InputFrame } from './index';
 import { IS_LIQUID } from './blocks';
 import { MobManager } from './mobs';
 import { IsleDirector, IsleWorldGenerator, ISLE_BEACH, ISLE_WRECK, floodIsleGaps, isleBlackMoon, isleCaveChest, isleDryAir, isleDryCave, isleFlock, isleMarks, isleRoll, parseIsleSave, raiseIsleKelp, thinIsleSea, unstackIsleBlooms, type IsleSim } from './isle';
@@ -73,6 +73,14 @@ describe('the isle world', () => {
     expect(gen.findSpawn()).toEqual({ x: 0.5, y: SEA_LEVEL + 1, z: 0.5 });
     expect(gen.columnAt(0, 0).height).toBe(SEA_LEVEL);
     expect(gen.columnAt(1000, 1000).height).toBeLessThan(SEA_LEVEL - 6);
+    const over = makeGenerator(3);
+    for (const [x, z] of [[40, 10], [-80, 30], [12, -40]] as const) {
+      const sea = gen.columnAt(x, z);
+      const there = over.columnAt(x, z);
+      expect(sea.t).toBeCloseTo(there.t ?? 0, 5);
+      expect(sea.h).toBeCloseTo(there.h ?? 0, 5);
+      expect(waterColor(sea.t ?? Number.NaN).every((c) => Number.isFinite(c))).toBe(true);
+    }
     let plants = 0;
     const home = gen.generateChunk(0, 0);
     for (let i = 0; i < home.length; i++) {

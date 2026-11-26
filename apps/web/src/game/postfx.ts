@@ -62,6 +62,11 @@ export interface FxFrame {
   menu: boolean;
   /** While the game loads: every part is switched on for these frames so that its shaders are built then, not when the sun first comes into view. */
   warm?: boolean;
+  /** 0..1, how hard the picture wobbles. Water sets it; air leaves it at 0. */
+  warp?: number;
+  /** Where the distance haze starts and ends, in blocks. The blur follows this. */
+  fogNear: number;
+  fogFar: number;
 }
 
 const GRADE_FRAGMENT = /* glsl */ `
@@ -69,8 +74,15 @@ uniform vec3 uShadow;
 uniform vec3 uLight;
 uniform float uAmount;
 uniform float uSat;
+uniform float uWarp;
+uniform float uTime;
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
-  vec3 c = inputColor.rgb;
+  vec2 suv = uv;
+  if (uWarp > 0.001) {
+    float w = uWarp * 0.0035;
+    suv += vec2(sin(uv.y * 26.0 + uTime * 1.3), cos(uv.x * 21.0 + uTime * 1.05)) * w;
+  }
+  vec3 c = uWarp > 0.001 ? texture2D(inputBuffer, suv).rgb : inputColor.rgb;
   float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
   float dark = 1.0 - smoothstep(0.0, 0.5, l);
   float bright = smoothstep(0.2, 0.9, l);
@@ -96,6 +108,8 @@ class GradeEffect extends Effect {
         ['uLight', new THREE.Uniform(new THREE.Vector3(1, 1, 1))],
         ['uAmount', new THREE.Uniform(0)],
         ['uSat', new THREE.Uniform(1)],
+        ['uWarp', new THREE.Uniform(0)],
+        ['uTime', new THREE.Uniform(0)],
       ]),
     });
   }
@@ -105,6 +119,11 @@ class GradeEffect extends Effect {
     (this.uniforms.get('uLight') as THREE.Uniform<THREE.Vector3>).value.copy(light);
     this.uniforms.get('uAmount')!.value = amount;
     this.uniforms.get('uSat')!.value = saturation;
+  }
+
+  setWarp(amount: number, time: number): void {
+    this.uniforms.get('uWarp')!.value = amount;
+    this.uniforms.get('uTime')!.value = time;
   }
 }
 
@@ -128,87 +147,129 @@ class SunRays extends GodRaysEffect {
 }
 
 /**
- * Columns of sunlight through the water. They are marched in the water in front of the camera, tilted with the sun,
- * so they show while looking at the seabed. The screen-space shafts from the sun's disc cannot: the disc is hidden
- * once the eyes are under, and those shafts are zeroed then.
+ * Sun rays through the water, drawn from where the sun sits on the screen.
+ * The sky writes no depth, so a march through the depth buffer finds nothing when you look up at it.
  */
 const SHAFT_FRAGMENT = /* glsl */ `
 uniform float uAmount;
-uniform float uSurface;
-uniform vec3 uSunDir;
-uniform mat4 uProj;
-uniform mat4 uProjInv;
-uniform mat4 uCamWorld;
-uniform vec3 uCamPos;
+uniform vec2 uSunUv;
+uniform float uFront;
 
-vec3 shaftView(vec2 uv, float depth) {
-  float viewZ = getViewZ(depth);
-  vec4 clip = vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
-  float clipW = uProj[2][3] * viewZ + uProj[3][3];
-  clip *= clipW;
-  return (uProjInv * clip).xyz;
-}
-
-void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth, out vec4 outputColor) {
-  if (uAmount < 0.001) {
+void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
+  if (uAmount < 0.001 || uFront < 0.5) {
     outputColor = vec4(0.0);
     return;
   }
-  vec3 farW = (uCamWorld * vec4(shaftView(uv, depth), 1.0)).xyz;
-  vec3 dir = farW - uCamPos;
-  float len = length(dir);
-  float reach = min(len, 42.0);
-  dir /= max(len, 0.0001);
-  vec3 sun = normalize(uSunDir);
-  vec2 tilt = sun.xz / max(sun.y, 0.12);
-  float acc = 0.0;
-  const int N = 8;
-  for (int i = 0; i < N; i++) {
-    float t = (float(i) + 0.5) / float(N);
-    vec3 p = uCamPos + dir * reach * t;
-    float below = uSurface - p.y;
-    if (below < 0.0) continue;
-    vec2 q = p.xz - tilt * below;
-    float n = sin(q.x * 0.42 + time * 0.15) * 0.5 + sin(q.y * 0.37 - time * 0.12) * 0.35 + sin((q.x * 0.7 + q.y) * 0.28 + time * 0.08) * 0.25;
-    float beam = smoothstep(-0.02, 0.72, n);
-    acc += beam * exp(-below * 0.065);
-  }
-  acc /= float(N);
-  float up = clamp(-dir.y, 0.0, 1.0);
-  acc *= 0.6 + 0.85 * up;
-  vec3 col = vec3(0.5, 0.76, 1.0) * acc * uAmount;
-  col += vec3(1.0, 0.92, 0.68) * pow(clamp(acc, 0.0, 1.0), 2.2) * uAmount * 0.45;
+  vec2 d = uv - uSunUv;
+  d.x *= aspect;
+  float r = length(d);
+  float ang = atan(d.y, d.x);
+  float spokes = sin(ang * 8.0 + time * 0.13);
+  spokes += 0.65 * sin(ang * 15.0 - time * 0.09);
+  spokes += 0.4 * sin(ang * 4.0 + time * 0.06);
+  float beam = pow(smoothstep(-0.15, 0.85, spokes), 1.7);
+  float fall = exp(-r * 1.65);
+  float haze = exp(-r * 0.75);
+  float rays = (beam * fall + haze * 0.22 * beam) * uAmount;
+  vec3 col = vec3(1.0, 0.94, 0.72) * rays * 1.7;
+  col += vec3(0.62, 0.82, 1.0) * beam * fall * uAmount * 0.55;
   outputColor = vec4(col, 1.0);
 }
 `;
+
+const shaftSun = new THREE.Vector3();
+const shaftForward = new THREE.Vector3();
 
 class WaterShafts extends Effect {
   constructor() {
     super('WaterShafts', SHAFT_FRAGMENT, {
       blendFunction: BlendFunction.ADD,
-      attributes: EffectAttribute.DEPTH,
       uniforms: new Map<string, THREE.Uniform>([
         ['uAmount', new THREE.Uniform(0)],
-        ['uSurface', new THREE.Uniform(0)],
-        ['uSunDir', new THREE.Uniform(new THREE.Vector3(0, 1, 0))],
-        ['uProj', new THREE.Uniform(new THREE.Matrix4())],
-        ['uProjInv', new THREE.Uniform(new THREE.Matrix4())],
-        ['uCamWorld', new THREE.Uniform(new THREE.Matrix4())],
-        ['uCamPos', new THREE.Uniform(new THREE.Vector3())],
+        ['uSunUv', new THREE.Uniform(new THREE.Vector2(0.5, 0.5))],
+        ['uFront', new THREE.Uniform(0)],
       ]),
     });
   }
 
-  set(camera: THREE.PerspectiveCamera, amount: number, surfaceY: number, sunDir: THREE.Vector3): void {
+  set(camera: THREE.PerspectiveCamera, amount: number, _surfaceY: number, sunDir: THREE.Vector3): void {
     this.uniforms.get('uAmount')!.value = amount;
-    this.uniforms.get('uSurface')!.value = surfaceY;
-    (this.uniforms.get('uSunDir') as THREE.Uniform<THREE.Vector3>).value.copy(sunDir);
-    if (amount < 0.001) return;
+    if (amount < 0.001) {
+      this.uniforms.get('uFront')!.value = 0;
+      return;
+    }
     camera.updateMatrixWorld();
-    (this.uniforms.get('uProj') as THREE.Uniform<THREE.Matrix4>).value.copy(camera.projectionMatrix);
-    (this.uniforms.get('uProjInv') as THREE.Uniform<THREE.Matrix4>).value.copy(camera.projectionMatrixInverse);
-    (this.uniforms.get('uCamWorld') as THREE.Uniform<THREE.Matrix4>).value.copy(camera.matrixWorld);
-    (this.uniforms.get('uCamPos') as THREE.Uniform<THREE.Vector3>).value.setFromMatrixPosition(camera.matrixWorld);
+    camera.getWorldDirection(shaftForward);
+    this.uniforms.get('uFront')!.value = shaftForward.dot(sunDir) > 0.02 ? 1 : 0;
+    shaftSun.copy(camera.position).addScaledVector(sunDir, 40);
+    shaftSun.project(camera);
+    (this.uniforms.get('uSunUv') as THREE.Uniform<THREE.Vector2>).value.set(shaftSun.x * 0.5 + 0.5, shaftSun.y * 0.5 + 0.5);
+  }
+}
+
+/**
+ * Far things go soft instead of being painted the colour of the sky. The blur is nothing up close
+ * and full at the far end of the haze, so a hill sharpens as it comes into view.
+ */
+const DISTANCE_BLUR = /* glsl */ `
+uniform float uNear;
+uniform float uFar;
+
+vec3 farTap(vec2 uv, vec2 o, float centerZ, inout float w) {
+  vec2 suv = uv + o;
+  float sd = readDepth(suv);
+  // The sky writes no depth, so a tap that lands on it must not smear the clouds into the land.
+  if (sd > 0.999) return vec3(0.0);
+  float sz = getViewZ(sd);
+  float keep = 1.0 - smoothstep(3.0, 18.0, abs(sz - centerZ));
+  w += keep;
+  return texture2D(inputBuffer, suv).rgb * keep;
+}
+
+void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth, out vec4 outputColor) {
+  // The dome and the clouds leave the depth clear. Blurring that paints the whole sky soft.
+  if (depth > 0.999) {
+    outputColor = inputColor;
+    return;
+  }
+  float dist = max(-getViewZ(depth), 0.0);
+  float f = smoothstep(uNear, max(uFar, uNear + 1.0), dist);
+  float rad = f * f * 8.0 * (resolution.y / 900.0);
+  if (rad < 0.4) {
+    outputColor = inputColor;
+    return;
+  }
+  float centerZ = getViewZ(depth);
+  vec2 px = texelSize * rad;
+  float w = 0.28;
+  vec3 acc = inputColor.rgb * w;
+  acc += farTap(uv, px * vec2(1.0, 0.0), centerZ, w);
+  acc += farTap(uv, px * vec2(-1.0, 0.0), centerZ, w);
+  acc += farTap(uv, px * vec2(0.0, 1.0), centerZ, w);
+  acc += farTap(uv, px * vec2(0.0, -1.0), centerZ, w);
+  acc += farTap(uv, px * vec2(0.48, 0.48), centerZ, w);
+  acc += farTap(uv, px * vec2(-0.48, 0.48), centerZ, w);
+  acc += farTap(uv, px * vec2(0.48, -0.48), centerZ, w);
+  acc += farTap(uv, px * vec2(-0.48, -0.48), centerZ, w);
+  outputColor = vec4(acc / max(w, 0.001), inputColor.a);
+}
+`;
+
+class DistanceBlur extends Effect {
+  constructor() {
+    super('DistanceBlur', DISTANCE_BLUR, {
+      blendFunction: BlendFunction.NORMAL,
+      attributes: EffectAttribute.DEPTH,
+      uniforms: new Map<string, THREE.Uniform>([
+        ['uNear', new THREE.Uniform(60)],
+        ['uFar', new THREE.Uniform(120)],
+      ]),
+    });
+  }
+
+  set(near: number, far: number): void {
+    this.uniforms.get('uNear')!.value = near;
+    this.uniforms.get('uFar')!.value = far;
   }
 }
 
@@ -239,12 +300,12 @@ const sstep = (a: number, b: number, x: number): number => {
 
 /**
  * The picture after the scene is drawn. In order: ambient occlusion (the soft dark where blocks meet each other, the ground, the player and
- * the props: the mesher's own occlusion only knows blocks), shafts of sunlight, glow round bright things, the colour grade (tone curve,
- * time-of-day tint, vignette), a blur behind open menus, and edge smoothing in place of the card's multisampling (which cannot be used
- * with the occlusion). It is made on first use; each part can be turned off and on while playing; with all of them off the scene goes
- * straight to the screen as before.
+ * the props: the mesher's own occlusion only knows blocks), a blur that softens the distance, shafts of sunlight, glow round bright
+ * things, the colour grade (tone curve, time-of-day tint, vignette), a blur behind open menus, and edge smoothing in place of the card's
+ * multisampling (which cannot be used with the occlusion). It is made on first use; each part can be turned off and on while playing; with
+ * all of them off the scene goes straight to the screen as before.
  *
- * The hand is drawn after it, straight onto the screen (see `HeldItem.render`), and the fog and the sky stay the terrain shader's own.
+ * The hand is drawn after it, straight onto the screen (see `HeldItem.render`). The sky stays the sky's own; the distance is this blur.
  */
 export class PostFx {
   private composer: EffectComposer | null = null;
@@ -252,6 +313,7 @@ export class PostFx {
   /** The sun's shafts, the glow and the colour grade are one pass over the picture, not three: each is a full screen of work less. */
   private fxPass: EffectPass | null = null;
   private rays: SunRays | null = null;
+  private distanceBlur: DistanceBlur | null = null;
   private shafts: WaterShafts | null = null;
   private bloom: Glow | null = null;
   private grade: GradeEffect | null = null;
@@ -327,9 +389,11 @@ export class PostFx {
     const grade = new GradeEffect();
     const vignette = new VignetteEffect({ offset: 0.45, darkness: 0.42 });
     const shafts = new WaterShafts();
-    // All in one pass, in this order. Each stays in it when it is switched off (it is only made to add nothing, see `apply`): taking one out
+    const distanceBlur = new DistanceBlur();
+    // All in one pass, in this order. The distance blur is first, so the shafts and the grade see the softened picture.
+    // Each stays in it when it is switched off (it is only made to add nothing, see `apply`): taking one out
     // would mean building the pass's shader again, which stops the game for a moment. The water shafts stay in too, and add nothing above water.
-    const fxPass = new EffectPass(camera, rays, shafts, bloom, grade, vignette);
+    const fxPass = new EffectPass(camera, distanceBlur, rays, shafts, bloom, grade, vignette);
     composer.addPass(fxPass);
 
     const blurPass = new KawaseBlurPass({ kernelSize: KernelSize.LARGE, resolutionScale: 0.5 });
@@ -340,6 +404,7 @@ export class PostFx {
     this.ao = ao;
     this.fxPass = fxPass;
     this.rays = rays;
+    this.distanceBlur = distanceBlur;
     this.shafts = shafts;
     this.bloom = bloom;
     this.grade = grade;
@@ -391,9 +456,15 @@ export class PostFx {
       this.sun.getWorldPosition(this.tmpA).sub(this.camera.position).normalize();
       this.camera.getWorldDirection(this.tmpB);
       const facing = sstep(0.15, 0.7, this.tmpA.dot(this.tmpB));
-      const strength = facing * open * (1 - frame.rain) * (frame.underwater ? 0 : 1) * (0.3 + 0.7 * frame.dusk) * frame.day;
+      // Above water the shafts belong to a low sun. Under water they come off the sun whenever it is in front of you.
+      const strength = frame.underwater
+        ? facing * frame.day
+        : facing * open * (1 - frame.rain) * (0.3 + 0.7 * frame.dusk) * frame.day;
       this.showRays(frame.warm === true || strength > 0.02);
-      this.rays!.godRaysMaterial.exposure = 0.9 * strength;
+      const mat = this.rays!.godRaysMaterial;
+      mat.exposure = (frame.underwater ? 1.35 : 0.9) * strength;
+      mat.weight = frame.underwater ? 0.72 : 0.45;
+      mat.decay = frame.underwater ? 0.965 : 0.93;
     }
 
     const shaftAmt = frame.underwater ? frame.shafts : 0;
@@ -414,6 +485,16 @@ export class PostFx {
       const amount = (0.55 + 0.45 * frame.dusk) * (1 - 0.7 * frame.underground) * (1 - 0.6 * frame.rain);
       this.grade!.set(this.shadow, this.light, amount, 1.06 + 0.14 * frame.dusk);
     }
+    this.distanceBlur!.set(frame.fogNear, frame.fogFar);
+    // The blur lives in this pass, so the pass stays on even when the colour grade and the shafts are off.
+    this.fxPass!.enabled = true;
+
+    const warp = frame.warp ?? 0;
+    this.grade?.setWarp(warp, performance.now() / 1000);
+    if (warp > 0.02) {
+      this.fxPass!.enabled = true;
+      if (this.grade) this.grade.blendMode.opacity.value = 1;
+    } else if (!f.grade && this.grade) this.grade.blendMode.opacity.value = 0;
 
     this.blurPass!.enabled = f.menuBlur && frame.menu;
     composer.render(frame.dt);
@@ -436,6 +517,7 @@ export class PostFx {
     this.ao = null;
     this.fxPass = null;
     this.rays = null;
+    this.distanceBlur = null;
     this.shafts = null;
     this.bloom = null;
     this.grade = null;

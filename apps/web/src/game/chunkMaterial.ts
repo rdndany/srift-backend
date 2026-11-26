@@ -436,9 +436,6 @@ ${HERO_TILES.map((n) => {
   float wdepth = 0.0;
   if (ti > ${WATER_DEPTH_FLAG - 0.5}) {
     water = true;
-    // Under the surface the water is the fog, not a stack of block faces. The sheet also goes the
-    // moment the camera slips under it: the eyes are often still in the air cell above the water.
-    if (uInWater > 0.5 || (abs(n.y) > 0.5 && cameraPosition.y < vWorld.y - 0.02)) discard;
     float k = ti - ${WATER_DEPTH_FLAG}.0;
     wdepth = floor(k / ${WATER_DEPTH_STRIDE}.0);
     ti = ${TINT_WATER_BASE}.0 + k - ${WATER_DEPTH_STRIDE}.0 * wdepth;
@@ -481,13 +478,20 @@ ${HERO_TILES.map((n) => {
   vec3 V = normalize(toCam);
 
   if (water) {
-    float top = step(0.5, n.y);
+    // From the beach the sea is edge-on. The face normal, taken from screen-space derivatives, then
+    // collapses and a whole triangle flips between "top" and "side", which is the flickering polygons.
+    // A level surface barely changes in Y from pixel to pixel; a waterfall side does. Use that.
+    float yGrad = abs(dFdx(vWorld.y)) + abs(dFdy(vWorld.y));
+    float xzGrad = length(dFdx(vWorld).xz) + length(dFdy(vWorld).xz);
+    float top = step(yGrad, max(xzGrad, 1e-4) * 0.35);
+    // No second sheet between the air and the water. Under the surface the sea is the fog and the sky, not the faces of the blocks.
+    if (uInWater > 0.5 || (top > 0.5 && cameraPosition.y < vWorld.y - 0.02)) discard;
     float tm = uTime;
     vec2 wp2 = vWorld.xz;
-    // The pixels of the water texture are not wanted: the body of the water is one smooth colour (the biome's), so no square shows.
+    // The body is the biome colour, with a little of the tile left in so the surface is not one flat fill.
     vec3 palW = texture2D(uPalette, vec2((ti + 0.5) / 256.0, 0.5)).rgb;
-    palW = mix(palW, vec3(dot(palW, vec3(0.3, 0.59, 0.11))), 0.28);
-    tex.rgb = mix(tex.rgb, palW, 0.9);
+    palW = mix(palW, vec3(dot(palW, vec3(0.3, 0.59, 0.11))), 0.22);
+    tex.rgb = mix(tex.rgb, palW, 0.72);
     // Slow, wide patches of lighter and darker water, so a big sea is not one flat sheet.
     float blotch = wnoise3(vec3(wp2 * 0.045, tm * 0.04)) * 0.6 + wnoise3(vec3(wp2 * 0.13 + 7.0, tm * 0.07)) * 0.4;
     tex.rgb *= 0.9 + 0.2 * blotch;
@@ -514,58 +518,41 @@ ${HERO_TILES.map((n) => {
       edgeD += (wnoise3(vec3(wp2 * 1.2, 0.0)) - 0.5) * 0.2;
     }
 
-    // Depth colour: lighter and greener where it is shallow or by a shore, deep dark blue where it is deep. The steps between the
-    // depth classes are kept small, so the blocks of the sea floor do not show through as squares.
-    float deep = mix(0.9, 1.0, wdepth / 3.0);
-    deep *= mix(0.7, 1.0, smoothstep(0.0, 0.6, edgeD));
-    vec3 body = mix(vec3(0.46, 0.64, 0.68), vec3(0.12, 0.22, 0.38), deep);
+    // Shallow and the shore stay pale, so the sand reads through. Deep water is a darker blue.
+    float deep = clamp(wdepth / 3.0, 0.0, 1.0);
+    deep *= mix(0.2, 1.0, smoothstep(0.0, 0.65, edgeD));
+    vec3 body = mix(vec3(0.72, 0.9, 0.82), vec3(0.2, 0.4, 0.58), deep);
     tex.rgb *= body;
-    // A slight movement in the colour. It stays around the same brightness, so a dark pool is not painted lighter.
+    // Wide patches, plus the swells: a crest lighter, a trough darker. A sea is not one colour.
     float dap = wnoise3(vWorld * vec3(1.6, 2.2, 1.6) + vec3(tm * 0.25, -tm * 0.18, tm * 0.2));
-    tex.rgb *= 0.94 + 0.12 * dap;
-    // The light sinks into the swells: troughs a little darker, crests a little brighter.
-    tex.rgb *= 1.0 + wh * 0.03 * top;
+    tex.rgb *= 0.9 + 0.18 * dap;
+    tex.rgb *= 1.0 + wh * 0.16 * top;
 
     // Sky on this water: the sun or the moon actually reaches the block. A torch is block light and does not make a sky.
     float skyReach = smoothstep(0.04, 0.4, vLight.g);
 
-    // The sky in the mirror: a flat surface shows the sky only at a grazing look, a rippled one a little sooner.
+    // The sky in the mirror. Across the sea you see more of it; looking down you see into the water.
     float cosT = clamp(dot(V, nw), 0.0, 1.0);
     float fres = clamp(0.04 + 0.96 * pow(1.0 - cosT, 4.0), 0.0, 1.0);
     vec3 R = reflect(-V, nw);
     R.y = abs(R.y);
-    vec3 mirror = mix(uSkyReflect, skyAtSoft(normalize(R)), 0.75);
-    tex.rgb = mix(tex.rgb, mirror * 0.8, fres * 0.55 * skyReach);
-    // See-through everywhere, sea and cave the same: a side is a face of water, and the cave shows through it.
-    alpha = mix(0.45, 0.62, deep);
-    alpha = mix(alpha, 0.82, fres * skyReach);
+    vec3 mirror = mix(uSkyReflect, skyAtSoft(normalize(R)), 0.8);
+    if (top > 0.5) tex.rgb = mix(tex.rgb, mirror, fres * (0.42 + 0.38 * skyReach));
+    // A side is the body of the water, darker. It is not a bright wall of the same colour as the surface.
+    if (top < 0.5) tex.rgb *= 0.55 + 0.12 * sin(vWorld.y * 9.0 - tm * 2.2);
+    // Light the water from the swell, not from the face normal, so a glance across the sea does not strobe.
+    n = nw;
+    ndl = dot(n, uLightDir);
+    // Mostly the water itself. Only a shallow shore lets a little of the sand through.
+    alpha = mix(0.78, 0.94, deep);
+    if (top > 0.5) alpha = mix(alpha, 0.97, fres);
+    else alpha = mix(0.86, 0.95, deep);
 
     // (No foam line along the shore: any bright band there flickers and shows the edges of the blocks. The shore is only a lighter, greener shallow, see edgeD above.)
 
     // Glints: a hard shine where the swells mirror the sun or the moon.
     float sp = max(dot(R, uLightDir), 0.0);
     tex.rgb += uSun * (pow(sp, 40.0) * 1.0 + pow(sp, 14.0) * 0.1) * uGlint * top * skyReach;
-
-    // From underneath, the surface is the bright ceiling of the sea: ripples, and the sun breaking through them.
-    if (cameraPosition.y < vWorld.y && top > 0.5) {
-      float up = clamp(-V.y, 0.0, 1.0);
-      vec3 sunW = normalize(uLightDir);
-      float sunUp = clamp(sunW.y, 0.0, 1.0);
-      float broad = pow(max(dot(nw, sunW), 0.0), 3.0);
-      float hit = pow(max(dot(nw, sunW), 0.0), 16.0);
-      float gaze = pow(max(dot(normalize(-V), sunW), 0.0), 26.0);
-      vec3 deepCol = vec3(0.04, 0.16, 0.32);
-      vec3 litCol = vec3(0.62, 0.86, 1.0);
-      vec3 col = mix(deepCol, litCol, (0.28 + 0.72 * up) * skyReach);
-      col *= 0.78 + 0.4 * wh;
-      col += uSun * broad * 0.55 * sunUp * uGlint * skyReach;
-      col += vec3(1.0, 0.96, 0.82) * (hit * 1.5 + gaze * 1.15) * sunUp * uGlint * skyReach;
-      tex.rgb = col;
-      // Close under the surface, and looking up, the sky shows through. Deeper, the ceiling closes over.
-      float below = max(vWorld.y - cameraPosition.y, 0.0);
-      float close = exp(-max(below - 0.4, 0.0) / 7.0);
-      alpha = mix(0.94, 0.38, close * up);
-    }
     // (The material's own opacity is for glass and ice: the water's is what is set above.)
     alpha = min(alpha / max(uOpacity, 0.01), 1.0);
   }
@@ -587,8 +574,17 @@ ${HERO_TILES.map((n) => {
     sunTerm = open * smoothstep(0.0, 0.3, ndl) * sh;
   }
   float sky = skyL * uDay;
-  // Never pitch black: a sliver of light is left even with no sky at all.
-  vec3 skyRGB = vec3(0.035) + 0.965 * pow(sky, 1.45) * (uAmbient + uSun * sunTerm);
+  // Never pitch black on land: a sliver of light is left even with no sky at all.
+  vec3 fill = vec3(0.035);
+  vec3 skyRGB = fill + 0.965 * pow(sky, 1.45) * (uAmbient + uSun * sunTerm);
+  // The light under the water is the light outside, seen through the sea. Noon stays bright, night stays dim.
+  if (uInWater > 0.5) {
+    float day = clamp(uDay, 0.0, 1.0);
+    float wet = clamp(max(skyL, 0.2), 0.0, 1.0);
+    vec3 lit = mix(vec3(0.04, 0.06, 0.12), vec3(0.36, 0.58, 0.86), day);
+    lit += uSun * day * 0.45;
+    skyRGB = lit * (0.5 + 0.7 * wet);
+  }
 
   // Torch and glowstone light: deep orange where it is faint, creamy where it is strong, with a lively flicker.
   float blk = vLight.b;
@@ -615,6 +611,8 @@ ${HERO_TILES.map((n) => {
   }
   vec3 L = max(skyRGB, blkRGB) + 0.3 * min(skyRGB, blkRGB);
   L = mix(L, vec3(1.15), aux.g);
+  // A pool with no sky at all keeps a little light. Night water still follows the moon: it is not painted the colour of noon.
+  if (water) L = max(L, vec3(0.05, 0.07, 0.11));
 
   // Foliage keeps more of its baked shade: the creases between clumps and the underside of a crown are deep.
   vec3 rgb = tex.rgb * (leaf ? pow(vLight.r, 1.3) : vLight.r) * L;
@@ -640,12 +638,18 @@ ${HERO_TILES.map((n) => {
   float lum = dot(rgb, vec3(0.299, 0.587, 0.114));
   rgb = mix(vec3(lum), rgb, 1.0 + 0.2 * uBlockLook + 0.3 * sunTerm * smoothstep(0.0, 0.12, uSun.r));
 
-  // ---- fog: the colour of the sky in this direction, so far hills melt into it ----
-  float fog = fogAmount(vDepth, vWorld.y);
+  // ---- fog. In the air it is a light veil (the distance is a blur, see postfx). Under water it is the sea. ----
+  // Distance at the fragment, not at the corners. A hillside is one big face: the corner distance
+  // interpolated across it punches a hard polygon out of the hill, on land and under water.
+  float eyeDist = length(cameraPosition - vWorld);
+  float fog = fogAmount(eyeDist, vWorld.y);
   // Golden haze: light scatters in the air towards the sun, so far land on that side melts into warm gold.
   float scat = pow(max(dot(-V, uSunDir), 0.0), 5.0);
-  rgb += uGlow * scat * smoothstep(uFogNear * 0.25, uFogFar, vDepth) * 0.55 * (1.0 - fog);
-  rgb = mix(rgb, skyAt(-V), fog);
+  rgb += uGlow * scat * smoothstep(uFogNear * 0.25, uFogFar, eyeDist) * 0.55 * (1.0 - fog);
+  // In the air the distance is a blur (see postfx), so the colour is only a veil.
+  // Under water the fog is the sea: far things, and the empty water, dissolve into it completely.
+  float fogCover = uInWater > 0.5 ? 1.0 : 0.22;
+  rgb = mix(rgb, skyAt(-V), fog * fogCover);
   gl_FragColor = vec4(rgb, alpha * uOpacity);
   #include <colorspace_fragment>
 }
@@ -832,6 +836,11 @@ export function createChunkMaterials(atlas: Atlas): ChunkMaterials {
     // Writes depth (the mesher puts the water first in each chunk): what lies under the surface of the sea, a crystal or a block of ice,
     // then fails the depth test behind it instead of being drawn over it, whatever order the faces came in.
     depthWrite: true,
+    // The surface sits a fraction above the blocks under it. At a distance the depth buffer cannot tell them
+    // apart, and the sea flickers. A small pull toward the camera makes the water win that test.
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -4,
     uniforms: { ...shared, uAlphaTest: { value: 0.02 }, uOpacity: { value: 0.95 } },
   });
 

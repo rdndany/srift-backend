@@ -1915,11 +1915,22 @@ export class Player implements EffectOwner {
   slowTime = 0;
   slowMul = 1;
   weakTime = 0;
+  /**
+   * Seconds of clear sight left (Night Vision or Conduit Power). While this is above zero the water
+   * barely fogs the eyes. A potion or a conduit sets it; nothing in the world does yet.
+   */
+  waterSight = 0;
 
   /** How fast the statuses let the player move now: 1 free, 0 rooted, else the slow's share. */
   get moveMul(): number {
     if (this.rootTime > 0) return 0;
     return this.slowTime > 0 ? this.slowMul : 1;
+  }
+
+  /** Night Vision or Conduit Power: the eyes stay clear underwater for this many seconds. */
+  grantWaterSight(seconds: number): void {
+    if (seconds <= 0) return;
+    this.waterSight = Math.max(this.waterSight, seconds);
   }
 
   /** Put a status on the player (not a creative player or a spectator, who are not touched by monsters): seconds of it, a slow to power of the speed. */
@@ -2284,7 +2295,9 @@ export class Player implements EffectOwner {
           this.breakProgress = 0;
           this.hitTimer = 0;
         }
-        const time = this.mode === 'creative' ? 0 : breakTime(def, item?.tool ?? null, this.toolEnchants().efficiency, !!item?.shears);
+        // Standing or swimming in water mines at a fifth of the speed on land. Lava is not water.
+        const wet = this.body.inWater && !this.body.inLava ? 5 : 1;
+        const time = this.mode === 'creative' ? 0 : breakTime(def, item?.tool ?? null, this.toolEnchants().efficiency, !!item?.shears) * wet;
         if (this.mode === 'creative') {
           if (this.breakCooldown <= 0) {
             this.breakCooldown = 0.22;
@@ -5119,6 +5132,7 @@ export class Player implements EffectOwner {
       this.foodSick = 0;
       this.onFire = 0;
       this.rootTime = this.slowTime = this.weakTime = 0;
+      this.waterSight = 0;
       return;
     }
     if (this.rootTime > 0) this.rootTime = Math.max(0, this.rootTime - STEP);
@@ -5127,6 +5141,7 @@ export class Player implements EffectOwner {
       this.slowMul = 1;
     }
     if (this.weakTime > 0) this.weakTime = Math.max(0, this.weakTime - STEP);
+    if (this.waterSight > 0) this.waterSight = Math.max(0, this.waterSight - STEP);
     if (this.poison > 0) {
       this.poison = Math.max(0, this.poison - STEP);
       this.poisonTick += STEP;

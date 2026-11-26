@@ -1,5 +1,5 @@
 import { B, BLOCKS } from './blocks';
-import { isLavaId } from './fluids';
+import { fluidCurrent, isLavaId, isWaterId } from './fluids';
 import { cloneStack, type ItemStack } from './inventory';
 
 /** A dropped item lying in the world. */
@@ -115,6 +115,14 @@ export class DropWorld {
         d.vy = Math.max(d.vy, -1.2);
         d.vx *= 0.9;
         d.vz *= 0.9;
+        if (isWaterId(here)) {
+          const fx = Math.floor(d.x);
+          const fy = Math.floor(d.y + 0.2);
+          const fz = Math.floor(d.z);
+          const flow = fluidCurrent(this.blockAt, fx, fy, fz);
+          d.vx += flow.x * 1.4 * step;
+          d.vz += flow.z * 1.4 * step;
+        }
       }
 
       // An item is picked up by walking onto it: it is not drawn in from a distance (orbs of experience are, items are not).

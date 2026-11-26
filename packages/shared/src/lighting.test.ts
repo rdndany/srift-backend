@@ -46,6 +46,15 @@ describe('computeLight', () => {
     expect(sky(l, 13, 15, 12)).toBe(0);
   });
 
+  it('loses one sky level for every water block in the column', () => {
+    const b = world((_x, y) => (y < 10 ? B.STONE : y < 26 ? B.WATER : B.AIR));
+    const l = computeLight(b, W, H, D);
+    expect(sky(l, 5, 30, 5)).toBe(15);
+    expect(sky(l, 5, 25, 5)).toBe(14);
+    expect(sky(l, 5, 24, 5)).toBe(13);
+    expect(sky(l, 5, 12, 5)).toBe(1);
+  });
+
   it('is not blocked by transparent blocks like glass and leaves', () => {
     const b = world((_x, y) => (y <= 5 ? B.STONE : y === 8 ? B.GLASS : B.AIR));
     const l = computeLight(b, W, H, D);

@@ -8,10 +8,12 @@ import {
   FLUID_WATER,
   FluidSim,
   I,
+  fluidCurrent,
   fluidId,
   fluidSurface,
   isFluid,
   isFluidSource,
+  isWaterloggable,
   isLavaId,
   isWaterId,
   type FluidHost,
@@ -350,6 +352,43 @@ describe('flowing lava', () => {
     r.put(0, 2, 0, B.WATER);
     r.sim.settle();
     expect(r.get(0, 1, 0)).toBe(B.OBSIDIAN);
+  });
+});
+
+describe('current', () => {
+  it('points from a source toward thinner water, and is still in a pool', () => {
+    const get = (x: number, y: number, z: number) => {
+      if (y < 1) return B.STONE;
+      if (y === 1 && z === 0 && x === 0) return B.WATER;
+      if (y === 1 && z === 0 && x === 1) return B.WATER_7;
+      if (y === 1 && z === 2) return B.WATER;
+      return B.AIR;
+    };
+    const down = fluidCurrent(get, 0, 1, 0);
+    expect(down.x).toBeGreaterThan(0.5);
+    expect(down.z).toBe(0);
+    expect(down.y).toBe(0);
+    const pool = fluidCurrent(get, 0, 1, 2);
+    expect(pool.x).toBe(0);
+    expect(pool.z).toBe(0);
+  });
+
+  it('a fall pulls downward, and a hole beside a source pulls toward the drop', () => {
+    const get = (x: number, y: number, z: number) => {
+      if (y < 0) return B.STONE;
+      if (x === 0 && y === 2 && z === 0) return B.WATER_FALL;
+      if (x === 0 && y === 1 && z === 0) return B.WATER;
+      if (x === 1 && y === 0 && z === 0) return B.WATER;
+      return B.AIR;
+    };
+    expect(fluidCurrent(get, 0, 2, 0).y).toBe(-1);
+    expect(fluidCurrent(get, 0, 1, 0).x).toBeGreaterThan(0);
+  });
+
+  it('a fence can share a cell with water; a full block cannot', () => {
+    expect(isWaterloggable(B.FENCE)).toBe(true);
+    expect(isWaterloggable(B.STONE)).toBe(false);
+    expect(isWaterloggable(B.WATER)).toBe(false);
   });
 });
 
